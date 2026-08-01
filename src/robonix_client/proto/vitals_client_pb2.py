@@ -24,31 +24,31 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13vitals_client.proto\x12\x15robonix.client.vitals\"Y\n\rBodyComponent\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\tparent_id\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\x12\x0c\n\x04kind\x18\x04 \x01(\t\x12\r\n\x05model\x18\x05 \x01(\t\"\xa6\x01\n\nBodyHealth\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\r\x12\x38\n\ncomponents\x18\x04 \x03(\x0b\x32$.robonix.client.vitals.BodyComponent\"2\n\x0e\x42odyHealthEnum\x12\n\n\x06NORMAL\x10\x00\x12\t\n\x05\x46\x41ULT\x10\x01\x12\t\n\x05\x45STOP\x10\x02\"\xa8\x01\n\x0cHealthSignal\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\r\x12\x0e\n\x06\x64\x65tail\x18\x03 \x01(\t\x12\x16\n\x0eobserved_value\x18\x04 \x01(\x02\x12\x17\n\x0freference_value\x18\x05 \x01(\x02\":\n\x10HealthSignalEnum\x12\x06\n\x02OK\x10\x00\x12\x08\n\x04WARN\x10\x01\x12\t\n\x05\x45RROR\x10\x02\x12\t\n\x05STALE\x10\x03\"Y\n\nPowerState\x12\x13\n\x0bsoc_percent\x18\x01 \x01(\x02\x12\x0f\n\x07voltage\x18\x02 \x01(\x02\x12\x10\n\x08\x63harging\x18\x03 \x01(\x08\x12\x13\n\x0bremaining_s\x18\x04 \x01(\x03\"\xc1\x01\n\x0eVitalsSnapshot\x12\r\n\x05ts_ns\x18\x01 \x01(\x04\x12\x30\n\x05power\x18\x02 \x01(\x0b\x32!.robonix.client.vitals.PowerState\x12;\n\x0ehealth_signals\x18\x03 \x03(\x0b\x32#.robonix.client.vitals.HealthSignal\x12\x31\n\x06\x62odies\x18\x04 \x03(\x0b\x32!.robonix.client.vitals.BodyHealth\"\x13\n\x11GetVitals_Request\"M\n\x12GetVitals_Response\x12\x37\n\x08snapshot\x18\x01 \x01(\x0b\x32%.robonix.client.vitals.VitalsSnapshot\"\x16\n\x14StreamVitals_Requestb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13vitals_client.proto\x12\x15robonix.client.vitals\"\x93\x01\n\rBodyComponent\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12\x13\n\x0btemperature\x18\x03 \x01(\x02\x12\x12\n\nerror_code\x18\x04 \x01(\r\x12\x0f\n\x07\x65nabled\x18\x05 \x01(\x08\x12\n\n\x02id\x18\x06 \x01(\t\x12\x11\n\tparent_id\x18\x07 \x01(\t\x12\r\n\x05model\x18\x08 \x01(\t\"\xbc\x01\n\nBodyHealth\x12\x11\n\tbody_type\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\r\x12\x0f\n\x07message\x18\x04 \x01(\t\x12\x38\n\ncomponents\x18\x05 \x03(\x0b\x32$.robonix.client.vitals.BodyComponent\"2\n\x0e\x42odyHealthEnum\x12\n\n\x06NORMAL\x10\x00\x12\t\n\x05\x46\x41ULT\x10\x01\x12\t\n\x05\x45STOP\x10\x02\"\x95\x01\n\x0f\x43omponentHealth\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x06health\x18\x02 \x01(\r\x12\x0e\n\x06\x64\x65tail\x18\x03 \x01(\t\x12\r\n\x05value\x18\x04 \x01(\x02\x12\x11\n\tthreshold\x18\x05 \x01(\x02\"2\n\x13\x43omponentHealthEnum\x12\x06\n\x02OK\x10\x00\x12\x08\n\x04WARN\x10\x01\x12\t\n\x05\x45RROR\x10\x02\"]\n\nPowerState\x12\x17\n\x0f\x62\x61ttery_percent\x18\x01 \x01(\x02\x12\x0f\n\x07voltage\x18\x02 \x01(\x02\x12\x10\n\x08\x63harging\x18\x03 \x01(\x08\x12\x13\n\x0bremaining_s\x18\x04 \x01(\x03\"\xc0\x01\n\x0eVitalsSnapshot\x12\r\n\x05ts_ns\x18\x01 \x01(\x04\x12\x30\n\x05power\x18\x02 \x01(\x0b\x32!.robonix.client.vitals.PowerState\x12:\n\ncomponents\x18\x03 \x03(\x0b\x32&.robonix.client.vitals.ComponentHealth\x12\x31\n\x06\x62odies\x18\x04 \x03(\x0b\x32!.robonix.client.vitals.BodyHealth\"\x13\n\x11GetVitals_Request\"M\n\x12GetVitals_Response\x12\x37\n\x08snapshot\x18\x01 \x01(\x0b\x32%.robonix.client.vitals.VitalsSnapshot\"\x16\n\x14StreamVitals_Requestb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'vitals_client_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_BODYCOMPONENT']._serialized_start=46
-  _globals['_BODYCOMPONENT']._serialized_end=135
-  _globals['_BODYHEALTH']._serialized_start=138
-  _globals['_BODYHEALTH']._serialized_end=304
-  _globals['_BODYHEALTH_BODYHEALTHENUM']._serialized_start=254
-  _globals['_BODYHEALTH_BODYHEALTHENUM']._serialized_end=304
-  _globals['_HEALTHSIGNAL']._serialized_start=307
-  _globals['_HEALTHSIGNAL']._serialized_end=475
-  _globals['_HEALTHSIGNAL_HEALTHSIGNALENUM']._serialized_start=417
-  _globals['_HEALTHSIGNAL_HEALTHSIGNALENUM']._serialized_end=475
-  _globals['_POWERSTATE']._serialized_start=477
-  _globals['_POWERSTATE']._serialized_end=566
-  _globals['_VITALSSNAPSHOT']._serialized_start=569
-  _globals['_VITALSSNAPSHOT']._serialized_end=762
-  _globals['_GETVITALS_REQUEST']._serialized_start=764
-  _globals['_GETVITALS_REQUEST']._serialized_end=783
-  _globals['_GETVITALS_RESPONSE']._serialized_start=785
-  _globals['_GETVITALS_RESPONSE']._serialized_end=862
-  _globals['_STREAMVITALS_REQUEST']._serialized_start=864
-  _globals['_STREAMVITALS_REQUEST']._serialized_end=886
+  _globals['_BODYCOMPONENT']._serialized_start=47
+  _globals['_BODYCOMPONENT']._serialized_end=194
+  _globals['_BODYHEALTH']._serialized_start=197
+  _globals['_BODYHEALTH']._serialized_end=385
+  _globals['_BODYHEALTH_BODYHEALTHENUM']._serialized_start=335
+  _globals['_BODYHEALTH_BODYHEALTHENUM']._serialized_end=385
+  _globals['_COMPONENTHEALTH']._serialized_start=388
+  _globals['_COMPONENTHEALTH']._serialized_end=537
+  _globals['_COMPONENTHEALTH_COMPONENTHEALTHENUM']._serialized_start=487
+  _globals['_COMPONENTHEALTH_COMPONENTHEALTHENUM']._serialized_end=537
+  _globals['_POWERSTATE']._serialized_start=539
+  _globals['_POWERSTATE']._serialized_end=632
+  _globals['_VITALSSNAPSHOT']._serialized_start=635
+  _globals['_VITALSSNAPSHOT']._serialized_end=827
+  _globals['_GETVITALS_REQUEST']._serialized_start=829
+  _globals['_GETVITALS_REQUEST']._serialized_end=848
+  _globals['_GETVITALS_RESPONSE']._serialized_start=850
+  _globals['_GETVITALS_RESPONSE']._serialized_end=927
+  _globals['_STREAMVITALS_REQUEST']._serialized_start=929
+  _globals['_STREAMVITALS_REQUEST']._serialized_end=951
 # @@protoc_insertion_point(module_scope)

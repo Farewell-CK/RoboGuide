@@ -251,10 +251,11 @@ discovers and combines these robot-local contracts through Atlas:
 
 The 3D view uses a model URL when the Soma description provides one, then a
 URDF with browser-renderable visual geometry, and finally a procedural renderer
-selected from robot family and component types. URDF-local mesh and texture
-files attached to Soma's `get_urdf` response are cached behind a same-origin
-resource URL, so this path does not depend on a robot model name. The
-procedural renderer remains the final fallback.
+selected from robot family and component types. The current `dev-next`
+`get_urdf` contract returns only `robot_id` and `urdf_xml`; it does not attach
+mesh or texture files. A URDF whose relative resources are unavailable therefore
+falls back to the procedural renderer. The same-origin resource route remains
+available for a future contract that explicitly supplies those assets.
 
 Actuators that report `torque_enabled=0` remain healthy but are presented as
 yellow `idle` components. This readiness state propagates to their parent robot

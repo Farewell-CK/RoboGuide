@@ -3,11 +3,14 @@ syntax = "proto3";
 package robonix.client.vitals;
 
 message BodyComponent {
-  string id = 1;
-  string parent_id = 2;
-  string name = 3;
-  string kind = 4;
-  string model = 5;
+  string name = 1;
+  string kind = 2;
+  float temperature = 3;
+  uint32 error_code = 4;
+  bool enabled = 5;
+  string id = 6;
+  string parent_id = 7;
+  string model = 8;
 }
 
 message BodyHealth {
@@ -17,29 +20,29 @@ message BodyHealth {
     ESTOP = 2;
   }
 
-  string key = 1;
+  string body_type = 1;
   string model = 2;
-  uint32 status = 3;
-  repeated BodyComponent components = 4;
+  uint32 state = 3;
+  string message = 4;
+  repeated BodyComponent components = 5;
 }
 
-message HealthSignal {
-  enum HealthSignalEnum {
+message ComponentHealth {
+  enum ComponentHealthEnum {
     OK = 0;
     WARN = 1;
     ERROR = 2;
-    STALE = 3;
   }
 
-  string key = 1;
-  uint32 status = 2;
+  string name = 1;
+  uint32 health = 2;
   string detail = 3;
-  float observed_value = 4;
-  float reference_value = 5;
+  float value = 4;
+  float threshold = 5;
 }
 
 message PowerState {
-  float soc_percent = 1;
+  float battery_percent = 1;
   float voltage = 2;
   bool charging = 3;
   int64 remaining_s = 4;
@@ -48,7 +51,7 @@ message PowerState {
 message VitalsSnapshot {
   uint64 ts_ns = 1;
   PowerState power = 2;
-  repeated HealthSignal health_signals = 3;
+  repeated ComponentHealth components = 3;
   repeated BodyHealth bodies = 4;
 }
 

@@ -21,7 +21,7 @@ class UrdfAssetStoreTest(unittest.TestCase):
 
         self.assertEqual(first_id, second_id)
         self.assertEqual(asset.data, b"solid base")
-        self.assertIn(asset.media_type, {"model/stl", "application/octet-stream"})
+        self.assertEqual(asset.media_type, "model/stl")
 
     def test_rejects_paths_outside_resource_root(self) -> None:
         store = UrdfAssetStore()

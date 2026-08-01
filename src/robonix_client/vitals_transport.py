@@ -15,8 +15,6 @@ from .transport import (
     grpc_channel,
     system_snapshot,
 )
-from .urdf_assets import urdf_asset_store
-
 CONTRACT_SOMA_GET_YAML = "robonix/system/soma/get_yaml"
 CONTRACT_SOMA_GET_URDF = "robonix/system/soma/get_urdf"
 CONTRACT_VITALS_STREAM = "robonix/system/vitals/stream"
@@ -227,7 +225,6 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
     )
 
     urdf_xml = ""
-    urdf_asset_base_url = ""
     try:
         urdf_endpoint = await discover_endpoint(
             settings.atlas_endpoint, CONTRACT_SOMA_GET_URDF
@@ -237,18 +234,10 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
             SOMA_GET_URDF_PATH,
             soma_client_pb2.GetUrdf_Request(
                 robot_id=yaml_response.robot_id,
-                include_assets=True,
             ),
             soma_client_pb2.GetUrdf_Response,
         )
         urdf_xml = urdf_response.urdf_xml
-        resource_set_id = urdf_asset_store.put(
-            (asset.path, asset.data) for asset in urdf_response.assets
-        )
-        if resource_set_id:
-            urdf_asset_base_url = (
-                f"/api/vitals/urdf-assets/{resource_set_id}/"
-            )
     except (grpc.aio.AioRpcError, RuntimeError):
         pass
 
@@ -257,7 +246,6 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
         urdf_xml,
         yaml_response.robot_id,
     )
-    description["urdfAssetBaseUrl"] = urdf_asset_base_url
     return description
 
 
@@ -402,23 +390,24 @@ def vitals_snapshot_to_dict(
     description: dict[str, Any],
 ) -> dict[str, Any]:
     signals = []
-    for signal in snapshot.health_signals:
+    for signal in snapshot.components:
         item = {
-            "key": signal.key,
-            "health": SIGNAL_HEALTH_NAMES.get(int(signal.status), "unknown"),
-            "status": int(signal.status),
+            "key": signal.name,
+            "health": SIGNAL_HEALTH_NAMES.get(int(signal.health), "unknown"),
+            "status": int(signal.health),
             "detail": signal.detail,
-            "observedValue": float(signal.observed_value),
-            "referenceValue": float(signal.reference_value),
+            "observedValue": float(signal.value),
+            "referenceValue": float(signal.threshold),
         }
         item["visualState"] = _signal_visual_state(item)
         signals.append(item)
     bodies = [
         {
-            "key": body.key,
+            "key": _component_path("body", body.body_type),
             "model": body.model,
-            "health": BODY_HEALTH_NAMES.get(int(body.status), "unknown"),
-            "status": int(body.status),
+            "health": BODY_HEALTH_NAMES.get(int(body.state), "unknown"),
+            "status": int(body.state),
+            "message": body.message,
             "components": [
                 {
                     "id": component.id,
@@ -426,6 +415,9 @@ def vitals_snapshot_to_dict(
                     "name": component.name,
                     "kind": component.kind,
                     "model": component.model,
+                    "temperature": float(component.temperature),
+                    "errorCode": int(component.error_code),
+                    "enabled": bool(component.enabled),
                 }
                 for component in body.components
             ],
@@ -434,7 +426,7 @@ def vitals_snapshot_to_dict(
     ]
     component_health = aggregate_component_health(description, signals, bodies)
     power = snapshot.power
-    soc_percent = float(power.soc_percent)
+    soc_percent = float(power.battery_percent)
     voltage = float(power.voltage)
     power_summary = None
     if soc_percent >= 0 or voltage >= 0:

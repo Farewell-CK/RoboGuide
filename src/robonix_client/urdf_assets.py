@@ -38,7 +38,11 @@ class UrdfAssetStore:
             existing = normalized.get(path)
             if existing is not None and existing.data != data:
                 raise ValueError(f"conflicting URDF asset path: {path}")
-            media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            media_type = (
+                "model/stl"
+                if path.lower().endswith(".stl")
+                else mimetypes.guess_type(path)[0] or "application/octet-stream"
+            )
             normalized[path] = CachedUrdfAsset(data=data, media_type=media_type)
         if not normalized:
             return ""
