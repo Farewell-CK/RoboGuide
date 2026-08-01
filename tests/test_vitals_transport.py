@@ -1,0 +1,367 @@
+import asyncio
+import unittest
+from contextlib import suppress
+from unittest.mock import AsyncMock, patch
+
+from robonix_client.proto import module_health_client_pb2, vitals_client_pb2
+from robonix_client.transport import ClientSettings
+from robonix_client.vitals_transport import (
+    _description_loop,
+    aggregate_component_health,
+    fallback_robot_description,
+    module_snapshot_to_dict,
+    normalize_robot_description,
+    provider_snapshot_to_dict,
+    vitals_snapshot_to_dict,
+)
+
+
+SOMA_YAML = """
+urdf:
+  root_link: base_link
+  model_name: test_robot
+robot:
+  id: test_robot
+  display_name: Test Mobile Robot
+  family: mobile_robot
+  root_part: base
+  dimensions:
+    length_m: 0.8
+    width_m: 0.6
+    height_m: 1.2
+  exports:
+    - provider_id: test_robot_health
+  components:
+    - id: base
+      type: mobile_base
+      urdf_link: base_link
+      components:
+        - id: left_wheel
+          type: wheel
+          urdf_joint: left_joint
+        - id: battery
+          type: battery
+    - id: head_camera
+      type: rgbd_camera
+      urdf_link: camera_link
+"""
+
+
+class RobotDescriptionTest(unittest.TestCase):
+    def test_normalizes_recursive_soma_components(self):
+        description = normalize_robot_description(SOMA_YAML)
+
+        self.assertEqual(description["id"], "test_robot")
+        self.assertEqual(description["family"], "mobile_robot")
+        self.assertEqual(description["render"]["mode"], "procedural")
+        self.assertEqual(
+            [component["id"] for component in description["components"]],
+            [
+                "body",
+                "body/base",
+                "body/base/left_wheel",
+                "body/base/battery",
+                "body/head_camera",
+            ],
+        )
+        self.assertEqual(description["components"][2]["parentId"], "body/base")
+        self.assertEqual(
+            description["components"][0]["providers"], ["test_robot_health"]
+        )
+
+    def test_marks_urdf_with_visual_geometry_as_renderable(self):
+        description = normalize_robot_description(
+            SOMA_YAML,
+            "<robot><link name='base'><visual><geometry/></visual></link></robot>",
+        )
+
+        self.assertEqual(description["render"]["mode"], "urdf")
+
+
+class ComponentHealthTest(unittest.TestCase):
+    def setUp(self):
+        self.description = normalize_robot_description(SOMA_YAML)
+
+    def test_uses_longest_component_prefix_and_propagates_faults(self):
+        signals = [
+            {
+                "key": "body/base/battery/soc",
+                "health": "warn",
+                "detail": "battery low",
+            },
+            {
+                "key": "body/base/left_wheel/motor",
+                "health": "error",
+                "detail": "motor fault",
+            },
+            {
+                "key": "body/head_camera/stream",
+                "health": "ok",
+                "detail": "camera streaming",
+            },
+        ]
+        rows = aggregate_component_health(
+            self.description,
+            signals,
+            [{"key": "body", "health": "ok"}],
+        )
+        health = {row["componentId"]: row for row in rows}
+
+        self.assertEqual(health["body/base/battery"]["directHealth"], "warn")
+        self.assertEqual(health["body/base/left_wheel"]["directHealth"], "error")
+        self.assertEqual(health["body/base"]["health"], "error")
+        self.assertEqual(health["body"]["health"], "error")
+        self.assertEqual(health["body/head_camera"]["health"], "ok")
+        self.assertEqual(
+            health["body/base/battery"]["signalKeys"],
+            ["body/base/battery/soc"],
+        )
+
+    def test_marks_disabled_actuator_idle_without_changing_health(self):
+        signals = [
+            {
+                "key": "body/base/left_wheel/torque_enabled",
+                "health": "ok",
+                "detail": "left wheel torque is disabled (idle)",
+                "observedValue": 0.0,
+                "referenceValue": 0.0,
+            }
+        ]
+
+        rows = aggregate_component_health(
+            self.description,
+            signals,
+            [{"key": "body", "health": "ok"}],
+        )
+        health = {row["componentId"]: row for row in rows}
+
+        wheel = health["body/base/left_wheel"]
+        self.assertEqual(wheel["health"], "ok")
+        self.assertEqual(wheel["directHealth"], "ok")
+        self.assertEqual(wheel["directVisualState"], "idle")
+        self.assertEqual(wheel["visualState"], "idle")
+        self.assertEqual(health["body/base"]["visualState"], "idle")
+        self.assertEqual(health["body"]["visualState"], "idle")
+
+    def test_converts_vitals_snapshot_to_browser_shape(self):
+        snapshot = vitals_client_pb2.VitalsSnapshot(
+            ts_ns=1_700_000_000_000_000_000,
+            power=vitals_client_pb2.PowerState(
+                soc_percent=82.5,
+                voltage=24.2,
+                charging=False,
+                remaining_s=7200,
+            ),
+            health_signals=[
+                vitals_client_pb2.HealthSignal(
+                    key="body/head_camera/stream",
+                    status=0,
+                    detail="camera streaming",
+                )
+            ],
+            bodies=[vitals_client_pb2.BodyHealth(key="body", status=0)],
+        )
+
+        result = vitals_snapshot_to_dict(snapshot, self.description)
+
+        self.assertEqual(result["power"]["socPercent"], 82.5)
+        self.assertEqual(result["signals"][0]["health"], "ok")
+        self.assertEqual(result["summary"]["overall"], "ok")
+        self.assertEqual(result["updatedAtMs"], 1_700_000_000_000)
+
+    def test_omits_negative_missing_power_sentinels(self):
+        snapshot = vitals_client_pb2.VitalsSnapshot(
+            power=vitals_client_pb2.PowerState(
+                soc_percent=-1.0,
+                voltage=-1.0,
+                remaining_s=-1,
+            )
+        )
+
+        result = vitals_snapshot_to_dict(snapshot, self.description)
+
+        self.assertIsNone(result["power"])
+
+    def test_marks_disabled_torque_signal_idle_in_browser_shape(self):
+        snapshot = vitals_client_pb2.VitalsSnapshot(
+            health_signals=[
+                vitals_client_pb2.HealthSignal(
+                    key="body/base/left_wheel/torque_enabled",
+                    status=0,
+                    detail="left wheel torque is disabled (idle)",
+                    observed_value=0.0,
+                )
+            ],
+            bodies=[vitals_client_pb2.BodyHealth(key="body", status=0)],
+        )
+
+        result = vitals_snapshot_to_dict(snapshot, self.description)
+
+        self.assertEqual(result["signals"][0]["health"], "ok")
+        self.assertEqual(result["signals"][0]["visualState"], "idle")
+        self.assertEqual(result["summary"]["overall"], "ok")
+
+    def test_marks_enabled_torque_signal_ready_in_browser_shape(self):
+        snapshot = vitals_client_pb2.VitalsSnapshot(
+            health_signals=[
+                vitals_client_pb2.HealthSignal(
+                    key="body/base/left_wheel/torque_enabled",
+                    status=0,
+                    detail="left wheel torque is enabled (ready)",
+                    observed_value=1.0,
+                    reference_value=1.0,
+                )
+            ],
+            bodies=[vitals_client_pb2.BodyHealth(key="body", status=0)],
+        )
+
+        result = vitals_snapshot_to_dict(snapshot, self.description)
+        wheel = next(
+            row
+            for row in result["componentHealth"]
+            if row["componentId"] == "body/base/left_wheel"
+        )
+
+        self.assertEqual(result["signals"][0]["visualState"], "ok")
+        self.assertEqual(wheel["directHealth"], "ok")
+        self.assertEqual(wheel["directVisualState"], "ok")
+        self.assertEqual(wheel["signalCount"], 1)
+
+
+class VitalsStreamOrderingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_description_reprojects_hardware_that_arrived_first(self):
+        """A slow Soma description must replace provisional health topology."""
+        description = normalize_robot_description(SOMA_YAML)
+        snapshot = vitals_client_pb2.VitalsSnapshot(
+            health_signals=[
+                vitals_client_pb2.HealthSignal(
+                    key="body/base/left_wheel/motor_temp",
+                    status=0,
+                )
+            ],
+            bodies=[vitals_client_pb2.BodyHealth(key="body", status=0)],
+        )
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        description_state = {"value": fallback_robot_description()}
+        hardware_state = {"value": snapshot}
+
+        with patch(
+            "robonix_client.vitals_transport.load_robot_description",
+            AsyncMock(return_value=description),
+        ):
+            task = asyncio.create_task(
+                _description_loop(
+                    ClientSettings(), queue, description_state, hardware_state
+                )
+            )
+            description_event = await asyncio.wait_for(queue.get(), timeout=1)
+            hardware_event = await asyncio.wait_for(queue.get(), timeout=1)
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(description_event["type"], "description")
+        self.assertEqual(hardware_event["type"], "hardware")
+        component_ids = {
+            row["componentId"] for row in hardware_event["data"]["componentHealth"]
+        }
+        self.assertEqual(
+            component_ids,
+            {
+                "body",
+                "body/base",
+                "body/base/left_wheel",
+                "body/base/battery",
+                "body/head_camera",
+            },
+        )
+        wheel = next(
+            row
+            for row in hardware_event["data"]["componentHealth"]
+            if row["componentId"] == "body/base/left_wheel"
+        )
+        self.assertEqual(wheel["health"], "ok")
+
+
+class SoftwareHealthTest(unittest.TestCase):
+    def test_ttl_expiry_is_presented_as_stale_instead_of_generic_error(self):
+        snapshot = module_health_client_pb2.ModuleHealthSnapshot(
+            schema_version=1,
+            ts_ns=1_700_000_000_000_000_000,
+            seq=4,
+            modules=[
+                module_health_client_pb2.ModuleHealth(
+                    module_key="executor/executor",
+                    module_id="executor",
+                    provider_id="executor",
+                    health=2,
+                    state="unavailable",
+                    reason_code="TTL_EXPIRED",
+                    detail="module health report expired",
+                    ttl_ms=3000,
+                ),
+                module_health_client_pb2.ModuleHealth(
+                    module_key="pilot/pilot",
+                    module_id="pilot",
+                    provider_id="pilot",
+                    health=1,
+                    state="active",
+                    reason_code="DEGRADED",
+                    detail="limited model access",
+                    ttl_ms=3000,
+                ),
+            ],
+        )
+
+        result = module_snapshot_to_dict(snapshot)
+        modules = {module["moduleId"]: module for module in result["modules"]}
+
+        self.assertEqual(modules["executor"]["health"], "stale")
+        self.assertEqual(modules["pilot"]["health"], "warn")
+        self.assertEqual(result["summary"]["overall"], "warn")
+
+    def test_maps_atlas_lifecycle_to_health(self):
+        result = provider_snapshot_to_dict(
+            {
+                "atlasEndpoint": "127.0.0.1:50051",
+                "updatedAtMs": 100,
+                "providers": [
+                    {"id": "soma", "state": "ACTIVE", "capabilities": []},
+                    {"id": "pilot", "state": "ERROR", "capabilities": []},
+                    {"id": "old", "state": "TERMINATED", "capabilities": []},
+                ],
+            }
+        )
+
+        providers = {provider["id"]: provider for provider in result["providers"]}
+        self.assertEqual(providers["soma"]["health"], "ok")
+        self.assertEqual(providers["pilot"]["health"], "error")
+        self.assertEqual(providers["old"]["health"], "stale")
+        self.assertEqual(result["summary"]["overall"], "error")
+
+    def test_treats_inactive_skill_as_healthy_without_masking_primitive(self):
+        result = provider_snapshot_to_dict(
+            {
+                "providers": [
+                    {
+                        "id": "dual_piper_initialize",
+                        "kind": "skill",
+                        "state": "INACTIVE",
+                    },
+                    {
+                        "id": "left_piper",
+                        "kind": "primitive",
+                        "state": "INACTIVE",
+                    },
+                ]
+            }
+        )
+
+        providers = {provider["id"]: provider for provider in result["providers"]}
+        self.assertEqual(providers["dual_piper_initialize"]["health"], "ok")
+        self.assertEqual(providers["left_piper"]["health"], "warn")
+        self.assertEqual(result["summary"]["overall"], "warn")
+
+
+if __name__ == "__main__":
+    unittest.main()
