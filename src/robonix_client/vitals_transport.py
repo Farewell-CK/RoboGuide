@@ -15,6 +15,8 @@ from .transport import (
     grpc_channel,
     system_snapshot,
 )
+from .urdf_assets import urdf_asset_store
+
 CONTRACT_SOMA_GET_YAML = "robonix/system/soma/get_yaml"
 CONTRACT_SOMA_GET_URDF = "robonix/system/soma/get_urdf"
 CONTRACT_VITALS_STREAM = "robonix/system/vitals/stream"
@@ -95,6 +97,7 @@ def normalize_robot_description(
     yaml_text: str,
     urdf_xml: str = "",
     robot_id_hint: str = "",
+    urdf_asset_base_url: str = "",
 ) -> dict[str, Any]:
     document = yaml.safe_load(yaml_text) or {}
     if not isinstance(document, dict):
@@ -177,7 +180,7 @@ def normalize_robot_description(
             "urdfModelName": str(urdf.get("model_name") or ""),
         },
         "urdfXml": urdf_xml,
-        "urdfAssetBaseUrl": "",
+        "urdfAssetBaseUrl": urdf_asset_base_url,
         "summary": str(_mapping(document.get("description")).get("summary") or ""),
     }
 
@@ -225,6 +228,7 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
     )
 
     urdf_xml = ""
+    urdf_asset_base_url = ""
     try:
         urdf_endpoint = await discover_endpoint(
             settings.atlas_endpoint, CONTRACT_SOMA_GET_URDF
@@ -234,10 +238,18 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
             SOMA_GET_URDF_PATH,
             soma_client_pb2.GetUrdf_Request(
                 robot_id=yaml_response.robot_id,
+                include_assets=True,
             ),
             soma_client_pb2.GetUrdf_Response,
         )
         urdf_xml = urdf_response.urdf_xml
+        resource_set_id = urdf_asset_store.put(
+            (asset.path, asset.data) for asset in urdf_response.assets
+        )
+        if resource_set_id:
+            urdf_asset_base_url = (
+                f"/api/vitals/urdf-assets/{resource_set_id}/"
+            )
     except (grpc.aio.AioRpcError, RuntimeError):
         pass
 
@@ -245,6 +257,7 @@ async def load_robot_description(settings: ClientSettings) -> dict[str, Any]:
         yaml_response.yaml_text,
         urdf_xml,
         yaml_response.robot_id,
+        urdf_asset_base_url,
     )
     return description
 
