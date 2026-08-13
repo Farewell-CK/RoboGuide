@@ -5,10 +5,12 @@ import importlib
 import json
 import os
 import platform
+import signal
 import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -108,15 +110,22 @@ def start(
         probe = _blocking_health(DEFAULT_BRIDGE_HOST, port, timeout_s=1.0)
         if probe.get("reachable"):
             return status(already_running=True, external=True)
-        return {
-            "ok": False,
-            "running": False,
-            "external": True,
-            "error": (
-                f"port {port} is occupied by an unresponsive audio server: "
-                f"{probe.get('error') or 'health timeout'}"
-            ),
-        }
+        # Port held by something that doesn't answer /health -- almost
+        # always a previous audio_device_server left behind by an unclean
+        # client exit (start_new_session=True means it outlives a crashed
+        # or SIGKILLed parent). Force-reset instead of leaving the client
+        # permanently stuck behind a dead port.
+        if not _reset_stale_listener(port):
+            return {
+                "ok": False,
+                "running": False,
+                "external": True,
+                "error": (
+                    f"port {port} is occupied by an unresponsive audio server "
+                    f"and it could not be reset automatically: "
+                    f"{probe.get('error') or 'health timeout'}"
+                ),
+            }
 
     system = platform.system()
     if system not in SUPPORTED_AUDIO_PLATFORMS:
@@ -217,3 +226,38 @@ def _port_open(host: str, port: int, timeout_s: float = 0.2) -> bool:
             return True
     except OSError:
         return False
+
+
+def _pids_on_port(port: int) -> list[int]:
+    """PIDs with *port* LISTENing. Best-effort; empty on unsupported platforms."""
+    if platform.system() not in {"Darwin", "Linux"}:
+        return []
+    try:
+        out = subprocess.run(
+            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [int(pid) for pid in out.stdout.split() if pid.strip().isdigit()]
+
+
+def _reset_stale_listener(port: int, timeout_s: float = 5.0) -> bool:
+    """SIGTERM (then SIGKILL) whatever is holding *port*. True once it's free."""
+    pids = _pids_on_port(port)
+    if not pids:
+        return False
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                return False
+        deadline = time.monotonic() + (timeout_s if sig == signal.SIGTERM else 1.0)
+        while time.monotonic() < deadline:
+            if not _port_open(DEFAULT_BRIDGE_HOST, port, timeout_s=0.2):
+                return True
+            time.sleep(0.2)
+    return not _port_open(DEFAULT_BRIDGE_HOST, port, timeout_s=0.2)

@@ -94,3 +94,52 @@ def test_speaker_eof_clears_level_after_output_drain(monkeypatch) -> None:
     asyncio.run(asyncio.wait_for(server_web.serve_speaker(FakeWebSocket()), timeout=0.5))
 
     assert lifecycle == ["level:0.0", "start", "stop", "level:0.0", "close"]
+
+
+def test_serve_vu_does_not_block_event_loop_on_slow_restart(monkeypatch) -> None:
+    """A slow/hung native device open in VuMonitor.restart() (observed: an
+    indefinite hang opening a stale CoreAudio device after macOS sleep/wake)
+    must not freeze the shared event loop that also serves /mic and
+    /speaker -- restart() has to run off-thread."""
+    import time as time_module
+
+    class SlowVuMonitor:
+        def __init__(self) -> None:
+            self.level = 0.0
+
+        def restart(self, _device) -> None:
+            time_module.sleep(0.3)
+
+    class FakeWs:
+        remote_address = ("127.0.0.1", 1)
+
+        async def send(self, _msg) -> None:
+            return None
+
+    monkeypatch.setattr(server_web, "vu_monitor", SlowVuMonitor())
+    monkeypatch.setattr(server_web, "_state", lambda _key: 7)
+
+    ticks = {"n": 0}
+
+    async def ticker():
+        while True:
+            ticks["n"] += 1
+            await asyncio.sleep(0.02)
+
+    async def run():
+        ticker_task = asyncio.create_task(ticker())
+        vu_task = asyncio.create_task(server_web.serve_vu(FakeWs()))
+        await asyncio.sleep(0.35)
+        for task in (vu_task, ticker_task):
+            task.cancel()
+        for task in (vu_task, ticker_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.run(run())
+
+    # A frozen event loop would leave ticks near 0 for the ~0.3s restart()
+    # blocks; off-thread execution lets the ticker keep running concurrently.
+    assert ticks["n"] > 5

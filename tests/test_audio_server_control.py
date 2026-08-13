@@ -75,6 +75,64 @@ def test_start_supports_linux_portaudio(monkeypatch, tmp_path) -> None:
     _reset_audio_process()
 
 
+def test_start_resets_stale_unresponsive_listener(monkeypatch, tmp_path) -> None:
+    """A dead server left on the port (e.g. an unclean prior exit) must be
+    force-reset and replaced, not just reported as an error."""
+    _reset_audio_process()
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 4321
+
+        def poll(self):
+            return None
+
+    port_open_calls = {"n": 0}
+
+    def fake_port_open(*_args, **_kwargs):
+        # open (stale server) until the reset kills it, then closed.
+        port_open_calls["n"] += 1
+        return port_open_calls["n"] <= 2
+
+    async def fake_health(*_args, **_kwargs):
+        return {"reachable": False, "error": "health timeout"}
+
+    monkeypatch.setattr(audio_server_control.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(audio_server_control.importlib, "import_module", lambda _name: object())
+    monkeypatch.setattr(audio_server_control, "_port_open", fake_port_open)
+    monkeypatch.setattr(audio_server_control, "health", fake_health)
+    monkeypatch.setattr(audio_server_control, "_pids_on_port", lambda _port: [9999])
+    monkeypatch.setattr(audio_server_control.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(audio_server_control.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(audio_server_control.subprocess, "Popen", lambda *_a, **_k: FakeProcess())
+
+    result = audio_server_control.start(port=60101)
+
+    assert killed and killed[0] == (9999, audio_server_control.signal.SIGTERM)
+    assert result["ok"] is True
+    assert result["pid"] == 4321
+    _reset_audio_process()
+
+
+def test_start_reports_unresettable_stale_listener(monkeypatch) -> None:
+    """If the stale listener can't be reset (no pid found, e.g. unsupported
+    platform), still fail loudly instead of silently spawning a duplicate."""
+    _reset_audio_process()
+
+    async def fake_health(*_args, **_kwargs):
+        return {"reachable": False, "error": "health timeout"}
+
+    monkeypatch.setattr(audio_server_control, "_port_open", lambda *_a, **_k: True)
+    monkeypatch.setattr(audio_server_control, "health", fake_health)
+    monkeypatch.setattr(audio_server_control, "_pids_on_port", lambda _port: [])
+
+    result = audio_server_control.start(port=60102)
+
+    assert result["ok"] is False
+    assert "could not be reset automatically" in result["error"]
+
+
 def test_start_reports_linux_audio_dependency(monkeypatch) -> None:
     _reset_audio_process()
     monkeypatch.setattr(audio_server_control.platform, "system", lambda: "Linux")

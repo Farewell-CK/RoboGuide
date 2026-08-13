@@ -470,12 +470,18 @@ async def serve_vu(ws) -> None:
     log.debug("vu client connected from %s", ws.remote_address)
     last_dev = _state("input_device")
     if vu_monitor is not None:
-        vu_monitor.restart(last_dev)
+        await asyncio.to_thread(vu_monitor.restart, last_dev)
     try:
         while True:
             cur = _state("input_device")
             if vu_monitor is not None and cur != last_dev:
-                vu_monitor.restart(cur)
+                # off-thread: sd.RawInputStream() can block for a long time
+                # (observed: indefinitely) when opening a stale CoreAudio
+                # device after macOS sleep/wake. restart() used to run
+                # inline here, on the same event loop that also serves
+                # /mic and /speaker on this ws-server thread — a hang here
+                # froze the entire voice pipeline, not just the VU meter.
+                await asyncio.to_thread(vu_monitor.restart, cur)
                 last_dev = cur
             input_level = vu_monitor.level if vu_monitor is not None else 0.0
             await ws.send(json.dumps({
