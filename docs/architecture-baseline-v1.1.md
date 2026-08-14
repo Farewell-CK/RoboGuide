@@ -1,6 +1,6 @@
 # RoboGuide 架构基线 V1.1
 
-本文件是仓库内对 `Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx` 的工程化摘要。原始 DOCX 和架构图仍是设计基线的来源；本摘要不替代原文。
+本文件是仓库内对 `Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx` 的工程化摘要。原始 DOCX 和 [V1.1 架构图](images/distributed-embodied-ai-os-architecture-v1.1.png) 仍是设计基线的来源；本摘要不替代原文。
 
 ## 1. 系统定位
 
@@ -15,12 +15,12 @@ Distributed Embodied AI OS 面向“多个具身体、多个计算节点、共�
 
 ## 2. 四个逻辑平面
 
-| 平面 | 核心问题 | 工程目录 |
+| 平面 | 核心问题 | 当前资料位置 |
 | --- | --- | --- |
-| Mission / Intelligence | 系统要完成什么？ | `src/roboguide/mission_intelligence` |
-| Embodied Control | 谁、在哪里、什么时候做，以及如何协作？ | `src/roboguide/control_plane` |
-| Embodied State & Memory | 当前现实是什么，过去发生过什么？ | `src/roboguide/state_memory` |
-| Distributed Embodied Runtime | 如何将组织结果真正运行到异构节点？ | `src/roboguide/runtime` |
+| Mission / Intelligence | 系统要完成什么？ | 本文档第 4 节、README |
+| Embodied Control | 谁、在哪里、什么时候做，以及如何协作？ | 本文档第 5 节、README |
+| Embodied State & Memory | 当前现实是什么，过去发生过什么？ | 本文档第 4 节、README |
+| Distributed Embodied Runtime | 如何将组织结果真正运行到异构节点？ | 本文档第 4 节、README |
 
 这些是逻辑边界，不要求每个平面一开始就对应独立进程或服务器。
 
@@ -112,7 +112,7 @@ Task 描述需要完成的工作；Task Graph 表达前后依赖、并行关系�
 - 协议、Schema、数据库和具体算法允许演进。
 ## 8. 当前实现边界
 
-仓库初始化阶段只提供模块归属、架构基线清单和自检入口。任何具体运行时实现都应先说明：
+仓库初始化阶段只提供原始设计文档、架构图、架构基线摘要和实现待决事项。当前不包含运行时代码。任何后续实现都应先说明：
 
 - 它属于哪个平面和哪个职责；
 - 输入/输出的所有权和时间语义是什么；
