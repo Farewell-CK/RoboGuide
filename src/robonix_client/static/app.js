@@ -29,6 +29,12 @@ const state = {
   voiceActive: false,
   activeVoiceSocket: null,
   activeVoiceMode: "voice",
+  voiceFinishSupported: false,
+  finishInFlight: false,
+  // Whether the microphone is actually capturing right now. Distinct from
+  // voiceActive, which stays true through ASR, Pilot, and TTS playback --
+  // the finish control only makes sense while audio is still being recorded.
+  voiceRecording: false,
   ttsPlaying: false,
   handsfree: { available: false, enabled: false, state: "unavailable", busy: false },
   handsfreeSocket: null,
@@ -49,6 +55,14 @@ const state = {
     route: { micProviders: [], speakerProviders: [], micDevices: [], speakerDevices: [] },
   },
 };
+
+/// Name captured for a New session click that is still in flight.
+///
+/// Pressing the button blurs the name field first, so without this the typed
+/// name would be committed as a rename of the session being left and the new
+/// one would open unnamed -- two chats from one click. null means no click is
+/// pending and the field behaves as a plain rename box.
+let pendingNewSessionTitle = null;
 
 const DEFAULT_ATLAS_PORT = 50051;
 const AUDIO_LOG_MAX_LINES = 120;
@@ -147,8 +161,76 @@ function loadConversations() {
   }
 }
 
+/// Persist the conversation list, shedding load until it fits.
+///
+/// Attachments are base64 data URLs, so a couple of screenshots can carry a
+/// 30-conversation history past localStorage's ~5MB quota. setItem then
+/// throws, which used to propagate out of persistCurrentConversation and
+/// skip the renderHistory() below it -- the sidebar entry vanished and the
+/// write never landed, so a reload came back to an older snapshot.
+///
+/// Drop attachment payloads first (the transcript text is what the user came
+/// back for), then the oldest conversations, and only give up once a single
+/// conversation still will not fit.
 function saveConversations() {
-  localStorage.setItem("robonix.conversations", JSON.stringify(state.history.slice(0, 30)));
+  const stripAttachments = (conversations) =>
+    conversations.map((conversation) => ({
+      ...conversation,
+      messages: (conversation.messages || []).map(({ attachments, ...rest }) => ({
+        ...rest,
+        attachments: (attachments || []).map(({ dataUrl, ...meta }) => meta),
+      })),
+    }));
+
+  const fits = (conversations) => {
+    try {
+      localStorage.setItem("robonix.conversations", JSON.stringify(conversations));
+      return true;
+    } catch (error) {
+      if (error?.name !== "QuotaExceededError") throw error;
+      return false;
+    }
+  };
+
+  const capped = state.history.slice(0, 30);
+  if (fits(capped)) return;
+  // Attachment payloads are the bulk of the data and the least missed.
+  let candidates = stripAttachments(capped);
+  // history is newest-first, so trimming the tail sheds the oldest chats.
+  while (candidates.length) {
+    if (fits(candidates)) return;
+    candidates = candidates.slice(0, candidates.length - 1);
+  }
+  // Never addStatusLine() here: it appends a message, which persists, which
+  // lands back in this function.
+  console.warn("robonix: browser storage is full; conversation history was not saved");
+}
+
+/// Record which conversation is on screen so a reload can return to it.
+/// Without this every refresh landed in a brand-new empty session and the
+/// work looked lost, even though it was still in the sidebar.
+function rememberLastSession(sessionId) {
+  if (sessionId) localStorage.setItem("robonix.lastSessionId", sessionId);
+  else localStorage.removeItem("robonix.lastSessionId");
+}
+
+/// Reopen the conversation that was last on screen. Only restores one whose
+/// transcript actually survived, so a stale id cannot strand the user in an
+/// empty session that no longer exists.
+function restoreLastSession() {
+  const lastId = localStorage.getItem("robonix.lastSessionId") || "";
+  if (!lastId) return false;
+  const conversation = state.history.find((item) => item.id === lastId);
+  if (!conversation) return false;
+  state.sessionId = conversation.id;
+  state.sessionTitle = conversation.title || "";
+  state.messages = (conversation.messages || []).map((item) => ({ ...item }));
+  state.timeline = (conversation.timeline || []).map((item) => ({ ...item }));
+  state.plan = conversation.plan || null;
+  state.planRecords = conversation.planRecords || [];
+  state.batches = conversation.batches || [];
+  state.nodeStates = conversation.nodeStates || {};
+  return true;
 }
 
 async function init() {
@@ -181,8 +263,12 @@ async function init() {
   // CLI/environment values are launch defaults, not immutable policy. Stored
   // browser settings must win so changing robot host or audio routing survives
   // a refresh even when the client was initially launched with --robot-host.
+  // An explicitly launched session id wins; otherwise come back to whatever
+  // conversation was open before the reload instead of a fresh empty one.
   if (defaults.sessionId) state.sessionId = defaults.sessionId;
+  else restoreLastSession();
   if (defaults.sessionTitle) state.sessionTitle = defaults.sessionTitle;
+  rememberLastSession(state.sessionId);
   bindSettings();
   bindEvents();
   renderAudioBars();
@@ -194,12 +280,14 @@ async function init() {
   refreshSystem();
   refreshActivePlans();
   refreshAudioRoute();
+  refreshVoiceFinishSupport();
   // The speaking aura is visible on every page, so its physical output-level
   // stream must be connected at startup rather than only after opening Audio.
   checkAudioServer();
   setInterval(refreshSystem, 7000);
   setInterval(refreshActivePlans, 2000);
   setInterval(refreshHandsfree, 2500);
+  setInterval(refreshVoiceFinishSupport, 7000);
 }
 
 function bindSettings() {
@@ -220,6 +308,7 @@ function bindSettings() {
   if (maybe("enrollUserId")) $("enrollUserId").value = state.settings.enrollUserId || "";
   if (maybe("enrollUserName")) $("enrollUserName").value = state.settings.enrollUserName || "";
   if (state.sessionTitle && maybe("promptTitle")) $("promptTitle").textContent = state.sessionTitle;
+  renderSessionChip();
 
   [
     "robotHost",
@@ -321,13 +410,45 @@ function bindEvents() {
   window.addEventListener("keydown", (event) => {
     if (event.key !== "F2") return;
     event.preventDefault();
+    if (state.voiceRecording) {
+      if (state.voiceFinishSupported) finishVoiceCapture();
+      else addStatusLine("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit.");
+      return;
+    }
+    if (state.voiceActive) return;
     startVoice();
   });
   $("stopButton").addEventListener("click", stopCurrentTask);
+  maybe("finishVoiceButton")?.addEventListener("click", finishVoiceCapture);
   maybe("voiceButton")?.addEventListener("click", startVoice);
   $("refreshSystem").addEventListener("click", refreshSystem);
   maybe("handsfreeToggle")?.addEventListener("click", toggleHandsfree);
-  $("newSession").addEventListener("click", newSession);
+  // The command bar's name field renames the open session as you type it;
+  // the button beside it starts a new one under whatever name it holds.
+  const sessionTitleInput = maybe("sessionTitleInput");
+  if (sessionTitleInput) {
+    sessionTitleInput.addEventListener("change", commitSessionTitle);
+    sessionTitleInput.addEventListener("blur", commitSessionTitle);
+    sessionTitleInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        sessionTitleInput.blur();
+      }
+    });
+    // Clears a capture left behind by a click that never completed.
+    sessionTitleInput.addEventListener("focus", () => {
+      pendingNewSessionTitle = null;
+    });
+  }
+  const newSessionAction = maybe("newSessionAction");
+  if (newSessionAction) {
+    // mousedown lands before the field's blur, which is the only moment the
+    // typed name is still known to be meant for the session about to open.
+    newSessionAction.addEventListener("mousedown", () => {
+      pendingNewSessionTitle = maybe("sessionTitleInput")?.value.trim() || "";
+    });
+    newSessionAction.addEventListener("click", newSession);
+  }
   $("renameSession").addEventListener("click", () => renameConversation(state.sessionId));
   $("clearHistory").addEventListener("click", clearHistory);
   maybe("connectNow")?.addEventListener("click", async () => {
@@ -462,7 +583,7 @@ function renderHandsfree() {
       : status === "in_voice"
         ? "Hands-free active"
         : status === "suspended"
-          ? "Voice steer recording"
+          ? "Recording"
         : state.handsfree.enabled
           ? `Hands-free ${status}`
           : "Hands-free off";
@@ -481,15 +602,23 @@ function handsfreeOwnsMicrophone() {
 function syncVoiceControls() {
   const recordingBlocked = state.voiceActive && !state.ttsPlaying;
   const disabled = recordingBlocked;
+  // While capture runs, the start control has nothing left to do and its
+  // twin ("Stop recording") is what F2 now triggers. Leaving both on screen
+  // showed two conflicting voice buttons at once, so hide this one outright
+  // rather than only disabling it.
+  const hideStart = state.voiceRecording && state.voiceFinishSupported;
   const title = state.ttsPlaying
-      ? "Interrupt speech and start a new voice turn"
+      ? "Interrupt speech and start a new voice turn (F2)"
       : state.voiceActive
         ? "Voice recording is already active"
-        : "Start voice session";
+        : state.busy
+          ? "Record a spoken instruction for the running task (F2)"
+          : "Start voice recording (F2)";
   maybe("voiceButton")?.toggleAttribute("disabled", disabled);
   if (maybe("voiceButton")) $("voiceButton").title = title;
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => {
     button.toggleAttribute("disabled", disabled);
+    button.hidden = hideStart;
     button.title = title;
   });
   const micTest = maybe("testMicrophone");
@@ -504,6 +633,18 @@ function syncVoiceControls() {
   }
   const handsfree = maybe("handsfreeToggle");
   if (handsfree) handsfree.toggleAttribute("disabled", state.voiceActive || state.handsfree.busy);
+  const finishButton = maybe("finishVoiceButton");
+  if (finishButton) {
+    const show = state.voiceRecording && state.voiceFinishSupported;
+    finishButton.hidden = !show;
+    if (show && !state.finishInFlight) {
+      finishButton.disabled = false;
+      setButtonLabel(finishButton, "Stop recording");
+    }
+    finishButton.title = state.voiceFinishSupported
+      ? "Stop recording and send what you have said so far (F2). Does not cancel the task."
+      : "This robot does not advertise robonix/system/liaison/voice/finish, so recordings can only end on their own.";
+  }
 }
 
 function stopHandsfreeEventStream() {
@@ -609,15 +750,37 @@ function activatePage(name) {
   }
 }
 
-function newSession() {
-  if (state.busy) {
-    addStatusLine("Stop the current task before starting a new session.");
-    return;
-  }
-  persistCurrentConversation();
-  state.sessionId = getSessionId();
+/// Drop every pointer into the Pilot turn of the conversation being left.
+///
+/// interactionSettings() overrides the outgoing session id with
+/// activePilotSessionId so a steer reaches the turn it belongs to. Any code
+/// path that switches which conversation is on screen must clear these, or
+/// the next message is delivered into the previous conversation's history
+/// and the planner answers from turns the user never spoke there.
+function forgetActiveTurn() {
   state.activeTurnId = "";
   state.activePilotSessionId = "";
+  state.taskState = null;
+  state.taskRunning = false;
+}
+
+function newSession() {
+  if (state.busy) {
+    pendingNewSessionTitle = null;
+    addStatusLine("Abort the running task before starting a new session.");
+    return;
+  }
+  // Captured at mousedown, before the field blurred. An untouched field still
+  // shows the CURRENT session's name, and naming the new session after it
+  // would clone the name on every click, so only text the user actually
+  // changed counts as a name for the session about to open.
+  const typedTitle = pendingNewSessionTitle ?? (maybe("sessionTitleInput")?.value.trim() || "");
+  pendingNewSessionTitle = null;
+  const requestedTitle = typedTitle && typedTitle !== state.sessionTitle ? typedTitle : "";
+  persistCurrentConversation();
+  state.sessionId = getSessionId();
+  rememberLastSession(state.sessionId);
+  forgetActiveTurn();
   state.sessionTitle = "";
   state.messages = [];
   state.timeline = [];
@@ -626,12 +789,56 @@ function newSession() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  $("promptTitle").textContent = "What should Robonix do?";
+  state.sessionTitle = uniqueConversationTitle(requestedTitle || "Untitled chat", state.sessionId);
+  $("promptTitle").textContent = state.sessionTitle;
+  renderSessionChip();
+  // force: an empty transcript would otherwise fail the has-content check and
+  // the new session would not appear in the sidebar until its first message.
+  persistCurrentConversation("", true);
+  // Pilot keys conversation history by session id, so a fresh id is what
+  // actually drops the old turns from the next prompt. Say so -- against an
+  // already-empty transcript the reset is otherwise invisible.
+  addStatusLine("New session started; the planner's history for this conversation is cleared.");
+  addTimeline("status", `new session ${state.sessionId.slice(0, 8)}`);
   renderMessages();
   renderTimeline();
   renderPlan();
   renderSceneAssets();
   renderHistory();
+}
+
+/// Keep the command bar's session chip showing the live conversation title.
+/// It was static markup before, so a reset left the previous name on screen
+/// and made the button look inert.
+function renderSessionChip() {
+  const field = maybe("sessionTitleInput");
+  // Never clobber what the user is in the middle of typing.
+  if (field && document.activeElement !== field) field.value = state.sessionTitle || "";
+}
+
+/// Apply the name field to the open session. Runs on change/blur rather than
+/// on every keystroke so a half-typed name is not written to the sidebar.
+/// An emptied field means "no explicit name", which leaves the conversation
+/// on its message-derived title instead of naming it the empty string.
+function commitSessionTitle() {
+  const field = maybe("sessionTitleInput");
+  if (!field) return;
+  // A New session click is mid-flight and owns this text; renaming the
+  // session being left with it is what produced two chats per click.
+  if (pendingNewSessionTitle !== null) {
+    renderSessionChip();
+    return;
+  }
+  const typed = field.value.trim();
+  if (!typed || typed === state.sessionTitle) {
+    renderSessionChip();
+    return;
+  }
+  const title = uniqueConversationTitle(typed, state.sessionId);
+  state.sessionTitle = title;
+  if (maybe("promptTitle")) $("promptTitle").textContent = title;
+  persistCurrentConversation("", true);
+  renderSessionChip();
 }
 
 async function sendTask() {
@@ -642,11 +849,11 @@ async function sendTask() {
   // A still-closing WebSocket or TTS tail is not an active Pilot turn. Only
   // mark input as steer while Pilot has task state that can actually accept it.
   const wasBusy = hasActiveTurn();
-  state.activeVoiceMode = wasBusy ? "voice steer" : "voice";
+  state.activeVoiceMode = "voice";
   const display = text || attachments.map((item) => item.name).join(", ");
-  addMessage("user", display, wasBusy ? "steer" : (attachments.length ? `${attachments.length} image` : ""), attachments);
-  addStatusLine(wasBusy ? "Queued steer input; waiting for Pilot to react." : "Submitted task; waiting for Pilot stream.");
-  addTimeline(wasBusy ? "steer" : "task", wasBusy ? `steer: ${display}` : `task: ${display}`);
+  addMessage("user", display, wasBusy ? "added to running task" : (attachments.length ? `${attachments.length} image` : ""), attachments);
+  addStatusLine(wasBusy ? "Sent to the running task; waiting for Pilot to react." : "Submitted task; waiting for Pilot stream.");
+  addTimeline("task", wasBusy ? `added: ${display}` : `task: ${display}`);
   persistCurrentConversation(display);
   $("taskInput").value = "";
   autoGrowInput();
@@ -674,8 +881,8 @@ function stopCurrentTask() {
   state.stopInFlight = true;
   const button = $("stopButton");
   button.disabled = true;
-  button.textContent = "Stopping";
-  addStatusLine("Stop requested; canceling the current task and any running action.");
+  setButtonLabel(button, "Aborting");
+  addStatusLine("Abort requested; canceling every running task and any robot motion.");
   addTimeline("cancel", `abort requested${state.activeTurnId ? ` for ${state.activeTurnId}` : ""}`);
 
   stopActiveVoiceSession();
@@ -696,7 +903,7 @@ function stopCurrentTask() {
 function resetStopState() {
   state.stopInFlight = false;
   $("stopButton").disabled = false;
-  $("stopButton").textContent = "Stop";
+  setButtonLabel($("stopButton"), "Abort all tasks");
 }
 
 function completeStopState() {
@@ -726,6 +933,26 @@ function stopActiveVoiceSession() {
   else sendStop();
 }
 
+function finishVoiceCapture() {
+  // Distinct from stopActiveVoiceSession(): this submits what's been said
+  // so far instead of discarding the turn, for when background noise keeps
+  // the ASR backend's own silence detection from ever firing.
+  const socket = state.activeVoiceSocket;
+  if (!state.voiceRecording || !socket || state.finishInFlight) return;
+  state.finishInFlight = true;
+  const button = maybe("finishVoiceButton");
+  if (button) {
+    button.disabled = true;
+    setButtonLabel(button, "Stopping");
+  }
+  addStatusLine("Stopping recording; submitting what has been recognized so far.");
+  const send = () => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
+  };
+  if (socket.readyState === WebSocket.CONNECTING) socket.addEventListener("open", send, { once: true });
+  else send();
+}
+
 function startVoice() {
   if (state.voiceActive) {
     addStatusLine("Voice recording is already active.");
@@ -736,11 +963,12 @@ function startVoice() {
   maybe("voiceButton")?.classList.add("active");
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => button.classList.add("active"));
   if (maybe("voiceState")) $("voiceState").textContent = "recording";
-  addStatusLine(wasBusy ? "Listening for voice steer input." : "Listening for voice input.");
-  addTimeline(wasBusy ? "voice steer" : "voice", wasBusy ? "voice steer requested" : "voice session requested");
+  syncVoiceControls();
+  addStatusLine("Listening for voice input.");
+  addTimeline("voice", wasBusy ? "voice input for running task" : "voice session requested");
   const socket = new WebSocket(wsUrl("/ws/voice"));
   beginStream(socket);
-  socket.robonixVoiceMode = wasBusy ? "voice steer" : "voice";
+  socket.robonixVoiceMode = "voice";
   state.activeVoiceSocket = socket;
   socket.onopen = () => socket.send(JSON.stringify({
     settings: interactionSettings(wasBusy),
@@ -753,6 +981,10 @@ function startVoice() {
     if (ownsCapture) {
       state.activeVoiceSocket = null;
       state.voiceActive = false;
+      state.finishInFlight = false;
+      // A socket that dies mid-capture never delivers recording_done, so the
+      // flag has to be cleared here too or the control outlives the session.
+      state.voiceRecording = false;
     }
     endStream(socket);
     if (ownsCapture) finishVoiceCaptureUi();
@@ -768,6 +1000,15 @@ function wireStream(socket, done, voiceSocket = null) {
     if (payload.type === "voice_event") handleVoiceEvent(payload.event, voiceSocket);
     if (payload.type === "accepted") addStatusLine("Connected; waiting for Robonix events.");
     if (payload.type === "status") addTimeline("status", payload.message || "status");
+    if (payload.type === "finish_requested") {
+      addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? "recording stop requested" : "could not stop recording"));
+      // A rejected request leaves the turn recording, so hand the control back
+      // rather than stranding the user with a dead "Stopping" button.
+      if (!payload.ok) {
+        state.finishInFlight = false;
+        syncVoiceControls();
+      }
+    }
     if (payload.type === "error") addMessage("error", payload.error);
     if (payload.type === "done") {
       socket.robonixDone = true;
@@ -876,12 +1117,20 @@ function updatePlanRecordResult(planId, update) {
 
 function handleVoiceEvent(event, sourceSocket = null) {
   const label = event.statusMessage || event.text || event.error || event.kind;
+  // Liaison reports the microphone's own lifecycle, so drive the finish
+  // control off these rather than off the socket, which stays open through
+  // Pilot and TTS long after capture has ended.
+  if (event.kind === "recording_started") setVoiceRecording(true);
+  else if (["recording_done", "asr_final", "session_done", "error"].includes(event.kind)) {
+    setVoiceRecording(false);
+  }
   if (event.kind === "asr_final") {
-    const mode = sourceSocket?.robonixVoiceMode || (hasActiveTurn() ? "voice steer" : "voice");
+    const mode = sourceSocket?.robonixVoiceMode || "voice";
     addMessage("user", event.text, mode);
     if (sourceSocket && state.activeVoiceSocket === sourceSocket) {
       state.activeVoiceSocket = null;
       state.voiceActive = false;
+      state.finishInFlight = false;
       finishVoiceCaptureUi();
       syncVoiceControls();
     }
@@ -901,6 +1150,16 @@ function handleVoiceEvent(event, sourceSocket = null) {
   } else {
     addTimeline("voice", label);
   }
+}
+
+/// Flip the mic-capture flag and re-sync the controls bound to it. Clearing
+/// it also clears any in-flight finish request, since a capture that has
+/// ended cannot still be finishing.
+function setVoiceRecording(active) {
+  if (state.voiceRecording === active) return;
+  state.voiceRecording = active;
+  if (!active) state.finishInFlight = false;
+  syncVoiceControls();
 }
 
 function finishVoiceCaptureUi() {
@@ -1807,6 +2066,19 @@ function currentTaskLabel() {
   return text.length > 40 ? `${text.slice(0, 37)}...` : text;
 }
 
+async function refreshVoiceFinishSupport() {
+  // Older liaisons never registered robonix/system/liaison/voice/finish, so
+  // absence just means "not upgraded yet" -- keep the button hidden rather
+  // than let a click fail with a raw gRPC UNIMPLEMENTED error.
+  const result = await fetch("/api/voice/finish-supported", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings: collectSettings() }),
+  }).then((r) => r.json()).catch(() => ({ supported: false }));
+  state.voiceFinishSupported = Boolean(result.supported);
+  syncVoiceControls();
+}
+
 async function refreshSystem() {
   const atlas = buildAtlasEndpoint($("robotHost").value, $("atlasPort").value);
   if (!atlas) {
@@ -1990,11 +2262,32 @@ function latestImageAttachment() {
   return null;
 }
 
+/// Make `base` unique among the other conversations by appending a counter,
+/// so a sidebar of identically-named chats stays tellable apart. Only the
+/// conversation being written is renamed; existing titles are left alone.
+///
+/// An existing " (n)" is stripped before counting, so deriving a name from an
+/// already-numbered one yields "123 (3)" rather than compounding it into
+/// "123 (2) (2)".
+function uniqueConversationTitle(base, selfId) {
+  const stem = String(base).replace(/\s*\(\d+\)$/, "").trim() || "Untitled chat";
+  const taken = new Set(
+    state.history.filter((item) => item.id !== selfId).map((item) => item.title)
+  );
+  if (!taken.has(stem)) return stem;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${stem} (${suffix})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 function persistCurrentConversation(titleHint = "", force = false) {
   const hasContent = state.sessionTitle || state.messages.length || state.timeline.length || state.plan || state.planRecords.length || state.batches.length || Object.keys(state.nodeStates || {}).length;
   if (!hasContent && !force) return;
-  const existing = state.history.find((item) => item.id === state.sessionId);
-  const title = state.sessionTitle || existing?.title || titleHint || firstUserMessage() || "Untitled chat";
+  const existingIndex = state.history.findIndex((item) => item.id === state.sessionId);
+  const existing = existingIndex >= 0 ? state.history[existingIndex] : null;
+  const baseTitle = state.sessionTitle || existing?.title || titleHint || firstUserMessage() || "Untitled chat";
+  const title = uniqueConversationTitle(baseTitle, state.sessionId);
   state.sessionTitle = title;
   const conversation = {
     id: state.sessionId,
@@ -2007,7 +2300,11 @@ function persistCurrentConversation(titleHint = "", force = false) {
     batches: state.batches,
     nodeStates: state.nodeStates,
   };
-  state.history = [conversation, ...state.history.filter((item) => item.id !== state.sessionId)].slice(0, 30);
+  // Update in place. Hoisting the current conversation to the front on every
+  // save re-sorted the sidebar just from visiting a chat, so rows moved out
+  // from under the pointer mid-click. New conversations still go on top.
+  if (existingIndex >= 0) state.history[existingIndex] = conversation;
+  else state.history = [conversation, ...state.history].slice(0, 30);
   saveConversations();
   renderHistory();
 }
@@ -2062,22 +2359,29 @@ function renderHistory() {
 }
 
 function renameConversation(sessionId) {
-  if (state.busy) return;
+  // window.prompt blocks the event loop, which would stall a live event
+  // stream, so renaming waits. Say so rather than ignoring the click.
+  if (state.busy) {
+    addStatusLine("Renaming is unavailable while a task is running.");
+    return;
+  }
   if (sessionId === state.sessionId) persistCurrentConversation("", true);
   const conversation = state.history.find((item) => item.id === sessionId);
   const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || "Untitled chat";
   const nextTitle = window.prompt("Rename session", currentTitle);
   if (nextTitle === null) return;
-  const title = nextTitle.trim();
-  if (!title) return;
+  const trimmed = nextTitle.trim();
+  if (!trimmed) return;
+  const title = uniqueConversationTitle(trimmed, sessionId);
   if (sessionId === state.sessionId) {
     state.sessionTitle = title;
     $("promptTitle").textContent = title;
+    renderSessionChip();
   }
   if (conversation) {
+    // Renaming must not reorder the list either -- see persistCurrentConversation.
     conversation.title = title;
     conversation.updatedAt = Date.now();
-    state.history = [conversation, ...state.history.filter((item) => item.id !== sessionId)].slice(0, 30);
   } else if (sessionId === state.sessionId) {
     persistCurrentConversation(title, true);
   }
@@ -2090,6 +2394,8 @@ function deleteConversation(sessionId) {
   saveConversations();
   if (sessionId === state.sessionId) {
     state.sessionId = getSessionId();
+    rememberLastSession(state.sessionId);
+    forgetActiveTurn();
     state.sessionTitle = "";
     state.messages = [];
     state.timeline = [];
@@ -2099,6 +2405,7 @@ function deleteConversation(sessionId) {
     state.nodeStates = {};
     state.activeAgentId = null;
     $("promptTitle").textContent = "What should Robonix do?";
+    renderSessionChip();
     renderMessages();
     renderTimeline();
     renderPlan();
@@ -2111,6 +2418,8 @@ function clearHistory() {
   state.history = [];
   saveConversations();
   state.sessionId = getSessionId();
+  rememberLastSession(state.sessionId);
+  forgetActiveTurn();
   state.sessionTitle = "";
   state.messages = [];
   state.timeline = [];
@@ -2128,12 +2437,21 @@ function clearHistory() {
 }
 
 function openConversation(sessionId) {
-  if (state.busy || sessionId === state.sessionId) return;
+  if (sessionId === state.sessionId) return;
+  // A running turn streams its events into whatever conversation is on
+  // screen, so switching mid-flight would file another session's replies
+  // here. Refuse, but say why -- returning silently reads as a dead list.
+  if (state.busy) {
+    addStatusLine("A task is still running in this session. Abort it before switching conversations.");
+    return;
+  }
   persistCurrentConversation();
   const conversation = state.history.find((item) => item.id === sessionId);
   if (!conversation) return;
   state.sessionId = conversation.id;
+  rememberLastSession(conversation.id);
   state.sessionTitle = conversation.title || "";
+  forgetActiveTurn();
   state.messages = (conversation.messages || []).map((item) => ({ ...item }));
   state.timeline = (conversation.timeline || []).map((item) => ({ ...item }));
   state.plan = conversation.plan || null;
@@ -2142,6 +2460,7 @@ function openConversation(sessionId) {
   state.nodeStates = conversation.nodeStates || {};
   state.activeAgentId = null;
   $("promptTitle").textContent = conversation.title || "What should Robonix do?";
+  renderSessionChip();
   $("taskInput").value = "";
   autoGrowInput();
   renderMessages();
@@ -2720,20 +3039,35 @@ function setText(id, text) {
   if (node) node.textContent = text;
 }
 
+/// Retarget a composer button's caption without discarding its icon span.
+function setButtonLabel(node, text) {
+  if (!node) return;
+  const label = node.querySelector(".btn-label");
+  if (label) label.textContent = text;
+  else node.textContent = text;
+}
+
 function setBusy(value) {
   state.busy = value;
   $("sendButton").classList.toggle("busy", value);
-  $("sendButton").textContent = value ? "Steer" : "Send";
-  $("sendButton").title = value ? "Steer current task" : "Send task";
+  setButtonLabel($("sendButton"), "Send");
+  $("sendButton").title = value ? "Send to the running task (Enter)" : "Send task (Enter)";
   $("stopButton").hidden = !value;
-  $("newSession").disabled = value;
+  // Left enabled while busy on purpose: a disabled button swallows the click
+  // and the "abort the running task first" guard never gets to explain
+  // itself, which reads as the control being broken.
+  if (maybe("newSessionAction")) $("newSessionAction").disabled = false;
   if (!value) resetStopState();
   maybe("voiceButton")?.classList.toggle("busy", value);
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => {
     button.classList.toggle("busy", value);
-    button.textContent = value ? "Voice steer" : "Voice";
-    button.title = value ? "Send a voice steer to the current task" : "Start voice session";
+    // Same button either way: it starts a recording. Whether that recording
+    // opens a new task or adds to the running one is context, not a separate
+    // control, so the label stays put and only the tooltip explains it.
+    setButtonLabel(button, "Start recording");
   });
+  // syncVoiceControls owns the tooltip and the hidden state for this button.
+  syncVoiceControls();
 }
 
 function beginStream(socket = null) {

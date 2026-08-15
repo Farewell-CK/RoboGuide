@@ -347,6 +347,108 @@ h1 {
   text-overflow: ellipsis;
 }
 
+/* The composer carries two interrupt controls that do very different things:
+   one ends the recording and keeps the turn, the other cancels everything the
+   robot is doing. Icon and colour have to carry that difference before the
+   label is read, so they must not render as a matched pair. */
+.btn-icon {
+  margin-right: 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tool-button,
+.danger-button,
+.send-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The rule above sets an author-level `display`, which outranks the user
+   agent's `[hidden] { display: none }`. Without this the composer's hidden
+   buttons stay on screen forever. */
+[hidden] {
+  display: none !important;
+}
+
+.stop-button {
+  /* "Abort all tasks" plus its icon does not fit the shared danger width. */
+  min-width: 142px;
+  max-width: none;
+}
+
+/* Resetting the conversation is the one control that keeps token cost down,
+   and it sits in a bar of muted outlined chips -- solid fill is what makes it
+   findable there. */
+.new-session-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 132px;
+  padding: 0 14px;
+  border: 1px solid #7fdcea;
+  border-radius: 6px;
+  color: #04171c;
+  background: var(--cyan);
+  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(95, 205, 216, 0.25), 0 2px 10px rgba(95, 205, 216, 0.2);
+}
+
+.new-session-button:hover:not(:disabled) {
+  background: #8ee2ec;
+  box-shadow: 0 0 0 1px rgba(95, 205, 216, 0.4), 0 2px 14px rgba(95, 205, 216, 0.35);
+}
+
+.new-session-button .btn-icon {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+/* Editable in place -- renaming used to mean a window.prompt. The enclosing
+   .select-field already draws the box, so this only marks the field as
+   focused; giving the input its own border nested a second frame inside it. */
+.select-field:focus-within {
+  border-color: var(--cyan);
+}
+
+/* Keyboard hint riding inside the button it belongs to. Nobody discovers F2
+   from a tooltip they never hover. */
+.btn-key {
+  margin-left: 7px;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  opacity: 0.55;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+.finish-button {
+  color: #e0a852;
+  border-color: #6a5324;
+  background: #221b10;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.finish-button:hover:not(:disabled) {
+  border-color: #a07d33;
+  background: #2c2314;
+}
+
+.finish-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .connect-button {
   min-width: 96px;
   white-space: nowrap;
@@ -735,7 +837,10 @@ h2 {
 
 .composer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  /* input, voice, stop-recording, abort, send. A column short of the button
+     count pushes the overflow onto an implicit row, which is what dropped
+     Send onto a line of its own. */
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   gap: 6px;
   align-items: end;
 }

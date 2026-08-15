@@ -22,8 +22,9 @@
         <header class="command-bar">
           <div class="select-field wide">
             <span>Session</span>
-            <button type="button" id="newSession">Morning Ops</button>
+            <input id="sessionTitleInput" autocomplete="off" placeholder="Untitled chat" title="Name of this session. Edit to rename it; New session creates one under this name." />
           </div>
+          <button class="new-session-button" type="button" id="newSessionAction" title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model."><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label">New session</span></button>
           <label class="select-field endpoint">
             <span>Robot Host</span>
             <input id="robotHost" autocomplete="off" placeholder="100.x.y.z" />
@@ -67,9 +68,10 @@
             <form class="composer" id="composer">
               <div class="composer-row">
                 <textarea id="taskInput" rows="1" placeholder="Type a message..."></textarea>
-                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice session">Voice</button>
-                <button class="danger-button stop-button" type="button" id="stopButton" title="Stop current task" hidden>Stop</button>
-                <button class="send-button" type="submit" id="sendButton" title="Send task">Send</button>
+                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice session (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label">Voice</span><kbd class="btn-key">F2</kbd></button>
+                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label">Stop recording</span><kbd class="btn-key">F2</kbd></button>
+                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label">Abort all tasks</span></button>
+                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)"><span class="btn-label">Send</span><kbd class="btn-key">Enter</kbd></button>
               </div>
             </form>
             </section>
