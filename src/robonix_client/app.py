@@ -44,7 +44,26 @@ from .transport import (
 STATIC_DIR = Path(__file__).with_name("static")
 
 app = FastAPI(title="Robonix Client", version="0.1.0")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+class _RevalidatingStaticFiles(StaticFiles):
+    """Serve the UI assets with `Cache-Control: no-cache`.
+
+    Without it the browser is free to reuse a cached app.js for as long as it
+    likes, so a rebuilt UI keeps showing the previous build until someone
+    thinks to hard-reload -- the failure looks like the change never landed.
+    `no-cache` still allows caching; it just forces the ETag revalidation that
+    turns an unchanged asset into a 304, so the only cost is one conditional
+    request per asset per load.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", _RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(vitals_router)
 _reverse_audio: AudioReverseBridge | None = None
 SETTINGS_PATH = Path(
