@@ -38,6 +38,7 @@ GRPC_CHANNEL_OPTIONS = (
 
 CONTRACT_LIAISON_SUBMIT = "robonix/system/liaison/submit"
 CONTRACT_LIAISON_VOICE = "robonix/system/liaison/voice"
+CONTRACT_LIAISON_VOICE_FINISH = "robonix/system/liaison/voice/finish"
 CONTRACT_PILOT = "robonix/system/pilot"
 CONTRACT_EXECUTOR_EXECUTE = "robonix/system/executor/execute"
 CONTRACT_EXECUTOR_GET_HEALTH = "robonix/system/executor/get_health"
@@ -684,6 +685,49 @@ async def start_voice_session(
         stream = call(req)
         async for raw in stream:
             yield {"type": "voice_event", "event": voice_event_to_dict(decode_voice_event(raw))}
+
+
+async def voice_finish_supported(settings: ClientSettings) -> bool:
+    """Whether the connected liaison advertises the manual finish-capture RPC.
+
+    Older liaisons (pre voice/finish) simply never registered this capability
+    with Atlas, so absence is the normal "not upgraded yet" case, not an
+    error -- callers should hide the finish-capture control rather than
+    surfacing a gRPC UNIMPLEMENTED failure.
+    """
+    try:
+        providers = await query_atlas(
+            settings.atlas_endpoint,
+            contract_id=CONTRACT_LIAISON_VOICE_FINISH,
+            transport=1,
+        )
+    except Exception:
+        return False
+    return any(
+        cap.contract_id == CONTRACT_LIAISON_VOICE_FINISH and cap.transport == 1
+        for provider in providers
+        for cap in provider.capabilities
+    )
+
+
+async def finish_voice_capture(settings: ClientSettings) -> dict[str, Any]:
+    """Manually end capture for the caller's in-flight voice session.
+
+    Mirrors `abort_turn`'s use of `settings.session_id`, which the frontend
+    always populates before opening `/ws/voice`, so the id sent here is the
+    same one Liaison registered in `StartVoiceSession`.
+    """
+    endpoint = await resolve_liaison(settings, CONTRACT_LIAISON_VOICE_FINISH)
+    req = liaison_pb2.FinishVoiceCapture_Request(
+        session_id=settings.session_id or "",
+    )
+    resp = await _unary_unary(
+        endpoint,
+        "/robonix.contracts.RobonixSystemLiaisonVoiceFinish/FinishVoiceCapture",
+        req,
+        liaison_pb2.FinishVoiceCapture_Response,
+    )
+    return {"ok": resp.ok, "sessionId": resp.session_id, "detail": resp.detail}
 
 
 def build_voice_context(*, steer: bool = False, expected_turn_id: str = "") -> dict[str, Any]:

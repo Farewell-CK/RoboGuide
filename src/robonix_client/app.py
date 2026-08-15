@@ -24,6 +24,7 @@ from .transport import (
     abort_turn,
     discover_audio_bridge,
     enroll_voiceprint,
+    finish_voice_capture,
     get_handsfree_status,
     list_active_plans,
     list_audio_devices,
@@ -35,6 +36,7 @@ from .transport import (
     start_voice_session,
     set_handsfree_enabled,
     submit_text,
+    voice_finish_supported,
     watch_handsfree_events,
     system_snapshot,
 )
@@ -255,6 +257,21 @@ async def executor_active_plans(req: ClientSettingsRequest) -> dict[str, Any]:
         return await list_active_plans(ClientSettings.from_payload(req.settings))
     except Exception as exc:
         return {"available": False, "count": 0, "plans": [], "error": str(exc)}
+
+
+@app.post("/api/voice/finish-supported")
+async def voice_finish_supported_route(req: ClientSettingsRequest) -> dict[str, Any]:
+    """Whether the connected liaison can accept a manual finish-capture request.
+
+    Older liaisons never registered this capability, so callers should treat
+    a False result as "not upgraded yet" and hide the finish-capture control,
+    not as an error.
+    """
+    try:
+        settings = ClientSettings.from_payload(req.settings)
+        return {"supported": await voice_finish_supported(settings)}
+    except Exception:
+        return {"supported": False}
 
 
 @app.post("/api/handsfree/set")
@@ -537,8 +554,27 @@ async def voice_ws(ws: WebSocket) -> None:
         async def wait_for_stop() -> None:
             while True:
                 control = await ws.receive_json()
-                if control.get("type") == "stop":
+                control_type = control.get("type")
+                if control_type == "stop":
                     return
+                if control_type == "finish":
+                    # Ask Liaison to stop capturing and submit whatever it has
+                    # already recognized, instead of discarding the turn. The
+                    # relay task keeps running -- Liaison flushes a normal
+                    # asr_final/session_done sequence down the same stream.
+                    try:
+                        result = await finish_voice_capture(settings)
+                        await ws.send_json({"type": "finish_requested", **result})
+                    except grpc.aio.AioRpcError as exc:
+                        await ws.send_json(
+                            {
+                                "type": "finish_requested",
+                                "ok": False,
+                                "detail": f"gRPC {exc.code().name}: {exc.details()}",
+                            }
+                        )
+                    except Exception as exc:
+                        await ws.send_json({"type": "finish_requested", "ok": False, "detail": str(exc)})
 
         relay_task = asyncio.create_task(relay_voice())
         stop_task = asyncio.create_task(wait_for_stop())
