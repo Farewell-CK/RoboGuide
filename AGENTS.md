@@ -2,42 +2,43 @@
 
 ## Project Structure & Module Organization
 
-RoboGuide is currently an architecture-only repository for the Distributed Embodied AI OS baseline.
+RoboGuide is an architecture-only repository for a general Distributed Embodied AI OS.
 
-- `README.md` is the contributor-facing architecture overview and embeds the V1.1 diagram.
-- `Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx` is the source design document.
-- `docs/architecture-baseline-v1.1.md` contains the structured architecture summary.
-- `docs/implementation-backlog.md` records decisions intentionally deferred until implementation evidence exists.
-- `docs/images/` stores diagrams and their naming guidance.
+- `docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx` is the current source of truth.
+- `README.md` and `docs/architecture/v2/README.md` provide V2 summaries.
+- V1.1 documents and diagrams are retained as historical artifacts.
+- `docs/project-goals-and-mvp.md` defines the general OS objective and MVP scope.
+- `docs/implementation-backlog.md` records intentionally deferred decisions.
+- `docs/images/` stores versioned documentation assets.
 
-There is intentionally no `src/`, test suite, or runtime implementation yet. When implementation begins, preserve the four logical boundaries: Mission / Intelligence, Embodied Control, State & Memory, and Distributed Runtime.
+Keep `AGENTS.md` at the root and imported sources under `docs/architecture/<version>/`. Add `src/` and `tests/` only with implementation work.
 
 ## Build, Test, and Development Commands
 
-No build system or test runner is configured at this stage. Use these checks before submitting documentation changes:
+No build system or test runner is configured. Before submitting documentation changes, run:
 
 ```bash
 git status --short --branch
 git diff --check
-file docs/images/distributed-embodied-ai-os-architecture-v1.1.png
+file docs/images/roboguide-v2-overall-architecture.png
 ```
 
-When code is introduced, add the canonical build and test commands to this file and `README.md` at the same time. Do not introduce a dependency or framework only to support a documentation change.
+When code is introduced, document its canonical build and test commands here and in `README.md`.
 
 ## Coding Style & Naming Conventions
 
-Write Markdown with clear `##` sections, short paragraphs, and relative links. Preserve UTF-8 Chinese content in the design materials. Use lowercase, descriptive, hyphen-separated names for new documentation assets, with versions included where relevant, for example `architecture-v1.1.png`. No formatter or linter is currently configured; keep diffs focused and ensure `git diff --check` passes.
+Use clear Markdown headings, short paragraphs, and relative links. Preserve UTF-8 Chinese design content. Name documentation assets with lowercase, descriptive, hyphen-separated words and include versions where relevant, for example `architecture-v1.1.png`. No formatter or linter is configured; keep diffs focused and make `git diff --check` pass.
 
 ## Testing Guidelines
 
-There are no automated tests or coverage requirements yet. Documentation changes should be checked for valid paths, readable headings, and synchronized references to renamed assets. Future tests should live under `tests/` and be added together with the implementation they validate.
+There are no automated tests or coverage requirements yet. Check links, headings, renamed assets, and cross-document consistency. Add future tests with the implementation they validate.
 
 ## Commit & Pull Request Guidelines
 
-Existing commits use concise Conventional Commit-style prefixes such as `docs:` and `chore:`. Use an imperative, scoped subject, for example `docs: clarify execution group boundary`. Pull requests should explain the architecture or behavior affected, identify deferred decisions, link relevant design files, and include updated screenshots or image references when diagrams change. Keep unrelated refactors out of documentation-only changes.
+Use concise Conventional Commit-style subjects such as `docs: clarify MVP scope` or `chore: organize assets`. Pull requests should explain the affected architecture or behavior, identify deferred decisions, link relevant documents or issues, and include updated images when diagrams change.
 
-AI tools may commit code, push changes, and create or update pull requests when authorized by a human contributor. Responsibility must remain attributable to the actual human owner: GitHub must show that person's verified account as the commit author/committer and PR author, never a tool identity such as `Codex`, `Claude`, `AI`, or an anonymous bot. Configure Git identity and PR credentials accordingly, and have the responsible human review the complete diff and relevant checks. A PR may disclose AI assistance in its description when useful, but that disclosure must not replace the human attribution.
+AI tools may commit, push, and manage pull requests when authorized. GitHub must show the responsible human's verified identity as commit author/committer and PR author, never `Codex`, `Claude`, `AI`, or an anonymous bot. The human owner reviews the complete diff and checks; optional AI disclosure does not replace human attribution.
 
 ## Architecture and Scope
 
-Do not freeze schemas, transport protocols, databases, scheduling algorithms, or hardware-control APIs without an explicit design decision and supporting evidence. Keep Global Autonomy responsible for `What / Who / Where / When`; Local Runtime retains `Immediate How` and final safety authority. Treat `Execution Group` as the bridge between scheduling and coordinated execution, and route failures back through State / Memory and Reconciliation.
+The objective is a general Distributed Embodied AI OS. The MVP uses a heterogeneous multi-node task; blind guidance comes later. Preserve V2 semantics: Scheduler emits a Proposal, resource coordination performs Commit, the Group Manager stays in Control while the Group runs across Runtime and Nodes, and State & Memory remains horizontal. Global coordination owns `What / Who / When / Shared Where`; Local Systems retain `Immediate How` and final safety. Do not freeze schemas, transports, databases, algorithms, or hardware APIs without an explicit decision and evidence.

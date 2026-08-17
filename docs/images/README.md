@@ -12,4 +12,5 @@
 
 当前图片：
 
-- `distributed-embodied-ai-os-architecture-v1.1.png`：Distributed Embodied AI OS 总体架构 V1.1。
+- `roboguide-v2-overall-architecture.png`：当前 RoboGuide V2 总体架构图，已嵌入 V2 DOCX；
+- `distributed-embodied-ai-os-architecture-v1.1.png`：历史 Distributed Embodied AI OS 总体架构 V1.1。

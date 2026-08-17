@@ -1,20 +1,41 @@
-# Implementation Backlog
+# Architecture and Implementation Backlog
 
-以下事项由 V1.1 明确延后到实现、策略或算法阶段。它们不是当前架构缺口，不能在没有实验依据时被默认冻结。
+本文件跟踪 [`RoboGuide Architecture Baseline V2`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。
 
-- Capability 的 Schema、类型系统、Contract 字段和版本兼容策略；
-- 节点接入采用 Agent、Adapter、SDK、Plugin 还是 ROS Bridge；
-- Control Plane 的内部进程划分、Leader Election、高可用和一致性算法；
-- State 的数据库、缓存、事件总线和复制方式；
-- 现实世界状态冲突采用投票、滤波、因子图或其他融合方法；
-- Scheduler 采用规则、启发式、优化求解、拍卖、强化学习或混合策略；
-- Execution Group 异常时的局部替换、整体重建、等待、降级或人工接管；
-- Traffic 的时空图表示、Reservation 数据结构和冲突求解算法；
-- Distributed Data 的传输协议和发现机制；
-- Memory 的向量库、图数据库、关系库、对象存储或多层组合；
-- Benchmark、SLO、QoS、延迟预算、资源预测和调度成本函数；
-- 面向真实硬件的 Safety、权限、心跳、超时和故障恢复验证。
+## V2 Open Architecture Questions
 
-## 判断规则
+| ID | 问题 | 需要回答的核心内容 |
+| --- | --- | --- |
+| Q1 | State Authority | Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；哪些状态必须保留 authoritative owner |
+| Q2 | Spatial Authority | Map、Pose、World Model 如何建立共同空间关系和系统级 reference authority |
+| Q3 | Control Topology | 集中式 Control Plane、层级控制和 Federation 的适用边界 |
+| Q4 | Execution Group Authority | Group 生命周期、Task ownership 与成员节点权威如何划分 |
+| Q5 | Scheduling vs Runtime Coordination | Plan-time allocation、资源协调与 execution-time adaptation 的边界 |
+| Q6 | Temporal Assurance | 同步、时钟偏差、deadline 和时间窗口如何成为架构约束 |
+| Q7 | Resource Commitment Semantics | Commit、Lease expiry、preemption、partial release 需要何种一致性保证 |
 
-如果一个问题不解决就无法判断“模块是谁、职责是什么、输入输出是什么、边界在哪里”，它属于架构问题；如果架构已经能承载，只是存在多种实现策略，则先保留为实现决策，使用实验结果再确定。
+## MVP Decisions
+
+- 具体多机异构任务、节点组合和任务成功条件；
+- 正常路径与节点掉线、Capability degraded、Reservation conflict 等故障注入；
+- Proposal、Commit、Bind、Execute、Reconcile 各阶段的可观察验收证据；
+- 延迟、恢复时间、资源冲突和任务完成的最小指标；
+- 导盲等后续领域场景如何通过领域层接入通用核心。
+
+## Deferred Implementation Choices
+
+- Capability Schema、Contract 字段、类型系统和版本兼容策略；
+- 节点接入采用 Agent、Adapter、SDK、Plugin 或 ROS Bridge；
+- Control Plane 的进程划分、Leader Election、高可用与一致性算法；
+- State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
+- Observation 融合采用投票、滤波、因子图或其他方法；
+- Scheduler 采用规则、启发式、优化、拍卖、强化学习或混合策略；
+- Shared Resource Coordination 的时空图、Reservation 和冲突求解；
+- Messaging / Invocation 使用 DDS、Zenoh、gRPC、MQTT、WebRTC 或其他协议；
+- Memory 使用向量库、图数据库、关系库、对象存储或组合；
+- Benchmark、SLO、QoS、资源预测和成本函数；
+- 真实硬件的 Safety、权限、Heartbeat、Lease、超时和恢复验证。
+
+## Decision Rule
+
+如果一个问题会改变模块职责、状态权威、Proposal / Commit 语义、Execution Group 定义或 Recovery 层级，它属于架构决策，必须先更新 V2 基线。若架构可以承载多种方案，则保留为实现选择，使用 MVP 和工程证据再决定。

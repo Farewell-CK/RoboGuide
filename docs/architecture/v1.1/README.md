@@ -1,6 +1,8 @@
 # RoboGuide 架构基线 V1.1
 
-本文件是仓库内对 `Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx` 的工程化摘要。原始 DOCX 和 [V1.1 架构图](images/distributed-embodied-ai-os-architecture-v1.1.png) 仍是设计基线的来源；本摘要不替代原文。
+> Historical baseline. V2 已取代本版本成为当前 source of truth。当前架构见 [`../v2/README.md`](../v2/README.md) 和 [`RoboGuide_Architecture_Baseline_V2.docx`](../v2/RoboGuide_Architecture_Baseline_V2.docx)。
+
+本文件是对 [`Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx`](Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx) 的历史工程化摘要。原始 DOCX 和 [V1.1 架构图](../../images/distributed-embodied-ai-os-architecture-v1.1.png) 是本版本的来源；本摘要不替代原文。
 
 ## 1. 系统定位
 
