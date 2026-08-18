@@ -32,13 +32,17 @@ MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
 见 [`docs/project-goals-and-mvp.md`](docs/project-goals-and-mvp.md)，当前决策状态
 见 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
 
-## 开发基线草案
+## 开发基线与首个 Bootstrap
 
-仓库已经形成开发基线草案，当前处于评审阶段，尚未创建实现目录或运行时代码：
+开发基线仍以 MVP Definition Draft 为约束，但首个可运行的 Rust core bootstrap
+已经开始。它用于验证领域模型、端口、控制、运行时和确定性故障恢复的边界，
+尚不代表完整 MVP 已经冻结或最终运行时已经完成：
 
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
-- 开发草案提议从模块化单体和确定性 Fake Nodes 起步；
+- 当前实现从模块化单体和确定性 Fake Nodes 起步；
+- 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
+- Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
   [`docs/development/README.md`](docs/development/README.md)；
 - 每个 Rust `fn` 和 Python `def/async def` 都必须有有效文档注释，完整规则见
@@ -47,8 +51,8 @@ MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
   [`ADR-0001`](docs/decisions/0001-rust-core-python-edges.md) 记录，当前状态为
   `Proposed`。
 
-开发基线被接受且对应 MVP 切片被冻结前，不创建实现目录。之后，目标目录按
-首次真实实现按需创建，不提交空目录，不允许绕过已接受的模块边界。
+完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
+不允许绕过已接受的模块边界。
 
 ## V2 逻辑结构
 
@@ -134,6 +138,17 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 .
 ├── AGENTS.md
 ├── README.md
+├── Cargo.toml
+├── rust-toolchain.toml
+├── pyproject.toml
+├── core/
+│   ├── domain/
+│   ├── ports/
+│   ├── control/
+│   ├── runtime/
+│   └── testkit/
+├── apps/
+│   └── controller/
 └── docs/
     ├── README.md
     ├── architecture/
@@ -158,6 +173,5 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
         └── distributed-embodied-ai-os-architecture-v1.1.png
 ```
 
-当前 V2 架构是有效基线；开发基线仍为评审提案，MVP Definition 仍为 Draft。
-仓库没有实现目录、测试代码或运行时。只有开发基线被接受且相关 MVP 切片被冻结
-后，才开始首个代码 scaffold。
+当前 V2 架构是有效基线；开发基线正在通过首个 bootstrap 验证，MVP Definition
+仍为 Draft。完整 MVP 的测试、适配器和仿真环境尚未完成。

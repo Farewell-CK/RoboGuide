@@ -1,0 +1,11 @@
+[package]
+name = "controller"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+control = { path = "../../core/control" }
+domain = { path = "../../core/domain" }
+runtime = { path = "../../core/runtime" }
+testkit = { path = "../../core/testkit" }

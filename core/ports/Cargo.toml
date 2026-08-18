@@ -1,0 +1,8 @@
+[package]
+name = "ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }

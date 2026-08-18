@@ -60,6 +60,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 - Network, model, clock, and simulator access must be injectable for tests.
 - Dependency and tool versions are declared in `pyproject.toml` and locked by the
   bootstrap change; do not rely on globally installed packages.
+- Use the repository's uv-managed environment for Python commands, for example
+  `uv run python ...` and `uv run pytest ...`.
 
 Required Python gates once packages exist:
 
@@ -79,7 +81,8 @@ private functions and tests. A suppression needs an inline reason.
 
 ## 4. Naming and Data
 
-- Rust crates use `roboguide-*`; Rust modules and Python packages use `snake_case`.
+- Rust package directories use short responsibility names under `core/` and `apps/`;
+  Rust modules and Python packages use `snake_case`.
 - Types and state names use domain language from V2; avoid generic `Manager`, `Util`,
   `Common`, or `Helper` unless the responsibility is further qualified.
 - Boolean names read as predicates, for example `is_committed` or `can_execute`.

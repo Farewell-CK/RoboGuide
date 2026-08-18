@@ -1,6 +1,6 @@
 # Development Baseline
 
-> Status: Proposed for review; MVP definition pending. Drafted on 2026-08-17.
+> Status: Bootstrap in progress; MVP definition remains Draft. Drafted on 2026-08-17.
 > The V2 architecture remains authoritative. This proposal translates V2
 > responsibilities into engineering boundaries without freezing transports,
 > databases, schemas, or algorithms.
@@ -18,34 +18,36 @@
 5. Frozen V2 semantics win over implementation convenience. A boundary change needs
    an ADR and, when architecture semantics change, an updated V2 baseline.
 
-## 2. Proposed Repository Layout
+## 2. Repository Layout
 
-The following layout is proposed, not yet accepted and not a request to create empty
-folders. After acceptance, create each path only in the change that adds its first
-maintained implementation.
+The V2 responsibility boundaries are reflected in the maintained bootstrap paths
+below. The MVP is still Draft, so future paths remain planned names until they have
+their first real implementation.
 
 ```text
-crates/
-  roboguide-domain/       Pure domain types, invariants, and state machines
-  roboguide-ports/        Transport-neutral interfaces owned by the core
-  roboguide-control/      Matching, proposal, coordination, commit, group manager
-  roboguide-runtime/      Discovery, invocation, heartbeat, lease, diagnostics
-  roboguide-state/        Evidence, shared views, allocation state, scoped memory
-  roboguide-adapters/     Rust transport, persistence, ROS, and vendor adapters
-  roboguide-testkit/      Fake nodes, virtual clock, fixtures, failure injection
+core/
+  domain/                  Pure domain types, invariants, and state machines
+  ports/                   Transport-neutral interfaces owned by the core
+  control/                 Matching, proposal, coordination, commit, group manager
+  runtime/                 Discovery, invocation, heartbeat, lease, diagnostics
+  state/                   Evidence, shared views, allocation state, scoped memory
+  adapters/                Rust transport, persistence, ROS, and vendor adapters
+  testkit/                 Fake nodes, virtual clock, fixtures, failure injection
 apps/
-  roboguide-controller/   Composition root and process lifecycle only
+  controller/              Composition root and process lifecycle only
 python/
-  roboguide_mission/      Mission planning and model-backed reasoning adapters
-  roboguide_sim/          Simulator integration adapters
+  mission/                 Mission planning and model-backed reasoning adapters
+  sim/                     Simulator integration adapters
 scenarios/                Versioned scenario inputs and expected event traces
 tests/system/             Black-box, cross-process tests only
 tools/quality/            Repository-specific documentation and boundary checks
 ```
 
-Do not create implementation directories while this baseline is under review. After
-acceptance, any additional top-level implementation directory requires a baseline
-update or accepted ADR. Never commit empty placeholder directories.
+The bootstrap currently creates only `core/domain`, `core/ports`, `core/control`,
+`core/runtime`, `core/testkit`, and `apps/controller`. Do not create future `state`,
+`adapters`, Python, simulator, system-test, or quality-tool paths without a
+maintained implementation and a synchronized baseline update. Never commit empty
+placeholder directories.
 
 ## 3. Module Boundaries
 
@@ -96,7 +98,7 @@ which is currently a Draft. Regardless of the final scenario, the first slice mu
 
 ## 6. Change Gate
 
-Once this baseline is accepted, every implementation change must include:
+For the bootstrap and every later implementation change, include:
 
 - the V2 responsibility and module it implements;
 - documented functions and public types;

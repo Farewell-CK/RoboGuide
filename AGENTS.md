@@ -2,8 +2,8 @@
 
 ## Project Structure & Module Organization
 
-RoboGuide has a current V2 architecture baseline plus proposed development and MVP
-documents. Runtime has not started.
+RoboGuide has a current V2 architecture baseline plus development and MVP documents.
+The first core bootstrap has started; the full runtime and MVP are not complete.
 
 - `docs/architecture/v2/` contains the current V2 source of truth and summary.
 - `README.md` and `docs/project-goals-and-mvp.md` define project scope.
@@ -12,10 +12,12 @@ documents. Runtime has not started.
 - `docs/development/` proposes module layout and defines engineering rules.
 - `docs/decisions/` stores numbered Architecture Decision Records (ADRs).
 - `docs/images/` stores diagrams.
+- `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
+  composition roots. Future paths are created only with their first implementation.
 
-Keep `AGENTS.md` at the root. Do not create implementation paths until the baseline
-is accepted. Then create each approved path with its first maintained implementation.
-Never add empty placeholders or a top-level `src/`.
+Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
+listed above. Create future paths only with their first implementation; never add
+empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
@@ -27,9 +29,9 @@ git diff --check
 file docs/images/roboguide-v2-overall-architecture.png
 ```
 
-The first scaffold starts only after baseline acceptance and MVP-slice freeze. It
-must pin toolchains, activate commands in `docs/development/coding-standards.md`, and
-update this file and `README.md`.
+The bootstrap pins Rust and Python toolchains. Python commands use the repository's
+uv-managed environment. New implementation paths must update this file and
+`README.md` when their ownership is established.
 
 ## Coding Style & Naming Conventions
 

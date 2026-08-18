@@ -1,0 +1,5 @@
+[toolchain]
+# The 2026-07-16 stable manifest resolves to Rust 1.97.1 on the development host.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

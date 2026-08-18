@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "core/domain",
+    "core/ports",
+    "core/control",
+    "core/runtime",
+    "core/testkit",
+    "apps/controller",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.97"
