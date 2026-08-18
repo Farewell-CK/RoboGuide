@@ -9,7 +9,14 @@
 ## Project Scope
 
 - [`project-goals-and-mvp.md`](project-goals-and-mvp.md)：通用 OS 目标、多机异构 MVP 和应用演进；
-- [`implementation-backlog.md`](implementation-backlog.md)：V2 Open Questions、MVP 决策和延后实现项。
+- [`mvp-definition.md`](mvp-definition.md)：尚未冻结的 MVP 决策草案、候选场景和冻结清单；
+- [`implementation-backlog.md`](implementation-backlog.md)：V2 Open Questions、待定 MVP 决策和延后实现项。
+
+## Development
+
+- [`development/README.md`](development/README.md)：`Proposed` 开发基线、目标目录、模块职责、依赖方向和变更门槛；
+- [`development/coding-standards.md`](development/coding-standards.md)：Rust/Python 函数文档、类型、错误处理、测试和质量门槛；
+- [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。
 
 ## Historical Architecture
 

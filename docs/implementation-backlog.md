@@ -14,13 +14,30 @@
 | Q6 | Temporal Assurance | 同步、时钟偏差、deadline 和时间窗口如何成为架构约束 |
 | Q7 | Resource Commitment Semantics | Commit、Lease expiry、preemption、partial release 需要何种一致性保证 |
 
-## MVP Decisions
+## MVP Definition Decisions (Open)
+
+当前决策状态和冻结清单由 [`mvp-definition.md`](mvp-definition.md) 统一记录：
 
 - 具体多机异构任务、节点组合和任务成功条件；
 - 正常路径与节点掉线、Capability degraded、Reservation conflict 等故障注入；
 - Proposal、Commit、Bind、Execute、Reconcile 各阶段的可观察验收证据；
 - 延迟、恢复时间、资源冲突和任务完成的最小指标；
 - 导盲等后续领域场景如何通过领域层接入通用核心。
+
+## Proposed Development Bootstrap Decisions
+
+- 提议使用 Rust 实现 Domain、Control、Runtime 和 State 核心，Python 承载 Mission
+  Intelligence、模型、仿真和研究型 Adapter；
+- 提议从模块化单体、内存 Port 实现和确定性 Fake Nodes 开始，不预先拆分微服务；
+- 提议让仿真与真实硬件通过 Adapter 接入，不作为核心框架开发的前置依赖；
+- 目标目录和依赖方向提案见 [`development/README.md`](development/README.md)；
+- 所有手写函数均需文档注释，质量门槛以
+  [`development/coding-standards.md`](development/coding-standards.md) 为准；
+- 语言职责决策由
+  [`ADR-0001`](decisions/0001-rust-core-python-edges.md) 记录。
+
+这些提案仍在评审，不构成已接受的 MVP。即使被接受，也不冻结跨进程
+Transport、序列化格式、数据库、调度算法或部署拓扑。
 
 ## Deferred Implementation Choices
 

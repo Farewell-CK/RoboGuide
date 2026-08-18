@@ -18,7 +18,7 @@ RoboGuide 统一感知系统状态、物理世界状态和具身能力状态，�
 
 ### 前期 MVP
 
-MVP 以普通多机异构任务验证领域无关的最小闭环：
+MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
 
 - 节点发现、身份、Capability 声明、状态与健康更新；
 - Mission、Task Graph 和 Execution Requirements；
@@ -27,7 +27,28 @@ MVP 以普通多机异构任务验证领域无关的最小闭环：
 - Execution Group 创建、绑定、执行和释放；
 - Observation、Shared Belief、Reconciliation 与分级恢复。
 
-导盲是后续应用场景，不是核心架构或 MVP 的前置假设。完整阶段边界见 [`docs/project-goals-and-mvp.md`](docs/project-goals-and-mvp.md)。
+导盲是后续应用场景，不是核心架构或 MVP 的前置假设。该方向已经明确，
+但具体 Mission、节点拓扑、故障矩阵、指标和退出条件尚未冻结。完整阶段边界
+见 [`docs/project-goals-and-mvp.md`](docs/project-goals-and-mvp.md)，当前决策状态
+见 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
+
+## 开发基线草案
+
+仓库已经形成开发基线草案，当前处于评审阶段，尚未创建实现目录或运行时代码：
+
+- ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
+- Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
+- 开发草案提议从模块化单体和确定性 Fake Nodes 起步；
+- 目标目录、依赖方向和首个异构任务闭环见
+  [`docs/development/README.md`](docs/development/README.md)；
+- 每个 Rust `fn` 和 Python `def/async def` 都必须有有效文档注释，完整规则见
+  [`docs/development/coding-standards.md`](docs/development/coding-standards.md)；
+- Rust/Python 职责边界提案由
+  [`ADR-0001`](docs/decisions/0001-rust-core-python-edges.md) 记录，当前状态为
+  `Proposed`。
+
+开发基线被接受且对应 MVP 切片被冻结前，不创建实现目录。之后，目标目录按
+首次真实实现按需创建，不提交空目录，不允许绕过已接受的模块边界。
 
 ## V2 逻辑结构
 
@@ -105,7 +126,7 @@ Detect → Reconcile → Adapt
 
 ## 当前开放问题
 
-V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们与 MVP 具体场景、拓扑和验收指标一起记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)。
+V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)；MVP 具体场景、拓扑和验收指标的草案记录在 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
 
 ## 仓库内容
 
@@ -124,11 +145,19 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │       ├── README.md
     │       └── Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx
     ├── project-goals-and-mvp.md
+    ├── mvp-definition.md
     ├── implementation-backlog.md
+    ├── development/
+    │   ├── README.md
+    │   └── coding-standards.md
+    ├── decisions/
+    │   └── 0001-rust-core-python-edges.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
         └── distributed-embodied-ai-os-architecture-v1.1.png
 ```
 
-当前仓库仍处于架构基线阶段，没有 `src/`、测试代码或运行时实现。后续新增模块时，必须先说明所属职责、状态权威、资源提交语义、失败恢复路径，以及是否构成架构变更。
+当前 V2 架构是有效基线；开发基线仍为评审提案，MVP Definition 仍为 Draft。
+仓库没有实现目录、测试代码或运行时。只有开发基线被接受且相关 MVP 切片被冻结
+后，才开始首个代码 scaffold。

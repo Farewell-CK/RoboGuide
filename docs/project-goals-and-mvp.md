@@ -2,6 +2,10 @@
 
 本文件补充当前 [`RoboGuide Architecture Baseline V2`](architecture/v2/README.md) 的阶段目标；V2 负责架构语义，本文件负责 MVP 范围和应用演进。
 
+> 当前状态：MVP 的通用多机异构方向已经明确，但具体 Mission、节点拓扑、
+> 故障矩阵、指标和退出条件尚未冻结。工作草案与冻结门槛见
+> [`mvp-definition.md`](mvp-definition.md)。
+
 ## 1. 总体目标
 
 RoboGuide 当前承载的是 Distributed Embodied AI OS 项目。项目目标是构建一套通用的分布式具身智能操作系统，使多个异构具身体、计算节点和交互设备能够在共享物理世界中形成统一的任务、调度、执行、状态和恢复闭环。
@@ -33,7 +37,9 @@ MVP 应覆盖：
 6. Runtime 能够维持调用、Heartbeat、Lease、执行结果和状态传播；
 7. 节点掉线、能力不可用或任务失败能够触发可观察的 Reconciliation 和分级恢复。
 
-搜索、识别、接近、搬运、巡检和远程推理可以作为候选任务元素。具体场景、节点拓扑、成功条件和指标需要在 MVP 设计阶段单独冻结。
+搜索、识别、接近、搬运、巡检和远程推理可以作为候选任务元素。它们不是当前
+MVP 的既定要求；具体场景、节点拓扑、成功条件和指标需要按
+[`mvp-definition.md`](mvp-definition.md) 单独冻结。
 
 ## 3. 当前非目标
 
