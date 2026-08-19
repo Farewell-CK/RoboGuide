@@ -15,6 +15,9 @@ use ports::EventSink;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
+/// Default maximum age for a node status used by capability matching.
+pub const DEFAULT_NODE_STATUS_TTL_MS: u64 = 5_000;
+
 /// Candidate node identifiers for one task role.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleCandidates {
@@ -240,7 +243,7 @@ impl Display for ControlError {
 impl std::error::Error for ControlError {}
 
 /// Global control state for registration, matching, commitment, and recovery.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ControlPlane {
     /// Registered nodes and their shared health snapshots.
     nodes: BTreeMap<NodeId, RegisteredNode>,
@@ -248,6 +251,20 @@ pub struct ControlPlane {
     reservations: BTreeMap<ResourceId, Reservation>,
     /// Dynamic execution groups known to the control plane.
     groups: BTreeMap<ExecutionGroupId, ExecutionGroup>,
+    /// Maximum age accepted for a node's shared health snapshot.
+    max_status_age_ms: u64,
+}
+
+impl Default for ControlPlane {
+    /// Creates an empty control plane with the default status freshness window.
+    fn default() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            reservations: BTreeMap::new(),
+            groups: BTreeMap::new(),
+            max_status_age_ms: DEFAULT_NODE_STATUS_TTL_MS,
+        }
+    }
 }
 
 /// A node registration plus its latest shared health view.
@@ -272,6 +289,16 @@ impl ControlPlane {
     /// Creates an empty control plane.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an empty control plane with an explicit status freshness window.
+    pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            reservations: BTreeMap::new(),
+            groups: BTreeMap::new(),
+            max_status_age_ms,
+        }
     }
 
     /// Registers or refreshes one logical node and records its visibility.
@@ -313,7 +340,9 @@ impl ControlPlane {
                 .nodes
                 .iter()
                 .filter(|(_, node)| {
-                    node.status.health().is_schedulable() && node.registration.supports_role(role)
+                    node.status.health().is_schedulable()
+                        && node.status.is_fresh_at(timestamp, self.max_status_age_ms)
+                        && node.registration.supports_role(role)
                 })
                 .map(|(node_id, _)| node_id.clone())
                 .collect::<Vec<_>>();
@@ -644,5 +673,291 @@ impl RoleRequirementView {
     /// Returns the wrapped requirement for capability validation.
     pub fn requirement(&self) -> &domain::RoleRequirement {
         &self.requirement
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::{Capability, CapabilityKind, NodeHealth, Resource, ResourceKind, RoleRequirement};
+
+    /// Discards event evidence while exercising Control behavior in isolation.
+    #[derive(Default)]
+    struct TestEvents;
+
+    impl EventSink for TestEvents {
+        /// Ignores the event because these tests assert returned control state.
+        fn append(
+            &mut self,
+            _timestamp: TimestampMs,
+            _correlation_id: &CorrelationId,
+            _causation_id: Option<&domain::EventId>,
+            _payload: EventPayload,
+        ) {
+        }
+    }
+
+    /// Builds a single-capability registration for deterministic control tests.
+    fn registration(
+        node_id: &str,
+        capability: CapabilityKind,
+        resource_id: &str,
+    ) -> NodeRegistration {
+        NodeRegistration::new(
+            NodeId::new(node_id).expect("test node id must be valid"),
+            domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime must be valid"),
+            vec![Capability::new(capability, true)],
+            vec![
+                Resource::new(
+                    ResourceId::new(resource_id).expect("test resource id must be valid"),
+                    ResourceKind::Space,
+                    1,
+                )
+                .expect("test resource must be valid"),
+            ],
+        )
+    }
+
+    /// Builds a one-role task requirement for a control test.
+    fn requirement(task_id: &str, role_id: &str, capability: CapabilityKind) -> TaskRequirement {
+        TaskRequirement::new(
+            domain::MissionId::new("mission-control-test").expect("test mission id must be valid"),
+            TaskId::new(task_id).expect("test task id must be valid"),
+            vec![RoleRequirement::new(
+                RoleId::new(role_id).expect("test role id must be valid"),
+                capability,
+                Some(ResourceKind::Space),
+            )],
+        )
+        .expect("test requirement must be valid")
+    }
+
+    /// Creates the correlation identity shared by one deterministic test.
+    fn correlation() -> CorrelationId {
+        CorrelationId::new("control-test-trace").expect("test correlation id must be valid")
+    }
+
+    /// A schedulable node can produce a proposal and a committed plan.
+    #[test]
+    fn normal_path_matches_proposes_and_commits() {
+        let node = registration("node-a", CapabilityKind::Transport, "space-a");
+        let node_id = node.node_id().clone();
+        let resource_id = ResourceId::new("space-a").expect("test resource id must be valid");
+        let role_id = RoleId::new("transport").expect("test role id must be valid");
+        let task = requirement("task-normal", "transport", CapabilityKind::Transport);
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+
+        control.register_node(
+            node,
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut events,
+        );
+        let candidates = control
+            .match_capabilities(&task, timestamp, &correlation_id, &mut events)
+            .expect("online node should match");
+        assert_eq!(
+            candidates
+                .for_role(&role_id)
+                .expect("role candidates should exist")
+                .node_ids(),
+            std::slice::from_ref(&node_id)
+        );
+
+        let proposal = control
+            .propose(
+                &task,
+                &candidates,
+                vec![RoleAssignment::new(role_id, node_id, vec![resource_id])],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("candidate assignment should produce a proposal");
+        let plan = control
+            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .expect("unreserved resource should commit");
+        assert_eq!(plan.assignments().len(), 1);
+    }
+
+    /// A node without the required capability is rejected during matching.
+    #[test]
+    fn matching_rejects_missing_capability() {
+        let node = registration("node-a", CapabilityKind::Mobility, "space-a");
+        let task = requirement("task-rejected", "transport", CapabilityKind::Transport);
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        control.register_node(
+            node,
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut events,
+        );
+
+        assert!(matches!(
+            control.match_capabilities(&task, timestamp, &correlation_id, &mut events),
+            Err(ControlError::NoCandidate(role)) if role.as_str() == "transport"
+        ));
+    }
+
+    /// A second commit cannot take a resource already held by another task.
+    #[test]
+    fn commit_rejects_resource_conflict() {
+        let node = registration("node-a", CapabilityKind::Transport, "space-a");
+        let node_id = node.node_id().clone();
+        let resource_id = ResourceId::new("space-a").expect("test resource id must be valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        control.register_node(
+            node,
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut events,
+        );
+
+        let first_task = requirement("task-first", "transport-first", CapabilityKind::Transport);
+        let first_candidates = control
+            .match_capabilities(&first_task, timestamp, &correlation_id, &mut events)
+            .expect("first task should match");
+        let first_proposal = control
+            .propose(
+                &first_task,
+                &first_candidates,
+                vec![RoleAssignment::new(
+                    RoleId::new("transport-first").expect("test role id must be valid"),
+                    node_id.clone(),
+                    vec![resource_id.clone()],
+                )],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("first proposal should be valid");
+        control
+            .commit(&first_proposal, timestamp, &correlation_id, &mut events)
+            .expect("first proposal should commit");
+
+        let second_task = requirement("task-second", "transport-second", CapabilityKind::Transport);
+        let second_candidates = control
+            .match_capabilities(&second_task, timestamp, &correlation_id, &mut events)
+            .expect("second task can match before commit");
+        let second_proposal = control
+            .propose(
+                &second_task,
+                &second_candidates,
+                vec![RoleAssignment::new(
+                    RoleId::new("transport-second").expect("test role id must be valid"),
+                    node_id,
+                    vec![resource_id.clone()],
+                )],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("second proposal should be valid before reservation");
+
+        assert!(matches!(
+            control.commit(&second_proposal, timestamp, &correlation_id, &mut events),
+            Err(ControlError::ResourceConflict { resource_id: conflict, .. })
+                if conflict == resource_id
+        ));
+    }
+
+    /// A stale health snapshot is rejected after the configured status TTL.
+    #[test]
+    fn matching_rejects_stale_node_status() {
+        let node = registration("node-a", CapabilityKind::Transport, "space-a");
+        let task = requirement("task-timeout", "transport", CapabilityKind::Transport);
+        let observed_at = TimestampMs::new(0);
+        let now = TimestampMs::new(101);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::with_status_ttl(100);
+        let mut events = TestEvents;
+        control.register_node(
+            node,
+            NodeStatus::new(NodeHealth::Online, observed_at),
+            observed_at,
+            &correlation_id,
+            &mut events,
+        );
+
+        assert!(matches!(
+            control.match_capabilities(&task, now, &correlation_id, &mut events),
+            Err(ControlError::NoCandidate(_))
+        ));
+    }
+
+    /// A group without a safe replacement is recorded as blocked, never complete.
+    #[test]
+    fn group_can_be_marked_blocked_after_recovery_exhaustion() {
+        let node = registration("node-a", CapabilityKind::Transport, "space-a");
+        let node_id = node.node_id().clone();
+        let resource_id = ResourceId::new("space-a").expect("test resource id must be valid");
+        let role_id = RoleId::new("transport").expect("test role id must be valid");
+        let group_id = ExecutionGroupId::new("group-blocked").expect("test group id must be valid");
+        let task = requirement("task-blocked", "transport", CapabilityKind::Transport);
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        control.register_node(
+            node,
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut events,
+        );
+        let candidates = control
+            .match_capabilities(&task, timestamp, &correlation_id, &mut events)
+            .expect("task should initially match");
+        let proposal = control
+            .propose(
+                &task,
+                &candidates,
+                vec![RoleAssignment::new(role_id, node_id, vec![resource_id])],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("proposal should be valid");
+        let plan = control
+            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .expect("proposal should commit");
+        control
+            .create_group(
+                group_id.clone(),
+                &plan,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("group should bind before recovery exhaustion");
+
+        control
+            .block_group(
+                &group_id,
+                "no safe replacement is available",
+                TimestampMs::new(1),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("blocked transition should be recorded");
+        assert_eq!(
+            control
+                .group(&group_id)
+                .expect("blocked group should remain observable")
+                .lifecycle(),
+            GroupLifecycle::Blocked
+        );
     }
 }

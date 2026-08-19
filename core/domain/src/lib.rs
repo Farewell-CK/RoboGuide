@@ -398,6 +398,14 @@ impl NodeStatus {
     pub const fn observed_at(self) -> TimestampMs {
         self.observed_at
     }
+
+    /// Returns whether the snapshot is within the supplied freshness window.
+    ///
+    /// A snapshot observed in the future is treated as fresh so deterministic
+    /// callers cannot fail solely because their clocks moved in opposite order.
+    pub const fn is_fresh_at(self, now: TimestampMs, max_age_ms: u64) -> bool {
+        now.as_millis().saturating_sub(self.observed_at.as_millis()) <= max_age_ms
+    }
 }
 
 /// The local runtime and resources a node exposes to DEAIOS.

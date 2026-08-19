@@ -1,7 +1,7 @@
 # MVP Definition
 
-> Status: Draft - not frozen
-> Last updated: 2026-08-18
+> Status: Draft - full MVP not frozen
+> Last updated: 2026-08-19
 > Authority: This document becomes binding only after explicit project-owner review
 > and a status change to `Frozen`.
 
@@ -23,6 +23,24 @@ node combinations, failure cases, and metrics must not be treated as requirement
 - Proposal and Commit remain distinct; Execution Group membership and resource
   bindings remain distinct.
 - Local Systems retain Immediate How and final safety authority.
+
+### Approved Implementation Slice v0.1
+
+The full MVP remains Draft, but the following narrow slice is approved as the
+first implementation and team handoff baseline:
+
+- Node A provides Transport and Compute;
+- Node B provides replacement Transport;
+- Edge provides shared Compute;
+- one task requires Transport and Compute roles;
+- Node A fails after execution has started;
+- the system preserves completed observations and the Execution Group context;
+- Control rebinds only the failed role to Node B and reuses the Edge binding;
+- the group completes, or becomes Blocked/Escalated when no safe replacement exists.
+
+This slice is intentionally simulator- and hardware-neutral. It does not imply
+that a physical payload can be handed between arbitrary robots, and it does not
+make a Drone or Arm a core MVP prerequisite.
 
 ### Engineering Direction Under Review
 
@@ -46,9 +64,9 @@ node combinations, failure cases, and metrics must not be treated as requirement
 | Validation ladder | Fake-node, simulator and hardware responsibilities |
 | Exit criteria | Evidence required to declare the MVP complete |
 
-## 3. Candidate Vertical Slice
+## 3. Deferred Scenario Candidates
 
-The current discussion offers one candidate, not an approved MVP:
+The earlier scenario remains a deferred candidate, not an MVP requirement:
 
 - a Drone provides wide-area search;
 - an Arm manipulates or loads a target object;

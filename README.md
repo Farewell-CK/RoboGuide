@@ -32,6 +32,10 @@ MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
 见 [`docs/project-goals-and-mvp.md`](docs/project-goals-and-mvp.md)，当前决策状态
 见 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
 
+当前已批准首个实现切片：Node A 执行运输与算力角色，Node B 作为运输替代节点，
+Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重绑定失败角色并
+继续执行。完整 MVP 仍未冻结。
+
 ## 开发基线与首个 Bootstrap
 
 开发基线仍以 MVP Definition Draft 为约束，但首个可运行的 Rust core bootstrap
@@ -50,6 +54,9 @@ MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
 - Rust/Python 职责边界提案由
   [`ADR-0001`](docs/decisions/0001-rust-core-python-edges.md) 记录，当前状态为
   `Proposed`。
+- DEAIOS 与本地 EAIOS/厂商运行时的语义边界由
+  [`ADR-0002`](docs/decisions/0002-deaios-node-contract.md) 记录，当前状态为
+  `Proposed for MVP Slice v0.1`。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -166,12 +173,13 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── README.md
     │   └── coding-standards.md
     ├── decisions/
-    │   └── 0001-rust-core-python-edges.md
+    │   ├── 0001-rust-core-python-edges.md
+    │   └── 0002-deaios-node-contract.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
         └── distributed-embodied-ai-os-architecture-v1.1.png
 ```
 
-当前 V2 架构是有效基线；开发基线正在通过首个 bootstrap 验证，MVP Definition
-仍为 Draft。完整 MVP 的测试、适配器和仿真环境尚未完成。
+当前 V2 架构是有效基线；开发基线正在通过首个 bootstrap 和 Slice v0.1 验证，
+MVP Definition 仍为 Draft。完整 MVP 的测试、适配器和仿真环境尚未完成。

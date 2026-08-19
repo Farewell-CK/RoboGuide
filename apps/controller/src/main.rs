@@ -6,9 +6,10 @@
 
 use control::{ControlPlane, GroupLifecycle, RoleRequirementView};
 use domain::{
-    Capability, CapabilityKind, CorrelationId, ExecutionCommand, ExecutionGroupId, LocalRuntime,
-    MissionId, NodeHealth, NodeId, NodeRegistration, NodeStatus, Resource, ResourceId,
-    ResourceKind, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
+    Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand, ExecutionGroupId,
+    LocalRuntime, MissionId, NodeHealth, NodeId, NodeRegistration, NodeStatus, Resource,
+    ResourceId, ResourceKind, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRequirement,
+    TimestampMs,
 };
 use runtime::Runtime;
 use testkit::{FailureMode, FakeNode, SharedEventLog, VirtualClock};
@@ -16,7 +17,7 @@ use testkit::{FailureMode, FakeNode, SharedEventLog, VirtualClock};
 /// Runs the first deterministic normal-and-recovery vertical slice.
 fn main() {
     match run_mvp_slice() {
-        Ok(event_count) => println!("DEAIOS MVP slice completed with {event_count} events"),
+        Ok(events) => println!("DEAIOS MVP slice completed with {} events", events.len()),
         Err(error) => {
             eprintln!("DEAIOS MVP slice failed: {error}");
             std::process::exit(1);
@@ -42,7 +43,7 @@ fn build_registration(
 }
 
 /// Executes registration, proposal, commit, failure, rebind, and completion.
-fn run_mvp_slice() -> Result<usize, String> {
+fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mission_id = MissionId::new("mission-mvp-001").map_err(|error| error.to_string())?;
     let task_id = TaskId::new("task-transport-and-compute").map_err(|error| error.to_string())?;
     let correlation_id = CorrelationId::new("trace-mvp-001").map_err(|error| error.to_string())?;
@@ -244,15 +245,68 @@ fn run_mvp_slice() -> Result<usize, String> {
     if control.group(&group_id).map(|group| group.lifecycle()) != Some(GroupLifecycle::Completed) {
         return Err("execution group did not reach Completed".to_string());
     }
-    Ok(log.snapshot().len())
+    Ok(log.snapshot())
 }
 
 #[cfg(test)]
 mod tests {
+    use domain::EventPayload;
+
     /// The first vertical slice must preserve completed work and recover by rebinding.
     #[test]
     fn mvp_slice_recovers_after_node_failure() {
-        let event_count = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-        assert!(event_count >= 9);
+        let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
+        assert_eq!(events.len(), 12);
+        assert!(matches!(
+            events[0].payload(),
+            EventPayload::NodeRegistered { .. }
+        ));
+        assert!(matches!(
+            events[1].payload(),
+            EventPayload::NodeRegistered { .. }
+        ));
+        assert!(matches!(
+            events[2].payload(),
+            EventPayload::NodeRegistered { .. }
+        ));
+        assert!(matches!(
+            events[3].payload(),
+            EventPayload::CandidatesMatched { .. }
+        ));
+        assert!(matches!(
+            events[4].payload(),
+            EventPayload::ProposalCreated { .. }
+        ));
+        assert!(matches!(
+            events[5].payload(),
+            EventPayload::PlanCommitted { .. }
+        ));
+        assert!(matches!(
+            events[6].payload(),
+            EventPayload::ExecutionGroupBound { .. }
+        ));
+        assert!(matches!(
+            events[7].payload(),
+            EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+        ));
+        assert!(matches!(
+            events[8].payload(),
+            EventPayload::NodeObservation(domain::NodeEvent::TaskFailed { node_id, .. })
+                if node_id.as_str() == "node-a"
+        ));
+        assert!(matches!(
+            events[9].payload(),
+            EventPayload::RecoveryRebound { from_node, to_node, .. }
+                if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[10].payload(),
+            EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
+                if node_id.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[11].payload(),
+            EventPayload::ExecutionGroupCompleted { .. }
+        ));
     }
 }

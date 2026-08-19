@@ -85,8 +85,8 @@ embedded into the Rust core during MVP; it communicates through an adapter bound
 
 ## 5. First Vertical-Slice Gate
 
-The scenario and node topology are selected in [`../mvp-definition.md`](../mvp-definition.md),
-which is currently a Draft. Regardless of the final scenario, the first slice must:
+The full MVP remains Draft. The approved Slice v0.1 is recorded in
+[`../mvp-definition.md`](../mvp-definition.md), and the first slice must:
 
 1. Register nodes, capabilities, health, and resources.
 2. consume an approved Task Graph and Execution Requirements fixture;
@@ -110,3 +110,5 @@ For the bootstrap and every later implementation change, include:
 Detailed code requirements are in [`coding-standards.md`](coding-standards.md).
 Language ownership is recorded in
 [`../decisions/0001-rust-core-python-edges.md`](../decisions/0001-rust-core-python-edges.md).
+The DEAIOS-to-local-runtime boundary is recorded in
+[`../decisions/0002-deaios-node-contract.md`](../decisions/0002-deaios-node-contract.md).
