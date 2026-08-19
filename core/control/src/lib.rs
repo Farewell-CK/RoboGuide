@@ -8,8 +8,9 @@
 //! Group binding, and role rebinding. It never sends raw actuator commands.
 
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, NodeId, NodeRegistration, NodeStatus,
-    ResourceId, RoleAssignment, RoleId, TaskId, TaskRequirement, TimestampMs,
+    CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHeartbeat, NodeId, NodeLease,
+    NodeRegistration, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRequirement,
+    TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
@@ -17,6 +18,9 @@ use std::fmt::{Display, Formatter};
 
 /// Default maximum age for a node status used by capability matching.
 pub const DEFAULT_NODE_STATUS_TTL_MS: u64 = 5_000;
+
+/// Default lease duration assigned by the convenience registration method.
+pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
 
 /// Candidate node identifiers for one task role.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,6 +219,22 @@ pub enum ControlError {
     },
     /// A group lifecycle transition was invalid.
     InvalidLifecycle(GroupLifecycle),
+    /// A node lease or heartbeat did not satisfy the Node Contract.
+    InvalidLease(String),
+    /// A node attempted to use an unknown lease identity.
+    UnknownLease {
+        /// Node that sent the invalid lease identity.
+        node_id: NodeId,
+        /// Lease identity that was not registered for the node.
+        lease_id: LeaseId,
+    },
+    /// A node attempted to use a lease after expiry.
+    LeaseExpired {
+        /// Node whose lease expired.
+        node_id: NodeId,
+        /// Expired lease identity.
+        lease_id: LeaseId,
+    },
 }
 
 impl Display for ControlError {
@@ -235,6 +255,13 @@ impl Display for ControlError {
             ),
             Self::InvalidLifecycle(lifecycle) => {
                 write!(formatter, "invalid lifecycle: {lifecycle:?}")
+            }
+            Self::InvalidLease(reason) => write!(formatter, "invalid node lease: {reason}"),
+            Self::UnknownLease { node_id, lease_id } => {
+                write!(formatter, "node {node_id} does not own lease {lease_id}")
+            }
+            Self::LeaseExpired { node_id, lease_id } => {
+                write!(formatter, "lease {lease_id} for node {node_id} has expired")
             }
         }
     }
@@ -274,6 +301,8 @@ struct RegisteredNode {
     registration: NodeRegistration,
     /// Latest health state used by global matching.
     status: NodeStatus,
+    /// Renewable authority required for the node to remain schedulable.
+    lease: NodeLease,
 }
 
 /// The task and role that currently hold a resource commitment.
@@ -301,7 +330,7 @@ impl ControlPlane {
         }
     }
 
-    /// Registers or refreshes one logical node and records its visibility.
+    /// Registers one node with a generated lease and records its visibility.
     pub fn register_node<E: EventSink>(
         &mut self,
         registration: NodeRegistration,
@@ -309,21 +338,133 @@ impl ControlPlane {
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
-    ) {
+    ) -> Result<(), ControlError> {
+        let lease_id = LeaseId::new(format!("lease-{}", registration.node_id()))
+            .map_err(|error| ControlError::InvalidLease(error.to_string()))?;
+        let lease = NodeLease::new(
+            lease_id,
+            registration.node_id().clone(),
+            timestamp,
+            DEFAULT_NODE_LEASE_TTL_MS,
+        )
+        .map_err(|error| ControlError::InvalidLease(error.to_string()))?;
+        self.register_node_with_lease(
+            registration,
+            status,
+            lease,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Registers one node with an explicit lease from the Node Contract.
+    pub fn register_node_with_lease<E: EventSink>(
+        &mut self,
+        registration: NodeRegistration,
+        status: NodeStatus,
+        lease: NodeLease,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        if lease.node_id() != registration.node_id() {
+            return Err(ControlError::InvalidLease(
+                "lease node does not match registration node".to_string(),
+            ));
+        }
+        if !lease.is_active_at(timestamp) {
+            return Err(ControlError::LeaseExpired {
+                node_id: registration.node_id().clone(),
+                lease_id: lease.lease_id().clone(),
+            });
+        }
         let node_id = registration.node_id().clone();
+        let lease_id = lease.lease_id().clone();
         self.nodes.insert(
             node_id.clone(),
             RegisteredNode {
                 registration,
                 status,
+                lease,
             },
         );
         events.append(
             timestamp,
             correlation_id,
             None,
-            EventPayload::NodeRegistered { node_id },
+            EventPayload::NodeRegistered { node_id, lease_id },
         );
+        Ok(())
+    }
+
+    /// Accepts a heartbeat, refreshes its health snapshot, and renews its lease.
+    pub fn accept_heartbeat<E: EventSink>(
+        &mut self,
+        heartbeat: NodeHeartbeat,
+        received_at: TimestampMs,
+        lease_duration_ms: u64,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let node = self
+            .nodes
+            .get_mut(heartbeat.node_id())
+            .ok_or_else(|| ControlError::UnknownNode(heartbeat.node_id().clone()))?;
+        if node.lease.lease_id() != heartbeat.lease_id() {
+            return Err(ControlError::UnknownLease {
+                node_id: heartbeat.node_id().clone(),
+                lease_id: heartbeat.lease_id().clone(),
+            });
+        }
+        let renewed_lease = node
+            .lease
+            .renew(received_at, lease_duration_ms)
+            .map_err(|error| match error {
+                domain::DomainError::LeaseExpired { .. } => ControlError::LeaseExpired {
+                    node_id: heartbeat.node_id().clone(),
+                    lease_id: heartbeat.lease_id().clone(),
+                },
+                other => ControlError::InvalidLease(other.to_string()),
+            })?;
+        node.status = heartbeat.status();
+        node.lease = renewed_lease;
+        events.append(
+            received_at,
+            correlation_id,
+            None,
+            EventPayload::NodeHeartbeatAccepted {
+                node_id: heartbeat.node_id().clone(),
+                lease_id: heartbeat.lease_id().clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Expires leases and marks affected nodes Offline in the shared view.
+    pub fn expire_leases<E: EventSink>(
+        &mut self,
+        now: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Vec<NodeId> {
+        let mut expired_nodes = Vec::new();
+        for (node_id, node) in &mut self.nodes {
+            if node.status.health().is_schedulable() && !node.lease.is_active_at(now) {
+                node.status = NodeStatus::new(domain::NodeHealth::Offline, now);
+                expired_nodes.push(node_id.clone());
+                events.append(
+                    now,
+                    correlation_id,
+                    None,
+                    EventPayload::NodeLeaseExpired {
+                        node_id: node_id.clone(),
+                        lease_id: node.lease.lease_id().clone(),
+                    },
+                );
+            }
+        }
+        expired_nodes
     }
 
     /// Matches every task role against currently schedulable node capabilities.
@@ -342,6 +483,7 @@ impl ControlPlane {
                 .filter(|(_, node)| {
                     node.status.health().is_schedulable()
                         && node.status.is_fresh_at(timestamp, self.max_status_age_ms)
+                        && node.lease.is_active_at(timestamp)
                         && node.registration.supports_role(role)
                 })
                 .map(|(node_id, _)| node_id.clone())
@@ -679,7 +821,10 @@ impl RoleRequirementView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{Capability, CapabilityKind, NodeHealth, Resource, ResourceKind, RoleRequirement};
+    use domain::{
+        Capability, CapabilityKind, CorrelationId, LeaseId, NodeHealth, NodeHeartbeat, NodeLease,
+        Resource, ResourceKind, RoleRequirement,
+    };
 
     /// Discards event evidence while exercising Control behavior in isolation.
     #[derive(Default)]
@@ -750,13 +895,15 @@ mod tests {
         let mut control = ControlPlane::new();
         let mut events = TestEvents;
 
-        control.register_node(
-            node,
-            NodeStatus::new(NodeHealth::Online, timestamp),
-            timestamp,
-            &correlation_id,
-            &mut events,
-        );
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
         let candidates = control
             .match_capabilities(&task, timestamp, &correlation_id, &mut events)
             .expect("online node should match");
@@ -793,13 +940,15 @@ mod tests {
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
         let mut events = TestEvents;
-        control.register_node(
-            node,
-            NodeStatus::new(NodeHealth::Online, timestamp),
-            timestamp,
-            &correlation_id,
-            &mut events,
-        );
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
 
         assert!(matches!(
             control.match_capabilities(&task, timestamp, &correlation_id, &mut events),
@@ -817,13 +966,15 @@ mod tests {
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
         let mut events = TestEvents;
-        control.register_node(
-            node,
-            NodeStatus::new(NodeHealth::Online, timestamp),
-            timestamp,
-            &correlation_id,
-            &mut events,
-        );
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
 
         let first_task = requirement("task-first", "transport-first", CapabilityKind::Transport);
         let first_candidates = control
@@ -883,18 +1034,143 @@ mod tests {
         let correlation_id = correlation();
         let mut control = ControlPlane::with_status_ttl(100);
         let mut events = TestEvents;
-        control.register_node(
-            node,
-            NodeStatus::new(NodeHealth::Online, observed_at),
-            observed_at,
-            &correlation_id,
-            &mut events,
-        );
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, observed_at),
+                observed_at,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
 
         assert!(matches!(
             control.match_capabilities(&task, now, &correlation_id, &mut events),
             Err(ControlError::NoCandidate(_))
         ));
+    }
+
+    /// A valid heartbeat renews the lease and refreshes the node health snapshot.
+    #[test]
+    fn heartbeat_renews_lease_and_updates_health() {
+        let node = registration(
+            "node-heartbeat",
+            CapabilityKind::Transport,
+            "space-heartbeat",
+        );
+        let node_id = node.node_id().clone();
+        let lease_id = LeaseId::new("lease-heartbeat").expect("test lease id must be valid");
+        let lease = NodeLease::new(lease_id.clone(), node_id.clone(), TimestampMs::new(0), 100)
+            .expect("test lease should be valid");
+        let correlation_id = correlation();
+        let mut control = ControlPlane::with_status_ttl(200);
+        let mut events = TestEvents;
+        control
+            .register_node_with_lease(
+                node,
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                lease,
+                TimestampMs::new(0),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("explicit lease registration should succeed");
+
+        control
+            .accept_heartbeat(
+                NodeHeartbeat::new(
+                    node_id.clone(),
+                    lease_id,
+                    NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(50)),
+                ),
+                TimestampMs::new(50),
+                100,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("heartbeat should renew active lease");
+
+        let task = requirement("task-heartbeat", "transport", CapabilityKind::Transport);
+        assert!(
+            control
+                .match_capabilities(&task, TimestampMs::new(149), &correlation_id, &mut events)
+                .is_ok()
+        );
+        assert!(matches!(
+            control.match_capabilities(&task, TimestampMs::new(150), &correlation_id, &mut events),
+            Err(ControlError::NoCandidate(_))
+        ));
+    }
+
+    /// Lease expiry marks a previously schedulable node Offline.
+    #[test]
+    fn expired_lease_marks_node_offline() {
+        let node = registration("node-expiring", CapabilityKind::Transport, "space-expiring");
+        let node_id = node.node_id().clone();
+        let task = requirement("task-expiring", "transport", CapabilityKind::Transport);
+        let correlation_id =
+            CorrelationId::new("lease-expiry-trace").expect("test correlation id must be valid");
+        let mut control = ControlPlane::with_status_ttl(200);
+        let mut events = TestEvents;
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                TimestampMs::new(0),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
+
+        let expired = control.expire_leases(
+            TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
+            &correlation_id,
+            &mut events,
+        );
+        assert_eq!(expired, vec![node_id]);
+        assert!(matches!(
+            control.match_capabilities(
+                &task,
+                TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::NoCandidate(_))
+        ));
+    }
+
+    /// A heartbeat carrying another node's lease is rejected.
+    #[test]
+    fn heartbeat_rejects_unknown_lease() {
+        let node = registration("node-lease-owner", CapabilityKind::Transport, "space-owner");
+        let node_id = node.node_id().clone();
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                TimestampMs::new(0),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
+
+        let error = control
+            .accept_heartbeat(
+                NodeHeartbeat::new(
+                    node_id,
+                    LeaseId::new("lease-not-owned").expect("test lease id must be valid"),
+                    NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
+                ),
+                TimestampMs::new(1),
+                DEFAULT_NODE_LEASE_TTL_MS,
+                &correlation_id,
+                &mut events,
+            )
+            .expect_err("unknown lease must be rejected");
+        assert!(matches!(error, ControlError::UnknownLease { .. }));
     }
 
     /// A group without a safe replacement is recorded as blocked, never complete.
@@ -910,13 +1186,15 @@ mod tests {
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
         let mut events = TestEvents;
-        control.register_node(
-            node,
-            NodeStatus::new(NodeHealth::Online, timestamp),
-            timestamp,
-            &correlation_id,
-            &mut events,
-        );
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
         let candidates = control
             .match_capabilities(&task, timestamp, &correlation_id, &mut events)
             .expect("task should initially match");

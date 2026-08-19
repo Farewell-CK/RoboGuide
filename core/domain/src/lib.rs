@@ -17,6 +17,16 @@ pub enum DomainError {
         /// The kind of value that was empty.
         kind: &'static str,
     },
+    /// A lease duration or timestamp range could not be represented safely.
+    InvalidDuration {
+        /// The duration or range that violated a domain invariant.
+        kind: &'static str,
+    },
+    /// An operation attempted to use a lease after its expiry instant.
+    LeaseExpired {
+        /// The kind of lease operation that was rejected.
+        kind: &'static str,
+    },
 }
 
 impl Display for DomainError {
@@ -24,6 +34,8 @@ impl Display for DomainError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyValue { kind } => write!(formatter, "{kind} must not be empty"),
+            Self::InvalidDuration { kind } => write!(formatter, "invalid {kind} duration"),
+            Self::LeaseExpired { kind } => write!(formatter, "{kind} lease has expired"),
         }
     }
 }
@@ -86,6 +98,7 @@ define_identifier!(
     "Identifies one end-to-end operation trace.",
     "correlation"
 );
+define_identifier!(LeaseId, "Identifies a renewable node lease.", "lease");
 
 /// A monotonic timestamp used by deterministic core tests and runtime adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,6 +113,81 @@ impl TimestampMs {
     /// Returns elapsed milliseconds represented by this timestamp.
     pub const fn as_millis(self) -> u64 {
         self.0
+    }
+}
+
+/// A renewable time-bound authority for a node to remain schedulable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeLease {
+    /// Stable identity of the lease instance.
+    lease_id: LeaseId,
+    /// Node that owns the lease.
+    node_id: NodeId,
+    /// Time at which this lease interval began.
+    issued_at: TimestampMs,
+    /// Time after which the lease cannot authorize scheduling.
+    expires_at: TimestampMs,
+}
+
+impl NodeLease {
+    /// Creates a lease with a strictly positive duration.
+    pub fn new(
+        lease_id: LeaseId,
+        node_id: NodeId,
+        issued_at: TimestampMs,
+        duration_ms: u64,
+    ) -> Result<Self, DomainError> {
+        if duration_ms == 0 {
+            return Err(DomainError::InvalidDuration { kind: "node lease" });
+        }
+        let expires_at = issued_at
+            .as_millis()
+            .checked_add(duration_ms)
+            .ok_or(DomainError::InvalidDuration { kind: "node lease" })?;
+        Ok(Self {
+            lease_id,
+            node_id,
+            issued_at,
+            expires_at: TimestampMs::new(expires_at),
+        })
+    }
+
+    /// Returns the lease identity.
+    pub fn lease_id(&self) -> &LeaseId {
+        &self.lease_id
+    }
+
+    /// Returns the node authorized by this lease.
+    pub fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns when the lease was issued or last renewed.
+    pub const fn issued_at(&self) -> TimestampMs {
+        self.issued_at
+    }
+
+    /// Returns the first timestamp at which the lease is no longer active.
+    pub const fn expires_at(&self) -> TimestampMs {
+        self.expires_at
+    }
+
+    /// Returns whether the lease is active at the supplied monotonic time.
+    pub const fn is_active_at(&self, now: TimestampMs) -> bool {
+        now.as_millis() < self.expires_at.as_millis()
+    }
+
+    /// Renews an active lease without changing its identity or owning node.
+    pub fn renew(&self, now: TimestampMs, duration_ms: u64) -> Result<Self, DomainError> {
+        if !self.is_active_at(now) {
+            return Err(DomainError::LeaseExpired { kind: "node" });
+        }
+        Self::new(
+            self.lease_id.clone(),
+            self.node_id.clone(),
+            now,
+            duration_ms,
+        )
     }
 }
 
@@ -380,6 +468,43 @@ pub struct NodeStatus {
     observed_at: TimestampMs,
 }
 
+/// A health-bearing heartbeat sent by a local EAIOS to DEAIOS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeHeartbeat {
+    /// Node sending the heartbeat.
+    node_id: NodeId,
+    /// Lease the node claims to renew.
+    lease_id: LeaseId,
+    /// Latest health snapshot observed by the node.
+    status: NodeStatus,
+}
+
+impl NodeHeartbeat {
+    /// Creates a heartbeat for one node and lease.
+    pub const fn new(node_id: NodeId, lease_id: LeaseId, status: NodeStatus) -> Self {
+        Self {
+            node_id,
+            lease_id,
+            status,
+        }
+    }
+
+    /// Returns the node sending this heartbeat.
+    pub fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the lease being renewed.
+    pub fn lease_id(&self) -> &LeaseId {
+        &self.lease_id
+    }
+
+    /// Returns the health snapshot carried by this heartbeat.
+    pub const fn status(&self) -> NodeStatus {
+        self.status
+    }
+}
+
 impl NodeStatus {
     /// Creates a health snapshot with its observation time.
     pub const fn new(health: NodeHealth, observed_at: TimestampMs) -> Self {
@@ -598,6 +723,22 @@ pub enum EventPayload {
     NodeRegistered {
         /// Registered node identity.
         node_id: NodeId,
+        /// Lease issued to the registered node.
+        lease_id: LeaseId,
+    },
+    /// A node heartbeat was accepted and its lease renewed.
+    NodeHeartbeatAccepted {
+        /// Node whose heartbeat was accepted.
+        node_id: NodeId,
+        /// Lease renewed by the heartbeat.
+        lease_id: LeaseId,
+    },
+    /// A node lease expired and the node became unschedulable.
+    NodeLeaseExpired {
+        /// Node whose lease expired.
+        node_id: NodeId,
+        /// Expired lease identity.
+        lease_id: LeaseId,
     },
     /// Matching produced role candidates.
     CandidatesMatched {

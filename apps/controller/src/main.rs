@@ -110,27 +110,33 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mut control = ControlPlane::new();
     let mut log = SharedEventLog::new();
     let timestamp = TimestampMs::new(0);
-    control.register_node(
-        node_a.clone(),
-        NodeStatus::new(NodeHealth::Online, timestamp),
-        timestamp,
-        &correlation_id,
-        &mut log,
-    );
-    control.register_node(
-        node_b.clone(),
-        NodeStatus::new(NodeHealth::Online, timestamp),
-        timestamp,
-        &correlation_id,
-        &mut log,
-    );
-    control.register_node(
-        edge.clone(),
-        NodeStatus::new(NodeHealth::Online, timestamp),
-        timestamp,
-        &correlation_id,
-        &mut log,
-    );
+    control
+        .register_node(
+            node_a.clone(),
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .register_node(
+            node_b.clone(),
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .register_node(
+            edge.clone(),
+            NodeStatus::new(NodeHealth::Online, timestamp),
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
 
     let candidates = control
         .match_capabilities(&requirement, timestamp, &correlation_id, &mut log)
