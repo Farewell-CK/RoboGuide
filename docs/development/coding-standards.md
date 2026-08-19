@@ -1,45 +1,39 @@
-# Coding Standards
+# 编码规范
 
-These rules apply to handwritten production code, tests, examples, and internal
-helpers. Generated code must be isolated and clearly marked.
+这些规则适用于手写的生产代码、测试、示例和内部辅助代码。生成代码必须隔离，
+并明确标记来源。
 
-## 1. Function Documentation
+## 1. 函数文档
 
-Every Rust `fn` and every Python `def` or `async def` must have a documentation
-comment or docstring, including private functions, methods, test helpers, fixtures,
-and constructors.
+每个 Rust `fn` 以及每个 Python `def` 或 `async def` 都必须有文档注释或
+docstring，包括私有函数、方法、测试辅助函数、Fixture 和构造函数。
 
-Documentation must state:
+文档必须说明：
 
-- the function's responsibility and meaningful inputs/outputs;
-- state changes, external effects, or concurrency assumptions;
-- important invariants and rejected conditions;
-- errors, panic conditions, or safety requirements when applicable.
+- 函数的职责以及重要输入/输出；
+- 状态变化、外部影响或并发假设；
+- 重要不变量和拒绝条件；
+- 适用时的错误、Panic 条件或安全要求。
 
-Do not write comments that merely restate the function name. Update documentation in
-the same change as behavior. Modules also require a Rust `//!` comment or Python
-module docstring explaining their ownership boundary.
+不要写只重复函数名的注释。行为变化必须在同一变更中同步更新文档。模块还必须
+使用 Rust `//!` 注释或 Python 模块 docstring 说明自身的职责边界。
 
-## 2. Rust Rules
+## 2. Rust 规则
 
-- Use the repository-pinned stable toolchain and edition.
-- Format with `rustfmt`; run Clippy with warnings denied.
-- Crate roots use `#![deny(missing_docs)]`,
-  `#![deny(clippy::missing_docs_in_private_items)]`, and default to
-  `#![forbid(unsafe_code)]`.
-- Use typed IDs and value objects instead of passing unrelated `String` values.
-- Model lifecycle changes as explicit transitions; invalid transitions return typed
-  errors and never silently mutate state.
-- Production code must not use `unwrap()` or `expect()` except for a documented,
-  process-startup invariant. Tests may use them for setup clarity.
-- Libraries expose domain-specific error enums. `anyhow`-style context belongs only
-  at application and adapter boundaries.
-- Blocking work must not run on an async executor thread. Cancellation, timeout, and
-  shutdown behavior must be explicit.
-- New dependencies require a written purpose and must not duplicate an existing
-  capability.
+- 使用仓库固定的 stable Toolchain 和 Edition；
+- 使用 `rustfmt` 格式化，并以禁止 Warning 的方式运行 Clippy；
+- Crate 根文件使用 `#![deny(missing_docs)]`、
+  `#![deny(clippy::missing_docs_in_private_items)]`，默认使用
+  `#![forbid(unsafe_code)]`；
+- 使用 Typed ID 和 Value Object，不要传递含义无关的 `String`；
+- 将生命周期变化建模为显式状态转换；无效转换返回类型化错误，不能静默修改状态；
+- 生产代码不得使用 `unwrap()` 或 `expect()`，除非它对应有文档说明的进程启动不变量；
+  测试可以为了设置清晰而使用它们；
+- Library 暴露领域错误枚举；`anyhow` 风格的上下文只属于应用和 Adapter 边界；
+- 阻塞工作不能运行在异步 Executor 线程上。取消、超时和关闭行为必须明确；
+- 新依赖必须说明用途，且不能重复已有能力。
 
-Required Rust gates once the workspace exists:
+Rust 必须通过以下检查：
 
 ```bash
 cargo fmt --all -- --check
@@ -48,22 +42,18 @@ cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-## 3. Python Rules
+## 3. Python 规则
 
-- All functions, methods, parameters, and return values are type annotated.
-- Use Google-style docstrings consistently.
-- Format and lint with Ruff; type-check application packages in strict mode.
-- Do not use bare `except`, mutable default arguments, wildcard imports, hidden
-  module-level runtime state, or unbounded background tasks.
-- Model and simulator SDK objects stay inside adapters. Core contract objects must
-  remain serializable and independent of those SDKs.
-- Network, model, clock, and simulator access must be injectable for tests.
-- Dependency and tool versions are declared in `pyproject.toml` and locked by the
-  bootstrap change; do not rely on globally installed packages.
-- Use the repository's uv-managed environment for Python commands, for example
-  `uv run python ...` and `uv run pytest ...`.
+- 所有函数、方法、参数和返回值都必须有类型标注；
+- 统一使用 Google 风格 docstring；
+- 使用 Ruff 格式化和 Lint，并以 strict 模式进行类型检查；
+- 禁止裸 `except`、可变默认参数、Wildcard Import、隐藏的模块级运行时状态和无界后台任务；
+- 模型和仿真器 SDK 对象只能留在 Adapter 内部。核心合同对象必须可序列化，且独立于 SDK；
+- 网络、模型、时钟和仿真器访问必须可注入，以便测试；
+- 依赖和工具版本声明在 `pyproject.toml` 中，并由 Bootstrap 变更锁定；不得依赖全局安装的包；
+- Python 命令使用仓库的 uv 环境，例如 `uv run python ...` 和 `uv run pytest ...`。
 
-Required Python gates once packages exist:
+Python 包创建后必须通过：
 
 ```bash
 ruff format --check python tests
@@ -73,44 +63,39 @@ mypy --strict python
 pytest -q
 ```
 
-Enable Ruff's pydocstyle `D` rules with the Google convention. These rules cover
-public definitions but do not guarantee documentation on underscore-prefixed private
-functions. The first Python scaffold must therefore add an AST-based check under
-`tools/quality/` that rejects every undocumented `def` and `async def`, including
-private functions and tests. A suppression needs an inline reason.
+启用 Ruff 的 pydocstyle `D` 规则，并使用 Google Convention。这些规则覆盖公共
+定义，但不能保证以下划线开头的私有函数有文档。因此，第一份 Python Scaffold
+必须在 `tools/quality/` 下加入 AST 检查，拒绝所有没有文档的 `def` 和 `async def`，
+包括私有函数和测试函数。抑制检查必须写明行内原因。
 
-## 4. Naming and Data
+## 4. 命名与数据
 
-- Rust package directories use short responsibility names under `core/` and `apps/`;
-  Rust modules and Python packages use `snake_case`.
-- Types and state names use domain language from V2; avoid generic `Manager`, `Util`,
-  `Common`, or `Helper` unless the responsibility is further qualified.
-- Boolean names read as predicates, for example `is_committed` or `can_execute`.
-- Units appear in names or types: `timeout_ms`, `distance_m`, `TimestampUtc`.
-- Configuration is explicit, validated at startup, and contains no credentials.
-- Logs are structured and include operation, node, task, group, correlation, and
-  error identifiers where available.
+- Rust Package Directory 在 `core/` 和 `apps/` 下使用简短的职责名称；Rust Module
+  和 Python Package 使用 `snake_case`；
+- 类型和状态名称使用 V2 的领域语言。除非进一步限定职责，否则避免使用通用的
+  `Manager`、`Util`、`Common` 或 `Helper`；
+- Boolean 名称使用谓词形式，例如 `is_committed` 或 `can_execute`；
+- 单位写入名称或类型，例如 `timeout_ms`、`distance_m`、`TimestampUtc`；
+- 配置必须显式声明、启动时校验，且不包含凭据；
+- 日志使用结构化格式，并在可用时包含 Operation、Node、Task、Group、Correlation
+  和 Error ID。
 
-## 5. Testing Standard
+## 5. 测试标准
 
-- Unit tests cover every lifecycle transition, invariant, and error branch.
-- Port implementations share contract tests.
-- Integration tests use fake nodes and a virtual clock; never wait with arbitrary
-  sleeps.
-- System tests verify observable event traces, not private implementation details.
-- Failure injection covers heartbeat expiry, stale evidence, capability degradation,
-  reservation conflict, invocation failure, and recovery escalation.
-- Critical state-machine transitions require complete transition coverage. The
-  workspace line-coverage floor will be set after the first measurable scaffold and
-  must never replace behavior-focused assertions.
+- Unit Test 覆盖每个生命周期转换、不变量和错误分支；
+- Port 实现共享 Contract Test；
+- Integration Test 使用 Fake Nodes 和 Virtual Clock，禁止使用任意 Sleep 等待；
+- System Test 验证可观察的事件轨迹，而不是私有实现细节；
+- 故障注入覆盖 Heartbeat 过期、证据过期、Capability 降级、Reservation 冲突、
+  Invocation 失败和恢复升级；
+- 关键状态机转换要求完整转换覆盖。Workspace 的行覆盖率下限将在第一份可测量
+  Scaffold 之后设定，且不能替代面向行为的断言。
 
-A test that depends on Isaac Sim, a real robot, an external model, or the network is
-an adapter/system test and must be separately marked. Core tests remain offline and
-deterministic.
+依赖 Isaac Sim、真实机器人、外部模型或网络的测试属于 Adapter/System Test，必须
+单独标记。核心测试保持离线和确定性。
 
-## 6. Review Standard
+## 6. 评审标准
 
-A pull request is not ready when it only compiles. It must explain the architecture
-boundary, document every function, include failure-path tests, pass all configured
-gates, and contain no unrelated refactor. `TODO` and `FIXME` require a tracked issue
-or decision identifier.
+Pull Request 不能只满足“能够编译”。它必须说明架构边界，记录每个函数，包含
+故障路径测试，通过所有质量门槛，且不包含无关重构。`TODO` 和 `FIXME` 必须关联
+已跟踪的 Issue 或 Decision ID。

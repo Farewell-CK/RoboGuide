@@ -1,114 +1,109 @@
-# Development Baseline
+# 开发基线
 
-> Status: Bootstrap in progress; MVP definition remains Draft. Drafted on 2026-08-17.
-> The V2 architecture remains authoritative. This proposal translates V2
-> responsibilities into engineering boundaries without freezing transports,
-> databases, schemas, or algorithms.
+> 状态：Bootstrap 进行中；MVP 定义仍为 Draft。起草日期：2026-08-17。
+> V2 架构仍是权威基线。本文档将 V2 的职责转换为工程边界，但不冻结传输、
+> 数据库、Schema 或算法。
 
-## 1. Development Principles
+## 1. 开发原则
 
-1. Architecture precedes directories and frameworks. A module exists only when it
-   has one responsibility, an explicit dependency direction, tests, and an owner.
-2. Start as a modular monolith. Logical boundaries must be enforceable in code, but
-   MVP deployment does not begin as a collection of microservices.
-3. The core is simulator- and hardware-neutral. Isaac Sim, ROS 2, vendor SDKs, and
-   real robots enter through adapters.
-4. The first executable evidence uses deterministic fake nodes. Simulation and real
-   hardware are parallel validation tracks, not prerequisites for core development.
-5. Frozen V2 semantics win over implementation convenience. A boundary change needs
-   an ADR and, when architecture semantics change, an updated V2 baseline.
+1. 架构先于目录和框架。只有在具备单一职责、明确依赖方向、测试和负责人时，
+   才创建模块。
+2. 从模块化单体开始。代码中必须能够约束逻辑边界，但 MVP 不先拆成微服务集合。
+3. 核心必须与仿真器和硬件无关。Isaac Sim、ROS 2、厂商 SDK 和真实机器人都通过
+   Adapter 接入。
+4. 第一份可执行证据使用确定性的 Fake Nodes。仿真和真实硬件是并行验证轨道，
+   不是核心开发的前置条件。
+5. 已冻结的 V2 语义优先于实现便利。边界变化需要 ADR；如果改变架构语义，
+   还必须更新 V2 基线。
 
-## 2. Repository Layout
+## 2. 仓库布局
 
-The V2 responsibility boundaries are reflected in the maintained bootstrap paths
-below. The MVP is still Draft, so future paths remain planned names until they have
-their first real implementation.
+下面的布局体现 V2 的职责边界。完整 MVP 仍为 Draft，因此未来路径只有在拥有
+第一份真实实现后才会创建。
 
 ```text
 core/
-  domain/                  Pure domain types, invariants, and state machines
-  ports/                   Transport-neutral interfaces owned by the core
-  control/                 Matching, proposal, coordination, commit, group manager
-  runtime/                 Discovery, invocation, heartbeat, lease, diagnostics
-  state/                   Evidence, shared views, allocation state, scoped memory
-  adapters/                Rust transport, persistence, ROS, and vendor adapters
-  testkit/                 Fake nodes, virtual clock, fixtures, failure injection
+  domain/                  纯领域类型、不变量和状态机
+  ports/                   由核心拥有、与传输无关的接口
+  control/                 匹配、提案、协调、提交和 Group Manager
+  runtime/                 发现、调用、Heartbeat、Lease 和诊断
+  state/                   证据、共享视图、分配状态和分域记忆
+  adapters/                Rust 传输、持久化、ROS 和厂商适配器
+  testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
-  controller/              Composition root and process lifecycle only
+  controller/              组合根和进程生命周期
 python/
-  mission/                 Mission planning and model-backed reasoning adapters
-  sim/                     Simulator integration adapters
-scenarios/                Versioned scenario inputs and expected event traces
-tests/system/             Black-box, cross-process tests only
-tools/quality/            Repository-specific documentation and boundary checks
+  mission/                 Mission 规划、模型推理和研究型适配器
+  sim/                     仿真器集成适配器
+scenarios/                 版本化场景输入和预期事件轨迹
+tests/system/              仅用于黑盒跨进程测试
+tools/quality/             标准 Linter 未覆盖的仓库检查
 ```
 
-The bootstrap currently creates only `core/domain`, `core/ports`, `core/control`,
-`core/runtime`, `core/testkit`, and `apps/controller`. Do not create future `state`,
-`adapters`, Python, simulator, system-test, or quality-tool paths without a
-maintained implementation and a synchronized baseline update. Never commit empty
-placeholder directories.
+当前 Bootstrap 只创建了 `core/domain`、`core/ports`、`core/control`、
+`core/runtime`、`core/testkit` 和 `apps/controller`。没有维护实现前，不得创建
+未来的 `state`、`adapters`、Python、仿真器、系统测试或质量工具路径。禁止提交
+空目录。
 
-## 3. Module Boundaries
+## 3. 模块边界
 
-| Module | Owns | Must not own |
+| 模块 | 负责 | 不负责 |
 | --- | --- | --- |
-| Domain | IDs, value objects, invariants, lifecycle state machines | I/O, SDKs, storage, scheduling infrastructure |
-| Ports | Core-required interfaces such as clock, event log, node registry | Vendor or transport types |
-| Control | Match, Propose, Coordinate, Commit, Group lifecycle, recovery decisions | Hardware commands or local motion |
-| Runtime | Discovery, messaging semantics, invocation, heartbeat, lease | Global resource selection |
-| State | Observation, provenance, freshness, uncertainty, belief and allocation views | Mission planning or device control |
-| Adapters | Protocol, simulator, storage, model, ROS and vendor translation | Core policy decisions |
-| Apps | Dependency wiring, configuration, startup and shutdown | Domain rules |
-| Quality tools | Static repository checks not covered by standard linters | Runtime behavior or production dependencies |
+| Domain | ID、值对象、不变量和生命周期状态机 | I/O、SDK、存储和调度基础设施 |
+| Ports | Clock、Event Log、Node Registry 等核心接口 | 厂商或传输类型 |
+| Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
+| Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
+| State | Observation、Provenance、Freshness、Uncertainty、Belief 和 Allocation View | Mission 规划或设备控制 |
+| Adapters | 协议、仿真器、存储、模型、ROS 和厂商转换 | 核心策略决策 |
+| Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
+| Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 
-Allowed Rust dependency direction:
+允许的 Rust 依赖方向：
 
 ```text
 apps -> control/runtime/state/adapters -> ports -> domain
 ```
 
-`domain` has no internal project dependency. Cycles are forbidden. Python is never
-embedded into the Rust core during MVP; it communicates through an adapter boundary.
+`domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
+Python；Python 通过 Adapter 边界与核心通信。
 
-## 4. Contract Rules
+## 4. 合同规则
 
-- Proposal and Commit are different types and transitions.
-- Node online state and Capability availability are different facts.
-- Members, Roles, Resource Bindings, and Shared Context remain distinct.
-- Observations carry source, timestamp, freshness, and uncertainty.
-- Events are immutable and include event, correlation, and causation identities.
-- Durations use a monotonic clock; externally exchanged timestamps use UTC.
-- Adapter messages are versioned. Serialization details are not domain types.
-- Control issues goals, roles, constraints, and bindings; Local Systems retain
-  Immediate How and final safety authority.
+- Proposal 和 Commit 是不同的类型和状态转换；
+- Node 在线状态和 Capability 可用性是不同事实；
+- Members、Roles、Resource Bindings 和 Shared Context 必须保持区分；
+- Observation 携带来源、时间戳、新鲜度和不确定性；
+- Event 不可变，并包含 Event、Correlation 和 Causation ID；
+- 时长使用单调时钟，跨系统交换的时间戳使用 UTC；
+- Adapter 消息需要版本化，序列化细节不能成为领域类型；
+- Control 下发目标、角色、约束和 Binding；Local Systems 保留 Immediate How
+  和最终安全权威。
 
-## 5. First Vertical-Slice Gate
+## 5. 首个纵向切片门槛
 
-The full MVP remains Draft. The approved Slice v0.1 is recorded in
-[`../mvp-definition.md`](../mvp-definition.md), and the first slice must:
+完整 MVP 仍为 Draft。已批准的 Slice v0.1 记录在
+[`../mvp-definition.md`](../mvp-definition.md) 中，第一条切片必须：
 
-1. Register nodes, capabilities, health, and resources.
-2. consume an approved Task Graph and Execution Requirements fixture;
-3. produce Candidate Set, Assignment Proposal, Commit, and Execution Group;
-4. execute through Runtime and record an ordered event trace;
-5. inject at least one approved failure at a physically valid boundary;
-6. preserve completed work and escalate only to the necessary recovery level;
-7. report an unrecoverable physical state as blocked/escalated, never as success.
+1. 注册节点、能力、健康状态和资源；
+2. 消费经过批准的 Task Graph 和 Execution Requirements Fixture；
+3. 产生 Candidate Set、Assignment Proposal、Commit 和 Execution Group；
+4. 通过 Runtime 执行并记录有序事件轨迹；
+5. 在物理上有效的边界注入至少一个已批准故障；
+6. 保留已完成工作，只升级到必要的恢复层级；
+7. 将无法恢复的物理状态报告为 Blocked/Escalated，绝不能报告为成功。
 
-## 6. Change Gate
+## 6. 变更门槛
 
-For the bootstrap and every later implementation change, include:
+Bootstrap 以及之后的每次实现变更都必须包含：
 
-- the V2 responsibility and module it implements;
-- documented functions and public types;
-- deterministic tests for normal, rejected, timeout, and recovery paths;
-- structured evidence such as an event trace for cross-module behavior;
-- an ADR when dependency direction, authority, lifecycle, or public contracts change;
-- synchronized commands and layout documentation.
+- 所实现的 V2 职责和所属模块；
+- 完整记录的函数和公共类型；
+- 正常、拒绝、超时和恢复路径的确定性测试；
+- 跨模块行为的结构化证据，例如事件轨迹；
+- 当依赖方向、权威、生命周期或公共合同改变时，新增 ADR；
+- 同步更新命令和目录说明。
 
-Detailed code requirements are in [`coding-standards.md`](coding-standards.md).
-Language ownership is recorded in
-[`../decisions/0001-rust-core-python-edges.md`](../decisions/0001-rust-core-python-edges.md).
-The DEAIOS-to-local-runtime boundary is recorded in
-[`../decisions/0002-deaios-node-contract.md`](../decisions/0002-deaios-node-contract.md).
+详细代码要求见 [`coding-standards.md`](coding-standards.md)。语言职责记录在
+[`../decisions/0001-rust-core-python-edges.md`](../decisions/0001-rust-core-python-edges.md)。
+DEAIOS 与本地运行时的边界记录在
+[`../decisions/0002-deaios-node-contract.md`](../decisions/0002-deaios-node-contract.md)。

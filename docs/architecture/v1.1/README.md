@@ -1,6 +1,7 @@
 # RoboGuide 架构基线 V1.1
 
-> Historical baseline. V2 已取代本版本成为当前 source of truth。当前架构见 [`../v2/README.md`](../v2/README.md) 和 [`RoboGuide_Architecture_Baseline_V2.docx`](../v2/RoboGuide_Architecture_Baseline_V2.docx)。
+> 历史基线。V2 已取代本版本，成为当前权威架构基线。当前架构见
+> [`../v2/README.md`](../v2/README.md) 和 [`RoboGuide_Architecture_Baseline_V2.docx`](../v2/RoboGuide_Architecture_Baseline_V2.docx)。
 
 本文件是对 [`Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx`](Distributed_Embodied_AI_OS_总体架构详细设计说明书_V1.1.docx) 的历史工程化摘要。原始 DOCX 和 [V1.1 架构图](../../images/distributed-embodied-ai-os-architecture-v1.1.png) 是本版本的来源；本摘要不替代原文。
 
@@ -112,9 +113,10 @@ Task 描述需要完成的工作；Task Graph 表达前后依赖、并行关系�
 - 逻辑组件可以单机部署，也可以后续拆分到多机；
 - 异常必须回到 State，并重新进入决策闭环；
 - 协议、Schema、数据库和具体算法允许演进。
-## 8. 当前实现边界
+## 8. V1.1 基线时期的实现边界
 
-仓库初始化阶段只提供原始设计文档、架构图、架构基线摘要和实现待决事项。当前不包含运行时代码。任何后续实现都应先说明：
+V1.1 基线形成时期，仓库只提供原始设计文档、架构图、架构基线摘要和实现待决事项，
+不包含运行时代码。后续实现都应先说明：
 
 - 它属于哪个平面和哪个职责；
 - 输入/输出的所有权和时间语义是什么；

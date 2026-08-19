@@ -1,6 +1,6 @@
-# Project Goals and MVP Scope
+# 项目目标与 MVP 范围
 
-本文件补充当前 [`RoboGuide Architecture Baseline V2`](architecture/v2/README.md) 的阶段目标；V2 负责架构语义，本文件负责 MVP 范围和应用演进。
+本文件补充当前 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 的阶段目标；V2 负责架构语义，本文件负责 MVP 范围和应用演进。
 
 > 当前状态：MVP 的通用多机异构方向已经明确，但具体 Mission、节点拓扑、
 > 故障矩阵、指标和退出条件尚未冻结。工作草案与冻结门槛见

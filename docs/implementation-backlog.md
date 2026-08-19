@@ -1,8 +1,8 @@
-# Architecture and Implementation Backlog
+# 架构与实现待决事项
 
-本文件跟踪 [`RoboGuide Architecture Baseline V2`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。
+本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。
 
-## V2 Open Architecture Questions
+## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 | Q6 | Temporal Assurance | 同步、时钟偏差、deadline 和时间窗口如何成为架构约束 |
 | Q7 | Resource Commitment Semantics | Commit、Lease expiry、preemption、partial release 需要何种一致性保证 |
 
-## MVP Definition Decisions (Open)
+## MVP 定义待决事项
 
 当前决策状态和冻结清单由 [`mvp-definition.md`](mvp-definition.md) 统一记录：
 
@@ -24,7 +24,7 @@
 - 延迟、恢复时间、资源冲突和任务完成的最小指标；
 - 导盲等后续领域场景如何通过领域层接入通用核心。
 
-## Proposed Development Bootstrap Decisions
+## 开发 Bootstrap 提案
 
 - 提议使用 Rust 实现 Domain、Control、Runtime 和 State 核心，Python 承载 Mission
   Intelligence、模型、仿真和研究型 Adapter；
@@ -35,11 +35,13 @@
   [`development/coding-standards.md`](development/coding-standards.md) 为准；
 - 语言职责决策由
   [`ADR-0001`](decisions/0001-rust-core-python-edges.md) 记录。
+- DEAIOS 与本地 EAIOS 的接入边界由
+  [`ADR-0002`](decisions/0002-deaios-node-contract.md) 记录。
 
 这些提案仍在评审，不构成已接受的 MVP。即使被接受，也不冻结跨进程
 Transport、序列化格式、数据库、调度算法或部署拓扑。
 
-## Deferred Implementation Choices
+## 延后的实现选型
 
 - Capability Schema、Contract 字段、类型系统和版本兼容策略；
 - 节点接入采用 Agent、Adapter、SDK、Plugin 或 ROS Bridge；
@@ -53,6 +55,6 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 - Benchmark、SLO、QoS、资源预测和成本函数；
 - 真实硬件的 Safety、权限、Heartbeat、Lease、超时和恢复验证。
 
-## Decision Rule
+## 决策规则
 
 如果一个问题会改变模块职责、状态权威、Proposal / Commit 语义、Execution Group 定义或 Recovery 层级，它属于架构决策，必须先更新 V2 基线。若架构可以承载多种方案，则保留为实现选择，使用 MVP 和工程证据再决定。
