@@ -19,6 +19,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Runtime observation ingestion normalizes `NodeGateway.status()` into reported
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.
+- Observation time semantics preserve source-local `NodeStatus.observed_at` while
+  State ordering and Control freshness use RoboGuide-local `received_at`; do not
+  compare independent source clocks or claim distributed clock synchronization.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -69,7 +72,9 @@ produces an inspectable event trace. State tests keep observed facts separate fr
 Control eligibility policy and cover registration, freshness, health updates, and
 cross-mission reads. Recovery tests must preserve partial versus whole-group release.
 Runtime-State tests distinguish local reported health from system-observed liveness
-and prove that new observations affect later Control decisions.
+and prove that new observations affect later Control decisions. Time tests must
+cover source-clock divergence, receive ordering, heartbeat receive time, and lease
+liveness without weakening Recovery lifecycle tests.
 
 ## Commit & Pull Request Guidelines
 

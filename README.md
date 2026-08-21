@@ -141,6 +141,17 @@ Runtime 从 `NodeGateway.status()` 形成 transport-neutral `NodeHealthObservati
 该路径只让新的事实可被后续 Control decision 读取，不会自动触发 Block、partial
 release、rebind 或其他 Reconciliation 行为。
 
+当前进一步实现 **State & Runtime Integration — Slice v0.2: Observation Time
+Semantics**。`NodeStatus.observed_at` 明确表示 Local EAIOS 的 source-local observation
+time；`NodeHealthObservation.received_at` 表示 RoboGuide Runtime/Control 收到该事实的
+本地时间。State 同时保留二者，但以 `received_at` 作为当前 bootstrap 的 health
+observation 接纳顺序，Control TTL/freshness 也只比较 RoboGuide-local receive time。
+Liveness observation 与 Lease 时间继续属于 RoboGuide-local 时间域。
+
+该策略没有解决跨节点 clock synchronization 或 global event ordering。Source time
+仅作为未来 provenance、offset estimation 和冲突推理的证据保留；NTP/PTP、clock
+offset 和 distributed ordering 均延后。
+
 这不是完整的 State & Memory Plane。Allocation State、Execution Group State
 Projection、Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、
 Distributed Memory、Persistence/Replication、State Authority resolution 和 Lease

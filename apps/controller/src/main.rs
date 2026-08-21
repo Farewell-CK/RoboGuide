@@ -652,6 +652,73 @@ mod tests {
         ));
     }
 
+    /// Independent source clock values do not affect Control receive-time freshness.
+    #[test]
+    fn runtime_source_clock_does_not_affect_control_freshness() {
+        let admitted_at = TimestampMs::new(0);
+        let runtime_received_at = TimestampMs::new(10);
+        let correlation_id =
+            CorrelationId::new("clock-domain-trace").expect("correlation id should be valid");
+        let node = build_registration(
+            "node-clock-domain",
+            "vendor-runtime",
+            vec![Capability::new(CapabilityKind::Transport, true)],
+            vec![
+                Resource::new(
+                    ResourceId::new("space-clock-domain").expect("resource id should be valid"),
+                    ResourceKind::Space,
+                    1,
+                )
+                .expect("resource should be valid"),
+            ],
+        )
+        .expect("node registration should be valid");
+        let node_id = node.node_id().clone();
+        let requirement = TaskRequirement::new(
+            MissionId::new("mission-clock-domain").expect("mission id should be valid"),
+            TaskId::new("task-01").expect("task id should be valid"),
+            vec![RoleRequirement::new(
+                RoleId::new("transport").expect("role id should be valid"),
+                CapabilityKind::Transport,
+                Some(ResourceKind::Space),
+            )],
+        )
+        .expect("task requirement should be valid");
+        let mut control = ControlPlane::with_status_ttl(20);
+        let mut state = InMemorySharedNodeState::new();
+        let mut log = SharedEventLog::new();
+        control
+            .register_node(
+                &mut state,
+                node.clone(),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
+                admitted_at,
+                &correlation_id,
+                &mut log,
+            )
+            .expect("node admission should succeed");
+        let mut runtime = Runtime::new(VirtualClock::new(runtime_received_at), log.clone());
+        runtime
+            .register_node(Box::new(FakeNode::new(node).with_status(NodeStatus::new(
+                NodeHealth::Online,
+                TimestampMs::new(500_000),
+            ))))
+            .expect("fake EAIOS adapter registration should succeed");
+        runtime
+            .observe_node_status(&node_id, &mut state)
+            .expect("Runtime should record source and receive times separately");
+
+        control
+            .match_capabilities(
+                &state,
+                &requirement,
+                TimestampMs::new(20),
+                &correlation_id,
+                &mut log,
+            )
+            .expect("receive time age 10 should remain eligible");
+    }
+
     /// Concurrent missions must isolate recovery, lifecycle, resources, and traces.
     #[test]
     fn concurrent_missions_rebind_and_release_independently() {

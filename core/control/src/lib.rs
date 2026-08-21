@@ -22,6 +22,11 @@ pub const DEFAULT_NODE_STATUS_TTL_MS: u64 = 5_000;
 /// Default lease duration assigned by the convenience registration method.
 pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
 
+/// Evaluates freshness using only RoboGuide-local receive and decision times.
+fn is_fresh_at(received_at: TimestampMs, now: TimestampMs, max_age_ms: u64) -> bool {
+    now.as_millis().saturating_sub(received_at.as_millis()) <= max_age_ms
+}
+
 /// Candidate node identifiers for one task role.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleCandidates {
@@ -424,7 +429,8 @@ impl ControlPlane {
             .record_node(NodeStateSnapshot::new(
                 registration,
                 status,
-                NodeLivenessObservation::new(NodeLiveness::Reachable, status.observed_at()),
+                timestamp,
+                NodeLivenessObservation::new(NodeLiveness::Reachable, timestamp),
             ))
             .map_err(ControlError::SharedState)?;
         self.leases.insert(node_id.clone(), lease);
@@ -471,13 +477,8 @@ impl ControlPlane {
             .record_node_health(NodeHealthObservation::new(
                 heartbeat.node_id().clone(),
                 heartbeat.status(),
+                received_at,
             ))
-            .map_err(ControlError::SharedState)?;
-        state
-            .record_node_liveness(
-                heartbeat.node_id(),
-                NodeLivenessObservation::new(NodeLiveness::Reachable, received_at),
-            )
             .map_err(ControlError::SharedState)?;
         *lease = renewed_lease;
         events.append(
@@ -547,9 +548,11 @@ impl ControlPlane {
                 .into_iter()
                 .filter(|snapshot| {
                     snapshot.reported_status().health().is_schedulable()
-                        && snapshot
-                            .reported_status()
-                            .is_fresh_at(timestamp, self.max_status_age_ms)
+                        && is_fresh_at(
+                            snapshot.reported_status_received_at(),
+                            timestamp,
+                            self.max_status_age_ms,
+                        )
                         && snapshot.liveness().liveness() == NodeLiveness::Reachable
                         && self
                             .leases
@@ -1701,6 +1704,7 @@ mod tests {
             .record_node_health(NodeHealthObservation::new(
                 fixture.node_a_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(3)),
+                TimestampMs::new(3),
             ))
             .expect("offline observation should update Shared State");
         assert!(matches!(
@@ -2028,6 +2032,7 @@ mod tests {
             .record_node_health(NodeHealthObservation::new(
                 node_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
+                TimestampMs::new(1),
             ))
             .expect("shared health update should be accepted");
         for task in [&task_a, &task_b] {
@@ -2561,6 +2566,51 @@ mod tests {
             .expect("stale facts should remain represented by State");
         assert_eq!(stored.reported_status().health(), NodeHealth::Online);
         assert_eq!(stored.reported_status().observed_at(), observed_at);
+        assert_eq!(stored.reported_status_received_at(), observed_at);
+    }
+
+    /// Health freshness uses RoboGuide receive time, never source-local time.
+    #[test]
+    fn matching_freshness_uses_roboguide_receive_time() {
+        let node = registration(
+            "node-clock-domain",
+            CapabilityKind::Transport,
+            "space-clock",
+        );
+        let task = requirement("task-clock-domain", "transport", CapabilityKind::Transport);
+        let correlation_id = correlation();
+        let received_at = TimestampMs::new(100);
+        let mut control = ControlPlane::with_status_ttl(100);
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                &mut state,
+                node,
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(1_000_000)),
+                received_at,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("registration should preserve independent source time");
+
+        control
+            .match_capabilities(
+                &state,
+                &task,
+                TimestampMs::new(150),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("receive time age 50 should be fresh despite source clock value");
+        let stored = state
+            .node(&NodeId::new("node-clock-domain").expect("test node id should be valid"))
+            .expect("registered node should exist");
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(1_000_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), received_at);
     }
 
     /// Matching observes the latest health fact instead of a Control-owned cache.
@@ -2592,6 +2642,7 @@ mod tests {
             .record_node_health(NodeHealthObservation::new(
                 node_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
+                TimestampMs::new(1),
             ))
             .expect("newer health observation should enter Shared State");
         assert!(matches!(
@@ -2640,14 +2691,24 @@ mod tests {
                 NodeHeartbeat::new(
                     node_id.clone(),
                     lease_id,
-                    NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(50)),
+                    NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(8_000)),
                 ),
-                TimestampMs::new(50),
+                TimestampMs::new(30),
                 100,
                 &correlation_id,
                 &mut events,
             )
             .expect("heartbeat should renew active lease");
+
+        let stored = state
+            .node(&node_id)
+            .expect("heartbeat node should remain in Shared State");
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(8_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(30));
+        assert_eq!(stored.liveness().observed_at(), TimestampMs::new(30));
 
         let task = requirement("task-heartbeat", "transport", CapabilityKind::Transport);
         assert!(
@@ -2655,7 +2716,7 @@ mod tests {
                 .match_capabilities(
                     &state,
                     &task,
-                    TimestampMs::new(149),
+                    TimestampMs::new(129),
                     &correlation_id,
                     &mut events,
                 )
@@ -2665,7 +2726,7 @@ mod tests {
             control.match_capabilities(
                 &state,
                 &task,
-                TimestampMs::new(150),
+                TimestampMs::new(130),
                 &correlation_id,
                 &mut events,
             ),
@@ -2680,7 +2741,7 @@ mod tests {
         let node_id = node.node_id().clone();
         let task = requirement("task-expiring", "transport", CapabilityKind::Transport);
         let lease_id = LeaseId::new("lease-expiring").expect("test lease id must be valid");
-        let lease = NodeLease::new(lease_id, node_id.clone(), TimestampMs::new(0), 20)
+        let lease = NodeLease::new(lease_id, node_id.clone(), TimestampMs::new(0), 100)
             .expect("test lease should be valid");
         let correlation_id =
             CorrelationId::new("lease-expiry-trace").expect("test correlation id must be valid");
@@ -2701,7 +2762,7 @@ mod tests {
 
         let expired = control.expire_leases(
             &mut state,
-            TimestampMs::new(20),
+            TimestampMs::new(100),
             &correlation_id,
             &mut events,
         );
@@ -2714,15 +2775,16 @@ mod tests {
             .expect("expired node should remain represented in State");
         assert_eq!(stored.reported_status().health(), NodeHealth::Online);
         assert_eq!(stored.reported_status().observed_at(), TimestampMs::new(10));
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(0));
         assert_eq!(
             stored.liveness(),
-            NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(20))
+            NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(100))
         );
         assert!(matches!(
             control.match_capabilities(
                 &state,
                 &task,
-                TimestampMs::new(20),
+                TimestampMs::new(100),
                 &correlation_id,
                 &mut events,
             ),

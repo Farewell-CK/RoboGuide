@@ -101,6 +101,23 @@ capability，State 本身不输出 `schedulable`。
 本切片没有 Reconciliation loop，也不会根据 State 变化自动 Block、partial release 或
 rebind。Runtime networking、真实 Adapter 和 Lease/Heartbeat 最终 ownership 仍未解决。
 
+### State & Runtime Integration — Slice v0.2: Observation Time Semantics
+
+Node health ingestion 明确区分两个时间：`NodeStatus.observed_at` 是 Local EAIOS 的
+source-local observation time；`NodeHealthObservation.received_at` 是 RoboGuide
+Runtime/Control 接收该 observation 的本地时间。Registration 以 admission timestamp
+初始化 receive time；Runtime 使用自身 `Clock.now()`；Heartbeat 使用 `received_at`。
+这些入口均保留 source time，不要求 source 使用 RoboGuide Clock。
+
+State 当前按 RoboGuide `received_at` 决定同一 Node health observation 的新旧，即使
+source time 数值回退，只要 receive time 更新也会接纳。Control 的
+`max_status_age_ms` 同样只计算 `now - received_at`。Liveness 的 `observed_at` 与 Lease
+的 issued/expiry time 继续使用 RoboGuide-local 时间域。
+
+Receive-ordering 只是当前 deterministic bootstrap policy，不是 distributed event
+ordering solution。本切片没有实现 NTP/PTP、clock offset estimation、Lamport/Vector/
+HLC 或全局时钟同步，也没有实现 Reconciliation。
+
 本切片明确不是完整 State & Memory Plane。以下内容延后：
 
 - Allocation State；

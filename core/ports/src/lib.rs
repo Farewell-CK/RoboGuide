@@ -37,10 +37,10 @@ pub enum SharedStateError {
     StaleObservation {
         /// Node whose observation was rejected.
         node_id: NodeId,
-        /// Observation time already represented by Shared State.
-        current_observed_at: TimestampMs,
-        /// Older observation time that was rejected.
-        incoming_observed_at: TimestampMs,
+        /// RoboGuide-local ordering time already represented by Shared State.
+        current_ordering_time: TimestampMs,
+        /// Older RoboGuide-local ordering time that was rejected.
+        incoming_ordering_time: TimestampMs,
     },
 }
 
@@ -51,13 +51,13 @@ impl Display for SharedStateError {
             Self::UnknownNode(node_id) => write!(formatter, "shared state has no node {node_id}"),
             Self::StaleObservation {
                 node_id,
-                current_observed_at,
-                incoming_observed_at,
+                current_ordering_time,
+                incoming_ordering_time,
             } => write!(
                 formatter,
                 "stale observation for node {node_id}: current={}ms, incoming={}ms",
-                current_observed_at.as_millis(),
-                incoming_observed_at.as_millis()
+                current_ordering_time.as_millis(),
+                incoming_ordering_time.as_millis()
             ),
         }
     }
@@ -79,7 +79,7 @@ pub trait SharedNodeStateWriter {
     /// Records a node snapshot unless it would replace newer health evidence.
     fn record_node(&mut self, snapshot: NodeStateSnapshot) -> Result<(), SharedStateError>;
 
-    /// Records a non-older local health observation without changing liveness.
+    /// Atomically records local health and its successful-receipt reachability evidence.
     fn record_node_health(
         &mut self,
         observation: NodeHealthObservation,
@@ -136,7 +136,7 @@ pub trait NodeGateway {
     /// Returns the immutable registration advertised by this node.
     fn registration(&self) -> &NodeRegistration;
 
-    /// Returns the latest local health snapshot.
+    /// Returns local health with a source-local observation timestamp.
     fn status(&self) -> NodeStatus;
 
     /// Executes one role-scoped command using local autonomy and safety rules.

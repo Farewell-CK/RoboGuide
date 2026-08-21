@@ -5,8 +5,8 @@
 //! Runtime execution semantics between DEAIOS Control and local node adapters.
 
 use domain::{
-    EventPayload, ExecutionCommand, NodeEvent, NodeHealthObservation, NodeId, NodeLiveness,
-    NodeLivenessObservation, NodeStatus, TimestampMs,
+    EventPayload, ExecutionCommand, NodeEvent, NodeHealthObservation, NodeId, NodeStatus,
+    TimestampMs,
 };
 use ports::{
     Clock, EventSink, NodeGateway, NodeGatewayError, SharedNodeStateWriter, SharedStateError,
@@ -75,11 +75,11 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
             .ok_or_else(|| RuntimeError::UnknownNode(node_id.clone()))
     }
 
-    /// Normalizes one gateway health report and writes it to Shared Node State.
+    /// Adds RoboGuide receive time to one gateway health report and writes it to State.
     ///
     /// A successfully read gateway status is also evidence that the node is
-    /// currently reachable. State applies that liveness restoration while
-    /// preserving its independent freshness invariants.
+    /// currently reachable. Source-local observation time remains evidence;
+    /// Runtime clock time controls receive ordering and later freshness policy.
     pub fn observe_node_status<S: SharedNodeStateWriter>(
         &self,
         node_id: &NodeId,
@@ -89,15 +89,10 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
             .nodes
             .get(node_id)
             .ok_or_else(|| RuntimeError::UnknownNode(node_id.clone()))?;
-        let observation = NodeHealthObservation::new(node_id.clone(), node.status());
+        let received_at = self.clock.now();
+        let observation = NodeHealthObservation::new(node_id.clone(), node.status(), received_at);
         state
             .record_node_health(observation.clone())
-            .map_err(RuntimeError::SharedState)?;
-        state
-            .record_node_liveness(
-                node_id,
-                NodeLivenessObservation::new(NodeLiveness::Reachable, self.clock.now()),
-            )
             .map_err(RuntimeError::SharedState)?;
         Ok(observation)
     }
@@ -189,6 +184,7 @@ mod tests {
             .record_node(NodeStateSnapshot::new(
                 registration.clone(),
                 NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                TimestampMs::new(0),
                 NodeLivenessObservation::new(NodeLiveness::Reachable, TimestampMs::new(0)),
             ))
             .expect("initial node facts should enter Shared State");
@@ -199,12 +195,12 @@ mod tests {
             )
             .expect("test should start from unreachable liveness");
         let mut runtime = Runtime::new(
-            FixedClock::new(TimestampMs::new(12)),
+            FixedClock::new(TimestampMs::new(20)),
             InMemoryEventLog::new(),
         );
         runtime
             .register_node(Box::new(FakeNode::new(registration).with_status(
-                NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(10)),
+                NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(1_000)),
             )))
             .expect("fake adapter registration should succeed");
 
@@ -213,9 +209,12 @@ mod tests {
             .expect("Runtime should ingest the gateway observation");
         assert_eq!(observation.node_id(), &node_id);
         assert_eq!(observation.status().health(), NodeHealth::Degraded);
+        assert_eq!(observation.status().observed_at(), TimestampMs::new(1_000));
+        assert_eq!(observation.received_at(), TimestampMs::new(20));
         let stored = state.node(&node_id).expect("node facts should remain");
         assert_eq!(stored.reported_status(), observation.status());
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(20));
         assert_eq!(stored.liveness().liveness(), NodeLiveness::Reachable);
-        assert_eq!(stored.liveness().observed_at(), TimestampMs::new(12));
+        assert_eq!(stored.liveness().observed_at(), TimestampMs::new(20));
     }
 }

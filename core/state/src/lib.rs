@@ -41,20 +41,20 @@ impl SharedNodeStateReader for InMemorySharedNodeState {
 }
 
 impl SharedNodeStateWriter for InMemorySharedNodeState {
-    /// Records registration, reported health, and liveness without overwriting newer evidence.
+    /// Records a snapshot ordered by its RoboGuide-local health receive time.
     fn record_node(&mut self, snapshot: NodeStateSnapshot) -> Result<(), SharedStateError> {
         if let Some(current) = self.nodes.get(snapshot.node_id()) {
             reject_older_timestamp(
                 snapshot.node_id(),
-                current.reported_status().observed_at(),
-                snapshot.reported_status().observed_at(),
+                current.reported_status_received_at(),
+                snapshot.reported_status_received_at(),
             )?;
         }
         self.nodes.insert(snapshot.node_id().clone(), snapshot);
         Ok(())
     }
 
-    /// Records reported health without changing independently observed liveness.
+    /// Atomically records health ordered by receive time and successful reachability.
     fn record_node_health(
         &mut self,
         observation: NodeHealthObservation,
@@ -67,13 +67,21 @@ impl SharedNodeStateWriter for InMemorySharedNodeState {
         let status = observation.status();
         reject_older_timestamp(
             node_id,
-            current.reported_status().observed_at(),
-            status.observed_at(),
+            current.reported_status_received_at(),
+            observation.received_at(),
         )?;
         let registration = current.registration().clone();
+        let liveness = if observation.received_at() >= current.liveness().observed_at() {
+            domain::NodeLivenessObservation::new(
+                domain::NodeLiveness::Reachable,
+                observation.received_at(),
+            )
+        } else {
+            current.liveness()
+        };
         self.nodes.insert(
             node_id.clone(),
-            NodeStateSnapshot::new(registration, status, current.liveness()),
+            NodeStateSnapshot::new(registration, status, observation.received_at(), liveness),
         );
         Ok(())
     }
@@ -97,23 +105,28 @@ impl SharedNodeStateWriter for InMemorySharedNodeState {
         let reported_status = current.reported_status();
         self.nodes.insert(
             node_id.clone(),
-            NodeStateSnapshot::new(registration, reported_status, observation),
+            NodeStateSnapshot::new(
+                registration,
+                reported_status,
+                current.reported_status_received_at(),
+                observation,
+            ),
         );
         Ok(())
     }
 }
 
-/// Rejects an incoming fact older than the latest fact in the same state dimension.
+/// Rejects a fact older in the relevant RoboGuide-local ordering dimension.
 fn reject_older_timestamp(
     node_id: &NodeId,
-    current_observed_at: domain::TimestampMs,
-    incoming_observed_at: domain::TimestampMs,
+    current_ordering_time: domain::TimestampMs,
+    incoming_ordering_time: domain::TimestampMs,
 ) -> Result<(), SharedStateError> {
-    if incoming_observed_at < current_observed_at {
+    if incoming_ordering_time < current_ordering_time {
         return Err(SharedStateError::StaleObservation {
             node_id: node_id.clone(),
-            current_observed_at,
-            incoming_observed_at,
+            current_ordering_time,
+            incoming_ordering_time,
         });
     }
     Ok(())
@@ -128,7 +141,7 @@ mod tests {
     };
 
     /// Builds one transport node snapshot for deterministic State tests.
-    fn snapshot(observed_at: u64) -> NodeStateSnapshot {
+    fn snapshot(source_observed_at: u64, received_at: u64) -> NodeStateSnapshot {
         let registration = NodeRegistration::new(
             NodeId::new("node-a").expect("test node id should be valid"),
             LocalRuntime::new("vendor-runtime", "1.0.0").expect("test runtime should be valid"),
@@ -144,8 +157,9 @@ mod tests {
         );
         NodeStateSnapshot::new(
             registration,
-            NodeStatus::new(NodeHealth::Online, TimestampMs::new(observed_at)),
-            NodeLivenessObservation::new(NodeLiveness::Reachable, TimestampMs::new(observed_at)),
+            NodeStatus::new(NodeHealth::Online, TimestampMs::new(source_observed_at)),
+            TimestampMs::new(received_at),
+            NodeLivenessObservation::new(NodeLiveness::Reachable, TimestampMs::new(received_at)),
         )
     }
 
@@ -154,7 +168,7 @@ mod tests {
     fn registration_enters_shared_node_state() {
         let mut state = InMemorySharedNodeState::new();
         state
-            .record_node(snapshot(10))
+            .record_node(snapshot(1_000, 10))
             .expect("initial observation should be accepted");
 
         let node_id = NodeId::new("node-a").expect("test node id should be valid");
@@ -167,36 +181,63 @@ mod tests {
         assert_eq!(stored.registration().capabilities().len(), 1);
         assert_eq!(stored.registration().resources().len(), 1);
         assert_eq!(stored.reported_status().health(), NodeHealth::Online);
-        assert_eq!(stored.reported_status().observed_at(), TimestampMs::new(10));
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(1_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(10));
         assert_eq!(stored.liveness().liveness(), NodeLiveness::Reachable);
     }
 
-    /// New health evidence replaces current facts while older evidence is rejected.
+    /// Later receive time accepts health even when the source-local clock moves backwards.
     #[test]
-    fn health_updates_preserve_latest_observation() {
+    fn later_receive_time_accepts_backward_source_time() {
         let mut state = InMemorySharedNodeState::new();
         state
-            .record_node(snapshot(10))
+            .record_node(snapshot(1_000, 10))
             .expect("initial observation should be accepted");
         let node_id = NodeId::new("node-a").expect("test node id should be valid");
         state
             .record_node_health(NodeHealthObservation::new(
                 node_id.clone(),
-                NodeStatus::new(NodeHealth::Offline, TimestampMs::new(20)),
+                NodeStatus::new(NodeHealth::Degraded, TimestampMs::new(900)),
+                TimestampMs::new(20),
             ))
-            .expect("newer health evidence should be accepted");
+            .expect("later receive time should win despite source clock regression");
+
+        let stored = state.node(&node_id).expect("registered node should remain");
+        assert_eq!(stored.reported_status().health(), NodeHealth::Degraded);
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(900)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(20));
+    }
+
+    /// Older receive time cannot overwrite current health even with newer source time.
+    #[test]
+    fn older_receive_time_cannot_overwrite_health() {
+        let mut state = InMemorySharedNodeState::new();
+        state
+            .record_node(snapshot(1_000, 20))
+            .expect("initial observation should be accepted");
+        let node_id = NodeId::new("node-a").expect("test node id should be valid");
 
         let error = state
             .record_node_health(NodeHealthObservation::new(
                 node_id.clone(),
-                NodeStatus::new(NodeHealth::Online, TimestampMs::new(15)),
+                NodeStatus::new(NodeHealth::Offline, TimestampMs::new(2_000)),
+                TimestampMs::new(10),
             ))
-            .expect_err("older health evidence must not replace current state");
+            .expect_err("older receive time must not replace current health");
         assert!(matches!(error, SharedStateError::StaleObservation { .. }));
         let stored = state.node(&node_id).expect("registered node should remain");
-        assert_eq!(stored.reported_status().health(), NodeHealth::Offline);
-        assert_eq!(stored.reported_status().observed_at(), TimestampMs::new(20));
-        assert_eq!(stored.liveness().liveness(), NodeLiveness::Reachable);
+        assert_eq!(stored.reported_status().health(), NodeHealth::Online);
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(1_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(20));
     }
 
     /// Liveness changes independently without rewriting local reported health.
@@ -204,7 +245,7 @@ mod tests {
     fn liveness_update_preserves_reported_health() {
         let mut state = InMemorySharedNodeState::new();
         state
-            .record_node(snapshot(10))
+            .record_node(snapshot(8_000, 10))
             .expect("initial observation should be accepted");
         let node_id = NodeId::new("node-a").expect("test node id should be valid");
         state
@@ -216,7 +257,11 @@ mod tests {
 
         let stored = state.node(&node_id).expect("registered node should remain");
         assert_eq!(stored.reported_status().health(), NodeHealth::Online);
-        assert_eq!(stored.reported_status().observed_at(), TimestampMs::new(10));
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(8_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(10));
         assert_eq!(stored.liveness().liveness(), NodeLiveness::Unreachable);
         assert_eq!(stored.liveness().observed_at(), TimestampMs::new(20));
     }

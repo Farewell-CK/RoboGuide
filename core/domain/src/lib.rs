@@ -148,7 +148,10 @@ impl Display for TaskRef {
     }
 }
 
-/// A monotonic timestamp used by deterministic core tests and runtime adapters.
+/// A millisecond clock reading whose comparison domain is defined by its containing field.
+///
+/// Readings from independent source clocks and RoboGuide clocks are not
+/// directly comparable merely because they share this representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TimestampMs(u64);
 
@@ -171,9 +174,9 @@ pub struct NodeLease {
     lease_id: LeaseId,
     /// Node that owns the lease.
     node_id: NodeId,
-    /// Time at which this lease interval began.
+    /// RoboGuide-local time at which this lease interval began.
     issued_at: TimestampMs,
-    /// Time after which the lease cannot authorize scheduling.
+    /// RoboGuide-local time after which the lease cannot authorize scheduling.
     expires_at: TimestampMs,
 }
 
@@ -220,7 +223,7 @@ impl NodeLease {
         self.expires_at
     }
 
-    /// Returns whether the lease is active at the supplied monotonic time.
+    /// Returns whether the lease is active at the supplied RoboGuide-local time.
     pub const fn is_active_at(&self, now: TimestampMs) -> bool {
         now.as_millis() < self.expires_at.as_millis()
     }
@@ -743,7 +746,7 @@ impl NodeHealth {
 pub struct NodeStatus {
     /// Most recent health classification reported by the node.
     health: NodeHealth,
-    /// Monotonic time at which the health was observed.
+    /// Source-local time at which the Local EAIOS observed this health.
     observed_at: TimestampMs,
 }
 
@@ -798,17 +801,9 @@ impl NodeStatus {
         self.health
     }
 
-    /// Returns when this snapshot was observed.
+    /// Returns when the source observed this health in its own local time domain.
     pub const fn observed_at(self) -> TimestampMs {
         self.observed_at
-    }
-
-    /// Returns whether the snapshot is within the supplied freshness window.
-    ///
-    /// A snapshot observed in the future is treated as fresh so deterministic
-    /// callers cannot fail solely because their clocks moved in opposite order.
-    pub const fn is_fresh_at(self, now: TimestampMs, max_age_ms: u64) -> bool {
-        now.as_millis().saturating_sub(self.observed_at.as_millis()) <= max_age_ms
     }
 }
 
@@ -819,12 +814,18 @@ pub struct NodeHealthObservation {
     node_id: NodeId,
     /// Latest timestamped health explicitly reported by the local system.
     status: NodeStatus,
+    /// RoboGuide-local time at which this observation was received and normalized.
+    received_at: TimestampMs,
 }
 
 impl NodeHealthObservation {
     /// Creates a transport-neutral node health observation.
-    pub const fn new(node_id: NodeId, status: NodeStatus) -> Self {
-        Self { node_id, status }
+    pub const fn new(node_id: NodeId, status: NodeStatus, received_at: TimestampMs) -> Self {
+        Self {
+            node_id,
+            status,
+            received_at,
+        }
     }
 
     /// Returns the node that produced the health observation.
@@ -835,6 +836,11 @@ impl NodeHealthObservation {
     /// Returns the timestamped health reported by the local system.
     pub const fn status(&self) -> NodeStatus {
         self.status
+    }
+
+    /// Returns when RoboGuide received this observation in its local time domain.
+    pub const fn received_at(&self) -> TimestampMs {
+        self.received_at
     }
 }
 
@@ -852,7 +858,7 @@ pub enum NodeLiveness {
 pub struct NodeLivenessObservation {
     /// Current minimal reachability classification.
     liveness: NodeLiveness,
-    /// Monotonic time at which RoboGuide observed this liveness.
+    /// RoboGuide-local time at which it observed this liveness.
     observed_at: TimestampMs,
 }
 
@@ -962,6 +968,8 @@ pub struct NodeStateSnapshot {
     registration: NodeRegistration,
     /// Latest accepted health explicitly reported by the local EAIOS.
     reported_status: NodeStatus,
+    /// RoboGuide-local receive time of the latest reported health.
+    reported_status_received_at: TimestampMs,
     /// Latest reachability fact observed by RoboGuide.
     liveness: NodeLivenessObservation,
 }
@@ -971,11 +979,13 @@ impl NodeStateSnapshot {
     pub const fn new(
         registration: NodeRegistration,
         reported_status: NodeStatus,
+        reported_status_received_at: TimestampMs,
         liveness: NodeLivenessObservation,
     ) -> Self {
         Self {
             registration,
             reported_status,
+            reported_status_received_at,
             liveness,
         }
     }
@@ -993,6 +1003,11 @@ impl NodeStateSnapshot {
     /// Returns the latest health explicitly reported by the local EAIOS.
     pub const fn reported_status(&self) -> NodeStatus {
         self.reported_status
+    }
+
+    /// Returns when RoboGuide received the latest reported health.
+    pub const fn reported_status_received_at(&self) -> TimestampMs {
+        self.reported_status_received_at
     }
 
     /// Returns the latest system-observed liveness fact.
