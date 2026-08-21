@@ -71,6 +71,8 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "ports",
+ "state",
+ "testkit",
 ]
 
 [[package]]

@@ -179,6 +179,12 @@ impl FakeNode {
         self
     }
 
+    /// Configures the health fact returned through the fake adapter boundary.
+    pub const fn with_status(mut self, status: NodeStatus) -> Self {
+        self.status = status;
+        self
+    }
+
     /// Returns all commands received by this fake node.
     pub fn executed_commands(&self) -> &[ExecutionCommand] {
         &self.executed_commands

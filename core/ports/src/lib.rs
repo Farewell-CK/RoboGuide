@@ -5,8 +5,8 @@
 //! Transport-neutral ports owned by the DEAIOS core.
 
 use domain::{
-    CorrelationId, EventId, EventPayload, ExecutionCommand, NodeEvent, NodeId, NodeRegistration,
-    NodeStateSnapshot, NodeStatus, TimestampMs,
+    CorrelationId, EventId, EventPayload, ExecutionCommand, NodeEvent, NodeHealthObservation,
+    NodeId, NodeLivenessObservation, NodeRegistration, NodeStateSnapshot, NodeStatus, TimestampMs,
 };
 use std::fmt::{Display, Formatter};
 
@@ -79,11 +79,17 @@ pub trait SharedNodeStateWriter {
     /// Records a node snapshot unless it would replace newer health evidence.
     fn record_node(&mut self, snapshot: NodeStateSnapshot) -> Result<(), SharedStateError>;
 
-    /// Replaces one node's health fact with a non-older accepted observation.
-    fn update_node_status(
+    /// Records a non-older local health observation without changing liveness.
+    fn record_node_health(
+        &mut self,
+        observation: NodeHealthObservation,
+    ) -> Result<(), SharedStateError>;
+
+    /// Records a non-older RoboGuide-derived liveness observation.
+    fn record_node_liveness(
         &mut self,
         node_id: &NodeId,
-        status: NodeStatus,
+        observation: NodeLivenessObservation,
     ) -> Result<(), SharedStateError>;
 }
 

@@ -812,6 +812,70 @@ impl NodeStatus {
     }
 }
 
+/// A normalized health observation reported by one local EAIOS or adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeHealthObservation {
+    /// Node whose local health was observed.
+    node_id: NodeId,
+    /// Latest timestamped health explicitly reported by the local system.
+    status: NodeStatus,
+}
+
+impl NodeHealthObservation {
+    /// Creates a transport-neutral node health observation.
+    pub const fn new(node_id: NodeId, status: NodeStatus) -> Self {
+        Self { node_id, status }
+    }
+
+    /// Returns the node that produced the health observation.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the timestamped health reported by the local system.
+    pub const fn status(&self) -> NodeStatus {
+        self.status
+    }
+}
+
+/// Minimal system-observed reachability of one node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeLiveness {
+    /// RoboGuide successfully observed or reached the node.
+    Reachable,
+    /// RoboGuide can no longer establish current reachability.
+    Unreachable,
+}
+
+/// A timestamped liveness fact derived by RoboGuide rather than the local EAIOS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeLivenessObservation {
+    /// Current minimal reachability classification.
+    liveness: NodeLiveness,
+    /// Monotonic time at which RoboGuide observed this liveness.
+    observed_at: TimestampMs,
+}
+
+impl NodeLivenessObservation {
+    /// Creates a timestamped system-observed liveness fact.
+    pub const fn new(liveness: NodeLiveness, observed_at: TimestampMs) -> Self {
+        Self {
+            liveness,
+            observed_at,
+        }
+    }
+
+    /// Returns the observed reachability classification.
+    pub const fn liveness(self) -> NodeLiveness {
+        self.liveness
+    }
+
+    /// Returns when RoboGuide observed this liveness.
+    pub const fn observed_at(self) -> TimestampMs {
+        self.observed_at
+    }
+}
+
 /// The local runtime and resources a node exposes to DEAIOS.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeRegistration {
@@ -891,21 +955,28 @@ impl NodeRegistration {
     }
 }
 
-/// The latest shared registration and health facts known for one node.
+/// The latest shared registration, reported health, and liveness facts for one node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeStateSnapshot {
     /// Local runtime, capability, and resource facts advertised by the node.
     registration: NodeRegistration,
-    /// Latest accepted timestamped health observation for the node.
-    status: NodeStatus,
+    /// Latest accepted health explicitly reported by the local EAIOS.
+    reported_status: NodeStatus,
+    /// Latest reachability fact observed by RoboGuide.
+    liveness: NodeLivenessObservation,
 }
 
 impl NodeStateSnapshot {
     /// Creates a shared node snapshot from transport-neutral domain facts.
-    pub const fn new(registration: NodeRegistration, status: NodeStatus) -> Self {
+    pub const fn new(
+        registration: NodeRegistration,
+        reported_status: NodeStatus,
+        liveness: NodeLivenessObservation,
+    ) -> Self {
         Self {
             registration,
-            status,
+            reported_status,
+            liveness,
         }
     }
 
@@ -919,9 +990,14 @@ impl NodeStateSnapshot {
         &self.registration
     }
 
-    /// Returns the latest accepted timestamped health observation.
-    pub const fn status(&self) -> NodeStatus {
-        self.status
+    /// Returns the latest health explicitly reported by the local EAIOS.
+    pub const fn reported_status(&self) -> NodeStatus {
+        self.reported_status
+    }
+
+    /// Returns the latest system-observed liveness fact.
+    pub const fn liveness(&self) -> NodeLivenessObservation {
+        self.liveness
     }
 }
 

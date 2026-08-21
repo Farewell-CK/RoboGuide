@@ -8,9 +8,9 @@
 //! Group binding, and role rebinding. It never sends raw actuator commands.
 
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHeartbeat, NodeId, NodeLease,
-    NodeRegistration, NodeStateSnapshot, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId,
-    TaskRef, TaskRequirement, TimestampMs,
+    CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHealthObservation, NodeHeartbeat,
+    NodeId, NodeLease, NodeLiveness, NodeLivenessObservation, NodeRegistration, NodeStateSnapshot,
+    NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
@@ -421,7 +421,11 @@ impl ControlPlane {
         let node_id = registration.node_id().clone();
         let lease_id = lease.lease_id().clone();
         state
-            .record_node(NodeStateSnapshot::new(registration, status))
+            .record_node(NodeStateSnapshot::new(
+                registration,
+                status,
+                NodeLivenessObservation::new(NodeLiveness::Reachable, status.observed_at()),
+            ))
             .map_err(ControlError::SharedState)?;
         self.leases.insert(node_id.clone(), lease);
         events.append(
@@ -464,7 +468,16 @@ impl ControlPlane {
                     other => ControlError::InvalidLease(other.to_string()),
                 })?;
         state
-            .update_node_status(heartbeat.node_id(), heartbeat.status())
+            .record_node_health(NodeHealthObservation::new(
+                heartbeat.node_id().clone(),
+                heartbeat.status(),
+            ))
+            .map_err(ControlError::SharedState)?;
+        state
+            .record_node_liveness(
+                heartbeat.node_id(),
+                NodeLivenessObservation::new(NodeLiveness::Reachable, received_at),
+            )
             .map_err(ControlError::SharedState)?;
         *lease = renewed_lease;
         events.append(
@@ -479,7 +492,7 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Expires leases and marks affected nodes Offline in the shared view.
+    /// Expires leases and records affected nodes as unreachable without changing reported health.
     pub fn expire_leases<S: SharedNodeStateReader + SharedNodeStateWriter, E: EventSink>(
         &mut self,
         state: &mut S,
@@ -492,15 +505,18 @@ impl ControlPlane {
             .iter()
             .filter(|(node_id, lease)| {
                 !lease.is_active_at(now)
-                    && state
-                        .node(node_id)
-                        .is_some_and(|snapshot| snapshot.status().health().is_schedulable())
+                    && state.node(node_id).is_some_and(|snapshot| {
+                        snapshot.liveness().liveness() == NodeLiveness::Reachable
+                    })
             })
             .map(|(node_id, lease)| (node_id.clone(), lease.lease_id().clone()))
             .collect::<Vec<_>>();
         for (node_id, lease_id) in &expired {
             state
-                .update_node_status(node_id, NodeStatus::new(domain::NodeHealth::Offline, now))
+                .record_node_liveness(
+                    node_id,
+                    NodeLivenessObservation::new(NodeLiveness::Unreachable, now),
+                )
                 .map_err(ControlError::SharedState)?;
             events.append(
                 now,
@@ -530,10 +546,11 @@ impl ControlPlane {
                 .nodes()
                 .into_iter()
                 .filter(|snapshot| {
-                    snapshot.status().health().is_schedulable()
+                    snapshot.reported_status().health().is_schedulable()
                         && snapshot
-                            .status()
+                            .reported_status()
                             .is_fresh_at(timestamp, self.max_status_age_ms)
+                        && snapshot.liveness().liveness() == NodeLiveness::Reachable
                         && self
                             .leases
                             .get(snapshot.node_id())
@@ -783,10 +800,7 @@ impl ControlPlane {
             .groups
             .get(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if !matches!(
-            group.lifecycle,
-            GroupLifecycle::Active | GroupLifecycle::Adapted | GroupLifecycle::Blocked
-        ) {
+        if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         let assignment_index = group
@@ -1501,6 +1515,61 @@ mod tests {
         );
     }
 
+    /// Partial release is legal only after the Group explicitly becomes Blocked.
+    #[test]
+    fn partial_release_requires_blocked_lifecycle() {
+        let mut fixture = recovery_fixture(true);
+        assert!(matches!(
+            fixture.control.release_role_binding(
+                &fixture.group_id,
+                &fixture.transport_role,
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Active))
+        ));
+
+        block_fixture(&mut fixture);
+        fixture
+            .control
+            .release_role_binding(
+                &fixture.group_id,
+                &fixture.transport_role,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("blocked Group should permit partial release");
+        fixture
+            .control
+            .rebind_role(
+                &fixture.state,
+                &fixture.group_id,
+                &RoleRequirementView::new(RoleRequirement::new(
+                    fixture.transport_role.clone(),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                )),
+                fixture.node_b_id.clone(),
+                vec![fixture.space_b.clone()],
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("blocked Group should recover to Adapted");
+        assert!(matches!(
+            fixture.control.release_role_binding(
+                &fixture.group_id,
+                &fixture.compute_role,
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Adapted))
+        ));
+    }
+
     /// A blocked Group rebinds only the failed role and reactivates in place.
     #[test]
     fn blocked_group_recovers_through_adapted_and_active() {
@@ -1629,10 +1698,10 @@ mod tests {
             .expect("failed transport binding should release");
         fixture
             .state
-            .update_node_status(
-                &fixture.node_a_id,
+            .record_node_health(NodeHealthObservation::new(
+                fixture.node_a_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(3)),
-            )
+            ))
             .expect("offline observation should update Shared State");
         assert!(matches!(
             fixture.control.match_capabilities(
@@ -1798,7 +1867,7 @@ mod tests {
             .expect("registration should be readable from Shared State");
         assert_eq!(stored.registration().capabilities().len(), 1);
         assert_eq!(stored.registration().resources().len(), 1);
-        assert_eq!(stored.status().health(), NodeHealth::Online);
+        assert_eq!(stored.reported_status().health(), NodeHealth::Online);
         let candidates = control
             .match_capabilities(&state, &task, timestamp, &correlation_id, &mut events)
             .expect("online node should match");
@@ -1956,10 +2025,10 @@ mod tests {
         );
 
         state
-            .update_node_status(
-                &node_id,
+            .record_node_health(NodeHealthObservation::new(
+                node_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
-            )
+            ))
             .expect("shared health update should be accepted");
         for task in [&task_a, &task_b] {
             assert!(matches!(
@@ -2490,8 +2559,8 @@ mod tests {
         let stored = state
             .node(&NodeId::new("node-a").expect("test node id should be valid"))
             .expect("stale facts should remain represented by State");
-        assert_eq!(stored.status().health(), NodeHealth::Online);
-        assert_eq!(stored.status().observed_at(), observed_at);
+        assert_eq!(stored.reported_status().health(), NodeHealth::Online);
+        assert_eq!(stored.reported_status().observed_at(), observed_at);
     }
 
     /// Matching observes the latest health fact instead of a Control-owned cache.
@@ -2520,10 +2589,10 @@ mod tests {
             .expect("online node should initially match");
 
         state
-            .update_node_status(
-                &node_id,
+            .record_node_health(NodeHealthObservation::new(
+                node_id.clone(),
                 NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
-            )
+            ))
             .expect("newer health observation should enter Shared State");
         assert!(matches!(
             control.match_capabilities(
@@ -2604,22 +2673,26 @@ mod tests {
         ));
     }
 
-    /// Lease expiry marks a previously schedulable node Offline.
+    /// Lease expiry changes liveness without rewriting local reported health.
     #[test]
-    fn expired_lease_marks_node_offline() {
+    fn expired_lease_marks_liveness_unreachable() {
         let node = registration("node-expiring", CapabilityKind::Transport, "space-expiring");
         let node_id = node.node_id().clone();
         let task = requirement("task-expiring", "transport", CapabilityKind::Transport);
+        let lease_id = LeaseId::new("lease-expiring").expect("test lease id must be valid");
+        let lease = NodeLease::new(lease_id, node_id.clone(), TimestampMs::new(0), 20)
+            .expect("test lease should be valid");
         let correlation_id =
             CorrelationId::new("lease-expiry-trace").expect("test correlation id must be valid");
-        let mut control = ControlPlane::with_status_ttl(200);
+        let mut control = ControlPlane::with_status_ttl(100);
         let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
-            .register_node(
+            .register_node_with_lease(
                 &mut state,
                 node,
-                NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(10)),
+                lease,
                 TimestampMs::new(0),
                 &correlation_id,
                 &mut events,
@@ -2628,7 +2701,7 @@ mod tests {
 
         let expired = control.expire_leases(
             &mut state,
-            TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
+            TimestampMs::new(20),
             &correlation_id,
             &mut events,
         );
@@ -2636,11 +2709,20 @@ mod tests {
             expired.expect("lease expiry should update Shared State"),
             vec![node_id]
         );
+        let stored = state
+            .node(&NodeId::new("node-expiring").expect("test node id should be valid"))
+            .expect("expired node should remain represented in State");
+        assert_eq!(stored.reported_status().health(), NodeHealth::Online);
+        assert_eq!(stored.reported_status().observed_at(), TimestampMs::new(10));
+        assert_eq!(
+            stored.liveness(),
+            NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(20))
+        );
         assert!(matches!(
             control.match_capabilities(
                 &state,
                 &task,
-                TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
+                TimestampMs::new(20),
                 &correlation_id,
                 &mut events,
             ),

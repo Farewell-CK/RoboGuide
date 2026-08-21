@@ -16,6 +16,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   composition roots.
 - `core/state/` implements only State & Memory Plane Slice v0.1: deterministic
   Shared Node State behind transport-neutral reader/writer ports.
+- Runtime observation ingestion normalizes `NodeGateway.status()` into reported
+  health and separately records RoboGuide-observed liveness; it does not trigger
+  reconciliation or automatic recovery.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -65,6 +68,8 @@ network, model, and hardware checks as adapter/system tests. Cross-module behavi
 produces an inspectable event trace. State tests keep observed facts separate from
 Control eligibility policy and cover registration, freshness, health updates, and
 cross-mission reads. Recovery tests must preserve partial versus whole-group release.
+Runtime-State tests distinguish local reported health from system-observed liveness
+and prove that new observations affect later Control decisions.
 
 ## Commit & Pull Request Guidelines
 

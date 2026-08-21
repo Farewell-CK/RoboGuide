@@ -7,3 +7,7 @@ rust-version.workspace = true
 [dependencies]
 domain = { path = "../domain" }
 ports = { path = "../ports" }
+
+[dev-dependencies]
+state = { path = "../state" }
+testkit = { path = "../testkit" }

@@ -350,6 +350,12 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     runtime
         .register_node(Box::new(FakeNode::new(edge)))
         .map_err(|error| error.to_string())?;
+    runtime
+        .observe_node_status(
+            &NodeId::new("node-a").map_err(|error| error.to_string())?,
+            &mut state,
+        )
+        .map_err(|error| error.to_string())?;
 
     let compute_command = ExecutionCommand::new(
         mission_id.clone(),
@@ -446,6 +452,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use control::ControlError;
     use domain::{EventPayload, NodeEvent, TaskRef};
 
     /// Builds a two-role task used to exercise concurrent mission isolation.
@@ -570,6 +577,78 @@ mod tests {
         assert!(matches!(
             events[16].payload(),
             EventPayload::ExecutionGroupReleased { .. }
+        ));
+    }
+
+    /// Runtime health ingestion immediately changes the next Control decision.
+    #[test]
+    fn runtime_health_observation_changes_control_matching() {
+        let timestamp = TimestampMs::new(0);
+        let observed_offline_at = TimestampMs::new(10);
+        let correlation_id =
+            CorrelationId::new("runtime-state-trace").expect("correlation id should be valid");
+        let node = build_registration(
+            "node-observed",
+            "vendor-runtime",
+            vec![Capability::new(CapabilityKind::Transport, true)],
+            vec![
+                Resource::new(
+                    ResourceId::new("space-observed").expect("resource id should be valid"),
+                    ResourceKind::Space,
+                    1,
+                )
+                .expect("resource should be valid"),
+            ],
+        )
+        .expect("node registration should be valid");
+        let node_id = node.node_id().clone();
+        let requirement = TaskRequirement::new(
+            MissionId::new("mission-observation").expect("mission id should be valid"),
+            TaskId::new("task-01").expect("task id should be valid"),
+            vec![RoleRequirement::new(
+                RoleId::new("transport").expect("role id should be valid"),
+                CapabilityKind::Transport,
+                Some(ResourceKind::Space),
+            )],
+        )
+        .expect("task requirement should be valid");
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut log = SharedEventLog::new();
+        control
+            .register_node(
+                &mut state,
+                node.clone(),
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut log,
+            )
+            .expect("node admission should succeed");
+        control
+            .match_capabilities(&state, &requirement, timestamp, &correlation_id, &mut log)
+            .expect("initial online observation should be eligible");
+
+        let mut runtime = Runtime::new(VirtualClock::new(observed_offline_at), log.clone());
+        runtime
+            .register_node(Box::new(FakeNode::new(node).with_status(NodeStatus::new(
+                NodeHealth::Offline,
+                observed_offline_at,
+            ))))
+            .expect("fake EAIOS adapter registration should succeed");
+        runtime
+            .observe_node_status(&node_id, &mut state)
+            .expect("Runtime should ingest local health");
+
+        assert!(matches!(
+            control.match_capabilities(
+                &state,
+                &requirement,
+                observed_offline_at,
+                &correlation_id,
+                &mut log,
+            ),
+            Err(ControlError::NoCandidate(role_id)) if role_id.as_str() == "transport"
         ));
     }
 

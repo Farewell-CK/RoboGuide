@@ -128,8 +128,18 @@ Runtime / Adapter observation -> Shared Node State -> Control decision
 ```
 
 `core/state` 使用确定性内存实现保存 Node identity、Local EAIOS/runtime descriptor、
-Capability/Resource declaration 和最新 `NodeStatus`。State 保存“观测到了什么以及何时
-观测”，Control 仍根据 health、TTL、lease 和 requirement 决定是否可参与 matching。
+Capability/Resource declaration、Local EAIOS 最近上报的 health，以及 RoboGuide 观察到的
+liveness。State 保存“观测到了什么以及何时观测”，Control 仍根据 reported health、
+freshness、liveness、lease 和 requirement 决定是否可参与 matching。
+
+当前同时实现 **State & Runtime Integration — Slice v0.1: Node Observation
+Ingestion**。`NodeGateway` 继续代表 Local EAIOS / Vendor Runtime / Adapter 边界；
+Runtime 从 `NodeGateway.status()` 形成 transport-neutral `NodeHealthObservation`，通过
+`SharedNodeStateWriter` 写入 State。成功读取 gateway 是 `Reachable` 证据；lease expiry
+只更新为 `Unreachable`，不会把 Local EAIOS 最后上报的 health 篡改成 `Offline`。
+
+该路径只让新的事实可被后续 Control decision 读取，不会自动触发 Block、partial
+release、rebind 或其他 Reconciliation 行为。
 
 这不是完整的 State & Memory Plane。Allocation State、Execution Group State
 Projection、Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、

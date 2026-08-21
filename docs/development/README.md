@@ -77,13 +77,29 @@ Python；Python 通过 Adapter 边界与核心通信。
 
 当前已实现的 State Port 为 `SharedNodeStateReader` 和
 `SharedNodeStateWriter`。领域对象 `NodeStateSnapshot` 组合
-`NodeRegistration` 与带 observation timestamp 的 `NodeStatus`；`core/state` 使用
-`BTreeMap` 保存最新已接受事实，并拒绝覆盖更新事实的旧 health observation。
+`NodeRegistration`、Local EAIOS 上报的 `NodeStatus` 与 RoboGuide 观察到的 timestamped
+liveness；`core/state` 使用 `BTreeMap` 保存最新已接受事实，并拒绝旧 observation
+覆盖同一状态维度中的更新事实。
 
 Control 不再私有保存 `NodeRegistration` 或 `NodeStatus`。Registration 和 Heartbeat
 通过 Writer 更新 Shared State；Matching、Proposal validation 和 Rebind validation
 通过 Reader 读取当前事实。State 不输出最终 `schedulable` 结论：health、freshness
 TTL、lease validity 和 requirement eligibility 仍由 Control 判定。
+
+### State & Runtime Integration — Slice v0.1: Node Observation Ingestion
+
+Runtime 通过 `NodeGateway.status()` 从 Local EAIOS / Vendor Adapter 获取 health，形成
+transport-neutral `NodeHealthObservation`，并仅依赖 `SharedNodeStateWriter` 写入 State。
+Runtime 不依赖 `core/state` concrete crate，也不保存跨 Mission 的 shared snapshot。
+
+Reported Health 与 Liveness 是独立事实：前者来自 Local EAIOS，后者来自 RoboGuide 的
+可达性观察。Runtime 成功读取 node status 时，以 Runtime Clock 记录 `Reachable`；
+Control 暂时仍在 lease expiry 时写入 `Unreachable`，但不再把 reported health 改成
+`Offline`。Matching 综合 reported health、health freshness、liveness、active lease 和
+capability，State 本身不输出 `schedulable`。
+
+本切片没有 Reconciliation loop，也不会根据 State 变化自动 Block、partial release 或
+rebind。Runtime networking、真实 Adapter 和 Lease/Heartbeat 最终 ownership 仍未解决。
 
 本切片明确不是完整 State & Memory Plane。以下内容延后：
 
