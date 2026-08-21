@@ -47,6 +47,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - 当前 `mission/` 已提供确定性 Fixture Planner 和可配置的 Responses LLM Planner；
 - Mission 输出使用 `contracts/mission/v0/` 中的版本化合同，Controller 只消费校验后的 Task Graph；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
+- `core/state` 已实现 `State & Memory Plane — Slice v0.1: Shared Node State`，
+  Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
@@ -95,6 +97,12 @@ Execution Group 是 Control Plane 之外、由 Runtime 承载的任务级动态�
 - `Shared Context`：仅当前 Group 需要的上下文；
 - `Lifecycle`：Create → Bind → Activate → Adapt → Complete → Release。
 
+`Blocked` 是等待 Reconciliation & Recovery 的非终态，不等于 Group 已失败或应被
+销毁。单个 Role/Member/Resource Binding 失效时，Control 只 partial release 该
+Role 的 binding 和 reservation，保留 Group identity、TaskRef 与其他有效 binding；
+恢复成功后经 `Adapted → Active` 继续执行。只有 `Completed`，或恢复明确耗尽后的
+`Failed`，才能执行 whole-group `Release`。
+
 Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 是 Node 能否承担该 Role 的
 依据，Assignment 指明当前承担者，Resource Binding 则记录已经提交的执行资源。
 如果 Task 直接绑定 Node，节点故障通常需要重新规划整个 Task；通过 Role 间接绑定，
@@ -112,6 +120,21 @@ Observe → Update → Fuse → Believe
 ```
 
 Shared Belief 是带有 Source、Timestamp、Freshness、Uncertainty 和冲突信息的决策视图，不等于绝对 Ground Truth。Memory 按 Local、Execution Group、Global 三种作用域管理，不要求全部全局同步。
+
+当前代码只实现 **State & Memory Plane — Slice v0.1: Shared Node State**：
+
+```text
+Runtime / Adapter observation -> Shared Node State -> Control decision
+```
+
+`core/state` 使用确定性内存实现保存 Node identity、Local EAIOS/runtime descriptor、
+Capability/Resource declaration 和最新 `NodeStatus`。State 保存“观测到了什么以及何时
+观测”，Control 仍根据 health、TTL、lease 和 requirement 决定是否可参与 matching。
+
+这不是完整的 State & Memory Plane。Allocation State、Execution Group State
+Projection、Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、
+Distributed Memory、Persistence/Replication、State Authority resolution 和 Lease
+ownership resolution 均未实现。
 
 ### Distributed Embodied Runtime
 
@@ -171,6 +194,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── core/
 │   ├── domain/
 │   ├── ports/
+│   ├── state/
 │   ├── control/
 │   ├── runtime/
 │   └── testkit/
@@ -202,8 +226,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
         └── distributed-embodied-ai-os-architecture-v1.1.png
 ```
 
-当前 V2 架构是有效基线；开发基线正在通过首个 bootstrap 和 Slice v0.1 验证，
-MVP Definition 仍为 Draft。完整 MVP 的测试、适配器和仿真环境尚未完成。
+当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node
+State Slice v0.1 已实现，但完整 State & Memory Plane 和 MVP Definition 均未完成；
+完整 MVP 的测试、适配器和仿真环境尚未完成。
 
 ## Mission Intelligence 开发
 

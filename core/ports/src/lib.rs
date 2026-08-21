@@ -6,7 +6,7 @@
 
 use domain::{
     CorrelationId, EventId, EventPayload, ExecutionCommand, NodeEvent, NodeId, NodeRegistration,
-    NodeStatus, TimestampMs,
+    NodeStateSnapshot, NodeStatus, TimestampMs,
 };
 use std::fmt::{Display, Formatter};
 
@@ -26,6 +26,65 @@ pub trait EventSink {
         causation_id: Option<&EventId>,
         payload: EventPayload,
     );
+}
+
+/// Failures exposed by the transport-neutral Shared Node State contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SharedStateError {
+    /// A health observation referenced a node absent from Shared State.
+    UnknownNode(NodeId),
+    /// An observation was older than the latest accepted node observation.
+    StaleObservation {
+        /// Node whose observation was rejected.
+        node_id: NodeId,
+        /// Observation time already represented by Shared State.
+        current_observed_at: TimestampMs,
+        /// Older observation time that was rejected.
+        incoming_observed_at: TimestampMs,
+    },
+}
+
+impl Display for SharedStateError {
+    /// Formats a stable Shared State failure for control and adapter diagnostics.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownNode(node_id) => write!(formatter, "shared state has no node {node_id}"),
+            Self::StaleObservation {
+                node_id,
+                current_observed_at,
+                incoming_observed_at,
+            } => write!(
+                formatter,
+                "stale observation for node {node_id}: current={}ms, incoming={}ms",
+                current_observed_at.as_millis(),
+                incoming_observed_at.as_millis()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SharedStateError {}
+
+/// Read access to current cross-mission Shared Node State facts.
+pub trait SharedNodeStateReader {
+    /// Returns the latest snapshot for one node, if it is currently known.
+    fn node(&self, node_id: &NodeId) -> Option<&NodeStateSnapshot>;
+
+    /// Returns all current node snapshots in deterministic node-identity order.
+    fn nodes(&self) -> Vec<&NodeStateSnapshot>;
+}
+
+/// Write access for accepted registration and health observations.
+pub trait SharedNodeStateWriter {
+    /// Records a node snapshot unless it would replace newer health evidence.
+    fn record_node(&mut self, snapshot: NodeStateSnapshot) -> Result<(), SharedStateError>;
+
+    /// Replaces one node's health fact with a non-older accepted observation.
+    fn update_node_status(
+        &mut self,
+        node_id: &NodeId,
+        status: NodeStatus,
+    ) -> Result<(), SharedStateError>;
 }
 
 /// Errors returned by a local EAIOS or vendor adapter.

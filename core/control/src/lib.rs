@@ -9,10 +9,10 @@
 
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHeartbeat, NodeId, NodeLease,
-    NodeRegistration, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRef,
-    TaskRequirement, TimestampMs,
+    NodeRegistration, NodeStateSnapshot, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId,
+    TaskRef, TaskRequirement, TimestampMs,
 };
-use ports::EventSink;
+use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
@@ -161,12 +161,23 @@ pub enum GroupLifecycle {
     Active,
     /// The group adapted after a recoverable deviation.
     Adapted,
+    /// Recovery was explicitly exhausted and the group cannot complete its task.
+    Failed,
     /// All assigned roles completed.
     Completed,
     /// The terminal group released all current bindings and reservations.
     Released,
-    /// The group cannot safely continue.
+    /// The current execution configuration cannot progress without reconciliation.
     Blocked,
+}
+
+/// Context retained when one role binding is released for recovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnboundRole {
+    /// Node that held the failed binding before partial release.
+    previous_node_id: NodeId,
+    /// Original assignment position restored after successful rebind.
+    assignment_index: usize,
 }
 
 /// A dynamic group of members, roles, and resource bindings.
@@ -178,6 +189,8 @@ pub struct ExecutionGroup {
     task_ref: TaskRef,
     /// Current role, member, and resource bindings.
     assignments: Vec<RoleAssignment>,
+    /// Roles awaiting replacement while the Group identity and context remain.
+    unbound_roles: BTreeMap<RoleId, UnboundRole>,
     /// Lifecycle state used by adaptation and recovery.
     lifecycle: GroupLifecycle,
 }
@@ -189,6 +202,7 @@ impl ExecutionGroup {
             group_id,
             task_ref: plan.task_ref().clone(),
             assignments: plan.assignments().to_vec(),
+            unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
         }
     }
@@ -211,6 +225,11 @@ impl ExecutionGroup {
     /// Returns member-role-resource bindings.
     pub fn assignments(&self) -> &[RoleAssignment] {
         &self.assignments
+    }
+
+    /// Returns whether a role is retained by the Group but awaits a new binding.
+    pub fn is_role_unbound(&self, role_id: &RoleId) -> bool {
+        self.unbound_roles.contains_key(role_id)
     }
 
     /// Returns the current group lifecycle.
@@ -243,6 +262,8 @@ pub enum ControlError {
     InvalidLifecycle(GroupLifecycle),
     /// A node lease or heartbeat did not satisfy the Node Contract.
     InvalidLease(String),
+    /// Shared Node State rejected an observation or lacked a required node fact.
+    SharedState(SharedStateError),
     /// A node attempted to use an unknown lease identity.
     UnknownLease {
         /// Node that sent the invalid lease identity.
@@ -279,6 +300,7 @@ impl Display for ControlError {
                 write!(formatter, "invalid lifecycle: {lifecycle:?}")
             }
             Self::InvalidLease(reason) => write!(formatter, "invalid node lease: {reason}"),
+            Self::SharedState(error) => write!(formatter, "shared state error: {error}"),
             Self::UnknownLease { node_id, lease_id } => {
                 write!(formatter, "node {node_id} does not own lease {lease_id}")
             }
@@ -294,8 +316,8 @@ impl std::error::Error for ControlError {}
 /// Global control state for registration, matching, commitment, and recovery.
 #[derive(Debug)]
 pub struct ControlPlane {
-    /// Registered nodes and their shared health snapshots.
-    nodes: BTreeMap<NodeId, RegisteredNode>,
+    /// Renewable lease authority retained pending a later ownership decision.
+    leases: BTreeMap<NodeId, NodeLease>,
     /// Resources currently held by committed task roles.
     reservations: BTreeMap<ResourceId, Reservation>,
     /// Dynamic execution groups known to the control plane.
@@ -308,23 +330,12 @@ impl Default for ControlPlane {
     /// Creates an empty control plane with the default status freshness window.
     fn default() -> Self {
         Self {
-            nodes: BTreeMap::new(),
+            leases: BTreeMap::new(),
             reservations: BTreeMap::new(),
             groups: BTreeMap::new(),
             max_status_age_ms: DEFAULT_NODE_STATUS_TTL_MS,
         }
     }
-}
-
-/// A node registration plus its latest shared health view.
-#[derive(Debug, Clone)]
-struct RegisteredNode {
-    /// Capability, resource, and local-runtime declaration.
-    registration: NodeRegistration,
-    /// Latest health state used by global matching.
-    status: NodeStatus,
-    /// Renewable authority required for the node to remain schedulable.
-    lease: NodeLease,
 }
 
 /// The task and role that currently hold a resource commitment.
@@ -347,7 +358,7 @@ impl ControlPlane {
     /// Creates an empty control plane with an explicit status freshness window.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
-            nodes: BTreeMap::new(),
+            leases: BTreeMap::new(),
             reservations: BTreeMap::new(),
             groups: BTreeMap::new(),
             max_status_age_ms,
@@ -355,8 +366,9 @@ impl ControlPlane {
     }
 
     /// Registers one node with a generated lease and records its visibility.
-    pub fn register_node<E: EventSink>(
+    pub fn register_node<S: SharedNodeStateWriter, E: EventSink>(
         &mut self,
+        state: &mut S,
         registration: NodeRegistration,
         status: NodeStatus,
         timestamp: TimestampMs,
@@ -373,6 +385,7 @@ impl ControlPlane {
         )
         .map_err(|error| ControlError::InvalidLease(error.to_string()))?;
         self.register_node_with_lease(
+            state,
             registration,
             status,
             lease,
@@ -383,8 +396,10 @@ impl ControlPlane {
     }
 
     /// Registers one node with an explicit lease from the Node Contract.
-    pub fn register_node_with_lease<E: EventSink>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_node_with_lease<S: SharedNodeStateWriter, E: EventSink>(
         &mut self,
+        state: &mut S,
         registration: NodeRegistration,
         status: NodeStatus,
         lease: NodeLease,
@@ -405,14 +420,10 @@ impl ControlPlane {
         }
         let node_id = registration.node_id().clone();
         let lease_id = lease.lease_id().clone();
-        self.nodes.insert(
-            node_id.clone(),
-            RegisteredNode {
-                registration,
-                status,
-                lease,
-            },
-        );
+        state
+            .record_node(NodeStateSnapshot::new(registration, status))
+            .map_err(ControlError::SharedState)?;
+        self.leases.insert(node_id.clone(), lease);
         events.append(
             timestamp,
             correlation_id,
@@ -423,36 +434,39 @@ impl ControlPlane {
     }
 
     /// Accepts a heartbeat, refreshes its health snapshot, and renews its lease.
-    pub fn accept_heartbeat<E: EventSink>(
+    pub fn accept_heartbeat<S: SharedNodeStateWriter, E: EventSink>(
         &mut self,
+        state: &mut S,
         heartbeat: NodeHeartbeat,
         received_at: TimestampMs,
         lease_duration_ms: u64,
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<(), ControlError> {
-        let node = self
-            .nodes
+        let lease = self
+            .leases
             .get_mut(heartbeat.node_id())
             .ok_or_else(|| ControlError::UnknownNode(heartbeat.node_id().clone()))?;
-        if node.lease.lease_id() != heartbeat.lease_id() {
+        if lease.lease_id() != heartbeat.lease_id() {
             return Err(ControlError::UnknownLease {
                 node_id: heartbeat.node_id().clone(),
                 lease_id: heartbeat.lease_id().clone(),
             });
         }
-        let renewed_lease = node
-            .lease
-            .renew(received_at, lease_duration_ms)
-            .map_err(|error| match error {
-                domain::DomainError::LeaseExpired { .. } => ControlError::LeaseExpired {
-                    node_id: heartbeat.node_id().clone(),
-                    lease_id: heartbeat.lease_id().clone(),
-                },
-                other => ControlError::InvalidLease(other.to_string()),
-            })?;
-        node.status = heartbeat.status();
-        node.lease = renewed_lease;
+        let renewed_lease =
+            lease
+                .renew(received_at, lease_duration_ms)
+                .map_err(|error| match error {
+                    domain::DomainError::LeaseExpired { .. } => ControlError::LeaseExpired {
+                        node_id: heartbeat.node_id().clone(),
+                        lease_id: heartbeat.lease_id().clone(),
+                    },
+                    other => ControlError::InvalidLease(other.to_string()),
+                })?;
+        state
+            .update_node_status(heartbeat.node_id(), heartbeat.status())
+            .map_err(ControlError::SharedState)?;
+        *lease = renewed_lease;
         events.append(
             received_at,
             correlation_id,
@@ -466,34 +480,45 @@ impl ControlPlane {
     }
 
     /// Expires leases and marks affected nodes Offline in the shared view.
-    pub fn expire_leases<E: EventSink>(
+    pub fn expire_leases<S: SharedNodeStateReader + SharedNodeStateWriter, E: EventSink>(
         &mut self,
+        state: &mut S,
         now: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
-    ) -> Vec<NodeId> {
-        let mut expired_nodes = Vec::new();
-        for (node_id, node) in &mut self.nodes {
-            if node.status.health().is_schedulable() && !node.lease.is_active_at(now) {
-                node.status = NodeStatus::new(domain::NodeHealth::Offline, now);
-                expired_nodes.push(node_id.clone());
-                events.append(
-                    now,
-                    correlation_id,
-                    None,
-                    EventPayload::NodeLeaseExpired {
-                        node_id: node_id.clone(),
-                        lease_id: node.lease.lease_id().clone(),
-                    },
-                );
-            }
+    ) -> Result<Vec<NodeId>, ControlError> {
+        let expired = self
+            .leases
+            .iter()
+            .filter(|(node_id, lease)| {
+                !lease.is_active_at(now)
+                    && state
+                        .node(node_id)
+                        .is_some_and(|snapshot| snapshot.status().health().is_schedulable())
+            })
+            .map(|(node_id, lease)| (node_id.clone(), lease.lease_id().clone()))
+            .collect::<Vec<_>>();
+        for (node_id, lease_id) in &expired {
+            state
+                .update_node_status(node_id, NodeStatus::new(domain::NodeHealth::Offline, now))
+                .map_err(ControlError::SharedState)?;
+            events.append(
+                now,
+                correlation_id,
+                None,
+                EventPayload::NodeLeaseExpired {
+                    node_id: node_id.clone(),
+                    lease_id: lease_id.clone(),
+                },
+            );
         }
-        expired_nodes
+        Ok(expired.into_iter().map(|(node_id, _)| node_id).collect())
     }
 
     /// Matches every task role against currently schedulable node capabilities.
-    pub fn match_capabilities<E: EventSink>(
+    pub fn match_capabilities<S: SharedNodeStateReader, E: EventSink>(
         &self,
+        state: &S,
         requirement: &TaskRequirement,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
@@ -501,16 +526,21 @@ impl ControlPlane {
     ) -> Result<CandidateSet, ControlError> {
         let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
-            let node_ids = self
-                .nodes
-                .iter()
-                .filter(|(_, node)| {
-                    node.status.health().is_schedulable()
-                        && node.status.is_fresh_at(timestamp, self.max_status_age_ms)
-                        && node.lease.is_active_at(timestamp)
-                        && node.registration.supports_role(role)
+            let node_ids = state
+                .nodes()
+                .into_iter()
+                .filter(|snapshot| {
+                    snapshot.status().health().is_schedulable()
+                        && snapshot
+                            .status()
+                            .is_fresh_at(timestamp, self.max_status_age_ms)
+                        && self
+                            .leases
+                            .get(snapshot.node_id())
+                            .is_some_and(|lease| lease.is_active_at(timestamp))
+                        && snapshot.registration().supports_role(role)
                 })
-                .map(|(node_id, _)| node_id.clone())
+                .map(|snapshot| snapshot.node_id().clone())
                 .collect::<Vec<_>>();
             if node_ids.is_empty() {
                 return Err(ControlError::NoCandidate(role.role_id().clone()));
@@ -531,8 +561,10 @@ impl ControlPlane {
     }
 
     /// Validates a scheduler's role assignments without committing resources.
-    pub fn propose<E: EventSink>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose<S: SharedNodeStateReader, E: EventSink>(
         &self,
+        state: &S,
         requirement: &TaskRequirement,
         candidates: &CandidateSet,
         assignments: Vec<RoleAssignment>,
@@ -571,11 +603,10 @@ impl ControlPlane {
                     role.role_id()
                 )));
             }
-            let node = self
-                .nodes
-                .get(assignment.node_id())
+            let node = state
+                .node(assignment.node_id())
                 .ok_or_else(|| ControlError::UnknownNode(assignment.node_id().clone()))?;
-            if !node.registration.supports_role(role) {
+            if !node.registration().supports_role(role) {
                 return Err(ControlError::InvalidProposal(format!(
                     "node {} no longer satisfies role {}",
                     assignment.node_id(),
@@ -584,7 +615,7 @@ impl ControlPlane {
             }
             if assignment.resource_ids().iter().any(|resource_id| {
                 !node
-                    .registration
+                    .registration()
                     .owns_resource(resource_id, role.resource_kind())
             }) {
                 return Err(ControlError::InvalidProposal(format!(
@@ -703,7 +734,7 @@ impl ControlPlane {
         Ok(group)
     }
 
-    /// Activates a bound group before any role invocation begins.
+    /// Activates a newly bound or fully rebound group before role invocation.
     pub fn activate_group<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
@@ -715,8 +746,16 @@ impl ControlPlane {
             .groups
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if group.lifecycle != GroupLifecycle::Bound {
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Adapted
+        ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        if !group.unbound_roles.is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "execution group still has unbound roles".to_string(),
+            ));
         }
         group.lifecycle = GroupLifecycle::Active;
         events.append(
@@ -731,13 +770,91 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Rebinds one group role to a replacement node after a recoverable failure.
+    /// Releases only one role's current member and resource binding for recovery.
+    pub fn release_role_binding<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        role_id: &RoleId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Active | GroupLifecycle::Adapted | GroupLifecycle::Blocked
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        let assignment_index = group
+            .assignments
+            .iter()
+            .position(|assignment| assignment.role_id() == role_id)
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "group has no active binding for role {role_id}"
+                ))
+            })?;
+        let assignment = &group.assignments[assignment_index];
+        let task_ref = group.task_ref.clone();
+        let node_id = assignment.node_id().clone();
+        let resource_ids = assignment.resource_ids().to_vec();
+        for resource_id in &resource_ids {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "group {group_id} binding {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != task_ref
+                || reservation.role_id != *role_id
+                || reservation.group_id.as_ref() != Some(group_id)
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "group {group_id} does not own role reservation {resource_id}"
+                )));
+            }
+        }
+        for resource_id in &resource_ids {
+            self.reservations.remove(resource_id);
+        }
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        group.assignments.remove(assignment_index);
+        group.unbound_roles.insert(
+            role_id.clone(),
+            UnboundRole {
+                previous_node_id: node_id.clone(),
+                assignment_index,
+            },
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupRoleBindingReleased {
+                group_id: group_id.clone(),
+                task_ref,
+                role_id: role_id.clone(),
+                node_id,
+                resource_ids,
+            },
+        );
+        Ok(())
+    }
+
+    /// Rebinds one explicitly released group role to a replacement node.
     ///
     /// Recovery inputs remain separate so the event trace preserves the exact
     /// replacement node, resource set, time, correlation, and evidence sink.
     #[allow(clippy::too_many_arguments)]
-    pub fn rebind_role<E: EventSink>(
+    pub fn rebind_role<S: SharedNodeStateReader, E: EventSink>(
         &mut self,
+        state: &S,
         group_id: &ExecutionGroupId,
         role: &RoleRequirementView,
         replacement_node_id: NodeId,
@@ -746,11 +863,28 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<(), ControlError> {
-        let replacement = self
-            .nodes
-            .get(&replacement_node_id)
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Active | GroupLifecycle::Adapted | GroupLifecycle::Blocked
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        let unbound_role = group.unbound_roles.get(role.role_id()).ok_or_else(|| {
+            ControlError::InvalidProposal(format!(
+                "role {} must be partially released before rebind",
+                role.role_id()
+            ))
+        })?;
+        let previous_node = unbound_role.previous_node_id.clone();
+        let assignment_index = unbound_role.assignment_index;
+        let replacement = state
+            .node(&replacement_node_id)
             .ok_or_else(|| ControlError::UnknownNode(replacement_node_id.clone()))?;
-        if !replacement.registration.supports_role(role.requirement()) {
+        if !replacement.registration().supports_role(role.requirement()) {
             return Err(ControlError::InvalidProposal(format!(
                 "replacement node {} cannot satisfy role {}",
                 replacement_node_id,
@@ -759,7 +893,7 @@ impl ControlPlane {
         }
         if replacement_resources.iter().any(|resource_id| {
             !replacement
-                .registration
+                .registration()
                 .owns_resource(resource_id, role.requirement().resource_kind())
                 || self.reservations.contains_key(resource_id)
         }) {
@@ -768,57 +902,31 @@ impl ControlPlane {
             ));
         }
 
-        let group = self
-            .groups
-            .get_mut(group_id)
-            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if !matches!(
-            group.lifecycle,
-            GroupLifecycle::Active | GroupLifecycle::Adapted
-        ) {
-            return Err(ControlError::InvalidLifecycle(group.lifecycle));
-        }
-        let assignment = group
-            .assignments
-            .iter_mut()
-            .find(|assignment| assignment.role_id() == role.role_id())
-            .ok_or_else(|| {
-                ControlError::InvalidProposal(format!("group has no role {}", role.role_id()))
-            })?;
-        let previous_node = assignment.node_id().clone();
-        for resource_id in assignment.resource_ids() {
-            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                ControlError::InvalidProposal(format!(
-                    "group {group_id} binding {resource_id} has no reservation"
-                ))
-            })?;
-            if reservation.task_ref != group.task_ref
-                || reservation.role_id != *role.role_id()
-                || reservation.group_id.as_ref() != Some(group_id)
-            {
-                return Err(ControlError::InvalidProposal(format!(
-                    "group {group_id} does not own role reservation {resource_id}"
-                )));
-            }
-        }
-        for resource_id in assignment.resource_ids() {
-            self.reservations.remove(resource_id);
-        }
+        let task_ref = group.task_ref.clone();
         for resource_id in &replacement_resources {
             self.reservations.insert(
                 resource_id.clone(),
                 Reservation {
-                    task_ref: group.task_ref.clone(),
+                    task_ref: task_ref.clone(),
                     role_id: role.role_id().clone(),
                     group_id: Some(group_id.clone()),
                 },
             );
         }
-        *assignment = RoleAssignment::new(
+        let replacement_assignment = RoleAssignment::new(
             role.role_id().clone(),
             replacement_node_id.clone(),
             replacement_resources,
         );
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let insertion_index = assignment_index.min(group.assignments.len());
+        group
+            .assignments
+            .insert(insertion_index, replacement_assignment);
+        group.unbound_roles.remove(role.role_id());
         group.lifecycle = GroupLifecycle::Adapted;
         events.append(
             timestamp,
@@ -826,7 +934,7 @@ impl ControlPlane {
             None,
             EventPayload::RecoveryRebound {
                 group_id: group_id.clone(),
-                task_ref: group.task_ref.clone(),
+                task_ref,
                 role_id: role.role_id().clone(),
                 from_node: previous_node,
                 to_node: replacement_node_id,
@@ -853,6 +961,11 @@ impl ControlPlane {
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
+        if !group.unbound_roles.is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "execution group still has unbound roles".to_string(),
+            ));
+        }
         group.lifecycle = GroupLifecycle::Completed;
         events.append(
             timestamp,
@@ -866,7 +979,7 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Marks a group blocked when local safety or recovery evidence is insufficient.
+    /// Marks a group blocked until reconciliation restores progress or declares failure.
     pub fn block_group<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
@@ -881,7 +994,7 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         if !matches!(
             group.lifecycle,
-            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+            GroupLifecycle::Active | GroupLifecycle::Adapted
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
@@ -891,6 +1004,36 @@ impl ControlPlane {
             correlation_id,
             None,
             EventPayload::ExecutionGroupBlocked {
+                group_id: group_id.clone(),
+                task_ref: group.task_ref.clone(),
+                reason: reason.into(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Marks a blocked group terminally failed after recovery is explicitly exhausted.
+    pub fn fail_group<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        reason: impl Into<String>,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.lifecycle != GroupLifecycle::Blocked {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        group.lifecycle = GroupLifecycle::Failed;
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupFailed {
                 group_id: group_id.clone(),
                 task_ref: group.task_ref.clone(),
                 reason: reason.into(),
@@ -913,7 +1056,7 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         if !matches!(
             group.lifecycle,
-            GroupLifecycle::Completed | GroupLifecycle::Blocked
+            GroupLifecycle::Completed | GroupLifecycle::Failed
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
@@ -943,6 +1086,7 @@ impl ControlPlane {
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         group.assignments.clear();
+        group.unbound_roles.clear();
         group.lifecycle = GroupLifecycle::Released;
         events.append(
             timestamp,
@@ -994,6 +1138,7 @@ mod tests {
         Capability, CapabilityKind, CorrelationId, LeaseId, NodeHealth, NodeHeartbeat, NodeLease,
         Resource, ResourceKind, RoleRequirement,
     };
+    use state::InMemorySharedNodeState;
 
     /// Discards event evidence while exercising Control behavior in isolation.
     #[derive(Default)]
@@ -1011,11 +1156,73 @@ mod tests {
         }
     }
 
+    /// Captures lifecycle evidence and correlation identities for recovery tests.
+    #[derive(Default)]
+    struct RecordingEvents {
+        /// Event payloads paired with the correlation identity supplied by Control.
+        records: Vec<(CorrelationId, EventPayload)>,
+    }
+
+    impl EventSink for RecordingEvents {
+        /// Records immutable payload evidence in deterministic append order.
+        fn append(
+            &mut self,
+            _timestamp: TimestampMs,
+            correlation_id: &CorrelationId,
+            _causation_id: Option<&domain::EventId>,
+            payload: EventPayload,
+        ) {
+            self.records.push((correlation_id.clone(), payload));
+        }
+    }
+
+    /// Complete in-process setup for two-role Group recovery tests.
+    struct RecoveryFixture {
+        /// Control instance owning reservations and Group lifecycle.
+        control: ControlPlane,
+        /// Cross-mission node facts read by Control through the State Port.
+        state: InMemorySharedNodeState,
+        /// Structured lifecycle evidence emitted by Control.
+        events: RecordingEvents,
+        /// Task requirements used to prove replacement availability.
+        requirement: TaskRequirement,
+        /// Stable Group identity retained throughout recovery.
+        group_id: ExecutionGroupId,
+        /// Stable task identity retained throughout recovery.
+        task_ref: TaskRef,
+        /// Failed role released and rebound by recovery.
+        transport_role: RoleId,
+        /// Unaffected role retained throughout recovery.
+        compute_role: RoleId,
+        /// Original transport member.
+        node_a_id: NodeId,
+        /// Replacement transport member, whether or not it is registered.
+        node_b_id: NodeId,
+        /// Original transport resource released by partial recovery.
+        space_a: ResourceId,
+        /// Replacement transport resource committed by rebind.
+        space_b: ResourceId,
+        /// Unaffected compute resource retained throughout recovery.
+        compute_c: ResourceId,
+        /// Correlation identity expected on all recovery evidence.
+        correlation_id: CorrelationId,
+    }
+
     /// Builds a single-capability registration for deterministic control tests.
     fn registration(
         node_id: &str,
         capability: CapabilityKind,
         resource_id: &str,
+    ) -> NodeRegistration {
+        registration_with_resource_kind(node_id, capability, resource_id, ResourceKind::Space)
+    }
+
+    /// Builds a single-capability registration with an explicit resource kind.
+    fn registration_with_resource_kind(
+        node_id: &str,
+        capability: CapabilityKind,
+        resource_id: &str,
+        resource_kind: ResourceKind,
     ) -> NodeRegistration {
         NodeRegistration::new(
             NodeId::new(node_id).expect("test node id must be valid"),
@@ -1024,12 +1231,142 @@ mod tests {
             vec![
                 Resource::new(
                     ResourceId::new(resource_id).expect("test resource id must be valid"),
-                    ResourceKind::Space,
+                    resource_kind,
                     1,
                 )
                 .expect("test resource must be valid"),
             ],
         )
+    }
+
+    /// Creates one active two-role Group with an optional transport replacement.
+    fn recovery_fixture(include_replacement: bool) -> RecoveryFixture {
+        let node_a = registration_with_resource_kind(
+            "node-a",
+            CapabilityKind::Transport,
+            "space-a",
+            ResourceKind::Space,
+        );
+        let node_b = registration_with_resource_kind(
+            "node-b",
+            CapabilityKind::Transport,
+            "space-b",
+            ResourceKind::Space,
+        );
+        let edge_c = registration_with_resource_kind(
+            "edge-c",
+            CapabilityKind::Compute,
+            "compute-c",
+            ResourceKind::Compute,
+        );
+        let node_a_id = node_a.node_id().clone();
+        let node_b_id = node_b.node_id().clone();
+        let edge_c_id = edge_c.node_id().clone();
+        let space_a = ResourceId::new("space-a").expect("test resource id must be valid");
+        let space_b = ResourceId::new("space-b").expect("test resource id must be valid");
+        let compute_c = ResourceId::new("compute-c").expect("test resource id must be valid");
+        let transport_role = RoleId::new("transport").expect("test role id must be valid");
+        let compute_role = RoleId::new("compute").expect("test role id must be valid");
+        let requirement = TaskRequirement::new(
+            domain::MissionId::new("mission-recovery").expect("test mission id must be valid"),
+            TaskId::new("task-01").expect("test task id must be valid"),
+            vec![
+                RoleRequirement::new(
+                    transport_role.clone(),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                ),
+                RoleRequirement::new(
+                    compute_role.clone(),
+                    CapabilityKind::Compute,
+                    Some(ResourceKind::Compute),
+                ),
+            ],
+        )
+        .expect("test requirement must be valid");
+        let task_ref = requirement.task_ref().clone();
+        let group_id =
+            ExecutionGroupId::new("group-recovery").expect("test group id must be valid");
+        let correlation_id =
+            CorrelationId::new("recovery-trace").expect("test correlation id must be valid");
+        let timestamp = TimestampMs::new(0);
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = RecordingEvents::default();
+        let mut registrations = vec![node_a, edge_c];
+        if include_replacement {
+            registrations.push(node_b);
+        }
+        for node in registrations {
+            control
+                .register_node(
+                    &mut state,
+                    node,
+                    NodeStatus::new(NodeHealth::Online, timestamp),
+                    timestamp,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("test node registration should succeed");
+        }
+        let candidates = control
+            .match_capabilities(
+                &state,
+                &requirement,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("initial role matching should succeed");
+        let proposal = control
+            .propose(
+                &state,
+                &requirement,
+                &candidates,
+                vec![
+                    RoleAssignment::new(
+                        transport_role.clone(),
+                        node_a_id.clone(),
+                        vec![space_a.clone()],
+                    ),
+                    RoleAssignment::new(compute_role.clone(), edge_c_id, vec![compute_c.clone()]),
+                ],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("initial proposal should succeed");
+        let plan = control
+            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .expect("initial proposal should commit");
+        control
+            .create_group(
+                group_id.clone(),
+                &plan,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test Group should bind");
+        control
+            .activate_group(&group_id, timestamp, &correlation_id, &mut events)
+            .expect("test Group should activate");
+        RecoveryFixture {
+            control,
+            state,
+            events,
+            requirement,
+            group_id,
+            task_ref,
+            transport_role,
+            compute_role,
+            node_a_id,
+            node_b_id,
+            space_a,
+            space_b,
+            compute_c,
+            correlation_id,
+        }
     }
 
     /// Builds a one-role task requirement for a control test.
@@ -1061,6 +1398,377 @@ mod tests {
         CorrelationId::new("control-test-trace").expect("test correlation id must be valid")
     }
 
+    /// Moves a recovery fixture from Active to Blocked without releasing bindings.
+    fn block_fixture(fixture: &mut RecoveryFixture) {
+        fixture
+            .control
+            .block_group(
+                &fixture.group_id,
+                "transport role cannot progress",
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("active fixture should become blocked");
+    }
+
+    /// Blocked preserves the Group and every binding until recovery acts explicitly.
+    #[test]
+    fn blocked_does_not_release_whole_group() {
+        let mut fixture = recovery_fixture(true);
+        block_fixture(&mut fixture);
+
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("blocked Group should remain");
+        assert_eq!(group.group_id(), &fixture.group_id);
+        assert_eq!(group.task_ref(), &fixture.task_ref);
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.assignments().iter().any(|assignment| {
+            assignment.role_id() == &fixture.compute_role
+                && assignment.resource_ids() == std::slice::from_ref(&fixture.compute_c)
+        }));
+        assert_eq!(
+            fixture
+                .control
+                .reservations
+                .get(&fixture.compute_c)
+                .and_then(|reservation| reservation.group_id.as_ref()),
+            Some(&fixture.group_id)
+        );
+        assert!(
+            !fixture
+                .events
+                .records
+                .iter()
+                .any(|(_, payload)| matches!(payload, EventPayload::ExecutionGroupReleased { .. }))
+        );
+    }
+
+    /// Partial release removes only the failed role's assignment and reservations.
+    #[test]
+    fn partial_release_preserves_unaffected_bindings() {
+        let mut fixture = recovery_fixture(true);
+        block_fixture(&mut fixture);
+        fixture
+            .control
+            .release_role_binding(
+                &fixture.group_id,
+                &fixture.transport_role,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("failed transport binding should release");
+
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("partially released Group should remain");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.is_role_unbound(&fixture.transport_role));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_a));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+        assert_eq!(group.assignments().len(), 1);
+        assert_eq!(group.assignments()[0].role_id(), &fixture.compute_role);
+        assert!(
+            fixture
+                .events
+                .records
+                .iter()
+                .any(|(correlation_id, payload)| {
+                    correlation_id == &fixture.correlation_id
+                        && matches!(
+                            payload,
+                            EventPayload::ExecutionGroupRoleBindingReleased {
+                                group_id,
+                                task_ref,
+                                role_id,
+                                resource_ids,
+                                ..
+                            } if group_id == &fixture.group_id
+                                && task_ref == &fixture.task_ref
+                                && role_id == &fixture.transport_role
+                                && resource_ids == std::slice::from_ref(&fixture.space_a)
+                        )
+                })
+        );
+    }
+
+    /// A blocked Group rebinds only the failed role and reactivates in place.
+    #[test]
+    fn blocked_group_recovers_through_adapted_and_active() {
+        let mut fixture = recovery_fixture(true);
+        let original_compute = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("active Group should exist")
+            .assignments()
+            .iter()
+            .find(|assignment| assignment.role_id() == &fixture.compute_role)
+            .expect("compute assignment should exist")
+            .clone();
+        block_fixture(&mut fixture);
+        fixture
+            .control
+            .release_role_binding(
+                &fixture.group_id,
+                &fixture.transport_role,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("failed transport binding should release");
+        fixture
+            .control
+            .rebind_role(
+                &fixture.state,
+                &fixture.group_id,
+                &RoleRequirementView::new(RoleRequirement::new(
+                    fixture.transport_role.clone(),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                )),
+                fixture.node_b_id.clone(),
+                vec![fixture.space_b.clone()],
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("released role should rebind to Node B");
+
+        let adapted = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("adapted Group should retain identity");
+        assert_eq!(adapted.group_id(), &fixture.group_id);
+        assert_eq!(adapted.task_ref(), &fixture.task_ref);
+        assert_eq!(adapted.lifecycle(), GroupLifecycle::Adapted);
+        assert!(!adapted.is_role_unbound(&fixture.transport_role));
+        assert_eq!(
+            adapted
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == &fixture.compute_role),
+            Some(&original_compute)
+        );
+        assert!(adapted.assignments().iter().any(|assignment| {
+            assignment.role_id() == &fixture.transport_role
+                && assignment.node_id() == &fixture.node_b_id
+                && assignment.resource_ids() == std::slice::from_ref(&fixture.space_b)
+        }));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+        assert!(fixture.control.reservations.contains_key(&fixture.space_b));
+        fixture
+            .control
+            .activate_group(
+                &fixture.group_id,
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("fully rebound Group should reactivate");
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("reactivated Group should remain")
+                .lifecycle(),
+            GroupLifecycle::Active
+        );
+        assert!(
+            fixture
+                .events
+                .records
+                .iter()
+                .any(|(correlation_id, payload)| {
+                    correlation_id == &fixture.correlation_id
+                        && matches!(
+                            payload,
+                            EventPayload::RecoveryRebound {
+                                group_id,
+                                task_ref,
+                                role_id,
+                                from_node,
+                                to_node,
+                            } if group_id == &fixture.group_id
+                                && task_ref == &fixture.task_ref
+                                && role_id == &fixture.transport_role
+                                && from_node == &fixture.node_a_id
+                                && to_node == &fixture.node_b_id
+                        )
+                })
+        );
+    }
+
+    /// Exhausted recovery explicitly enters Failed before whole-group release.
+    #[test]
+    fn recovery_exhausted_transitions_through_failed() {
+        let mut fixture = recovery_fixture(false);
+        block_fixture(&mut fixture);
+        fixture
+            .control
+            .release_role_binding(
+                &fixture.group_id,
+                &fixture.transport_role,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("failed transport binding should release");
+        fixture
+            .state
+            .update_node_status(
+                &fixture.node_a_id,
+                NodeStatus::new(NodeHealth::Offline, TimestampMs::new(3)),
+            )
+            .expect("offline observation should update Shared State");
+        assert!(matches!(
+            fixture.control.match_capabilities(
+                &fixture.state,
+                &fixture.requirement,
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::NoCandidate(role_id)) if role_id == fixture.transport_role
+        ));
+        fixture
+            .control
+            .fail_group(
+                &fixture.group_id,
+                "no replacement candidate",
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("blocked Group should explicitly fail");
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("failed Group should remain observable")
+                .lifecycle(),
+            GroupLifecycle::Failed
+        );
+        assert!(fixture.events.records.iter().any(|(_, payload)| matches!(
+            payload,
+            EventPayload::ExecutionGroupFailed { group_id, task_ref, .. }
+                if group_id == &fixture.group_id && task_ref == &fixture.task_ref
+        )));
+        fixture
+            .control
+            .release_group(
+                &fixture.group_id,
+                TimestampMs::new(5),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("failed Group should release remaining bindings");
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("released Group should remain observable")
+                .lifecycle(),
+            GroupLifecycle::Released
+        );
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_a));
+        assert!(
+            !fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+    }
+
+    /// Completed releases every remaining reservation and emits whole-group evidence.
+    #[test]
+    fn completed_group_releases_all_bindings() {
+        let mut fixture = recovery_fixture(true);
+        fixture
+            .control
+            .complete_group(
+                &fixture.group_id,
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("active Group should complete");
+        fixture
+            .control
+            .release_group(
+                &fixture.group_id,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("completed Group should release");
+
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("released Group should remain observable");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Released);
+        assert!(group.assignments().is_empty());
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_a));
+        assert!(
+            !fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+        assert!(fixture.events.records.iter().any(|(_, payload)| matches!(
+            payload,
+            EventPayload::ExecutionGroupReleased { group_id, task_ref, resource_ids }
+                if group_id == &fixture.group_id
+                    && task_ref == &fixture.task_ref
+                    && resource_ids.contains(&fixture.space_a)
+                    && resource_ids.contains(&fixture.compute_c)
+        )));
+    }
+
+    /// Blocked rejects direct whole-group release and retains all reservations.
+    #[test]
+    fn blocked_group_cannot_release_directly() {
+        let mut fixture = recovery_fixture(true);
+        block_fixture(&mut fixture);
+        assert!(matches!(
+            fixture.control.release_group(
+                &fixture.group_id,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Blocked))
+        ));
+        assert!(fixture.control.reservations.contains_key(&fixture.space_a));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+        assert!(
+            !fixture
+                .events
+                .records
+                .iter()
+                .any(|(_, payload)| matches!(payload, EventPayload::ExecutionGroupReleased { .. }))
+        );
+    }
+
     /// A schedulable node can produce a proposal and a committed plan.
     #[test]
     fn normal_path_matches_proposes_and_commits() {
@@ -1072,10 +1780,12 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
 
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, timestamp),
                 timestamp,
@@ -1083,8 +1793,14 @@ mod tests {
                 &mut events,
             )
             .expect("test node registration should succeed");
+        let stored = state
+            .node(&node_id)
+            .expect("registration should be readable from Shared State");
+        assert_eq!(stored.registration().capabilities().len(), 1);
+        assert_eq!(stored.registration().resources().len(), 1);
+        assert_eq!(stored.status().health(), NodeHealth::Online);
         let candidates = control
-            .match_capabilities(&task, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &task, timestamp, &correlation_id, &mut events)
             .expect("online node should match");
         assert_eq!(
             candidates
@@ -1096,6 +1812,7 @@ mod tests {
 
         let proposal = control
             .propose(
+                &state,
                 &task,
                 &candidates,
                 vec![RoleAssignment::new(role_id, node_id, vec![resource_id])],
@@ -1108,6 +1825,154 @@ mod tests {
             .commit(&proposal, timestamp, &correlation_id, &mut events)
             .expect("unreserved resource should commit");
         assert_eq!(plan.assignments().len(), 1);
+    }
+
+    /// Matching reads heterogeneous node capability facts from Shared State.
+    #[test]
+    fn matching_reads_shared_state_capability_facts() {
+        let node_a = registration_with_resource_kind(
+            "node-a",
+            CapabilityKind::Transport,
+            "space-a",
+            ResourceKind::Space,
+        );
+        let node_b = registration_with_resource_kind(
+            "node-b",
+            CapabilityKind::Compute,
+            "compute-b",
+            ResourceKind::Compute,
+        );
+        let requirement = TaskRequirement::new(
+            domain::MissionId::new("mission-shared-state")
+                .expect("test mission id should be valid"),
+            TaskId::new("task-01").expect("test task id should be valid"),
+            vec![
+                RoleRequirement::new(
+                    RoleId::new("transport").expect("test role id should be valid"),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                ),
+                RoleRequirement::new(
+                    RoleId::new("compute").expect("test role id should be valid"),
+                    CapabilityKind::Compute,
+                    Some(ResourceKind::Compute),
+                ),
+            ],
+        )
+        .expect("test requirement should be valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        for node in [node_a, node_b] {
+            control
+                .register_node(
+                    &mut state,
+                    node,
+                    NodeStatus::new(NodeHealth::Online, timestamp),
+                    timestamp,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("test node registration should succeed");
+        }
+
+        let candidates = control
+            .match_capabilities(
+                &state,
+                &requirement,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("heterogeneous state facts should satisfy both roles");
+        assert_eq!(
+            candidates
+                .for_role(&RoleId::new("transport").expect("test role id should be valid"))
+                .expect("transport candidates should exist")
+                .node_ids()[0]
+                .as_str(),
+            "node-a"
+        );
+        assert_eq!(
+            candidates
+                .for_role(&RoleId::new("compute").expect("test role id should be valid"))
+                .expect("compute candidates should exist")
+                .node_ids()[0]
+                .as_str(),
+            "node-b"
+        );
+    }
+
+    /// Concurrent missions share node facts while retaining distinct TaskRefs.
+    #[test]
+    fn multi_mission_matching_shares_state_without_identity_collision() {
+        let node = registration("node-shared", CapabilityKind::Transport, "space-shared");
+        let node_id = node.node_id().clone();
+        let task_a = requirement_for_mission(
+            "mission-a",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let task_b = requirement_for_mission(
+            "mission-b",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                &mut state,
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("shared node registration should succeed");
+
+        let candidates_a = control
+            .match_capabilities(&state, &task_a, timestamp, &correlation_id, &mut events)
+            .expect("Mission A should read Shared State");
+        let candidates_b = control
+            .match_capabilities(&state, &task_b, timestamp, &correlation_id, &mut events)
+            .expect("Mission B should read the same Shared State");
+        assert_eq!(state.nodes().len(), 1);
+        assert_ne!(candidates_a.task_ref(), candidates_b.task_ref());
+        assert_eq!(
+            candidates_a.roles()[0].node_ids(),
+            std::slice::from_ref(&node_id)
+        );
+        assert_eq!(
+            candidates_a.roles()[0].node_ids(),
+            candidates_b.roles()[0].node_ids()
+        );
+
+        state
+            .update_node_status(
+                &node_id,
+                NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
+            )
+            .expect("shared health update should be accepted");
+        for task in [&task_a, &task_b] {
+            assert!(matches!(
+                control.match_capabilities(
+                    &state,
+                    task,
+                    TimestampMs::new(1),
+                    &correlation_id,
+                    &mut events,
+                ),
+                Err(ControlError::NoCandidate(_))
+            ));
+        }
     }
 
     /// Mission-scoped TaskRefs prevent identical local TaskIds from colliding.
@@ -1137,10 +2002,12 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         for node in [node_a, node_b] {
             control
                 .register_node(
+                    &mut state,
                     node,
                     NodeStatus::new(NodeHealth::Online, timestamp),
                     timestamp,
@@ -1151,13 +2018,14 @@ mod tests {
         }
 
         let candidates_a = control
-            .match_capabilities(&task_a, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &task_a, timestamp, &correlation_id, &mut events)
             .expect("Mission A task should match");
         let candidates_b = control
-            .match_capabilities(&task_b, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &task_b, timestamp, &correlation_id, &mut events)
             .expect("Mission B task should match");
         let proposal_a = control
             .propose(
+                &state,
                 &task_a,
                 &candidates_a,
                 vec![RoleAssignment::new(
@@ -1172,6 +2040,7 @@ mod tests {
             .expect("Mission A proposal should succeed");
         let proposal_b = control
             .propose(
+                &state,
                 &task_b,
                 &candidates_b,
                 vec![RoleAssignment::new(
@@ -1253,9 +2122,11 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, timestamp),
                 timestamp,
@@ -1265,7 +2136,13 @@ mod tests {
             .expect("test node registration should succeed");
 
         assert!(matches!(
-            control.match_capabilities(&task, timestamp, &correlation_id, &mut events),
+            control.match_capabilities(
+                &state,
+                &task,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            ),
             Err(ControlError::NoCandidate(role)) if role.as_str() == "transport"
         ));
     }
@@ -1279,9 +2156,11 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, timestamp),
                 timestamp,
@@ -1292,10 +2171,11 @@ mod tests {
 
         let first_task = requirement("task-first", "transport-first", CapabilityKind::Transport);
         let first_candidates = control
-            .match_capabilities(&first_task, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &first_task, timestamp, &correlation_id, &mut events)
             .expect("first task should match");
         let first_proposal = control
             .propose(
+                &state,
                 &first_task,
                 &first_candidates,
                 vec![RoleAssignment::new(
@@ -1314,10 +2194,17 @@ mod tests {
 
         let second_task = requirement("task-second", "transport-second", CapabilityKind::Transport);
         let second_candidates = control
-            .match_capabilities(&second_task, timestamp, &correlation_id, &mut events)
+            .match_capabilities(
+                &state,
+                &second_task,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
             .expect("second task can match before commit");
         let second_proposal = control
             .propose(
+                &state,
                 &second_task,
                 &second_candidates,
                 vec![RoleAssignment::new(
@@ -1361,9 +2248,11 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, timestamp),
                 timestamp,
@@ -1372,10 +2261,11 @@ mod tests {
             )
             .expect("test node registration should succeed");
         let first_candidates = control
-            .match_capabilities(&first_task, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &first_task, timestamp, &correlation_id, &mut events)
             .expect("first task should match");
         let first_proposal = control
             .propose(
+                &state,
                 &first_task,
                 &first_candidates,
                 vec![RoleAssignment::new(
@@ -1470,6 +2360,7 @@ mod tests {
             ExecutionGroupId::new("group-lifecycle-b").expect("test group id must be valid");
         let second_candidates = control
             .match_capabilities(
+                &state,
                 &second_task,
                 TimestampMs::new(6),
                 &correlation_id,
@@ -1478,6 +2369,7 @@ mod tests {
             .expect("second task should match");
         let second_proposal = control
             .propose(
+                &state,
                 &second_task,
                 &second_candidates,
                 vec![RoleAssignment::new(
@@ -1533,18 +2425,36 @@ mod tests {
             ),
             Err(ControlError::InvalidLifecycle(GroupLifecycle::Blocked))
         ));
-        control
-            .release_group(
+        assert!(matches!(
+            control.release_group(
                 &second_group,
                 TimestampMs::new(10),
                 &correlation_id,
                 &mut events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Blocked))
+        ));
+        control
+            .fail_group(
+                &second_group,
+                "recovery exhausted",
+                TimestampMs::new(11),
+                &correlation_id,
+                &mut events,
             )
-            .expect("blocked group should release");
+            .expect("blocked group should explicitly fail");
+        control
+            .release_group(
+                &second_group,
+                TimestampMs::new(12),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("failed group should release");
         assert_eq!(
             control
                 .group(&second_group)
-                .expect("released blocked group should remain observable")
+                .expect("released failed group should remain observable")
                 .lifecycle(),
             GroupLifecycle::Released
         );
@@ -1560,9 +2470,11 @@ mod tests {
         let now = TimestampMs::new(101);
         let correlation_id = correlation();
         let mut control = ControlPlane::with_status_ttl(100);
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, observed_at),
                 observed_at,
@@ -1572,7 +2484,55 @@ mod tests {
             .expect("test node registration should succeed");
 
         assert!(matches!(
-            control.match_capabilities(&task, now, &correlation_id, &mut events),
+            control.match_capabilities(&state, &task, now, &correlation_id, &mut events),
+            Err(ControlError::NoCandidate(_))
+        ));
+        let stored = state
+            .node(&NodeId::new("node-a").expect("test node id should be valid"))
+            .expect("stale facts should remain represented by State");
+        assert_eq!(stored.status().health(), NodeHealth::Online);
+        assert_eq!(stored.status().observed_at(), observed_at);
+    }
+
+    /// Matching observes the latest health fact instead of a Control-owned cache.
+    #[test]
+    fn health_update_is_visible_to_next_matching_decision() {
+        let node = registration("node-health", CapabilityKind::Transport, "space-health");
+        let node_id = node.node_id().clone();
+        let task = requirement("task-health", "transport", CapabilityKind::Transport);
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                &mut state,
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
+        control
+            .match_capabilities(&state, &task, timestamp, &correlation_id, &mut events)
+            .expect("online node should initially match");
+
+        state
+            .update_node_status(
+                &node_id,
+                NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
+            )
+            .expect("newer health observation should enter Shared State");
+        assert!(matches!(
+            control.match_capabilities(
+                &state,
+                &task,
+                TimestampMs::new(1),
+                &correlation_id,
+                &mut events,
+            ),
             Err(ControlError::NoCandidate(_))
         ));
     }
@@ -1591,9 +2551,11 @@ mod tests {
             .expect("test lease should be valid");
         let correlation_id = correlation();
         let mut control = ControlPlane::with_status_ttl(200);
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node_with_lease(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
                 lease,
@@ -1605,6 +2567,7 @@ mod tests {
 
         control
             .accept_heartbeat(
+                &mut state,
                 NodeHeartbeat::new(
                     node_id.clone(),
                     lease_id,
@@ -1620,11 +2583,23 @@ mod tests {
         let task = requirement("task-heartbeat", "transport", CapabilityKind::Transport);
         assert!(
             control
-                .match_capabilities(&task, TimestampMs::new(149), &correlation_id, &mut events)
+                .match_capabilities(
+                    &state,
+                    &task,
+                    TimestampMs::new(149),
+                    &correlation_id,
+                    &mut events,
+                )
                 .is_ok()
         );
         assert!(matches!(
-            control.match_capabilities(&task, TimestampMs::new(150), &correlation_id, &mut events),
+            control.match_capabilities(
+                &state,
+                &task,
+                TimestampMs::new(150),
+                &correlation_id,
+                &mut events,
+            ),
             Err(ControlError::NoCandidate(_))
         ));
     }
@@ -1638,9 +2613,11 @@ mod tests {
         let correlation_id =
             CorrelationId::new("lease-expiry-trace").expect("test correlation id must be valid");
         let mut control = ControlPlane::with_status_ttl(200);
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
                 TimestampMs::new(0),
@@ -1650,13 +2627,18 @@ mod tests {
             .expect("test node registration should succeed");
 
         let expired = control.expire_leases(
+            &mut state,
             TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
             &correlation_id,
             &mut events,
         );
-        assert_eq!(expired, vec![node_id]);
+        assert_eq!(
+            expired.expect("lease expiry should update Shared State"),
+            vec![node_id]
+        );
         assert!(matches!(
             control.match_capabilities(
+                &state,
                 &task,
                 TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
                 &correlation_id,
@@ -1673,9 +2655,11 @@ mod tests {
         let node_id = node.node_id().clone();
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
                 TimestampMs::new(0),
@@ -1686,6 +2670,7 @@ mod tests {
 
         let error = control
             .accept_heartbeat(
+                &mut state,
                 NodeHeartbeat::new(
                     node_id,
                     LeaseId::new("lease-not-owned").expect("test lease id must be valid"),
@@ -1712,9 +2697,11 @@ mod tests {
         let timestamp = TimestampMs::new(0);
         let correlation_id = correlation();
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut events = TestEvents;
         control
             .register_node(
+                &mut state,
                 node,
                 NodeStatus::new(NodeHealth::Online, timestamp),
                 timestamp,
@@ -1723,10 +2710,11 @@ mod tests {
             )
             .expect("test node registration should succeed");
         let candidates = control
-            .match_capabilities(&task, timestamp, &correlation_id, &mut events)
+            .match_capabilities(&state, &task, timestamp, &correlation_id, &mut events)
             .expect("task should initially match");
         let proposal = control
             .propose(
+                &state,
                 &task,
                 &candidates,
                 vec![RoleAssignment::new(role_id, node_id, vec![resource_id])],
@@ -1747,6 +2735,9 @@ mod tests {
                 &mut events,
             )
             .expect("group should bind before recovery exhaustion");
+        control
+            .activate_group(&group_id, timestamp, &correlation_id, &mut events)
+            .expect("group should activate before becoming blocked");
 
         control
             .block_group(

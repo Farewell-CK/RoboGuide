@@ -2,6 +2,7 @@
 members = [
     "core/domain",
     "core/ports",
+    "core/state",
     "core/control",
     "core/runtime",
     "core/testkit",

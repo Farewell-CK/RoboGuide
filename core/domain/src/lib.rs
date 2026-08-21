@@ -891,6 +891,40 @@ impl NodeRegistration {
     }
 }
 
+/// The latest shared registration and health facts known for one node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeStateSnapshot {
+    /// Local runtime, capability, and resource facts advertised by the node.
+    registration: NodeRegistration,
+    /// Latest accepted timestamped health observation for the node.
+    status: NodeStatus,
+}
+
+impl NodeStateSnapshot {
+    /// Creates a shared node snapshot from transport-neutral domain facts.
+    pub const fn new(registration: NodeRegistration, status: NodeStatus) -> Self {
+        Self {
+            registration,
+            status,
+        }
+    }
+
+    /// Returns the node identity represented by this snapshot.
+    pub fn node_id(&self) -> &NodeId {
+        self.registration.node_id()
+    }
+
+    /// Returns the node's latest advertised runtime, capabilities, and resources.
+    pub const fn registration(&self) -> &NodeRegistration {
+        &self.registration
+    }
+
+    /// Returns the latest accepted timestamped health observation.
+    pub const fn status(&self) -> NodeStatus {
+        self.status
+    }
+}
+
 /// The result reported by a local node after receiving an execution command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeEvent {
@@ -1072,13 +1106,35 @@ pub enum EventPayload {
         /// Mission-scoped task completed by the group.
         task_ref: TaskRef,
     },
-    /// The group could not recover safely.
+    /// The current Group configuration cannot progress without reconciliation.
     ExecutionGroupBlocked {
         /// Blocked group identity.
         group_id: ExecutionGroupId,
         /// Mission-scoped task that could not continue.
         task_ref: TaskRef,
         /// Reason for escalation.
+        reason: String,
+    },
+    /// One failed role released only its current member and resource binding.
+    ExecutionGroupRoleBindingReleased {
+        /// Group retaining its identity and unaffected bindings.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task that owns the group.
+        task_ref: TaskRef,
+        /// Role whose failed binding was released.
+        role_id: RoleId,
+        /// Node formerly bound to the role.
+        node_id: NodeId,
+        /// Resource reservations released only for this role.
+        resource_ids: Vec<ResourceId>,
+    },
+    /// Recovery was explicitly exhausted and the group became terminally failed.
+    ExecutionGroupFailed {
+        /// Failed group identity.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task the group could not complete.
+        task_ref: TaskRef,
+        /// Explicit reason recovery could not continue.
         reason: String,
     },
     /// A terminal group released all current role and resource bindings.

@@ -13,6 +13,7 @@ use domain::{
 };
 use runtime::Runtime;
 use serde::Deserialize;
+use state::InMemorySharedNodeState;
 use std::collections::BTreeSet;
 use testkit::{FailureMode, FakeNode, SharedEventLog, VirtualClock};
 
@@ -260,10 +261,12 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     )?;
 
     let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
     let mut log = SharedEventLog::new();
     let timestamp = TimestampMs::new(0);
     control
         .register_node(
+            &mut state,
             node_a.clone(),
             NodeStatus::new(NodeHealth::Online, timestamp),
             timestamp,
@@ -273,6 +276,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         .map_err(|error| error.to_string())?;
     control
         .register_node(
+            &mut state,
             node_b.clone(),
             NodeStatus::new(NodeHealth::Online, timestamp),
             timestamp,
@@ -282,6 +286,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         .map_err(|error| error.to_string())?;
     control
         .register_node(
+            &mut state,
             edge.clone(),
             NodeStatus::new(NodeHealth::Online, timestamp),
             timestamp,
@@ -291,10 +296,11 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         .map_err(|error| error.to_string())?;
 
     let candidates = control
-        .match_capabilities(&requirement, timestamp, &correlation_id, &mut log)
+        .match_capabilities(&state, &requirement, timestamp, &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
     let proposal = control
         .propose(
+            &state,
             &requirement,
             &candidates,
             vec![
@@ -373,7 +379,26 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     }
 
     control
+        .block_group(
+            &group_id,
+            "transport role cannot progress on node-a",
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .release_role_binding(
+            &group_id,
+            &transport_role,
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
         .rebind_role(
+            &state,
             &group_id,
             &RoleRequirementView::new(RoleRequirement::new(
                 transport_role.clone(),
@@ -386,6 +411,9 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &correlation_id,
             &mut log,
         )
+        .map_err(|error| error.to_string())?;
+    control
+        .activate_group(&group_id, TimestampMs::new(1), &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
 
     let replacement_command = ExecutionCommand::new(
@@ -452,6 +480,8 @@ mod tests {
             | EventPayload::RecoveryRebound { task_ref, .. }
             | EventPayload::ExecutionGroupCompleted { task_ref, .. }
             | EventPayload::ExecutionGroupBlocked { task_ref, .. }
+            | EventPayload::ExecutionGroupRoleBindingReleased { task_ref, .. }
+            | EventPayload::ExecutionGroupFailed { task_ref, .. }
             | EventPayload::ExecutionGroupReleased { task_ref, .. }
             | EventPayload::NodeObservation(NodeEvent::TaskCompleted { task_ref, .. })
             | EventPayload::NodeObservation(NodeEvent::TaskFailed { task_ref, .. }) => {
@@ -468,7 +498,7 @@ mod tests {
     #[test]
     fn mvp_slice_recovers_after_node_failure() {
         let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-        assert_eq!(events.len(), 14);
+        assert_eq!(events.len(), 17);
         assert!(matches!(
             events[0].payload(),
             EventPayload::NodeRegistered { .. }
@@ -512,20 +542,33 @@ mod tests {
         ));
         assert!(matches!(
             events[10].payload(),
+            EventPayload::ExecutionGroupBlocked { .. }
+        ));
+        assert!(matches!(
+            events[11].payload(),
+            EventPayload::ExecutionGroupRoleBindingReleased { role_id, .. }
+                if role_id.as_str() == "primary-transport"
+        ));
+        assert!(matches!(
+            events[12].payload(),
             EventPayload::RecoveryRebound { from_node, to_node, .. }
                 if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[11].payload(),
+            events[13].payload(),
+            EventPayload::ExecutionGroupActivated { .. }
+        ));
+        assert!(matches!(
+            events[14].payload(),
             EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
                 if node_id.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[12].payload(),
+            events[15].payload(),
             EventPayload::ExecutionGroupCompleted { .. }
         ));
         assert!(matches!(
-            events[13].payload(),
+            events[16].payload(),
             EventPayload::ExecutionGroupReleased { .. }
         ));
     }
@@ -609,10 +652,12 @@ mod tests {
         .expect("node registration should be valid");
 
         let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
         let mut log = SharedEventLog::new();
         for registration in [&node_a, &node_b, &node_d, &edge_c, &edge_e] {
             control
                 .register_node(
+                    &mut state,
                     registration.clone(),
                     NodeStatus::new(NodeHealth::Online, started_at),
                     started_at,
@@ -623,10 +668,11 @@ mod tests {
         }
 
         let candidates_a = control
-            .match_capabilities(&requirement_a, started_at, &trace_a, &mut log)
+            .match_capabilities(&state, &requirement_a, started_at, &trace_a, &mut log)
             .expect("Mission A matching should succeed");
         let proposal_a = control
             .propose(
+                &state,
                 &requirement_a,
                 &candidates_a,
                 vec![
@@ -657,10 +703,11 @@ mod tests {
             .expect("Mission A activation should succeed");
 
         let candidates_b = control
-            .match_capabilities(&requirement_b, started_at, &trace_b, &mut log)
+            .match_capabilities(&state, &requirement_b, started_at, &trace_b, &mut log)
             .expect("Mission B matching should succeed");
         let proposal_b = control
             .propose(
+                &state,
                 &requirement_b,
                 &candidates_b,
                 vec![
@@ -749,7 +796,26 @@ mod tests {
         );
 
         control
+            .block_group(
+                &group_a,
+                "transport role cannot progress on node-a",
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("Mission A should enter reconciliation");
+        control
+            .release_role_binding(
+                &group_a,
+                &transport_role,
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("Mission A should release only the failed role binding");
+        control
             .rebind_role(
+                &state,
                 &group_a,
                 &RoleRequirementView::new(RoleRequirement::new(
                     transport_role.clone(),
@@ -769,6 +835,16 @@ mod tests {
                 .expect("Mission A group should exist")
                 .lifecycle(),
             GroupLifecycle::Adapted
+        );
+        control
+            .activate_group(&group_a, TimestampMs::new(1), &trace_a, &mut log)
+            .expect("Mission A recovered group should reactivate");
+        assert_eq!(
+            control
+                .group(&group_a)
+                .expect("Mission A group should exist")
+                .lifecycle(),
+            GroupLifecycle::Active
         );
         assert_eq!(
             control
@@ -834,10 +910,17 @@ mod tests {
 
         let requirement_c = multi_mission_requirement("mission-c", "task-02");
         let candidates_c = control
-            .match_capabilities(&requirement_c, TimestampMs::new(4), &trace_c, &mut log)
+            .match_capabilities(
+                &state,
+                &requirement_c,
+                TimestampMs::new(4),
+                &trace_c,
+                &mut log,
+            )
             .expect("Mission C matching should succeed");
         let proposal_c = control
             .propose(
+                &state,
                 &requirement_c,
                 &candidates_c,
                 vec![

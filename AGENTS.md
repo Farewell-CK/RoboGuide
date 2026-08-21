@@ -14,6 +14,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `docs/images/` stores diagrams.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
   composition roots.
+- `core/state/` implements only State & Memory Plane Slice v0.1: deterministic
+  Shared Node State behind transport-neutral reader/writer ports.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -60,7 +62,9 @@ docstrings.
 Core tests are deterministic and offline, use fake nodes and a virtual clock, and
 cover normal, rejection, timeout, conflict, and recovery paths. Mark Isaac Sim,
 network, model, and hardware checks as adapter/system tests. Cross-module behavior
-produces an inspectable event trace.
+produces an inspectable event trace. State tests keep observed facts separate from
+Control eligibility policy and cover registration, freshness, health updates, and
+cross-mission reads. Recovery tests must preserve partial versus whole-group release.
 
 ## Commit & Pull Request Guidelines
 
@@ -79,4 +83,5 @@ Control while the Group runs across Runtime and Nodes; State & Memory is horizon
 Local Systems retain Immediate How and final safety. Do not freeze schemas,
 transports, databases, algorithms, or hardware APIs without evidence and a decision.
 Changing ownership, dependency direction, authority, lifecycle, or public contracts
-requires an ADR; architecture-semantic changes update V2 first.
+requires an ADR; architecture-semantic changes update V2 first. Do not describe
+Shared Node State Slice v0.1 as complete State, Belief, Allocation, or Memory.

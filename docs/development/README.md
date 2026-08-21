@@ -27,7 +27,7 @@ core/
   ports/                   由核心拥有、与传输无关的接口
   control/                 匹配、提案、协调、提交和 Group Manager
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
-  state/                   证据、共享视图、分配状态和分域记忆
+  state/                   已实现 Shared Node State Slice v0.1；其他 State/Memory 延后
   adapters/                Rust 传输、持久化、ROS 和厂商适配器
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
@@ -44,11 +44,12 @@ tests/system/              仅用于黑盒跨进程测试
 tools/quality/             标准 Linter 未覆盖的仓库检查
 ```
 
-当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/control`、
+当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
 `core/runtime`、`core/testkit`、`apps/controller` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
-不在 Rust 进程中嵌入 Python。没有维护实现前，不得创建未来的 `state`、
-`adapters`、`simulation` 或系统测试路径。禁止提交空目录。
+不在 Rust 进程中嵌入 Python。`core/state` 当前只有 Shared Node State 的真实实现；
+没有维护实现前，不得创建未来的 `adapters`、`simulation` 或系统测试路径。禁止提交
+空目录。
 
 ## 3. 模块边界
 
@@ -58,7 +59,7 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 | Ports | Clock、Event Log、Node Registry 等核心接口 | 厂商或传输类型 |
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
 | Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
-| State | Observation、Provenance、Freshness、Uncertainty、Belief 和 Allocation View | Mission 规划或设备控制 |
+| State | 当前切片维护 Node registration、runtime descriptor、Capability/Resource declaration 和最新 health observation | 调度决策、Lease authority、Reservation、Group lifecycle、Belief 或 Memory |
 | Adapters | 协议、仿真器、存储、模型、ROS 和厂商转换 | 核心策略决策 |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
@@ -71,6 +72,35 @@ apps -> control/runtime/state/adapters -> ports -> domain
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；Python 通过 Adapter 边界与核心通信。
+
+### State & Memory Plane — Slice v0.1: Shared Node State
+
+当前已实现的 State Port 为 `SharedNodeStateReader` 和
+`SharedNodeStateWriter`。领域对象 `NodeStateSnapshot` 组合
+`NodeRegistration` 与带 observation timestamp 的 `NodeStatus`；`core/state` 使用
+`BTreeMap` 保存最新已接受事实，并拒绝覆盖更新事实的旧 health observation。
+
+Control 不再私有保存 `NodeRegistration` 或 `NodeStatus`。Registration 和 Heartbeat
+通过 Writer 更新 Shared State；Matching、Proposal validation 和 Rebind validation
+通过 Reader 读取当前事实。State 不输出最终 `schedulable` 结论：health、freshness
+TTL、lease validity 和 requirement eligibility 仍由 Control 判定。
+
+本切片明确不是完整 State & Memory Plane。以下内容延后：
+
+- Allocation State；
+- Execution Group State Projection；
+- Physical / Spatial State；
+- Shared Belief；
+- Provenance / uncertainty fusion；
+- Distributed Memory；
+- Persistence / Replication；
+- State Authority resolution；
+- Lease ownership resolution。
+
+Control 当前仍持有 `NodeId -> NodeLease`、Reservation、Execution Group 及其
+Blocked/Recovery/Partial Release/Failed/Release 生命周期。Lease 的 Control / Runtime /
+State owner 尚未最终确认；Allocation View 与 Group observable projection 将由后续独立
+State slice 处理。
 
 ## 4. 合同规则
 

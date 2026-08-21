@@ -1,5 +1,5 @@
 [package]
-name = "control"
+name = "state"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,6 +7,3 @@ rust-version.workspace = true
 [dependencies]
 domain = { path = "../domain" }
 ports = { path = "../ports" }
-
-[dev-dependencies]
-state = { path = "../state" }

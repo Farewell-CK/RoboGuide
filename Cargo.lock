@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "ports",
+ "state",
 ]
 
 [[package]]
@@ -19,6 +20,7 @@ dependencies = [
  "runtime",
  "serde",
  "serde_json",
+ "state",
  "testkit",
 ]
 
@@ -112,6 +114,14 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "state"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "ports",
 ]
 
 [[package]]
