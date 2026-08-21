@@ -1,0 +1,26 @@
+{
+  "schema_version": "roboguide.mission-plan/v0",
+  "mission": {
+    "id": "mission-mvp-001",
+    "objective": "使用可恢复的运输能力和共享算力完成异构节点协作任务"
+  },
+  "tasks": [
+    {
+      "id": "task-transport-and-compute",
+      "description": "运输节点执行搬运角色，边缘节点提供共享计算角色",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "primary-transport",
+          "capability": "transport",
+          "resource_kind": "space"
+        },
+        {
+          "id": "execution-compute",
+          "capability": "compute",
+          "resource_kind": "compute"
+        }
+      ]
+    }
+  ]
+}

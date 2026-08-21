@@ -56,11 +56,11 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 Python 包创建后必须通过：
 
 ```bash
-ruff format --check python tests
-ruff check python tests
-python tools/quality/check_python_function_docs.py python tests
-mypy --strict python
-pytest -q
+uv run ruff format --check mission tools/quality
+uv run ruff check mission tools/quality
+uv run python tools/quality/check_python_function_docs.py mission tools/quality
+uv run mypy --strict mission/src mission/tests tools/quality
+uv run pytest -q
 ```
 
 启用 Ruff 的 pydocstyle `D` 规则，并使用 Google Convention。这些规则覆盖公共

@@ -13,7 +13,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `docs/decisions/` stores numbered Architecture Decision Records (ADRs).
 - `docs/images/` stores diagrams.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
-  composition roots. Future paths are created only with their first implementation.
+  composition roots.
+- `mission/` contains the Python Mission Intelligence package and its tests.
+- `contracts/mission/` stores versioned cross-language contracts; `config/` stores
+  non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add
@@ -32,6 +35,15 @@ file docs/images/roboguide-v2-overall-architecture.png
 The bootstrap pins Rust and Python toolchains. Python commands use the repository's
 uv-managed environment. New implementation paths must update this file and
 `README.md` when their ownership is established.
+
+For Mission changes, run:
+
+```bash
+uv run ruff format --check mission tools/quality
+uv run ruff check mission tools/quality
+uv run mypy --strict mission/src mission/tests tools/quality
+uv run pytest -q
+```
 
 ## Coding Style & Naming Conventions
 

@@ -1,0 +1,28 @@
+[mission]
+planner = "llm"
+contract_version = "roboguide.mission-plan/v0"
+schema_path = "contracts/mission/v0/mission-plan.schema.json"
+review_enabled = true
+
+[mission.prompts]
+version = "v0"
+planner_path = "mission/prompts/v0/planner.md"
+reviewer_path = "mission/prompts/v0/reviewer.md"
+
+[mission.llm]
+model_provider = "OpenAI"
+model = "gpt-5.6-luna"
+review_model = "gpt-5.6-luna"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+network_access = "enabled"
+max_output_tokens = 4096
+timeout_seconds = 90
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "http://101.43.45.215:8080"
+wire_api = "responses"
+responses_path = "/responses"
+requires_openai_auth = true
+api_key_env = "OPENAI_API_KEY"

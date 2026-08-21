@@ -7,7 +7,11 @@
 //! This crate intentionally contains no transport, serialization, SDK, or
 //! simulator dependency. It defines the first internal Node Contract shape.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
+
+/// Version identifier for the first cross-language Mission Plan contract.
+pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
 
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +31,11 @@ pub enum DomainError {
         /// The kind of lease operation that was rejected.
         kind: &'static str,
     },
+    /// A Mission Plan or Task Graph violated a structural invariant.
+    InvalidMissionPlan {
+        /// Stable diagnostic reason suitable for adapter and test evidence.
+        reason: String,
+    },
 }
 
 impl Display for DomainError {
@@ -36,6 +45,9 @@ impl Display for DomainError {
             Self::EmptyValue { kind } => write!(formatter, "{kind} must not be empty"),
             Self::InvalidDuration { kind } => write!(formatter, "invalid {kind} duration"),
             Self::LeaseExpired { kind } => write!(formatter, "{kind} lease has expired"),
+            Self::InvalidMissionPlan { reason } => {
+                write!(formatter, "invalid mission plan: {reason}")
+            }
         }
     }
 }
@@ -99,6 +111,42 @@ define_identifier!(
     "correlation"
 );
 define_identifier!(LeaseId, "Identifies a renewable node lease.", "lease");
+
+/// Uniquely identifies a mission-scoped task across concurrent missions.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskRef {
+    /// Mission that owns the task namespace.
+    mission_id: MissionId,
+    /// Task identity scoped by the owning mission.
+    task_id: TaskId,
+}
+
+impl TaskRef {
+    /// Creates an unambiguous task reference from its mission and local task identity.
+    pub const fn new(mission_id: MissionId, task_id: TaskId) -> Self {
+        Self {
+            mission_id,
+            task_id,
+        }
+    }
+
+    /// Returns the mission that owns this task.
+    pub const fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// Returns the task identity within its mission namespace.
+    pub const fn task_id(&self) -> &TaskId {
+        &self.task_id
+    }
+}
+
+impl Display for TaskRef {
+    /// Formats a task reference without collapsing its mission namespace.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}/{}", self.mission_id, self.task_id)
+    }
+}
 
 /// A monotonic timestamp used by deterministic core tests and runtime adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -361,10 +409,8 @@ impl RoleRequirement {
 /// A mission task's role-level execution requirements.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskRequirement {
-    /// Mission containing the task.
-    mission_id: MissionId,
-    /// Task whose execution requirements are being described.
-    task_id: TaskId,
+    /// Mission-scoped task whose execution requirements are being described.
+    task_ref: TaskRef,
     /// Role requirements in the task's declared order.
     roles: Vec<RoleRequirement>,
 }
@@ -380,25 +426,258 @@ impl TaskRequirement {
             return Err(DomainError::EmptyValue { kind: "task roles" });
         }
         Ok(Self {
-            mission_id,
-            task_id,
+            task_ref: TaskRef::new(mission_id, task_id),
             roles,
         })
     }
 
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
     /// Returns the mission identity.
-    pub fn mission_id(&self) -> &MissionId {
-        &self.mission_id
+    pub const fn mission_id(&self) -> &MissionId {
+        self.task_ref.mission_id()
     }
 
     /// Returns the task identity.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns all role requirements in declaration order.
     pub fn roles(&self) -> &[RoleRequirement] {
         &self.roles
+    }
+}
+
+/// A user-visible mission objective before global scheduling decisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissionGoal {
+    /// Stable mission identity shared by every task in the graph.
+    mission_id: MissionId,
+    /// Outcome Mission Intelligence must decompose without selecting nodes.
+    objective: String,
+}
+
+impl MissionGoal {
+    /// Creates a mission goal with a nonblank objective.
+    pub fn new(mission_id: MissionId, objective: impl Into<String>) -> Result<Self, DomainError> {
+        let objective = objective.into();
+        if objective.trim().is_empty() {
+            return Err(DomainError::EmptyValue {
+                kind: "mission objective",
+            });
+        }
+        Ok(Self {
+            mission_id,
+            objective,
+        })
+    }
+
+    /// Returns the stable mission identity.
+    pub fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// Returns the requested user-visible outcome.
+    pub fn objective(&self) -> &str {
+        &self.objective
+    }
+}
+
+/// One Task Graph node with dependencies and role-level execution requirements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedTask {
+    /// Human-readable task outcome used for review and diagnostics.
+    description: String,
+    /// Task requirements consumed by Control capability matching.
+    requirement: TaskRequirement,
+    /// Tasks that must complete before this task becomes ready.
+    dependencies: Vec<TaskId>,
+}
+
+impl PlannedTask {
+    /// Creates a task while rejecting blank descriptions and duplicate dependencies.
+    pub fn new(
+        description: impl Into<String>,
+        requirement: TaskRequirement,
+        dependencies: Vec<TaskId>,
+    ) -> Result<Self, DomainError> {
+        let description = description.into();
+        if description.trim().is_empty() {
+            return Err(DomainError::EmptyValue {
+                kind: "task description",
+            });
+        }
+        let unique_dependencies: BTreeSet<&TaskId> = dependencies.iter().collect();
+        if unique_dependencies.len() != dependencies.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("task {} has duplicate dependencies", requirement.task_id()),
+            });
+        }
+        if dependencies
+            .iter()
+            .any(|dependency| dependency == requirement.task_id())
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("task {} depends on itself", requirement.task_id()),
+            });
+        }
+        Ok(Self {
+            description,
+            requirement,
+            dependencies,
+        })
+    }
+
+    /// Returns the task identity carried by its execution requirements.
+    pub fn task_id(&self) -> &TaskId {
+        self.requirement.task_id()
+    }
+
+    /// Returns the human-readable task outcome.
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the role-level requirements consumed by Control.
+    pub const fn requirement(&self) -> &TaskRequirement {
+        &self.requirement
+    }
+
+    /// Returns prerequisite task identities in declaration order.
+    pub fn dependencies(&self) -> &[TaskId] {
+        &self.dependencies
+    }
+}
+
+/// A validated acyclic Task Graph owned by one mission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskGraph {
+    /// Mission that owns every task in this graph.
+    mission_id: MissionId,
+    /// Tasks retained in planner declaration order.
+    tasks: Vec<PlannedTask>,
+}
+
+impl TaskGraph {
+    /// Creates a graph and rejects identity mismatch, unknown dependencies, or cycles.
+    pub fn new(mission_id: MissionId, tasks: Vec<PlannedTask>) -> Result<Self, DomainError> {
+        if tasks.is_empty() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "task graph must not be empty".to_string(),
+            });
+        }
+        let mut dependencies = BTreeMap::<TaskId, BTreeSet<TaskId>>::new();
+        for task in &tasks {
+            if task.requirement().mission_id() != &mission_id {
+                return Err(DomainError::InvalidMissionPlan {
+                    reason: format!("task {} belongs to another mission", task.task_id()),
+                });
+            }
+            if dependencies
+                .insert(
+                    task.task_id().clone(),
+                    task.dependencies().iter().cloned().collect(),
+                )
+                .is_some()
+            {
+                return Err(DomainError::InvalidMissionPlan {
+                    reason: format!("duplicate task id {}", task.task_id()),
+                });
+            }
+        }
+        let known_tasks: BTreeSet<TaskId> = dependencies.keys().cloned().collect();
+        for (task_id, prerequisites) in &dependencies {
+            if let Some(unknown) = prerequisites
+                .iter()
+                .find(|dependency| !known_tasks.contains(*dependency))
+            {
+                return Err(DomainError::InvalidMissionPlan {
+                    reason: format!("task {task_id} depends on unknown task {unknown}"),
+                });
+            }
+        }
+        let mut remaining = dependencies;
+        while !remaining.is_empty() {
+            let ready: BTreeSet<TaskId> = remaining
+                .iter()
+                .filter(|(_, prerequisites)| prerequisites.is_empty())
+                .map(|(task_id, _)| task_id.clone())
+                .collect();
+            if ready.is_empty() {
+                return Err(DomainError::InvalidMissionPlan {
+                    reason: "task graph contains a cycle".to_string(),
+                });
+            }
+            remaining.retain(|task_id, _| !ready.contains(task_id));
+            for prerequisites in remaining.values_mut() {
+                prerequisites.retain(|dependency| !ready.contains(dependency));
+            }
+        }
+        Ok(Self { mission_id, tasks })
+    }
+
+    /// Returns the mission that owns this graph.
+    pub fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// Returns tasks in planner declaration order.
+    pub fn tasks(&self) -> &[PlannedTask] {
+        &self.tasks
+    }
+
+    /// Returns tasks whose dependencies are all present in the completed set.
+    pub fn ready_tasks(&self, completed: &BTreeSet<TaskId>) -> Vec<&PlannedTask> {
+        self.tasks
+            .iter()
+            .filter(|task| {
+                !completed.contains(task.task_id())
+                    && task
+                        .dependencies()
+                        .iter()
+                        .all(|dependency| completed.contains(dependency))
+            })
+            .collect()
+    }
+}
+
+/// A versioned Mission Intelligence result accepted by the DEAIOS core.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissionPlan {
+    /// User-visible goal preserved across planning and recovery.
+    goal: MissionGoal,
+    /// Validated task decomposition and execution requirements.
+    task_graph: TaskGraph,
+}
+
+impl MissionPlan {
+    /// Creates a plan only when the goal and Task Graph share one mission identity.
+    pub fn new(goal: MissionGoal, task_graph: TaskGraph) -> Result<Self, DomainError> {
+        if goal.mission_id() != task_graph.mission_id() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "goal and task graph mission ids differ".to_string(),
+            });
+        }
+        Ok(Self { goal, task_graph })
+    }
+
+    /// Returns the versioned adapter contract represented by this domain shape.
+    pub const fn schema_version(&self) -> &'static str {
+        MISSION_PLAN_SCHEMA_V0
+    }
+
+    /// Returns the original mission goal.
+    pub const fn goal(&self) -> &MissionGoal {
+        &self.goal
+    }
+
+    /// Returns the validated Task Graph.
+    pub const fn task_graph(&self) -> &TaskGraph {
+        &self.task_graph
     }
 }
 
@@ -619,8 +898,8 @@ pub enum NodeEvent {
     TaskCompleted {
         /// Node that executed the role.
         node_id: NodeId,
-        /// Task that was executed.
-        task_id: TaskId,
+        /// Mission-scoped task that was executed.
+        task_ref: TaskRef,
         /// Execution group containing the role.
         group_id: ExecutionGroupId,
         /// Role that completed.
@@ -630,8 +909,8 @@ pub enum NodeEvent {
     TaskFailed {
         /// Node that attempted the role.
         node_id: NodeId,
-        /// Task that failed.
-        task_id: TaskId,
+        /// Mission-scoped task that failed.
+        task_ref: TaskRef,
         /// Execution group containing the role.
         group_id: ExecutionGroupId,
         /// Role that failed.
@@ -651,10 +930,8 @@ pub enum NodeEvent {
 /// A command sent through the runtime to a local node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionCommand {
-    /// Mission containing the commanded task.
-    mission_id: MissionId,
-    /// Task whose role is being invoked.
-    task_id: TaskId,
+    /// Mission-scoped task whose role is being invoked.
+    task_ref: TaskRef,
     /// Execution group that owns the role lifecycle.
     group_id: ExecutionGroupId,
     /// Role being invoked on the node.
@@ -676,8 +953,7 @@ impl ExecutionCommand {
         correlation_id: CorrelationId,
     ) -> Self {
         Self {
-            mission_id,
-            task_id,
+            task_ref: TaskRef::new(mission_id, task_id),
             group_id,
             role_id,
             node_id,
@@ -685,14 +961,19 @@ impl ExecutionCommand {
         }
     }
 
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
     /// Returns the mission targeted by this command.
-    pub fn mission_id(&self) -> &MissionId {
-        &self.mission_id
+    pub const fn mission_id(&self) -> &MissionId {
+        self.task_ref.mission_id()
     }
 
     /// Returns the task targeted by this command.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns the execution group targeted by this command.
@@ -742,25 +1023,32 @@ pub enum EventPayload {
     },
     /// Matching produced role candidates.
     CandidatesMatched {
-        /// Task for which candidates were produced.
-        task_id: TaskId,
+        /// Mission-scoped task for which candidates were produced.
+        task_ref: TaskRef,
     },
     /// A scheduler proposal was accepted for validation.
     ProposalCreated {
-        /// Task represented by the proposal.
-        task_id: TaskId,
+        /// Mission-scoped task represented by the proposal.
+        task_ref: TaskRef,
     },
     /// Resource coordination committed a proposal.
     PlanCommitted {
-        /// Task represented by the committed plan.
-        task_id: TaskId,
+        /// Mission-scoped task represented by the committed plan.
+        task_ref: TaskRef,
     },
     /// An execution group was created and bound.
     ExecutionGroupBound {
         /// Group identity.
         group_id: ExecutionGroupId,
-        /// Task assigned to the group.
-        task_id: TaskId,
+        /// Mission-scoped task assigned to the group.
+        task_ref: TaskRef,
+    },
+    /// An execution group began executing its bound roles.
+    ExecutionGroupActivated {
+        /// Activated group identity.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task executed by the group.
+        task_ref: TaskRef,
     },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),
@@ -768,6 +1056,8 @@ pub enum EventPayload {
     RecoveryRebound {
         /// Group being adapted.
         group_id: ExecutionGroupId,
+        /// Mission-scoped task whose role was rebound.
+        task_ref: TaskRef,
         /// Role being replaced.
         role_id: RoleId,
         /// Previous node.
@@ -779,13 +1069,26 @@ pub enum EventPayload {
     ExecutionGroupCompleted {
         /// Completed group identity.
         group_id: ExecutionGroupId,
+        /// Mission-scoped task completed by the group.
+        task_ref: TaskRef,
     },
     /// The group could not recover safely.
     ExecutionGroupBlocked {
         /// Blocked group identity.
         group_id: ExecutionGroupId,
+        /// Mission-scoped task that could not continue.
+        task_ref: TaskRef,
         /// Reason for escalation.
         reason: String,
+    },
+    /// A terminal group released all current role and resource bindings.
+    ExecutionGroupReleased {
+        /// Released group identity.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task formerly owned by the group.
+        task_ref: TaskRef,
+        /// Resource reservations released in deterministic assignment order.
+        resource_ids: Vec<ResourceId>,
     },
 }
 
@@ -845,5 +1148,86 @@ impl EventRecord {
     /// Returns the immutable event payload.
     pub fn payload(&self) -> &EventPayload {
         &self.payload
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds one valid task with no dependencies for graph invariant tests.
+    fn task(mission_id: &MissionId, task_id: &str, dependencies: Vec<TaskId>) -> PlannedTask {
+        let task_id = TaskId::new(task_id).expect("test task id must be valid");
+        let role = RoleRequirement::new(
+            RoleId::new(format!("role-{task_id}")).expect("test role id must be valid"),
+            CapabilityKind::Transport,
+            Some(ResourceKind::Space),
+        );
+        let requirement = TaskRequirement::new(mission_id.clone(), task_id, vec![role])
+            .expect("test requirement must be valid");
+        PlannedTask::new("transport payload", requirement, dependencies)
+            .expect("test task must be valid")
+    }
+
+    /// Acyclic dependencies expose only tasks whose prerequisites have completed.
+    #[test]
+    fn task_graph_returns_ready_tasks() {
+        let mission_id = MissionId::new("mission-ready").expect("test mission id must be valid");
+        let first = task(&mission_id, "task-first", vec![]);
+        let first_id = first.task_id().clone();
+        let second = task(&mission_id, "task-second", vec![first_id.clone()]);
+        let graph = TaskGraph::new(mission_id, vec![first, second])
+            .expect("acyclic test graph must be valid");
+
+        let initially_ready = graph.ready_tasks(&BTreeSet::new());
+        assert_eq!(initially_ready.len(), 1);
+        assert_eq!(initially_ready[0].task_id(), &first_id);
+
+        let completed = BTreeSet::from([first_id]);
+        let ready_after_first = graph.ready_tasks(&completed);
+        assert_eq!(ready_after_first.len(), 1);
+        assert_eq!(ready_after_first[0].task_id().as_str(), "task-second");
+    }
+
+    /// A cyclic Task Graph is rejected before Control can consume any requirement.
+    #[test]
+    fn task_graph_rejects_cycle() {
+        let mission_id = MissionId::new("mission-cycle").expect("test mission id must be valid");
+        let first = task(
+            &mission_id,
+            "task-first",
+            vec![TaskId::new("task-second").expect("test dependency id must be valid")],
+        );
+        let second = task(
+            &mission_id,
+            "task-second",
+            vec![TaskId::new("task-first").expect("test dependency id must be valid")],
+        );
+
+        assert!(matches!(
+            TaskGraph::new(mission_id, vec![first, second]),
+            Err(DomainError::InvalidMissionPlan { reason }) if reason.contains("cycle")
+        ));
+    }
+
+    /// A plan cannot combine a goal and Task Graph from different missions.
+    #[test]
+    fn mission_plan_rejects_identity_mismatch() {
+        let goal_mission =
+            MissionId::new("mission-goal").expect("test goal mission id must be valid");
+        let graph_mission =
+            MissionId::new("mission-graph").expect("test graph mission id must be valid");
+        let goal = MissionGoal::new(goal_mission, "deliver payload")
+            .expect("test mission goal must be valid");
+        let graph = TaskGraph::new(
+            graph_mission.clone(),
+            vec![task(&graph_mission, "task-deliver", vec![])],
+        )
+        .expect("test task graph must be valid");
+
+        assert!(matches!(
+            MissionPlan::new(goal, graph),
+            Err(DomainError::InvalidMissionPlan { .. })
+        ));
     }
 }

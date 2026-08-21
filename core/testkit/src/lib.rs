@@ -209,13 +209,13 @@ impl NodeGateway for FakeNode {
         match failure_mode {
             FailureMode::Never => Ok(NodeEvent::TaskCompleted {
                 node_id: self.registration.node_id().clone(),
-                task_id: command.task_id().clone(),
+                task_ref: command.task_ref().clone(),
                 group_id: command.group_id().clone(),
                 role_id: command.role_id().clone(),
             }),
             FailureMode::FailNext { reason } => Ok(NodeEvent::TaskFailed {
                 node_id: self.registration.node_id().clone(),
-                task_id: command.task_id().clone(),
+                task_ref: command.task_ref().clone(),
                 group_id: command.group_id().clone(),
                 role_id: command.role_id().clone(),
                 reason,

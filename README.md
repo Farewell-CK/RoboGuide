@@ -44,6 +44,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
+- 当前 `mission/` 已提供确定性 Fixture Planner 和可配置的 Responses LLM Planner；
+- Mission 输出使用 `contracts/mission/v0/` 中的版本化合同，Controller 只消费校验后的 Task Graph；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
@@ -92,6 +94,12 @@ Execution Group 是 Control Plane 之外、由 Runtime 承载的任务级动态�
 - `Resource Bindings`：已提交的 Space、Compute、Device、Time 占用；
 - `Shared Context`：仅当前 Group 需要的上下文；
 - `Lifecycle`：Create → Bind → Activate → Adapt → Complete → Release。
+
+Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 是 Node 能否承担该 Role 的
+依据，Assignment 指明当前承担者，Resource Binding 则记录已经提交的执行资源。
+如果 Task 直接绑定 Node，节点故障通常需要重新规划整个 Task；通过 Role 间接绑定，
+系统可以只替换失败 Role 的承担节点，同时保留其他已完成工作、有效 Binding 和
+Execution Group 上下文。
 
 Member 与 Resource Binding 必须区分：GPU Node 可以是 Member，GPU quota 是 Binding；走廊是 Spatial Binding，不是 Group Member。
 
@@ -148,6 +156,18 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── Cargo.toml
 ├── rust-toolchain.toml
 ├── pyproject.toml
+├── config/
+│   └── mission.toml
+├── contracts/
+│   └── mission/v0/
+├── mission/
+│   ├── src/mission/
+│   ├── prompts/v0/
+│   └── tests/
+├── scenarios/
+│   └── mvp-slice-v0.1/
+├── tools/
+│   └── quality/
 ├── core/
 │   ├── domain/
 │   ├── ports/
@@ -174,7 +194,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   └── coding-standards.md
     ├── decisions/
     │   ├── 0001-rust-core-python-edges.md
-    │   └── 0002-deaios-node-contract.md
+    │   ├── 0002-deaios-node-contract.md
+    │   └── 0003-mission-plan-contract.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
@@ -183,3 +204,18 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 
 当前 V2 架构是有效基线；开发基线正在通过首个 bootstrap 和 Slice v0.1 验证，
 MVP Definition 仍为 Draft。完整 MVP 的测试、适配器和仿真环境尚未完成。
+
+## Mission Intelligence 开发
+
+Mission 配置位于 [`config/mission.toml`](config/mission.toml)，版本化 Prompt 位于
+[`mission/prompts/`](mission/prompts/)。模型名、Provider、Prompt 版本、Responses
+路径、推理强度、review 模型和存储策略均由配置提供；API Key 只从
+`OPENAI_API_KEY` 读取。默认配置使用 `gpt-5.6-luna`，但远程明文 HTTP 会被安全
+边界拒绝，生产与持续联调应使用 HTTPS 或 localhost 隧道。
+
+```bash
+uv sync --dev
+uv run mission validate \
+  --input scenarios/mvp-slice-v0.1/mission-plan.json
+uv run pytest -q
+```

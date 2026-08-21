@@ -18,6 +18,7 @@
 - [`development/coding-standards.md`](development/coding-standards.md)：Rust/Python 函数文档、类型、错误处理、测试和质量门槛；
 - [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。
 - [`decisions/0002-deaios-node-contract.md`](decisions/0002-deaios-node-contract.md)：DEAIOS 与本地 EAIOS/厂商运行时之间的 Node Contract v0。
+- [`decisions/0003-mission-plan-contract.md`](decisions/0003-mission-plan-contract.md)：Mission Intelligence 向 Rust 核心交付 Task Graph 的 MissionPlan v0 合同。
 
 ## 历史架构
 

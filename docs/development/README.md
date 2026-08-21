@@ -32,18 +32,23 @@ core/
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
   controller/              组合根和进程生命周期
-python/
-  mission/                 Mission 规划、模型推理和研究型适配器
-  sim/                     仿真器集成适配器
+mission/
+  src/mission/             Mission 规划、合同校验和模型适配器
+  prompts/v0/              可版本化、可评审的 Planner 与 Reviewer Prompt
+  tests/                   Mission 合同与 Adapter 的离线测试
+simulation/                未来的仿真器集成适配器，首次实现时再创建
+contracts/mission/         版本化的跨语言 Mission Plan 合同
+config/                    不含凭据的运行配置
 scenarios/                 版本化场景输入和预期事件轨迹
 tests/system/              仅用于黑盒跨进程测试
 tools/quality/             标准 Linter 未覆盖的仓库检查
 ```
 
-当前 Bootstrap 只创建了 `core/domain`、`core/ports`、`core/control`、
-`core/runtime`、`core/testkit` 和 `apps/controller`。没有维护实现前，不得创建
-未来的 `state`、`adapters`、Python、仿真器、系统测试或质量工具路径。禁止提交
-空目录。
+当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/control`、
+`core/runtime`、`core/testkit`、`apps/controller` 和 `mission`。Mission 通过
+`contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
+不在 Rust 进程中嵌入 Python。没有维护实现前，不得创建未来的 `state`、
+`adapters`、`simulation` 或系统测试路径。禁止提交空目录。
 
 ## 3. 模块边界
 

@@ -9,8 +9,8 @@
 
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHeartbeat, NodeId, NodeLease,
-    NodeRegistration, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRequirement,
-    TimestampMs,
+    NodeRegistration, NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRef,
+    TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
@@ -51,21 +51,26 @@ impl RoleCandidates {
 /// The complete Candidate Set produced by Capability Matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CandidateSet {
-    /// Task for which matching was performed.
-    task_id: TaskId,
+    /// Mission-scoped task for which matching was performed.
+    task_ref: TaskRef,
     /// Candidate nodes grouped by required role.
     roles: Vec<RoleCandidates>,
 }
 
 impl CandidateSet {
     /// Creates a candidate set for one task.
-    pub fn new(task_id: TaskId, roles: Vec<RoleCandidates>) -> Self {
-        Self { task_id, roles }
+    pub fn new(task_ref: TaskRef, roles: Vec<RoleCandidates>) -> Self {
+        Self { task_ref, roles }
+    }
+
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
     }
 
     /// Returns the matched task identity.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns role-level candidates.
@@ -82,24 +87,29 @@ impl CandidateSet {
 /// A scheduler proposal before shared resources are committed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentProposal {
-    /// Task represented by this proposal.
-    task_id: TaskId,
+    /// Mission-scoped task represented by this proposal.
+    task_ref: TaskRef,
     /// Proposed node and resource assignments by role.
     assignments: Vec<RoleAssignment>,
 }
 
 impl AssignmentProposal {
     /// Creates a proposal after Control validates its role assignments.
-    fn new(task_id: TaskId, assignments: Vec<RoleAssignment>) -> Self {
+    fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
         Self {
-            task_id,
+            task_ref,
             assignments,
         }
     }
 
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
     /// Returns the proposed task identity.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns all proposed role assignments.
@@ -111,24 +121,29 @@ impl AssignmentProposal {
 /// A proposal whose resources are now system-recognized commitments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedPlan {
-    /// Task represented by this committed plan.
-    task_id: TaskId,
+    /// Mission-scoped task represented by this committed plan.
+    task_ref: TaskRef,
     /// Resource-checked assignments accepted by coordination.
     assignments: Vec<RoleAssignment>,
 }
 
 impl CommittedPlan {
     /// Creates a committed plan after reservation checks succeed.
-    fn new(task_id: TaskId, assignments: Vec<RoleAssignment>) -> Self {
+    fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
         Self {
-            task_id,
+            task_ref,
             assignments,
         }
     }
 
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
     /// Returns the committed task identity.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns committed role assignments.
@@ -142,12 +157,14 @@ impl CommittedPlan {
 pub enum GroupLifecycle {
     /// The group exists with committed member/resource bindings.
     Bound,
-    /// At least one role has begun execution.
+    /// The bound group is authorized to begin role execution.
     Active,
     /// The group adapted after a recoverable deviation.
     Adapted,
     /// All assigned roles completed.
     Completed,
+    /// The terminal group released all current bindings and reservations.
+    Released,
     /// The group cannot safely continue.
     Blocked,
 }
@@ -157,8 +174,8 @@ pub enum GroupLifecycle {
 pub struct ExecutionGroup {
     /// Dynamic execution-group identity.
     group_id: ExecutionGroupId,
-    /// Task owned by the group.
-    task_id: TaskId,
+    /// Mission-scoped task owned by the group.
+    task_ref: TaskRef,
     /// Current role, member, and resource bindings.
     assignments: Vec<RoleAssignment>,
     /// Lifecycle state used by adaptation and recovery.
@@ -170,7 +187,7 @@ impl ExecutionGroup {
     fn new(group_id: ExecutionGroupId, plan: &CommittedPlan) -> Self {
         Self {
             group_id,
-            task_id: plan.task_id().clone(),
+            task_ref: plan.task_ref().clone(),
             assignments: plan.assignments().to_vec(),
             lifecycle: GroupLifecycle::Bound,
         }
@@ -181,9 +198,14 @@ impl ExecutionGroup {
         &self.group_id
     }
 
+    /// Returns the complete mission-scoped task identity.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
     /// Returns the task owned by this group.
-    pub fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub const fn task_id(&self) -> &TaskId {
+        self.task_ref.task_id()
     }
 
     /// Returns member-role-resource bindings.
@@ -212,8 +234,8 @@ pub enum ControlError {
     ResourceConflict {
         /// Resource that could not be committed.
         resource_id: ResourceId,
-        /// Task currently holding the resource.
-        owner_task_id: TaskId,
+        /// Mission-scoped task currently holding the resource.
+        owner_task_ref: TaskRef,
         /// Role currently holding the resource.
         owner_role_id: RoleId,
     },
@@ -247,11 +269,11 @@ impl Display for ControlError {
             Self::InvalidProposal(reason) => write!(formatter, "invalid proposal: {reason}"),
             Self::ResourceConflict {
                 resource_id,
-                owner_task_id,
+                owner_task_ref,
                 owner_role_id,
             } => write!(
                 formatter,
-                "resource conflict: {resource_id} held by task {owner_task_id}, role {owner_role_id}"
+                "resource conflict: {resource_id} held by task {owner_task_ref}, role {owner_role_id}"
             ),
             Self::InvalidLifecycle(lifecycle) => {
                 write!(formatter, "invalid lifecycle: {lifecycle:?}")
@@ -308,10 +330,12 @@ struct RegisteredNode {
 /// The task and role that currently hold a resource commitment.
 #[derive(Debug, Clone)]
 struct Reservation {
-    /// Task currently holding the resource.
-    task_id: TaskId,
+    /// Mission-scoped task currently holding the resource.
+    task_ref: TaskRef,
     /// Role currently holding the resource.
     role_id: RoleId,
+    /// Group currently owning the binding after creation, if any.
+    group_id: Option<ExecutionGroupId>,
 }
 
 impl ControlPlane {
@@ -494,13 +518,13 @@ impl ControlPlane {
             roles.push(RoleCandidates::new(role.role_id().clone(), node_ids));
         }
 
-        let candidates = CandidateSet::new(requirement.task_id().clone(), roles);
+        let candidates = CandidateSet::new(requirement.task_ref().clone(), roles);
         events.append(
             timestamp,
             correlation_id,
             None,
             EventPayload::CandidatesMatched {
-                task_id: requirement.task_id().clone(),
+                task_ref: requirement.task_ref().clone(),
             },
         );
         Ok(candidates)
@@ -516,7 +540,7 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<AssignmentProposal, ControlError> {
-        if candidates.task_id() != requirement.task_id() {
+        if candidates.task_ref() != requirement.task_ref() {
             return Err(ControlError::InvalidProposal(
                 "candidate set belongs to another task".to_string(),
             ));
@@ -570,13 +594,13 @@ impl ControlPlane {
             }
         }
 
-        let proposal = AssignmentProposal::new(requirement.task_id().clone(), assignments);
+        let proposal = AssignmentProposal::new(requirement.task_ref().clone(), assignments);
         events.append(
             timestamp,
             correlation_id,
             None,
             EventPayload::ProposalCreated {
-                task_id: requirement.task_id().clone(),
+                task_ref: requirement.task_ref().clone(),
             },
         );
         Ok(proposal)
@@ -595,7 +619,7 @@ impl ControlPlane {
                 if let Some(reservation) = self.reservations.get(resource_id) {
                     return Err(ControlError::ResourceConflict {
                         resource_id: resource_id.clone(),
-                        owner_task_id: reservation.task_id.clone(),
+                        owner_task_ref: reservation.task_ref.clone(),
                         owner_role_id: reservation.role_id.clone(),
                     });
                 }
@@ -607,20 +631,21 @@ impl ControlPlane {
                 self.reservations.insert(
                     resource_id.clone(),
                     Reservation {
-                        task_id: proposal.task_id().clone(),
+                        task_ref: proposal.task_ref().clone(),
                         role_id: assignment.role_id().clone(),
+                        group_id: None,
                     },
                 );
             }
         }
 
-        let plan = CommittedPlan::new(proposal.task_id().clone(), proposal.assignments().to_vec());
+        let plan = CommittedPlan::new(proposal.task_ref().clone(), proposal.assignments().to_vec());
         events.append(
             timestamp,
             correlation_id,
             None,
             EventPayload::PlanCommitted {
-                task_id: proposal.task_id().clone(),
+                task_ref: proposal.task_ref().clone(),
             },
         );
         Ok(plan)
@@ -640,6 +665,30 @@ impl ControlPlane {
                 "execution group identity already exists".to_string(),
             ));
         }
+        for assignment in plan.assignments() {
+            for resource_id in assignment.resource_ids() {
+                let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "committed resource {resource_id} has no reservation"
+                    ))
+                })?;
+                if reservation.task_ref != *plan.task_ref()
+                    || reservation.role_id != *assignment.role_id()
+                    || reservation.group_id.is_some()
+                {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "committed resource {resource_id} cannot bind to group {group_id}"
+                    )));
+                }
+            }
+        }
+        for assignment in plan.assignments() {
+            for resource_id in assignment.resource_ids() {
+                if let Some(reservation) = self.reservations.get_mut(resource_id) {
+                    reservation.group_id = Some(group_id.clone());
+                }
+            }
+        }
         let group = ExecutionGroup::new(group_id.clone(), plan);
         events.append(
             timestamp,
@@ -647,11 +696,39 @@ impl ControlPlane {
             None,
             EventPayload::ExecutionGroupBound {
                 group_id: group_id.clone(),
-                task_id: plan.task_id().clone(),
+                task_ref: plan.task_ref().clone(),
             },
         );
         self.groups.insert(group_id, group.clone());
         Ok(group)
+    }
+
+    /// Activates a bound group before any role invocation begins.
+    pub fn activate_group<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.lifecycle != GroupLifecycle::Bound {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        group.lifecycle = GroupLifecycle::Active;
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupActivated {
+                group_id: group_id.clone(),
+                task_ref: group.task_ref.clone(),
+            },
+        );
+        Ok(())
     }
 
     /// Rebinds one group role to a replacement node after a recoverable failure.
@@ -695,6 +772,12 @@ impl ControlPlane {
             .groups
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
         let assignment = group
             .assignments
             .iter_mut()
@@ -704,14 +787,30 @@ impl ControlPlane {
             })?;
         let previous_node = assignment.node_id().clone();
         for resource_id in assignment.resource_ids() {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "group {group_id} binding {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != group.task_ref
+                || reservation.role_id != *role.role_id()
+                || reservation.group_id.as_ref() != Some(group_id)
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "group {group_id} does not own role reservation {resource_id}"
+                )));
+            }
+        }
+        for resource_id in assignment.resource_ids() {
             self.reservations.remove(resource_id);
         }
         for resource_id in &replacement_resources {
             self.reservations.insert(
                 resource_id.clone(),
                 Reservation {
-                    task_id: group.task_id.clone(),
+                    task_ref: group.task_ref.clone(),
                     role_id: role.role_id().clone(),
+                    group_id: Some(group_id.clone()),
                 },
             );
         }
@@ -727,6 +826,7 @@ impl ControlPlane {
             None,
             EventPayload::RecoveryRebound {
                 group_id: group_id.clone(),
+                task_ref: group.task_ref.clone(),
                 role_id: role.role_id().clone(),
                 from_node: previous_node,
                 to_node: replacement_node_id,
@@ -747,7 +847,10 @@ impl ControlPlane {
             .groups
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if group.lifecycle == GroupLifecycle::Blocked {
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         group.lifecycle = GroupLifecycle::Completed;
@@ -757,6 +860,7 @@ impl ControlPlane {
             None,
             EventPayload::ExecutionGroupCompleted {
                 group_id: group_id.clone(),
+                task_ref: group.task_ref.clone(),
             },
         );
         Ok(())
@@ -775,6 +879,12 @@ impl ControlPlane {
             .groups
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
         group.lifecycle = GroupLifecycle::Blocked;
         events.append(
             timestamp,
@@ -782,7 +892,66 @@ impl ControlPlane {
             None,
             EventPayload::ExecutionGroupBlocked {
                 group_id: group_id.clone(),
+                task_ref: group.task_ref.clone(),
                 reason: reason.into(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Releases all reservations and current bindings owned by a terminal group.
+    pub fn release_group<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Completed | GroupLifecycle::Blocked
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        let task_ref = group.task_ref.clone();
+        let resource_ids = group
+            .assignments
+            .iter()
+            .flat_map(|assignment| assignment.resource_ids().iter().cloned())
+            .collect::<Vec<_>>();
+        for resource_id in &resource_ids {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "group {group_id} binding {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != task_ref || reservation.group_id.as_ref() != Some(group_id) {
+                return Err(ControlError::InvalidProposal(format!(
+                    "group {group_id} does not own reservation {resource_id}"
+                )));
+            }
+        }
+        for resource_id in &resource_ids {
+            self.reservations.remove(resource_id);
+        }
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        group.assignments.clear();
+        group.lifecycle = GroupLifecycle::Released;
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupReleased {
+                group_id: group_id.clone(),
+                task_ref,
+                resource_ids,
             },
         );
         Ok(())
@@ -865,8 +1034,18 @@ mod tests {
 
     /// Builds a one-role task requirement for a control test.
     fn requirement(task_id: &str, role_id: &str, capability: CapabilityKind) -> TaskRequirement {
+        requirement_for_mission("mission-control-test", task_id, role_id, capability)
+    }
+
+    /// Builds a one-role task requirement in an explicit mission namespace.
+    fn requirement_for_mission(
+        mission_id: &str,
+        task_id: &str,
+        role_id: &str,
+        capability: CapabilityKind,
+    ) -> TaskRequirement {
         TaskRequirement::new(
-            domain::MissionId::new("mission-control-test").expect("test mission id must be valid"),
+            domain::MissionId::new(mission_id).expect("test mission id must be valid"),
             TaskId::new(task_id).expect("test task id must be valid"),
             vec![RoleRequirement::new(
                 RoleId::new(role_id).expect("test role id must be valid"),
@@ -929,6 +1108,141 @@ mod tests {
             .commit(&proposal, timestamp, &correlation_id, &mut events)
             .expect("unreserved resource should commit");
         assert_eq!(plan.assignments().len(), 1);
+    }
+
+    /// Mission-scoped TaskRefs prevent identical local TaskIds from colliding.
+    #[test]
+    fn mission_scoped_task_identity_survives_control_chain() {
+        let node_a = registration("node-a", CapabilityKind::Transport, "space-a");
+        let node_b = registration("node-b", CapabilityKind::Transport, "space-b");
+        let node_a_id = node_a.node_id().clone();
+        let node_b_id = node_b.node_id().clone();
+        let resource_a = ResourceId::new("space-a").expect("test resource id must be valid");
+        let resource_b = ResourceId::new("space-b").expect("test resource id must be valid");
+        let role_id = RoleId::new("transport").expect("test role id must be valid");
+        let task_a = requirement_for_mission(
+            "mission-a",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let task_b = requirement_for_mission(
+            "mission-b",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let group_a = ExecutionGroupId::new("group-a").expect("test group id must be valid");
+        let group_b = ExecutionGroupId::new("group-b").expect("test group id must be valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        for node in [node_a, node_b] {
+            control
+                .register_node(
+                    node,
+                    NodeStatus::new(NodeHealth::Online, timestamp),
+                    timestamp,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("test node registration should succeed");
+        }
+
+        let candidates_a = control
+            .match_capabilities(&task_a, timestamp, &correlation_id, &mut events)
+            .expect("Mission A task should match");
+        let candidates_b = control
+            .match_capabilities(&task_b, timestamp, &correlation_id, &mut events)
+            .expect("Mission B task should match");
+        let proposal_a = control
+            .propose(
+                &task_a,
+                &candidates_a,
+                vec![RoleAssignment::new(
+                    role_id.clone(),
+                    node_a_id,
+                    vec![resource_a.clone()],
+                )],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("Mission A proposal should succeed");
+        let proposal_b = control
+            .propose(
+                &task_b,
+                &candidates_b,
+                vec![RoleAssignment::new(
+                    role_id,
+                    node_b_id,
+                    vec![resource_b.clone()],
+                )],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("Mission B proposal should succeed");
+        let plan_a = control
+            .commit(&proposal_a, timestamp, &correlation_id, &mut events)
+            .expect("Mission A plan should commit");
+        let plan_b = control
+            .commit(&proposal_b, timestamp, &correlation_id, &mut events)
+            .expect("Mission B plan should commit");
+        control
+            .create_group(
+                group_a.clone(),
+                &plan_a,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("Mission A group should bind");
+        control
+            .create_group(
+                group_b.clone(),
+                &plan_b,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("Mission B group should bind");
+
+        assert_eq!(task_a.task_id(), task_b.task_id());
+        assert_ne!(task_a.task_ref(), task_b.task_ref());
+        assert_eq!(candidates_a.task_ref(), task_a.task_ref());
+        assert_eq!(candidates_b.task_ref(), task_b.task_ref());
+        assert_eq!(proposal_a.task_ref(), task_a.task_ref());
+        assert_eq!(proposal_b.task_ref(), task_b.task_ref());
+        assert_eq!(plan_a.task_ref(), task_a.task_ref());
+        assert_eq!(plan_b.task_ref(), task_b.task_ref());
+        assert_eq!(
+            control
+                .group(&group_a)
+                .expect("Mission A group must exist")
+                .task_ref(),
+            task_a.task_ref()
+        );
+        assert_eq!(
+            control
+                .group(&group_b)
+                .expect("Mission B group must exist")
+                .task_ref(),
+            task_b.task_ref()
+        );
+        let reservation_a = control
+            .reservations
+            .get(&resource_a)
+            .expect("Mission A reservation must exist");
+        let reservation_b = control
+            .reservations
+            .get(&resource_b)
+            .expect("Mission B reservation must exist");
+        assert_eq!(&reservation_a.task_ref, task_a.task_ref());
+        assert_eq!(&reservation_b.task_ref, task_b.task_ref());
+        assert_eq!(reservation_a.group_id.as_ref(), Some(&group_a));
+        assert_eq!(reservation_b.group_id.as_ref(), Some(&group_b));
     }
 
     /// A node without the required capability is rejected during matching.
@@ -1022,6 +1336,219 @@ mod tests {
             Err(ControlError::ResourceConflict { resource_id: conflict, .. })
                 if conflict == resource_id
         ));
+    }
+
+    /// Terminal lifecycle states reject reactivation and release enables resource reuse.
+    #[test]
+    fn lifecycle_guards_terminal_states_and_release_frees_resources() {
+        let node = registration(
+            "node-lifecycle",
+            CapabilityKind::Transport,
+            "space-lifecycle",
+        );
+        let node_id = node.node_id().clone();
+        let resource_id =
+            ResourceId::new("space-lifecycle").expect("test resource id must be valid");
+        let role_id = RoleId::new("transport").expect("test role id must be valid");
+        let first_task = requirement_for_mission(
+            "mission-lifecycle-a",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let first_group =
+            ExecutionGroupId::new("group-lifecycle-a").expect("test group id must be valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("test node registration should succeed");
+        let first_candidates = control
+            .match_capabilities(&first_task, timestamp, &correlation_id, &mut events)
+            .expect("first task should match");
+        let first_proposal = control
+            .propose(
+                &first_task,
+                &first_candidates,
+                vec![RoleAssignment::new(
+                    role_id.clone(),
+                    node_id.clone(),
+                    vec![resource_id.clone()],
+                )],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("first proposal should be valid");
+        let first_plan = control
+            .commit(&first_proposal, timestamp, &correlation_id, &mut events)
+            .expect("first proposal should commit");
+        control
+            .create_group(
+                first_group.clone(),
+                &first_plan,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("first group should bind");
+        assert!(matches!(
+            control.complete_group(
+                &first_group,
+                TimestampMs::new(1),
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Bound))
+        ));
+        control
+            .activate_group(
+                &first_group,
+                TimestampMs::new(2),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("bound group should activate");
+        control
+            .complete_group(
+                &first_group,
+                TimestampMs::new(3),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("active group should complete");
+        assert!(matches!(
+            control.activate_group(
+                &first_group,
+                TimestampMs::new(4),
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Completed))
+        ));
+        control
+            .release_group(
+                &first_group,
+                TimestampMs::new(5),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("completed group should release");
+        assert!(!control.reservations.contains_key(&resource_id));
+        assert!(
+            control
+                .group(&first_group)
+                .expect("released group should remain observable")
+                .assignments()
+                .is_empty()
+        );
+        assert!(matches!(
+            control.activate_group(
+                &first_group,
+                TimestampMs::new(6),
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Released))
+        ));
+
+        let second_task = requirement_for_mission(
+            "mission-lifecycle-b",
+            "task-01",
+            "transport",
+            CapabilityKind::Transport,
+        );
+        let second_group =
+            ExecutionGroupId::new("group-lifecycle-b").expect("test group id must be valid");
+        let second_candidates = control
+            .match_capabilities(
+                &second_task,
+                TimestampMs::new(6),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("second task should match");
+        let second_proposal = control
+            .propose(
+                &second_task,
+                &second_candidates,
+                vec![RoleAssignment::new(
+                    role_id,
+                    node_id,
+                    vec![resource_id.clone()],
+                )],
+                TimestampMs::new(6),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("released resource should be proposed again");
+        let second_plan = control
+            .commit(
+                &second_proposal,
+                TimestampMs::new(6),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("released resource should commit again");
+        control
+            .create_group(
+                second_group.clone(),
+                &second_plan,
+                TimestampMs::new(6),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("second group should bind");
+        control
+            .activate_group(
+                &second_group,
+                TimestampMs::new(7),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("second group should activate");
+        control
+            .block_group(
+                &second_group,
+                "no safe continuation",
+                TimestampMs::new(8),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("active group may become blocked");
+        assert!(matches!(
+            control.complete_group(
+                &second_group,
+                TimestampMs::new(9),
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Blocked))
+        ));
+        control
+            .release_group(
+                &second_group,
+                TimestampMs::new(10),
+                &correlation_id,
+                &mut events,
+            )
+            .expect("blocked group should release");
+        assert_eq!(
+            control
+                .group(&second_group)
+                .expect("released blocked group should remain observable")
+                .lifecycle(),
+            GroupLifecycle::Released
+        );
+        assert!(!control.reservations.contains_key(&resource_id));
     }
 
     /// A stale health snapshot is rejected after the configured status TTL.

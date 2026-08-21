@@ -49,6 +49,12 @@ RoboGuide 联合调度四类资源：
 面向具体任务动态形成的执行上下文，由 Members、Roles、已提交的 Resource
 Bindings、Shared Context 和 Lifecycle 组成。
 
+Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 说明 Node 是否具备承担
+该 Role 的能力，Assignment 记录当前由哪个 Node 承担，Resource Binding 记录执行
+该职责已经提交的资源。如果 Task 直接绑定 Node，节点故障通常会迫使系统重新规划
+整个 Task；通过 Role 间接绑定后，系统可以只重新匹配和绑定失败的 Role，同时保留
+其他已完成工作、有效 Binding 和 Execution Group 上下文。
+
 Member 与 Binding 必须区分：GPU Node 可以是 Member，GPU quota 是 Compute
 Binding；走廊是 Spatial Binding，不是 Member。Group Manager 属于 Control Plane，
 Group 本体由 Runtime 承载并跨节点运行。
