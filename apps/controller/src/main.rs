@@ -4,7 +4,7 @@
 
 //! Executable evidence for the first DEAIOS Node Contract vertical slice.
 
-use control::{ControlPlane, GroupLifecycle, RoleRequirementView};
+use control::{ControlPlane, GroupLifecycle, ReconciliationAssessment, RecoveryAssignmentProposal};
 use domain::{
     Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand, ExecutionGroupId,
     LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId,
@@ -339,8 +339,9 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mut runtime = Runtime::new(VirtualClock::new(timestamp), log.clone());
     runtime
         .register_node(Box::new(FakeNode::new(node_a).with_failure_mode(
-            FailureMode::FailNext {
+            FailureMode::FailNextAndReportStatus {
                 reason: "onboard execution capability degraded".to_string(),
+                status: NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
             },
         )))
         .map_err(|error| error.to_string())?;
@@ -384,35 +385,40 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         return Err("failure injection did not produce a task failure".to_string());
     }
 
-    control
-        .block_group(
-            &group_id,
-            "transport role cannot progress on node-a",
-            TimestampMs::new(1),
-            &correlation_id,
-            &mut log,
+    runtime
+        .observe_node_status(
+            &NodeId::new("node-a").map_err(|error| error.to_string())?,
+            &mut state,
         )
         .map_err(|error| error.to_string())?;
-    control
-        .release_role_binding(
-            &group_id,
-            &transport_role,
-            TimestampMs::new(1),
-            &correlation_id,
-            &mut log,
-        )
-        .map_err(|error| error.to_string())?;
-    control
-        .rebind_role(
+    let assessment = control
+        .assess_group(
             &state,
             &group_id,
-            &RoleRequirementView::new(RoleRequirement::new(
-                transport_role.clone(),
-                CapabilityKind::Transport,
-                Some(ResourceKind::Space),
-            )),
-            node_b.node_id().clone(),
-            vec![b_space],
+            &requirement,
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    let ReconciliationAssessment::RoleRecoveryRequired(need) = assessment else {
+        return Err("failed assigned node did not produce a recovery need".to_string());
+    };
+    control
+        .begin_role_recovery(&need, TimestampMs::new(1), &correlation_id, &mut log)
+        .map_err(|error| error.to_string())?;
+    let recovery_proposal = RecoveryAssignmentProposal::new(
+        group_id.clone(),
+        requirement.task_ref().clone(),
+        transport_role.clone(),
+        node_b.node_id().clone(),
+        vec![b_space],
+    );
+    control
+        .apply_role_recovery(
+            &state,
+            &requirement,
+            &recovery_proposal,
             TimestampMs::new(1),
             &correlation_id,
             &mut log,
@@ -484,6 +490,7 @@ mod tests {
             | EventPayload::PlanCommitted { task_ref }
             | EventPayload::ExecutionGroupBound { task_ref, .. }
             | EventPayload::ExecutionGroupActivated { task_ref, .. }
+            | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
             | EventPayload::RecoveryRebound { task_ref, .. }
             | EventPayload::ExecutionGroupCompleted { task_ref, .. }
             | EventPayload::ExecutionGroupBlocked { task_ref, .. }
@@ -505,7 +512,7 @@ mod tests {
     #[test]
     fn mvp_slice_recovers_after_node_failure() {
         let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-        assert_eq!(events.len(), 17);
+        assert_eq!(events.len(), 18);
         assert!(matches!(
             events[0].payload(),
             EventPayload::NodeRegistered { .. }
@@ -549,33 +556,38 @@ mod tests {
         ));
         assert!(matches!(
             events[10].payload(),
-            EventPayload::ExecutionGroupBlocked { .. }
+            EventPayload::ReconciliationRoleRecoveryRequired { role_id, node_id, .. }
+                if role_id.as_str() == "primary-transport" && node_id.as_str() == "node-a"
         ));
         assert!(matches!(
             events[11].payload(),
+            EventPayload::ExecutionGroupBlocked { .. }
+        ));
+        assert!(matches!(
+            events[12].payload(),
             EventPayload::ExecutionGroupRoleBindingReleased { role_id, .. }
                 if role_id.as_str() == "primary-transport"
         ));
         assert!(matches!(
-            events[12].payload(),
+            events[13].payload(),
             EventPayload::RecoveryRebound { from_node, to_node, .. }
                 if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[13].payload(),
+            events[14].payload(),
             EventPayload::ExecutionGroupActivated { .. }
         ));
         assert!(matches!(
-            events[14].payload(),
+            events[15].payload(),
             EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
                 if node_id.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[15].payload(),
+            events[16].payload(),
             EventPayload::ExecutionGroupCompleted { .. }
         ));
         assert!(matches!(
-            events[16].payload(),
+            events[17].payload(),
             EventPayload::ExecutionGroupReleased { .. }
         ));
     }
@@ -891,8 +903,9 @@ mod tests {
         let mut runtime = Runtime::new(VirtualClock::new(started_at), log.clone());
         runtime
             .register_node(Box::new(FakeNode::new(node_a.clone()).with_failure_mode(
-                FailureMode::FailNext {
+                FailureMode::FailNextAndReportStatus {
                     reason: "transport unavailable".to_string(),
+                    status: NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)),
                 },
             )))
             .expect("Node A runtime registration should succeed");
@@ -941,35 +954,48 @@ mod tests {
             matches!(failure, NodeEvent::TaskFailed { ref task_ref, .. } if task_ref == &task_ref_a)
         );
 
-        control
-            .block_group(
-                &group_a,
-                "transport role cannot progress on node-a",
-                TimestampMs::new(1),
-                &trace_a,
-                &mut log,
-            )
-            .expect("Mission A should enter reconciliation");
-        control
-            .release_role_binding(
-                &group_a,
-                &transport_role,
-                TimestampMs::new(1),
-                &trace_a,
-                &mut log,
-            )
-            .expect("Mission A should release only the failed role binding");
-        control
-            .rebind_role(
+        runtime
+            .observe_node_status(node_a.node_id(), &mut state)
+            .expect("Runtime should ingest Node A unavailability");
+        let assessment_a = control
+            .assess_group(
                 &state,
                 &group_a,
-                &RoleRequirementView::new(RoleRequirement::new(
-                    transport_role.clone(),
-                    CapabilityKind::Transport,
-                    Some(ResourceKind::Space),
-                )),
-                node_b.node_id().clone(),
-                vec![space_b.clone()],
+                &requirement_a,
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("Mission A reconciliation assessment should succeed");
+        let ReconciliationAssessment::RoleRecoveryRequired(need) = assessment_a else {
+            panic!("Mission A should require transport recovery");
+        };
+        let assessment_b = control
+            .assess_group(
+                &state,
+                &group_b,
+                &requirement_b,
+                TimestampMs::new(1),
+                &trace_b,
+                &mut log,
+            )
+            .expect("Mission B reconciliation assessment should succeed");
+        assert_eq!(assessment_b, ReconciliationAssessment::NoAction);
+        control
+            .begin_role_recovery(&need, TimestampMs::new(1), &trace_a, &mut log)
+            .expect("Mission A should begin only transport recovery");
+        let recovery_proposal = RecoveryAssignmentProposal::new(
+            group_a.clone(),
+            requirement_a.task_ref().clone(),
+            transport_role.clone(),
+            node_b.node_id().clone(),
+            vec![space_b.clone()],
+        );
+        control
+            .apply_role_recovery(
+                &state,
+                &requirement_a,
+                &recovery_proposal,
                 TimestampMs::new(1),
                 &trace_a,
                 &mut log,

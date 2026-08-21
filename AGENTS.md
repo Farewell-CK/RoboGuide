@@ -22,6 +22,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Observation time semantics preserve source-local `NodeStatus.observed_at` while
   State ordering and Control freshness use RoboGuide-local `received_at`; do not
   compare independent source clocks or claim distributed clock synchronization.
+- Assigned-node reconciliation lives inside `core/control`, reuses the shared
+  eligibility predicate and existing Group lifecycle APIs, and consumes an
+  externally supplied recovery proposal; it never selects a replacement node.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -75,6 +78,9 @@ Runtime-State tests distinguish local reported health from system-observed liven
 and prove that new observations affect later Control decisions. Time tests must
 cover source-clock divergence, receive ordering, heartbeat receive time, and lease
 liveness without weakening Recovery lifecycle tests.
+Reconciliation tests separate read-only assessment from mutation, preserve
+unaffected bindings and Multi-Mission isolation, and keep missing replacements
+Blocked/Pending rather than Failed.
 
 ## Commit & Pull Request Guidelines
 

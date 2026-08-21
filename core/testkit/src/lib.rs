@@ -143,6 +143,13 @@ pub enum FailureMode {
         /// Reason returned to DEAIOS.
         reason: String,
     },
+    /// The next command fails and the fake adapter subsequently reports a new health fact.
+    FailNextAndReportStatus {
+        /// Reason returned to DEAIOS for the failed role execution.
+        reason: String,
+        /// Local health reported by the fake EAIOS after the failure.
+        status: NodeStatus,
+    },
     /// The next command causes a local safety stop.
     SafeStopNext {
         /// Reason returned by local safety.
@@ -226,6 +233,16 @@ impl NodeGateway for FakeNode {
                 role_id: command.role_id().clone(),
                 reason,
             }),
+            FailureMode::FailNextAndReportStatus { reason, status } => {
+                self.status = status;
+                Ok(NodeEvent::TaskFailed {
+                    node_id: self.registration.node_id().clone(),
+                    task_ref: command.task_ref().clone(),
+                    group_id: command.group_id().clone(),
+                    role_id: command.role_id().clone(),
+                    reason,
+                })
+            }
             FailureMode::SafeStopNext { reason } => {
                 self.status = NodeStatus::new(NodeHealth::SafeStopped, TimestampMs::new(0));
                 Ok(NodeEvent::SafeStopped {

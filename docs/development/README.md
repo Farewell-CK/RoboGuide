@@ -118,6 +118,26 @@ Receive-ordering 只是当前 deterministic bootstrap policy，不是 distribute
 ordering solution。本切片没有实现 NTP/PTP、clock offset estimation、Lamport/Vector/
 HLC 或全局时钟同步，也没有实现 Reconciliation。
 
+### Control Plane — Reconciliation & Recovery Slice v0.1
+
+当前只处理 Active Execution Group 中恰好一个 assigned node 不再满足 Control
+eligibility policy。`assess_group` 读取 Control-owned Group desired configuration 与
+Shared Node State observed facts，复用 Capability Matching 的 health、receive-time
+freshness、liveness、lease、capability predicate，返回 `NoAction` 或
+`RoleRecoveryNeed`；assessment 不修改 Group。
+
+`begin_role_recovery` 只编排既有 `block_group` 与 `release_role_binding`，使 Group 保持
+Blocked 并仅将失败 Role 置为 unbound。外部 scheduling/coordination boundary 通过
+`RecoveryAssignmentProposal` 提供 replacement node/resources；`apply_role_recovery`
+验证 TaskRef、Group、Role、node eligibility、resource ownership/conflict 和 failed
+binding 后复用 `rebind_role`，使 Group 进入 Adapted，再由现有 `activate_group` 返回
+Active。Reconciler 从不遍历候选节点自行选择 replacement。
+
+没有 proposal 或当前没有 candidate 时，Group 保持 Blocked/RecoveryPending；只有显式
+`fail_group` 才表示 recovery exhausted。本切片没有 background loop、自动 Scheduler、
+multi-role/spatial/timeout recovery、Mission replanning、Runtime command replay 或自动
+failure escalation。
+
 本切片明确不是完整 State & Memory Plane。以下内容延后：
 
 - Allocation State；

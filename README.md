@@ -87,6 +87,31 @@ Control Plane 负责全局决策与协调：
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
+当前实现 **Control Plane — Reconciliation & Recovery Slice v0.1: Assigned Node
+Unavailability**：Control 将 Active Group 的当前 assignment 作为 desired execution
+configuration，并通过 Shared Node State 检查 assigned node 是否仍满足与 Capability
+Matching 相同的 eligibility policy。Assessment 只产生 `NoAction` 或
+`RoleRecoveryNeed`，不会立即修改 Group。
+
+```text
+Observed node unavailable
+  -> Recovery Need
+  -> Blocked + partial role release
+  -> externally supplied Recovery Assignment Proposal
+  -> validated rebind
+  -> Adapted -> Active
+```
+
+Reconciler 不选择 replacement node，也不实现 Scheduler。Controller 暂时代表外部
+scheduling/coordination boundary 提供 bootstrap proposal；proposal 仍须通过当前 node
+eligibility、Role capability、resource ownership/conflict、TaskRef/Group/Role identity 和
+failed-binding 检查。没有 proposal 或当前没有 replacement 只表示 `RecoveryPending`，
+不等于 recovery exhausted，不会自动进入 `Failed`。
+
+本切片未实现 background reconciliation loop、自动 Scheduler、multi-role failure、
+spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
+exhaustion policy。
+
 ### Embodied Execution Group
 
 Execution Group 是 Control Plane 之外、由 Runtime 承载的任务级动态分布式执行上下文。Group Manager 位于 Control Plane，Group 本体跨多个节点存在。

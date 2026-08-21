@@ -1175,6 +1175,17 @@ pub enum EventPayload {
         /// Mission-scoped task executed by the group.
         task_ref: TaskRef,
     },
+    /// Reconciliation detected one assigned role whose node is no longer eligible.
+    ReconciliationRoleRecoveryRequired {
+        /// Active group containing the unavailable assignment.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task that owns the group.
+        task_ref: TaskRef,
+        /// Role whose current assignment requires recovery.
+        role_id: RoleId,
+        /// Currently assigned node that became unavailable.
+        node_id: NodeId,
+    },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),
     /// A role was rebound after a recoverable failure.

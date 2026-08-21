@@ -7,10 +7,17 @@
 //! This crate validates Proposal versus Commit, resource reservation, Execution
 //! Group binding, and role rebinding. It never sends raw actuator commands.
 
+mod reconciliation;
+
+pub use reconciliation::{
+    ReconciliationAssessment, RecoveryAssignmentProposal, RecoveryOutcome, RoleRecoveryNeed,
+};
+
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, LeaseId, NodeHealthObservation, NodeHeartbeat,
     NodeId, NodeLease, NodeLiveness, NodeLivenessObservation, NodeRegistration, NodeStateSnapshot,
-    NodeStatus, ResourceId, RoleAssignment, RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    NodeStatus, ResourceId, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRef,
+    TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
@@ -532,6 +539,30 @@ impl ControlPlane {
         Ok(expired.into_iter().map(|(node_id, _)| node_id).collect())
     }
 
+    /// Returns whether one node currently satisfies Control execution eligibility for a role.
+    pub(crate) fn node_is_eligible_for_role<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        node_id: &NodeId,
+        role: &RoleRequirement,
+        timestamp: TimestampMs,
+    ) -> bool {
+        state.node(node_id).is_some_and(|snapshot| {
+            snapshot.reported_status().health().is_schedulable()
+                && is_fresh_at(
+                    snapshot.reported_status_received_at(),
+                    timestamp,
+                    self.max_status_age_ms,
+                )
+                && snapshot.liveness().liveness() == NodeLiveness::Reachable
+                && self
+                    .leases
+                    .get(node_id)
+                    .is_some_and(|lease| lease.is_active_at(timestamp))
+                && snapshot.registration().supports_role(role)
+        })
+    }
+
     /// Matches every task role against currently schedulable node capabilities.
     pub fn match_capabilities<S: SharedNodeStateReader, E: EventSink>(
         &self,
@@ -547,18 +578,7 @@ impl ControlPlane {
                 .nodes()
                 .into_iter()
                 .filter(|snapshot| {
-                    snapshot.reported_status().health().is_schedulable()
-                        && is_fresh_at(
-                            snapshot.reported_status_received_at(),
-                            timestamp,
-                            self.max_status_age_ms,
-                        )
-                        && snapshot.liveness().liveness() == NodeLiveness::Reachable
-                        && self
-                            .leases
-                            .get(snapshot.node_id())
-                            .is_some_and(|lease| lease.is_active_at(timestamp))
-                        && snapshot.registration().supports_role(role)
+                    self.node_is_eligible_for_role(state, snapshot.node_id(), role, timestamp)
                 })
                 .map(|snapshot| snapshot.node_id().clone())
                 .collect::<Vec<_>>();
@@ -626,9 +646,9 @@ impl ControlPlane {
             let node = state
                 .node(assignment.node_id())
                 .ok_or_else(|| ControlError::UnknownNode(assignment.node_id().clone()))?;
-            if !node.registration().supports_role(role) {
+            if !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp) {
                 return Err(ControlError::InvalidProposal(format!(
-                    "node {} no longer satisfies role {}",
+                    "node {} is no longer eligible for role {}",
                     assignment.node_id(),
                     role.role_id()
                 )));
@@ -901,10 +921,26 @@ impl ControlPlane {
         let replacement = state
             .node(&replacement_node_id)
             .ok_or_else(|| ControlError::UnknownNode(replacement_node_id.clone()))?;
-        if !replacement.registration().supports_role(role.requirement()) {
+        if replacement_node_id == previous_node {
+            return Err(ControlError::InvalidProposal(
+                "replacement node is the failed binding".to_string(),
+            ));
+        }
+        if !self.node_is_eligible_for_role(
+            state,
+            &replacement_node_id,
+            role.requirement(),
+            timestamp,
+        ) {
             return Err(ControlError::InvalidProposal(format!(
-                "replacement node {} cannot satisfy role {}",
+                "replacement node {} is not currently eligible for role {}",
                 replacement_node_id,
+                role.role_id()
+            )));
+        }
+        if role.requirement().resource_kind().is_some() && replacement_resources.is_empty() {
+            return Err(ControlError::InvalidProposal(format!(
+                "replacement role {} requires a resource binding",
                 role.role_id()
             )));
         }
@@ -1215,6 +1251,8 @@ mod tests {
         node_a_id: NodeId,
         /// Replacement transport member, whether or not it is registered.
         node_b_id: NodeId,
+        /// Unaffected compute member retained throughout recovery.
+        edge_c_id: NodeId,
         /// Original transport resource released by partial recovery.
         space_a: ResourceId,
         /// Replacement transport resource committed by rebind.
@@ -1346,7 +1384,11 @@ mod tests {
                         node_a_id.clone(),
                         vec![space_a.clone()],
                     ),
-                    RoleAssignment::new(compute_role.clone(), edge_c_id, vec![compute_c.clone()]),
+                    RoleAssignment::new(
+                        compute_role.clone(),
+                        edge_c_id.clone(),
+                        vec![compute_c.clone()],
+                    ),
                 ],
                 timestamp,
                 &correlation_id,
@@ -1379,6 +1421,7 @@ mod tests {
             compute_role,
             node_a_id,
             node_b_id,
+            edge_c_id,
             space_a,
             space_b,
             compute_c,
@@ -1427,6 +1470,405 @@ mod tests {
                 &mut fixture.events,
             )
             .expect("active fixture should become blocked");
+    }
+
+    /// Marks the fixture's assigned transport node unreachable in Shared State.
+    fn mark_transport_unreachable(fixture: &mut RecoveryFixture, timestamp: TimestampMs) {
+        fixture
+            .state
+            .record_node_liveness(
+                &fixture.node_a_id,
+                NodeLivenessObservation::new(NodeLiveness::Unreachable, timestamp),
+            )
+            .expect("transport liveness observation should be accepted");
+    }
+
+    /// Assesses the fixture and returns its single transport recovery need.
+    fn assess_transport_recovery(
+        fixture: &mut RecoveryFixture,
+        timestamp: TimestampMs,
+    ) -> RoleRecoveryNeed {
+        match fixture
+            .control
+            .assess_group(
+                &fixture.state,
+                &fixture.group_id,
+                &fixture.requirement,
+                timestamp,
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("fixture assessment should succeed")
+        {
+            ReconciliationAssessment::RoleRecoveryRequired(need) => need,
+            ReconciliationAssessment::NoAction => {
+                panic!("unreachable transport assignment should require recovery")
+            }
+        }
+    }
+
+    /// A healthy active Group produces NoAction without lifecycle mutation or events.
+    #[test]
+    fn reconciliation_healthy_active_group_requires_no_action() {
+        let mut fixture = recovery_fixture(true);
+        let event_count = fixture.events.records.len();
+        let assessment = fixture
+            .control
+            .assess_group(
+                &fixture.state,
+                &fixture.group_id,
+                &fixture.requirement,
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("healthy Group assessment should succeed");
+
+        assert_eq!(assessment, ReconciliationAssessment::NoAction);
+        assert_eq!(fixture.events.records.len(), event_count);
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("healthy Group should remain")
+                .lifecycle(),
+            GroupLifecycle::Active
+        );
+    }
+
+    /// Detection identifies one unavailable assignment without modifying the Group.
+    #[test]
+    fn reconciliation_detects_unreachable_assignment_without_mutation() {
+        let mut fixture = recovery_fixture(true);
+        let original_assignments = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("active Group should exist")
+            .assignments()
+            .to_vec();
+        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
+
+        assert_eq!(need.group_id(), &fixture.group_id);
+        assert_eq!(need.task_ref(), &fixture.task_ref);
+        assert_eq!(need.role_id(), &fixture.transport_role);
+        assert_eq!(need.current_node_id(), &fixture.node_a_id);
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("assessment must retain the Group");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Active);
+        assert_eq!(group.assignments(), original_assignments.as_slice());
+        assert!(fixture.events.records.iter().any(|(_, payload)| matches!(
+            payload,
+            EventPayload::ReconciliationRoleRecoveryRequired {
+                group_id,
+                task_ref,
+                role_id,
+                node_id,
+            } if group_id == &fixture.group_id
+                && task_ref == &fixture.task_ref
+                && role_id == &fixture.transport_role
+                && node_id == &fixture.node_a_id
+        )));
+    }
+
+    /// Beginning recovery blocks the Group and releases only the affected role.
+    #[test]
+    fn reconciliation_begin_recovery_preserves_unaffected_binding() {
+        let mut fixture = recovery_fixture(true);
+        let original_compute = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("active Group should exist")
+            .assignments()
+            .iter()
+            .find(|assignment| assignment.role_id() == &fixture.compute_role)
+            .expect("compute assignment should exist")
+            .clone();
+        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
+        let outcome = fixture
+            .control
+            .begin_role_recovery(
+                &need,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("recovery should block and partially release transport");
+
+        assert!(matches!(
+            outcome,
+            RecoveryOutcome::Pending { ref group_id, ref task_ref, ref role_id }
+                if group_id == &fixture.group_id
+                    && task_ref == &fixture.task_ref
+                    && role_id == &fixture.transport_role
+        ));
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("blocked Group should remain");
+        assert_eq!(group.group_id(), &fixture.group_id);
+        assert_eq!(group.task_ref(), &fixture.task_ref);
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.is_role_unbound(&fixture.transport_role));
+        assert_eq!(
+            group
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == &fixture.compute_role),
+            Some(&original_compute)
+        );
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_a));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+    }
+
+    /// An external valid proposal rebinds the role while preserving Group context.
+    #[test]
+    fn reconciliation_applies_external_replacement_proposal() {
+        let mut fixture = recovery_fixture(true);
+        let original_compute = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("active Group should exist")
+            .assignments()
+            .iter()
+            .find(|assignment| assignment.role_id() == &fixture.compute_role)
+            .expect("compute assignment should exist")
+            .clone();
+        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
+        fixture
+            .control
+            .begin_role_recovery(
+                &need,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("recovery should await a replacement proposal");
+        let proposal = RecoveryAssignmentProposal::new(
+            fixture.group_id.clone(),
+            fixture.task_ref.clone(),
+            fixture.transport_role.clone(),
+            fixture.node_b_id.clone(),
+            vec![fixture.space_b.clone()],
+        );
+        let outcome = fixture
+            .control
+            .apply_role_recovery(
+                &fixture.state,
+                &fixture.requirement,
+                &proposal,
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("valid external proposal should rebind transport");
+
+        assert!(matches!(
+            outcome,
+            RecoveryOutcome::Recovered { ref group_id, ref role_id, ref from_node, ref to_node, .. }
+                if group_id == &fixture.group_id
+                    && role_id == &fixture.transport_role
+                    && from_node == &fixture.node_a_id
+                    && to_node == &fixture.node_b_id
+        ));
+        let adapted = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("adapted Group should remain");
+        assert_eq!(adapted.lifecycle(), GroupLifecycle::Adapted);
+        assert_eq!(adapted.task_ref(), &fixture.task_ref);
+        assert_eq!(
+            adapted
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == &fixture.compute_role),
+            Some(&original_compute)
+        );
+        assert!(adapted.assignments().iter().any(|assignment| {
+            assignment.role_id() == &fixture.transport_role
+                && assignment.node_id() == &fixture.node_b_id
+                && assignment.resource_ids() == std::slice::from_ref(&fixture.space_b)
+        }));
+        fixture
+            .control
+            .activate_group(
+                &fixture.group_id,
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("adapted Group should reactivate");
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("reactivated Group should remain")
+                .lifecycle(),
+            GroupLifecycle::Active
+        );
+    }
+
+    /// An unavailable proposed replacement is rejected without corrupting pending recovery.
+    #[test]
+    fn reconciliation_rejects_ineligible_replacement() {
+        let mut fixture = recovery_fixture(true);
+        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
+        fixture
+            .control
+            .begin_role_recovery(
+                &need,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("recovery should await a replacement proposal");
+        fixture
+            .state
+            .record_node_liveness(
+                &fixture.node_b_id,
+                NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(2)),
+            )
+            .expect("replacement liveness observation should be accepted");
+        let proposal = RecoveryAssignmentProposal::new(
+            fixture.group_id.clone(),
+            fixture.task_ref.clone(),
+            fixture.transport_role.clone(),
+            fixture.node_b_id.clone(),
+            vec![fixture.space_b.clone()],
+        );
+
+        assert!(matches!(
+            fixture.control.apply_role_recovery(
+                &fixture.state,
+                &fixture.requirement,
+                &proposal,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidProposal(_))
+        ));
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("pending Group should remain");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.is_role_unbound(&fixture.transport_role));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+    }
+
+    /// Missing replacement input leaves the Group pending rather than Failed or Released.
+    #[test]
+    fn reconciliation_without_replacement_remains_pending() {
+        let mut fixture = recovery_fixture(false);
+        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
+        let outcome = fixture
+            .control
+            .begin_role_recovery(
+                &need,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("recovery should enter pending state without a proposal");
+
+        assert!(matches!(outcome, RecoveryOutcome::Pending { .. }));
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("pending Group should remain");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.is_role_unbound(&fixture.transport_role));
+        assert!(!fixture.events.records.iter().any(|(_, payload)| matches!(
+            payload,
+            EventPayload::ExecutionGroupFailed { .. } | EventPayload::ExecutionGroupReleased { .. }
+        )));
+    }
+
+    /// Reconciliation uses receive-time freshness from the shared eligibility predicate.
+    #[test]
+    fn reconciliation_detects_stale_assignment_with_large_source_time() {
+        let mut fixture = recovery_fixture(true);
+        fixture
+            .state
+            .record_node_health(NodeHealthObservation::new(
+                fixture.node_a_id.clone(),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(1_000_000)),
+                TimestampMs::new(0),
+            ))
+            .expect("equal receive time should preserve source evidence");
+        fixture
+            .state
+            .record_node_health(NodeHealthObservation::new(
+                fixture.edge_c_id.clone(),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
+                TimestampMs::new(5_001),
+            ))
+            .expect("compute health should remain fresh");
+
+        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(5_001));
+        assert_eq!(need.role_id(), &fixture.transport_role);
+        assert_eq!(need.current_node_id(), &fixture.node_a_id);
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("assessment must not mutate Group")
+                .lifecycle(),
+            GroupLifecycle::Active
+        );
+    }
+
+    /// Lease-derived Unreachable state triggers the same shared eligibility policy.
+    #[test]
+    fn reconciliation_detects_lease_expired_assignment() {
+        let mut fixture = recovery_fixture(false);
+        fixture
+            .control
+            .accept_heartbeat(
+                &mut fixture.state,
+                NodeHeartbeat::new(
+                    fixture.edge_c_id.clone(),
+                    LeaseId::new("lease-edge-c").expect("test lease id should be valid"),
+                    NodeStatus::new(NodeHealth::Online, TimestampMs::new(10)),
+                ),
+                TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS - 1),
+                DEFAULT_NODE_LEASE_TTL_MS,
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("compute lease should renew before expiry");
+        fixture
+            .control
+            .expire_leases(
+                &mut fixture.state,
+                TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("expired transport lease should update liveness");
+
+        let need =
+            assess_transport_recovery(&mut fixture, TimestampMs::new(DEFAULT_NODE_LEASE_TTL_MS));
+        assert_eq!(need.role_id(), &fixture.transport_role);
+        assert_eq!(need.current_node_id(), &fixture.node_a_id);
     }
 
     /// Blocked preserves the Group and every binding until recovery acts explicitly.
