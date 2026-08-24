@@ -14,16 +14,19 @@ impl LocalExecutionBackend for LocalBackend {
         &self,
         _execution_id: &str,
         _command: &integration::ExecuteCommand,
-    ) -> Vec<ExecutionFact> {
-        vec![
-            ExecutionFact::Accepted,
-            ExecutionFact::Started,
-            ExecutionFact::Completed,
-        ]
+        events: tokio::sync::mpsc::UnboundedSender<ExecutionFact>,
+    ) {
+        let _ = events.send(ExecutionFact::Accepted);
+        let _ = events.send(ExecutionFact::Started);
+        let _ = events.send(ExecutionFact::Completed);
     }
     /// Reports cancellation as a local fact.
-    fn cancel(&self, _execution_id: &str) -> Vec<ExecutionFact> {
-        vec![ExecutionFact::Cancelled]
+    fn cancel(
+        &self,
+        _execution_id: &str,
+        events: tokio::sync::mpsc::UnboundedSender<ExecutionFact>,
+    ) {
+        let _ = events.send(ExecutionFact::Cancelled);
     }
 }
 

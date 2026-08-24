@@ -18,6 +18,16 @@ ExecutionEvent 只报告 Accepted、Started、Completed、Failed、Cancelled 等
 execution_id 由上层重用以避免把重连误认为新任务。Local EAIOS/backend 保留 Immediate
 How 与 final safety；Connector 不包含 Robonix 专用逻辑。
 
+Connector 的 Execution Registry 生命周期属于 daemon，不属于单次 session。backend
+执行在独立 blocking task 中，通过 channel 渐进发送 lifecycle facts；网络 read、write、
+heartbeat 与 Cancel 始终独立运行。重连后 Connector 主动 replay 已知 execution 的
+Running/Completed/Failed/Cancelled 状态；重复 Execute 只返回当前状态，不再次调用
+backend。Unknown 只表示该 Connector daemon 没有该 identity 的记录。
+
+Integration Server 的 accept loop 只负责协商新连接，每个已注册 Node session 进入独立
+Tokio task，并通过共享 event channel 汇聚事实。因此多个 Node 可以同时在线，任一 Node
+的慢消息或断线不会阻塞其他 Node 的 accept、heartbeat 或 execution stream。
+
 ## 范围
 
 本轮提供 generic Tokio TCP 实现、deterministic backend、server/connector binaries 和

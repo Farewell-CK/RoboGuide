@@ -8,6 +8,7 @@ use crate::session::SessionState;
 use std::fmt::{Display, Formatter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 
 /// Server-side fact emitted by a connector session.
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +65,18 @@ impl IntegrationServer {
         let identity = self.next_identity;
         self.next_identity += 1;
         ServerSession::negotiate(stream, identity).await
+    }
+
+    /// Accepts nodes continuously and runs every session in an independent Tokio task.
+    pub async fn serve(
+        mut self,
+        events: mpsc::UnboundedSender<ServerEvent>,
+    ) -> Result<(), ServerError> {
+        loop {
+            let session = self.accept().await?;
+            let session_events = events.clone();
+            tokio::spawn(async move { run_session(session, session_events).await });
+        }
     }
 }
 
@@ -194,9 +207,33 @@ impl ServerSession {
             ClientFrame::Heartbeat { .. } | ClientFrame::RegistrationUpdate { .. } => {
                 Ok(Some(ServerEvent::ClientFact(frame)))
             }
+            ClientFrame::ExecutionStatus {
+                session_id,
+                execution_id,
+                fact,
+            } if session_id == self.state.session_id => Ok(Some(ServerEvent::ExecutionFact {
+                session_id,
+                execution_id,
+                sequence: 0,
+                fact,
+            })),
             other => Err(ServerError::Protocol(format!(
                 "unexpected client frame: {other:?}"
             ))),
+        }
+    }
+}
+
+/// Owns one node session independently of the listener and all other nodes.
+async fn run_session(mut session: ServerSession, events: mpsc::UnboundedSender<ServerEvent>) {
+    let _ = events.send(ServerEvent::Registered {
+        registration: session.registration().clone(),
+        session_id: session.session_id().to_string(),
+        lease_id: session.state.lease_id.clone(),
+    });
+    while let Ok(Some(event)) = session.next_event().await {
+        if events.send(event).is_err() {
+            break;
         }
     }
 }

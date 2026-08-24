@@ -50,6 +50,15 @@ pub enum ClientFrame {
         /// Fact reported by Local EAIOS.
         fact: ExecutionFact,
     },
+    /// Current execution state replayed after registration or duplicate Execute.
+    ExecutionStatus {
+        /// Current session identity.
+        session_id: String,
+        /// Stable execution identity.
+        execution_id: String,
+        /// Current connector-owned lifecycle state.
+        fact: ExecutionFact,
+    },
 }
 
 /// One server-to-client stream message.
@@ -186,6 +195,8 @@ pub enum ExecutionFact {
     },
     /// Local EAIOS cancelled the request.
     Cancelled,
+    /// Connector has no durable knowledge of the requested execution identity.
+    Unknown,
 }
 
 /// Protocol-level conversion or validation failure.
