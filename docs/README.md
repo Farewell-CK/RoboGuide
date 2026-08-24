@@ -20,6 +20,7 @@
 - [`decisions/0002-deaios-node-contract.md`](decisions/0002-deaios-node-contract.md)：DEAIOS 与本地 EAIOS/厂商运行时之间的 Node Contract v0。
 - [`decisions/0003-mission-plan-contract.md`](decisions/0003-mission-plan-contract.md)：Mission Intelligence 向 Rust 核心交付 Task Graph 的 MissionPlan v0 合同。
 - [`decisions/0004-recovery-commitment-lifecycle.md`](decisions/0004-recovery-commitment-lifecycle.md)：Recovery Commit 到 Rebind 之间的 Pending、Consume、Abort 和 terminal cleanup ownership。
+- [`decisions/0005-allocation-state-projection-authority.md`](decisions/0005-allocation-state-projection-authority.md)：Control reservation authority 到非权威 Allocation State projection 的单向边界。
 
 ## 历史架构
 

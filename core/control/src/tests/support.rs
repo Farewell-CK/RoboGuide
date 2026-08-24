@@ -7,7 +7,9 @@
         TimestampMs,
     };
     use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
-    use state::InMemorySharedNodeState;
+    use ports::{AllocationStateReader, AllocationStateWriter};
+    use state::{InMemoryAllocationState, InMemorySharedNodeState};
+    use crate::coordination::Reservation;
 
     /// Discards event evidence while exercising Control behavior in isolation.
     #[derive(Default)]

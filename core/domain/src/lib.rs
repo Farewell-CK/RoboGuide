@@ -10,6 +10,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
+mod allocation;
+
+pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
+
 /// Version identifier for the first cross-language Mission Plan contract.
 pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
 

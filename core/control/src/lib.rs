@@ -4,6 +4,7 @@
 
 //! Control Plane facade and composition root.
 
+mod allocation;
 mod coordination;
 mod group;
 mod matching;
@@ -12,6 +13,7 @@ mod proposal;
 mod reconciliation;
 mod scheduler;
 
+pub use allocation::AllocationProjectionError;
 pub use coordination::CommittedPlan;
 pub use group::{ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use matching::{CandidateSet, RoleCandidates};
@@ -55,6 +57,8 @@ pub enum ControlError {
     NoCandidate(RoleId),
     /// A proposal or internal invariant was invalid.
     InvalidProposal(String),
+    /// Control allocation authority could not be projected due to an invariant violation.
+    AllocationInvariant(String),
     /// A resource was already committed by another task or role.
     ResourceConflict {
         /// Conflicting resource.
@@ -115,6 +119,9 @@ impl Display for ControlError {
             Self::UnknownGroup(id) => write!(formatter, "unknown execution group {id}"),
             Self::NoCandidate(id) => write!(formatter, "no candidate for role {id}"),
             Self::InvalidProposal(reason) => write!(formatter, "invalid proposal: {reason}"),
+            Self::AllocationInvariant(reason) => {
+                write!(formatter, "allocation invariant violation: {reason}")
+            }
             Self::ResourceConflict {
                 resource_id,
                 owner_task_ref,

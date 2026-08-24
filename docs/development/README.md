@@ -25,9 +25,9 @@
 core/
   domain/                  纯领域类型、不变量和状态机
   ports/                   由核心拥有、与传输无关的接口
-  control/                 匹配、提案、协调、提交和 Group Manager
+  control/                 Node、匹配、调度、提案、协调、Group、恢复和 Allocation projection
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
-  state/                   已实现 Shared Node State Slice v0.1；其他 State/Memory 延后
+  state/                   已实现 Shared Node State 与 Allocation State v0.1
   adapters/                Rust 传输、持久化、ROS 和厂商适配器
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
@@ -47,7 +47,8 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
 `core/runtime`、`core/testkit`、`apps/controller` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
-不在 Rust 进程中嵌入 Python。`core/state` 当前只有 Shared Node State 的真实实现；
+不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State 与非权威
+Allocation View 的真实内存实现；
 没有维护实现前，不得创建未来的 `adapters`、`simulation` 或系统测试路径。禁止提交
 空目录。
 
@@ -59,7 +60,7 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 | Ports | Clock、Event Log、Node Registry 等核心接口 | 厂商或传输类型 |
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
 | Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
-| State | 当前切片维护 Node registration、runtime descriptor、Capability/Resource declaration 和最新 health observation | 调度决策、Lease authority、Reservation、Group lifecycle、Belief 或 Memory |
+| State | 当前切片维护 Shared Node State 与非权威 Allocation View | 调度决策、Lease authority、Reservation commitment、Group lifecycle、Belief 或 Memory |
 | Adapters | 协议、仿真器、存储、模型、ROS 和厂商转换 | 核心策略决策 |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
@@ -142,6 +143,26 @@ v0.1 未实现 Capability × Compute × Space × Time optimization、load-aware 
 spatial/traffic/deadline scheduling、priority/fairness/preemption、batching、bidding/auction、
 RL/LLM policy 或 Scheduler persistence。演化这些能力前需要真实 Compute Load/Queue/GPU
 Memory、Pose/Travel/Traffic、Time Window/Deadline/Duration 与 contention evidence。
+
+### State & Memory Plane — Allocation State v0.1
+
+`ControlPlane.reservations` 是 resource commitment 唯一 authority；`allocation_snapshot`
+交叉验证 reservations、Execution Group assignments 和 pending recovery commitments，生成
+完整 `AllocationViewSnapshot`。Phase 仅为 `Committed`、`Bound`、`RecoveryPending`，不
+复制 GroupLifecycle，也不创建 Free/capacity/load/contention records。
+
+`AllocationStateWriter::replace_allocation_view` whole-view 替换独立
+`InMemoryAllocationState`，Reader 提供单资源、稳定 ResourceId 顺序和 `projected_at`。
+State 拒绝旧 projection 覆盖更新 view，但不重新验证 Control authority。Authority mutation
+与 projection refresh 不是共同 transaction：projection 可以滞后，State write 失败不影响
+Commit，反向修改 State 也不改变 reservation。
+
+Normal Commit 投影 Committed；create_group 后投影 Bound；partial release 删除受影响 record；
+Recovery Commit 投影 RecoveryPending；Rebind 后转 Bound；Abort/Release 后 record 消失。
+orphan 或 ownership 不一致的 Group reservation 会使 projection builder 返回 invariant error。
+该 ownership 记录在
+[`ADR-0005`](../decisions/0005-allocation-state-projection-authority.md)。Scheduler v0.1
+保持不变且不读取 Allocation View；Scheduler v0.2 是后续独立工作。
 
 ### Control Plane — Reconciliation & Recovery Slice v0.1
 

@@ -15,7 +15,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
   composition roots.
 - `core/state/` implements only State & Memory Plane Slice v0.1: deterministic
-  Shared Node State behind transport-neutral reader/writer ports.
+  Shared Node State plus Allocation State v0.1 behind transport-neutral ports.
+- Control reservations remain the sole commitment authority; Allocation State is
+  a whole-view observable projection that may lag and never grants or revokes ownership.
 - Runtime observation ingestion normalizes `NodeGateway.status()` into reported
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.
@@ -97,6 +99,9 @@ terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
 Scheduler tests require stable node/resource choices, CandidateSet confinement,
 normal/recovery policy consistency, decision-local exclusive-resource avoidance,
 NoSelection/NoFeasible outcomes, and Decision/Proposal/Commit separation.
+Allocation projection tests cover Committed/Bound/RecoveryPending, partial release,
+Abort/Rebind/Release, orphan rejection, stable ordering, projection lag, and
+Control-to-State one-way authority. Scheduler v0.1 must not read Allocation State.
 
 ## Commit & Pull Request Guidelines
 

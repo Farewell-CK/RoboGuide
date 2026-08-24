@@ -4,6 +4,8 @@
 
 //! State & Memory Plane facade for implemented observable projections.
 
+mod allocation;
 mod node;
 
+pub use allocation::InMemoryAllocationState;
 pub use node::InMemorySharedNodeState;

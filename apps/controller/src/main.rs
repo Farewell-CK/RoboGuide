@@ -9,14 +9,15 @@ use control::{
     RecoverySchedulingOutcome,
 };
 use domain::{
-    Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand, ExecutionGroupId,
-    LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId,
-    NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
-    RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    AllocationPhase, Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand,
+    ExecutionGroupId, LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan,
+    NodeHealth, NodeId, NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId,
+    ResourceKind, RoleId, RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
+use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
 use serde::Deserialize;
-use state::InMemorySharedNodeState;
+use state::{InMemoryAllocationState, InMemorySharedNodeState};
 use std::collections::BTreeSet;
 use testkit::{FailureMode, FakeNode, SharedEventLog, VirtualClock};
 
@@ -207,6 +208,39 @@ fn role_for_capability(
     }
 }
 
+/// Refreshes the non-authoritative Allocation View from current Control authority.
+fn refresh_allocation_view(
+    control: &ControlPlane,
+    allocation_state: &mut InMemoryAllocationState,
+    projected_at: TimestampMs,
+) -> Result<(), String> {
+    allocation_state
+        .replace_allocation_view(
+            control
+                .allocation_snapshot(projected_at)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// Verifies one projected resource phase and optional Group ownership.
+fn require_allocation_phase(
+    allocation_state: &InMemoryAllocationState,
+    resource_id: &ResourceId,
+    phase: AllocationPhase,
+    group_id: Option<&ExecutionGroupId>,
+) -> Result<(), String> {
+    let allocation = allocation_state
+        .allocation(resource_id)
+        .ok_or_else(|| format!("allocation projection lacks resource {resource_id}"))?;
+    if allocation.phase() != phase || allocation.group_id() != group_id {
+        return Err(format!(
+            "allocation projection mismatch for resource {resource_id}"
+        ));
+    }
+    Ok(())
+}
+
 /// Executes registration, proposal, commit, failure, rebind, and completion.
 fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mission_plan = load_mission_plan()?;
@@ -266,6 +300,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mut control = ControlPlane::new();
     let scheduler = DeterministicBootstrapScheduler::new();
     let mut state = InMemorySharedNodeState::new();
+    let mut allocation_state = InMemoryAllocationState::new();
     let mut log = SharedEventLog::new();
     let timestamp = TimestampMs::new(0);
     control
@@ -326,6 +361,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let plan = control
         .commit(&proposal, timestamp, &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(0))?;
+    require_allocation_phase(
+        &allocation_state,
+        &a_space,
+        AllocationPhase::Committed,
+        None,
+    )?;
     control
         .create_group(
             group_id.clone(),
@@ -335,6 +377,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &mut log,
         )
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(1))?;
+    require_allocation_phase(
+        &allocation_state,
+        &a_space,
+        AllocationPhase::Bound,
+        Some(&group_id),
+    )?;
     control
         .activate_group(&group_id, timestamp, &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
@@ -410,6 +459,16 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     control
         .begin_role_recovery(&need, TimestampMs::new(1), &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(2))?;
+    if allocation_state.allocation(&a_space).is_some() {
+        return Err("partial release remained visible in allocation projection".to_string());
+    }
+    require_allocation_phase(
+        &allocation_state,
+        &edge_compute,
+        AllocationPhase::Bound,
+        Some(&group_id),
+    )?;
     let recovery_candidates = control
         .match_recovery_candidates(
             &state,
@@ -456,6 +515,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &mut log,
         )
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(3))?;
+    require_allocation_phase(
+        &allocation_state,
+        &b_space,
+        AllocationPhase::RecoveryPending,
+        Some(&group_id),
+    )?;
     control
         .rebind_role(
             &committed_recovery,
@@ -464,6 +530,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &mut log,
         )
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(4))?;
+    require_allocation_phase(
+        &allocation_state,
+        &b_space,
+        AllocationPhase::Bound,
+        Some(&group_id),
+    )?;
     control
         .activate_group(&group_id, TimestampMs::new(1), &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
@@ -489,6 +562,14 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     control
         .release_group(&group_id, TimestampMs::new(3), &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
+    refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(5))?;
+    if allocation_state
+        .allocations()
+        .iter()
+        .any(|allocation| allocation.group_id() == Some(&group_id))
+    {
+        return Err("released Group remains in allocation projection".to_string());
+    }
     if control.group(&group_id).map(|group| group.lifecycle()) != Some(GroupLifecycle::Released) {
         return Err("execution group did not reach Released".to_string());
     }

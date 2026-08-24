@@ -4,6 +4,10 @@
 
 //! Transport-neutral ports owned by the DEAIOS core.
 
+mod allocation;
+
+pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
+
 use domain::{
     CorrelationId, EventId, EventPayload, ExecutionCommand, NodeEvent, NodeHealthObservation,
     NodeId, NodeLivenessObservation, NodeRegistration, NodeStateSnapshot, NodeStatus, TimestampMs,

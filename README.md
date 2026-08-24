@@ -225,8 +225,23 @@ Liveness observation 与 Lease 时间继续属于 RoboGuide-local 时间域。
 仅作为未来 provenance、offset estimation 和冲突推理的证据保留；NTP/PTP、clock
 offset 和 distributed ordering 均延后。
 
-这不是完整的 State & Memory Plane。Allocation State、Execution Group State
-Projection、Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、
+当前同时实现 **State & Memory Plane — Allocation State v0.1**。Control 的
+`reservations` 仍是 resource commitment 唯一 authority；`allocation_snapshot()` 将
+authority 投影为完整 `AllocationViewSnapshot`，由独立 `InMemoryAllocationState` whole-view
+replace。View 只表达：
+
+- `Committed`：正常资源已 Commit，尚未 Bind，`group_id=None`；
+- `Bound`：资源属于当前 Execution Group assignment；
+- `RecoveryPending`：replacement 已 Commit 到 existing Group，但 Role 尚未 Rebind。
+
+Projection refresh 独立发生，可以暂时滞后；State write 失败不回滚 Control Commit，State
+内容也不能授予、拒绝或释放 reservation。Projection builder 会拒绝 orphan、重复或同时
+Bound/RecoveryPending 的 Group reservation。Scheduler v0.1 当前不读取 Allocation View；
+未来 Scheduler v0.2 即使使用该 view，也仍须由 Commit 重新检查 authority。该边界记录在
+[`ADR-0005`](docs/decisions/0005-allocation-state-projection-authority.md)。
+
+这不是完整的 State & Memory Plane。Execution Group State Projection、Physical/Spatial
+State、Shared Belief、Provenance/uncertainty fusion、
 Distributed Memory、Persistence/Replication、State Authority resolution 和 Lease
 ownership resolution 均未实现。
 
@@ -286,10 +301,10 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── tools/
 │   └── quality/
 ├── core/
-│   ├── domain/
-│   ├── ports/
-│   ├── state/
-│   ├── control/
+│   ├── domain/              # facade + allocation domain module
+│   ├── ports/               # facade + allocation ports
+│   ├── state/               # node and allocation projections
+│   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
 │   └── testkit/
 ├── apps/
@@ -314,7 +329,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0001-rust-core-python-edges.md
     │   ├── 0002-deaios-node-contract.md
     │   ├── 0003-mission-plan-contract.md
-    │   └── 0004-recovery-commitment-lifecycle.md
+    │   ├── 0004-recovery-commitment-lifecycle.md
+    │   └── 0005-allocation-state-projection-authority.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
@@ -322,7 +338,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ```
 
 当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node
-State Slice v0.1 已实现，但完整 State & Memory Plane 和 MVP Definition 均未完成；
+Shared Node State 与 Allocation State v0.1 已实现，但完整 State & Memory Plane 和 MVP
+Definition 均未完成；
 完整 MVP 的测试、适配器和仿真环境尚未完成。
 
 ## Mission Intelligence 开发

@@ -6,3 +6,4 @@ include!("recovery_commitment.rs");
 include!("group_lifecycle.rs");
 include!("matching_coordination.rs");
 include!("node_state.rs");
+include!("allocation_projection.rs");
