@@ -1,0 +1,19 @@
+[package]
+name = "node-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+integration = { path = "../integration" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1.53", features = ["sync", "time"] }
+tokio-stream = "0.1"
+toml = "0.9"
+tonic = { version = "0.14.6", features = ["transport"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1", features = ["net"] }

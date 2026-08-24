@@ -303,6 +303,24 @@ Detect → Reconcile → Adapt
 
 恢复目标不是盲目重放旧命令，而是在当前物理世界中恢复任务进展，并且只升级到必要层级。
 
+## 启动 Node Protocol v0.1
+
+Server 使用正式 gRPC bidirectional streaming：
+
+```bash
+cargo run -p integration-server -- 0.0.0.0:50051
+```
+
+节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：
+
+```bash
+cargo run -p roboguide-node -- config/node.toml
+```
+
+`server_endpoint` 是节点主动连接的可达地址，例如
+`http://192.168.1.10:50051`。当前仓库提供 `fake` reference adapter；真实 Local EAIOS
+通过 `LocalEaiosAdapter` 接入，不修改 Node Service 或 Node Protocol。
+
 ## 当前开放问题
 
 V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)；MVP 具体场景、拓扑和验收指标的草案记录在 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
@@ -317,7 +335,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── rust-toolchain.toml
 ├── pyproject.toml
 ├── config/
-│   └── mission.toml
+│   ├── mission.toml
+│   └── node.toml
 ├── contracts/
 │   └── mission/v0/
 ├── mission/
@@ -334,9 +353,13 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── state/               # node and allocation projections
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
+│   ├── integration/         # formal gRPC + reference NDJSON transports
+│   ├── node-service/        # node-side lifecycle, config, Local EAIOS Adapter boundary
 │   └── testkit/
 ├── apps/
-│   └── controller/
+│   ├── controller/
+│   ├── integration-server/
+│   └── roboguide-node/
 └── docs/
     ├── README.md
     ├── architecture/

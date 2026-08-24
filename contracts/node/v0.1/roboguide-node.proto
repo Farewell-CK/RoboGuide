@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package roboguide.node.v0_1;
+
+// Formal RoboGuide Node Protocol v0.1 bidirectional session.
+service RoboGuideNodeProtocol {
+  rpc NodeSession(stream NodeMessage) returns (stream ServerMessage);
+}
+
+message NodeMessage {
+  oneof message {
+    Hello hello = 1;
+    Register register = 2;
+    Heartbeat heartbeat = 3;
+    RegistrationUpdate registration_update = 4;
+    ExecutionEvent execution_event = 5;
+    ExecutionSnapshot execution_snapshot = 6;
+  }
+}
+
+message ServerMessage {
+  oneof message {
+    Welcome welcome = 1;
+    Registered registered = 2;
+    Execute execute = 3;
+    Cancel cancel = 4;
+    Ack ack = 5;
+    ProtocolError error = 6;
+  }
+}
+
+message Hello {
+  string node_id = 1;
+  repeated string protocol_versions = 2;
+  repeated string node_contract_versions = 3;
+}
+
+message Welcome {
+  string server_version = 1;
+  string selected_protocol_version = 2;
+  string selected_node_contract_version = 3;
+  uint64 heartbeat_interval_ms = 4;
+  uint64 lease_duration_ms = 5;
+}
+
+message Register { NodeRegistration registration = 1; }
+
+message Registered {
+  string session_id = 1;
+  string lease_id = 2;
+}
+
+message NodeRegistration {
+  string node_id = 1;
+  LocalRuntime runtime = 2;
+  repeated Capability capabilities = 3;
+  repeated Sensor sensors = 4;
+  repeated Resource resources = 5;
+  map<string, string> metadata = 6;
+  string node_contract_version = 7;
+}
+
+message LocalRuntime { string name = 1; string version = 2; }
+message Capability { string kind = 1; bool available = 2; repeated string contracts = 3; }
+message Sensor { string id = 1; string kind = 2; map<string, string> metadata = 3; }
+message Resource { string id = 1; string kind = 2; uint32 capacity = 3; map<string, string> metadata = 4; }
+
+message Heartbeat { string session_id = 1; string lease_id = 2; uint64 sequence = 3; NodeStatus status = 4; }
+message RegistrationUpdate { string session_id = 1; uint64 sequence = 2; NodeRegistration registration = 3; }
+message NodeStatus { string health = 1; string detail = 2; }
+
+message Execute { string session_id = 1; string execution_id = 2; CanonicalInvocation invocation = 3; }
+message Cancel { string session_id = 1; string execution_id = 2; }
+message CanonicalInvocation {
+  string mission_id = 1;
+  string task_id = 2;
+  string group_id = 3;
+  string role_id = 4;
+  string capability_contract = 5;
+  map<string, ScalarValue> parameters = 6;
+}
+message ScalarValue { oneof value { bool bool_value = 1; sint64 integer_value = 2; double float_value = 3; string string_value = 4; } }
+
+enum ExecutionPhase { EXECUTION_PHASE_UNSPECIFIED = 0; ACCEPTED = 1; STARTED = 2; COMPLETED = 3; FAILED = 4; CANCELLED = 5; UNKNOWN = 6; }
+message ExecutionEvent { string session_id = 1; string execution_id = 2; uint64 sequence = 3; ExecutionPhase phase = 4; string reason = 5; }
+message ExecutionSnapshot { string session_id = 1; string execution_id = 2; uint64 last_sequence = 3; ExecutionPhase phase = 4; string reason = 5; }
+message Ack { uint64 sequence = 1; }
+message ProtocolError { string code = 1; string reason = 2; }

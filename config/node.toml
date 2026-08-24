@@ -1,0 +1,8 @@
+node_id = "generic-node"
+server_endpoint = "http://127.0.0.1:50051"
+reconnect_delay_ms = 1000
+
+[adapter]
+type = "fake"
+runtime_name = "reference-local-eaios"
+runtime_version = "0.1.0"

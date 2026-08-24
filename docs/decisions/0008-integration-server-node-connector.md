@@ -1,5 +1,7 @@
 # ADR-0008：Integration Server 与 Node Connector 长连接
 
+> 状态：其 NDJSON/TCP transport 决策已由 ADR-0009 取代；实现仅保留为 reference/debug transport。
+
 ## 决策
 
 Node Connector 主动连接固定的 RoboGuide Integration Server。第一版使用长度受限的

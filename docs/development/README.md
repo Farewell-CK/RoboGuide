@@ -47,7 +47,8 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 ```
 
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
-`core/runtime`、`core/adapters`、`core/testkit`、`apps/controller`、
+`core/runtime`、`core/adapters`、`core/integration`、`core/node-service`、`core/testkit`、
+`apps/controller`、`apps/integration-server`、`apps/roboguide-node`、
 `apps/real-node-smoke` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
 不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State 与非权威

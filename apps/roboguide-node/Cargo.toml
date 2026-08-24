@@ -1,0 +1,10 @@
+[package]
+name = "roboguide-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+node-service = { path = "../../core/node-service" }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+toml = "0.9"

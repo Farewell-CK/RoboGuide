@@ -38,6 +38,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
 - `core/adapters/` contains transport/backend adapters; its HTTP implementation is
   only a reference NodeGateway binding and must not leak HTTP/serde into Domain or Ports.
+- `core/integration/` owns the formal gRPC Node Protocol transport plus retained
+  NDJSON/TCP debug transport; `core/node-service/` owns node-side lifecycle,
+  configuration, execution continuity, and the generic Local EAIOS Adapter boundary.
+- `apps/integration-server/` is the formal gRPC server composition root and
+  `apps/roboguide-node/` is the configured node-side daemon composition root.
 - `apps/real-node-smoke/` probes generic Node Contract endpoints by default and
   executes only with explicit `--execute` plus a versioned intent fixture.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do

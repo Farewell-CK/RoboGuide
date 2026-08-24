@@ -4,23 +4,24 @@
 
 //! Generic RoboGuide Integration Server and Node Connector protocol.
 //!
-//! The first wire transport is a newline-delimited, length-bounded JSON stream over
-//! TCP. Its message envelope is deliberately equivalent to a gRPC bidirectional
-//! stream: one ordered client stream carries node facts and one ordered server
-//! stream carries control messages. The framing is isolated here so a tonic
-//! service can replace it without changing session or execution invariants.
+//! Formal Node Protocol v0.1 uses generated tonic gRPC bidirectional streaming.
+//! The earlier newline-delimited JSON/TCP implementation remains available only
+//! as a reference/debug transport for deterministic low-level tests.
 
 mod connector;
 mod execution;
+pub mod grpc;
+mod grpc_server;
 mod protocol;
 mod server;
 mod session;
 
 pub use connector::{ConnectorError, LocalExecutionBackend, NodeConnector};
 pub use execution::{ExecutionRegistry, ExecutionRegistryDecision, ExecutionStatus};
+pub use grpc_server::{GrpcIntegrationService, GrpcNodeEvent, GrpcNodeRouter};
 pub use protocol::{
-    ClientFrame, ExecuteCommand, ExecutionFact, Hello, ProtocolError, Registration, ServerFrame,
-    WireCapability, WireResource,
+    ClientFrame, ExecuteCommand, ExecutionFact, Hello, PROTOCOL_VERSION_V0_1, ProtocolError,
+    Registration, SERVER_VERSION_V0_1, ServerFrame, WireCapability, WireResource,
 };
 pub use server::{IntegrationServer, ServerError, ServerEvent};
 pub use session::{SessionError, SessionState};

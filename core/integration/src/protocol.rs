@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 /// Protocol version negotiated by Hello.
-pub const PROTOCOL_VERSION_V0_1: &str = "roboguide.integration/v0.1";
+pub const PROTOCOL_VERSION_V0_1: &str = "roboguide.node-protocol/v0.1";
 /// Server implementation version advertised during Hello.
 pub const SERVER_VERSION_V0_1: &str = "roboguide.server/v0.1";
 /// Maximum accepted JSON frame size.

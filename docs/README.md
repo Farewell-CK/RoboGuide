@@ -23,6 +23,7 @@
 - [`decisions/0005-allocation-state-projection-authority.md`](decisions/0005-allocation-state-projection-authority.md)：Control reservation authority 到非权威 Allocation State projection 的单向边界。
 - [`decisions/0007-mission-actor-continuity.md`](decisions/0007-mission-actor-continuity.md)：Mission Actor 跨 Task 连续绑定与版本策略。
 - [`decisions/0008-integration-server-node-connector.md`](decisions/0008-integration-server-node-connector.md)：Integration Server 与 Node Connector 长连接协议。
+- [`decisions/0009-node-service-grpc-protocol.md`](decisions/0009-node-service-grpc-protocol.md)：正式 gRPC Node Protocol 与节点侧 Node Service/Adapter 边界。
 
 ## 历史架构
 

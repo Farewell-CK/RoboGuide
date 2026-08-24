@@ -1,8 +1,16 @@
 # RoboGuide Node Contract v0.1
 
-This directory documents the first HTTP binding of RoboGuide's semantic Node Contract. The
-contract is transport-neutral: HTTP paths and JSON fields are reference wire details, not Core
-ownership or a requirement that nodes run a RoboGuide agent.
+This directory owns RoboGuide Node Protocol v0.1. `roboguide-node.proto` is the formal gRPC
+bidirectional streaming contract. The older HTTP paths below remain reference/debug bindings of
+the same transport-neutral Node Contract and are not the production session transport.
+
+## Formal gRPC session
+
+`RoboGuideNodeProtocol.NodeSession` carries ordered streams in both directions. The lifecycle is
+Hello -> Welcome -> Register -> Registered, followed by Heartbeat, RegistrationUpdate,
+ExecutionEvent, and reconnect ExecutionSnapshot from the Node; Execute, Cancel, Ack, and Error
+flow from RoboGuide. CanonicalInvocation never contains local Atlas, Pilot, ROS topic, executable,
+or vendor SDK semantics.
 
 ## Registration
 
@@ -36,9 +44,9 @@ failure leaves reported health unchanged and provides evidence that liveness is 
 }
 ```
 
-The synchronous v0.1 response is `task_completed`, `task_failed`, or `safe_stopped`. Long-running
-`accepted -> started -> completed/failed` execution, callbacks, streaming observations, capability_contract
-catalog discovery, and transport negotiation are deferred.
+The synchronous HTTP response is retained only for compatibility with the reference probe. Formal
+Node Protocol execution is asynchronous `accepted -> started -> completed/failed/cancelled`, pushed
+through the gRPC stream without RoboGuide polling.
 
 Adapters map canonical `CapabilityContractRef` values to Local EAIOS skills, services, primitives, or vendor
 APIs. Network callers never supply an executable or shell command.

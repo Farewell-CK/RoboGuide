@@ -7,3 +7,4 @@ rust-version.workspace = true
 [dependencies]
 integration = { path = "../../core/integration" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "sync"] }
+tonic = { version = "0.14.6", features = ["transport"] }

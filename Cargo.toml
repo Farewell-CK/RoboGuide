@@ -8,10 +8,11 @@ members = [
     "core/adapters",
     "core/testkit",
     "core/integration",
+    "core/node-service",
     "apps/controller",
     "apps/real-node-smoke",
     "apps/integration-server",
-    "apps/node-connector",
+    "apps/roboguide-node",
 ]
 resolver = "2"
 
