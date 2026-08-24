@@ -97,16 +97,26 @@ Matching 相同的 eligibility policy。Assessment 只产生 `NoAction` 或
 Observed node unavailable
   -> Recovery Need
   -> Blocked + partial role release
-  -> externally supplied Recovery Assignment Proposal
-  -> validated rebind
+  -> role-scoped Recovery Candidate Set
+  -> external bootstrap scheduler choice
+  -> Recovery Assignment Proposal
+  -> Resource Coordinate / Commit
+  -> committed replacement rebind
   -> Adapted -> Active
 ```
 
 Reconciler 不选择 replacement node，也不实现 Scheduler。Controller 暂时代表外部
-scheduling/coordination boundary 提供 bootstrap proposal；proposal 仍须通过当前 node
+scheduler boundary，在 role-scoped Candidate Set 中显式确认场景预定的 Node B，再通过
+Control API 创建 proposal。Proposal 不写 reservation；Commit 阶段重新验证 node
 eligibility、Role capability、resource ownership/conflict、TaskRef/Group/Role identity 和
-failed-binding 检查。没有 proposal 或当前没有 replacement 只表示 `RecoveryPending`，
-不等于 recovery exhausted，不会自动进入 `Failed`。
+failed binding，并原子建立 existing Group 的 replacement reservation；Rebind 只接受
+`CommittedRecoveryAssignment`。没有 candidate、没有 proposal 或 commit conflict 都只
+表示 `RecoveryPending`，不等于 recovery exhausted，不会自动进入 `Failed`。
+
+该实现形成 **Recovery Reassignment Pipeline v0.2**：`Who can` 属于 role-scoped
+Capability Matching，`Who should` 仍属于外部 Scheduler boundary，资源能否生效属于
+Shared Resource Coordination/Commit，已经 committed 的协作变化才由 Execution Group
+Manager Rebind。Proposal 不等于 Commit，Commit 也不等于 Group Binding。
 
 本切片未实现 background reconciliation loop、自动 Scheduler、multi-role failure、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery

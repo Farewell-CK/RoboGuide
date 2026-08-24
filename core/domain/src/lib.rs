@@ -1186,6 +1186,43 @@ pub enum EventPayload {
         /// Currently assigned node that became unavailable.
         node_id: NodeId,
     },
+    /// Role-scoped matching produced currently eligible recovery candidates.
+    RecoveryCandidatesMatched {
+        /// Blocked Group waiting for a replacement.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task retained by the Group.
+        task_ref: TaskRef,
+        /// Unbound role being rematched.
+        role_id: RoleId,
+        /// Eligible candidates in deterministic node order.
+        candidate_node_ids: Vec<NodeId>,
+    },
+    /// An external scheduler choice passed recovery proposal validation.
+    RecoveryAssignmentProposed {
+        /// Group targeted by the non-committed proposal.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task retained by the Group.
+        task_ref: TaskRef,
+        /// Role proposed for reassignment.
+        role_id: RoleId,
+        /// Scheduler-selected replacement node.
+        replacement_node_id: NodeId,
+        /// Proposed resources, not yet reserved.
+        resource_ids: Vec<ResourceId>,
+    },
+    /// Shared Resource Coordination committed one replacement assignment.
+    RecoveryAssignmentCommitted {
+        /// Existing Group that owns the replacement commitment.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task that owns the commitment.
+        task_ref: TaskRef,
+        /// Role receiving the committed replacement.
+        role_id: RoleId,
+        /// Replacement node covered by the commitment.
+        replacement_node_id: NodeId,
+        /// Resources atomically reserved for the existing Group.
+        resource_ids: Vec<ResourceId>,
+    },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),
     /// A role was rebound after a recoverable failure.

@@ -25,6 +25,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Assigned-node reconciliation lives inside `core/control`, reuses the shared
   eligibility predicate and existing Group lifecycle APIs, and consumes an
   externally supplied recovery proposal; it never selects a replacement node.
+- Recovery reassignment follows role-scoped Match -> Propose -> Commit -> Rebind:
+  candidate matching may be empty, proposal creates no reservation, commit uses
+  the single Control reservation authority, and rebind requires commitment.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -81,6 +84,8 @@ liveness without weakening Recovery lifecycle tests.
 Reconciliation tests separate read-only assessment from mutation, preserve
 unaffected bindings and Multi-Mission isolation, and keep missing replacements
 Blocked/Pending rather than Failed.
+Recovery pipeline tests prove candidate membership, proposal/commit separation,
+atomic conflicts, committed-only rebind, and stable unaffected bindings.
 
 ## Commit & Pull Request Guidelines
 

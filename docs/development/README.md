@@ -127,16 +127,30 @@ freshness、liveness、lease、capability predicate，返回 `NoAction` 或
 `RoleRecoveryNeed`；assessment 不修改 Group。
 
 `begin_role_recovery` 只编排既有 `block_group` 与 `release_role_binding`，使 Group 保持
-Blocked 并仅将失败 Role 置为 unbound。外部 scheduling/coordination boundary 通过
-`RecoveryAssignmentProposal` 提供 replacement node/resources；`apply_role_recovery`
-验证 TaskRef、Group、Role、node eligibility、resource ownership/conflict 和 failed
-binding 后复用 `rebind_role`，使 Group 进入 Adapted，再由现有 `activate_group` 返回
-Active。Reconciler 从不遍历候选节点自行选择 replacement。
+Blocked 并仅将失败 Role 置为 unbound。Reconciler 从不替 Scheduler 选择 replacement。
 
-没有 proposal 或当前没有 candidate 时，Group 保持 Blocked/RecoveryPending；只有显式
-`fail_group` 才表示 recovery exhausted。本切片没有 background loop、自动 Scheduler、
-multi-role/spatial/timeout recovery、Mission replanning、Runtime command replay 或自动
-failure escalation。
+#### Recovery Reassignment Pipeline v0.2
+
+`match_recovery_candidates` 只对失败 Role 使用共享 eligibility predicate，排除 failed
+node，并允许返回空 `RecoveryCandidateSet`。外部 bootstrap Scheduler 必须从该 Set
+显式选择 Node；`propose_role_recovery` 验证 candidate membership 与 resource declaration，
+但不创建 reservation 或修改 Group。
+
+`commit_role_recovery` 在 commit time 重新验证 Group/TaskRef/Role、Blocked/unbound、node
+eligibility、failed binding、resource ownership 和 conflict，完成全部检查后才原子写入
+ControlPlane 唯一的 reservation authority，返回 `CommittedRecoveryAssignment`。此时
+Group 仍为 Blocked/unbound。`rebind_role` 只接受 committed value，并验证 reservation
+确实属于同一 TaskRef/Role/ExecutionGroupId 后更新 assignment，进入 Adapted；随后由
+`activate_group` 返回 Active。
+
+职责保持为：Who can = Capability Matching；Who should = Scheduler boundary；Can resources
+be committed = Shared Resource Coordination；Apply committed collaboration change = Execution
+Group Manager/Rebind。Proposal != Commit，Commit != Rebind。
+
+没有 candidate/proposal，或 commit conflict 时，Group 保持 Blocked/RecoveryPending；
+只有显式 `fail_group` 才表示 recovery exhausted。本切片没有 background loop、自动
+Scheduler、multi-role/spatial/timeout recovery、Mission replanning、Runtime command
+replay 或自动 failure escalation。
 
 本切片明确不是完整 State & Memory Plane。以下内容延后：
 

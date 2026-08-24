@@ -10,7 +10,8 @@
 mod reconciliation;
 
 pub use reconciliation::{
-    ReconciliationAssessment, RecoveryAssignmentProposal, RecoveryOutcome, RoleRecoveryNeed,
+    CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
+    RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
 };
 
 use domain::{
@@ -884,116 +885,93 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Rebinds one explicitly released group role to a replacement node.
-    ///
-    /// Recovery inputs remain separate so the event trace preserves the exact
-    /// replacement node, resource set, time, correlation, and evidence sink.
-    #[allow(clippy::too_many_arguments)]
-    pub fn rebind_role<S: SharedNodeStateReader, E: EventSink>(
+    /// Rebinds one blocked role using resources already committed by coordination.
+    pub fn rebind_role<E: EventSink>(
         &mut self,
-        state: &S,
-        group_id: &ExecutionGroupId,
-        role: &RoleRequirementView,
-        replacement_node_id: NodeId,
-        replacement_resources: Vec<ResourceId>,
+        committed: &CommittedRecoveryAssignment,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
-    ) -> Result<(), ControlError> {
+    ) -> Result<RecoveryOutcome, ControlError> {
         let group = self
             .groups
-            .get(group_id)
-            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if !matches!(
-            group.lifecycle,
-            GroupLifecycle::Active | GroupLifecycle::Adapted | GroupLifecycle::Blocked
-        ) {
+            .get(committed.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(committed.group_id().clone()))?;
+        if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        let unbound_role = group.unbound_roles.get(role.role_id()).ok_or_else(|| {
-            ControlError::InvalidProposal(format!(
-                "role {} must be partially released before rebind",
-                role.role_id()
-            ))
-        })?;
+        if group.task_ref != *committed.task_ref() {
+            return Err(ControlError::InvalidProposal(
+                "committed recovery belongs to another task".to_string(),
+            ));
+        }
+        let unbound_role = group
+            .unbound_roles
+            .get(committed.role_id())
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "role {} is not unbound for committed rebind",
+                    committed.role_id()
+                ))
+            })?;
         let previous_node = unbound_role.previous_node_id.clone();
         let assignment_index = unbound_role.assignment_index;
-        let replacement = state
-            .node(&replacement_node_id)
-            .ok_or_else(|| ControlError::UnknownNode(replacement_node_id.clone()))?;
-        if replacement_node_id == previous_node {
+        if previous_node != *committed.previous_node_id()
+            || committed.replacement_node_id() == committed.previous_node_id()
+        {
             return Err(ControlError::InvalidProposal(
-                "replacement node is the failed binding".to_string(),
+                "committed recovery does not match the released role binding".to_string(),
             ));
         }
-        if !self.node_is_eligible_for_role(
-            state,
-            &replacement_node_id,
-            role.requirement(),
-            timestamp,
-        ) {
-            return Err(ControlError::InvalidProposal(format!(
-                "replacement node {} is not currently eligible for role {}",
-                replacement_node_id,
-                role.role_id()
-            )));
-        }
-        if role.requirement().resource_kind().is_some() && replacement_resources.is_empty() {
-            return Err(ControlError::InvalidProposal(format!(
-                "replacement role {} requires a resource binding",
-                role.role_id()
-            )));
-        }
-        if replacement_resources.iter().any(|resource_id| {
-            !replacement
-                .registration()
-                .owns_resource(resource_id, role.requirement().resource_kind())
-                || self.reservations.contains_key(resource_id)
-        }) {
-            return Err(ControlError::InvalidProposal(
-                "replacement resources are invalid or already committed".to_string(),
-            ));
-        }
-
-        let task_ref = group.task_ref.clone();
-        for resource_id in &replacement_resources {
-            self.reservations.insert(
-                resource_id.clone(),
-                Reservation {
-                    task_ref: task_ref.clone(),
-                    role_id: role.role_id().clone(),
-                    group_id: Some(group_id.clone()),
-                },
-            );
+        for resource_id in committed.committed_resource_ids() {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "committed recovery resource {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != *committed.task_ref()
+                || reservation.role_id != *committed.role_id()
+                || reservation.group_id.as_ref() != Some(committed.group_id())
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "resource {resource_id} is not committed to the recovery Group and role"
+                )));
+            }
         }
         let replacement_assignment = RoleAssignment::new(
-            role.role_id().clone(),
-            replacement_node_id.clone(),
-            replacement_resources,
+            committed.role_id().clone(),
+            committed.replacement_node_id().clone(),
+            committed.committed_resource_ids().to_vec(),
         );
         let group = self
             .groups
-            .get_mut(group_id)
-            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+            .get_mut(committed.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(committed.group_id().clone()))?;
         let insertion_index = assignment_index.min(group.assignments.len());
         group
             .assignments
             .insert(insertion_index, replacement_assignment);
-        group.unbound_roles.remove(role.role_id());
+        group.unbound_roles.remove(committed.role_id());
         group.lifecycle = GroupLifecycle::Adapted;
         events.append(
             timestamp,
             correlation_id,
             None,
             EventPayload::RecoveryRebound {
-                group_id: group_id.clone(),
-                task_ref,
-                role_id: role.role_id().clone(),
-                from_node: previous_node,
-                to_node: replacement_node_id,
+                group_id: committed.group_id().clone(),
+                task_ref: committed.task_ref().clone(),
+                role_id: committed.role_id().clone(),
+                from_node: previous_node.clone(),
+                to_node: committed.replacement_node_id().clone(),
             },
         );
-        Ok(())
+        Ok(RecoveryOutcome::Recovered {
+            group_id: committed.group_id().clone(),
+            task_ref: committed.task_ref().clone(),
+            role_id: committed.role_id().clone(),
+            from_node: previous_node,
+            to_node: committed.replacement_node_id().clone(),
+        })
     }
 
     /// Marks a group complete after all required role executions succeed.
@@ -1257,6 +1235,8 @@ mod tests {
         space_a: ResourceId,
         /// Replacement transport resource committed by rebind.
         space_b: ResourceId,
+        /// Additional Node B resource used to prove atomic multi-resource commit.
+        space_b_secondary: ResourceId,
         /// Unaffected compute resource retained throughout recovery.
         compute_c: ResourceId,
         /// Correlation identity expected on all recovery evidence.
@@ -1302,11 +1282,19 @@ mod tests {
             "space-a",
             ResourceKind::Space,
         );
-        let node_b = registration_with_resource_kind(
-            "node-b",
-            CapabilityKind::Transport,
-            "space-b",
-            ResourceKind::Space,
+        let space_b = ResourceId::new("space-b").expect("test resource id must be valid");
+        let space_b_secondary =
+            ResourceId::new("space-b-secondary").expect("test resource id must be valid");
+        let node_b = NodeRegistration::new(
+            NodeId::new("node-b").expect("test node id must be valid"),
+            domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime must be valid"),
+            vec![Capability::new(CapabilityKind::Transport, true)],
+            vec![
+                Resource::new(space_b.clone(), ResourceKind::Space, 1)
+                    .expect("test resource must be valid"),
+                Resource::new(space_b_secondary.clone(), ResourceKind::Space, 1)
+                    .expect("test resource must be valid"),
+            ],
         );
         let edge_c = registration_with_resource_kind(
             "edge-c",
@@ -1318,7 +1306,6 @@ mod tests {
         let node_b_id = node_b.node_id().clone();
         let edge_c_id = edge_c.node_id().clone();
         let space_a = ResourceId::new("space-a").expect("test resource id must be valid");
-        let space_b = ResourceId::new("space-b").expect("test resource id must be valid");
         let compute_c = ResourceId::new("compute-c").expect("test resource id must be valid");
         let transport_role = RoleId::new("transport").expect("test role id must be valid");
         let compute_role = RoleId::new("compute").expect("test role id must be valid");
@@ -1424,6 +1411,7 @@ mod tests {
             edge_c_id,
             space_a,
             space_b,
+            space_b_secondary,
             compute_c,
             correlation_id,
         }
@@ -1505,6 +1493,81 @@ mod tests {
                 panic!("unreachable transport assignment should require recovery")
             }
         }
+    }
+
+    /// Detects transport unavailability and leaves the fixture Blocked and unbound.
+    fn begin_detected_transport_recovery(fixture: &mut RecoveryFixture) -> RoleRecoveryNeed {
+        mark_transport_unreachable(fixture, TimestampMs::new(1));
+        let need = assess_transport_recovery(fixture, TimestampMs::new(1));
+        fixture
+            .control
+            .begin_role_recovery(
+                &need,
+                TimestampMs::new(2),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("detected transport recovery should begin");
+        need
+    }
+
+    /// Matches the fixture's unbound transport role without selecting a candidate.
+    fn match_fixture_recovery_candidates(
+        fixture: &mut RecoveryFixture,
+        need: &RoleRecoveryNeed,
+        timestamp: TimestampMs,
+    ) -> RecoveryCandidateSet {
+        fixture
+            .control
+            .match_recovery_candidates(
+                &fixture.state,
+                need,
+                &fixture.requirement,
+                timestamp,
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("role-scoped recovery matching should succeed")
+    }
+
+    /// Produces a validated non-committed proposal for the fixture's known Node B.
+    fn propose_fixture_node_b(
+        fixture: &mut RecoveryFixture,
+        candidates: &RecoveryCandidateSet,
+        timestamp: TimestampMs,
+    ) -> RecoveryAssignmentProposal {
+        fixture
+            .control
+            .propose_role_recovery(
+                &fixture.state,
+                candidates,
+                &fixture.requirement,
+                fixture.node_b_id.clone(),
+                vec![fixture.space_b.clone()],
+                timestamp,
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("known Node B recovery proposal should validate")
+    }
+
+    /// Commits the fixture's proposed Node B resources without rebinding the Group.
+    fn commit_fixture_node_b(
+        fixture: &mut RecoveryFixture,
+        proposal: &RecoveryAssignmentProposal,
+        timestamp: TimestampMs,
+    ) -> CommittedRecoveryAssignment {
+        fixture
+            .control
+            .commit_role_recovery(
+                &fixture.state,
+                &fixture.requirement,
+                proposal,
+                timestamp,
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("known Node B recovery proposal should commit")
     }
 
     /// A healthy active Group produces NoAction without lifecycle mutation or events.
@@ -1629,9 +1692,9 @@ mod tests {
         );
     }
 
-    /// An external valid proposal rebinds the role while preserving Group context.
+    /// The complete role-scoped pipeline commits before rebinding and preserves Group context.
     #[test]
-    fn reconciliation_applies_external_replacement_proposal() {
+    fn recovery_pipeline_commits_then_rebinds_external_choice() {
         let mut fixture = recovery_fixture(true);
         let original_compute = fixture
             .control
@@ -1642,35 +1705,53 @@ mod tests {
             .find(|assignment| assignment.role_id() == &fixture.compute_role)
             .expect("compute assignment should exist")
             .clone();
-        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
-        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
-        fixture
-            .control
-            .begin_role_recovery(
-                &need,
-                TimestampMs::new(2),
-                &fixture.correlation_id,
-                &mut fixture.events,
-            )
-            .expect("recovery should await a replacement proposal");
-        let proposal = RecoveryAssignmentProposal::new(
-            fixture.group_id.clone(),
-            fixture.task_ref.clone(),
-            fixture.transport_role.clone(),
-            fixture.node_b_id.clone(),
-            vec![fixture.space_b.clone()],
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        assert_eq!(candidates.role_id(), &fixture.transport_role);
+        assert_eq!(
+            candidates.candidate_node_ids(),
+            std::slice::from_ref(&fixture.node_b_id)
         );
+        assert!(!candidates.candidate_node_ids().contains(&fixture.node_a_id));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("proposal must not bind the Group")
+                .lifecycle(),
+            GroupLifecycle::Blocked
+        );
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
+        assert_eq!(committed.group_id(), &fixture.group_id);
+        assert_eq!(committed.task_ref(), &fixture.task_ref);
+        assert_eq!(committed.role_id(), &fixture.transport_role);
+        assert_eq!(
+            fixture
+                .control
+                .reservations
+                .get(&fixture.space_b)
+                .and_then(|reservation| reservation.group_id.as_ref()),
+            Some(&fixture.group_id)
+        );
+        let committed_but_unbound = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("committed Group should remain observable");
+        assert_eq!(committed_but_unbound.lifecycle(), GroupLifecycle::Blocked);
+        assert!(committed_but_unbound.is_role_unbound(&fixture.transport_role));
+
         let outcome = fixture
             .control
-            .apply_role_recovery(
-                &fixture.state,
-                &fixture.requirement,
-                &proposal,
-                TimestampMs::new(3),
+            .rebind_role(
+                &committed,
+                TimestampMs::new(6),
                 &fixture.correlation_id,
                 &mut fixture.events,
             )
-            .expect("valid external proposal should rebind transport");
+            .expect("committed replacement should rebind transport");
 
         assert!(matches!(
             outcome,
@@ -1702,7 +1783,7 @@ mod tests {
             .control
             .activate_group(
                 &fixture.group_id,
-                TimestampMs::new(4),
+                TimestampMs::new(7),
                 &fixture.correlation_id,
                 &mut fixture.events,
             )
@@ -1717,42 +1798,28 @@ mod tests {
         );
     }
 
-    /// An unavailable proposed replacement is rejected without corrupting pending recovery.
+    /// A replacement that becomes unavailable after proposal is rejected at commit.
     #[test]
-    fn reconciliation_rejects_ineligible_replacement() {
+    fn recovery_commit_rejects_replacement_that_became_unavailable() {
         let mut fixture = recovery_fixture(true);
-        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
-        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
-        fixture
-            .control
-            .begin_role_recovery(
-                &need,
-                TimestampMs::new(2),
-                &fixture.correlation_id,
-                &mut fixture.events,
-            )
-            .expect("recovery should await a replacement proposal");
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
         fixture
             .state
             .record_node_liveness(
                 &fixture.node_b_id,
-                NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(2)),
+                NodeLivenessObservation::new(NodeLiveness::Unreachable, TimestampMs::new(5)),
             )
             .expect("replacement liveness observation should be accepted");
-        let proposal = RecoveryAssignmentProposal::new(
-            fixture.group_id.clone(),
-            fixture.task_ref.clone(),
-            fixture.transport_role.clone(),
-            fixture.node_b_id.clone(),
-            vec![fixture.space_b.clone()],
-        );
 
         assert!(matches!(
-            fixture.control.apply_role_recovery(
+            fixture.control.commit_role_recovery(
                 &fixture.state,
                 &fixture.requirement,
                 &proposal,
-                TimestampMs::new(2),
+                TimestampMs::new(5),
                 &fixture.correlation_id,
                 &mut fixture.events,
             ),
@@ -1773,23 +1840,231 @@ mod tests {
         );
     }
 
+    /// Scheduler choices outside the role-scoped Candidate Set cannot become proposals.
+    #[test]
+    fn recovery_proposal_requires_candidate_membership() {
+        let mut fixture = recovery_fixture(true);
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let node_c = NodeId::new("node-c").expect("test node id must be valid");
+
+        assert!(matches!(
+            fixture.control.propose_role_recovery(
+                &fixture.state,
+                &candidates,
+                &fixture.requirement,
+                node_c,
+                vec![fixture.space_b.clone()],
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidProposal(_))
+        ));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("invalid proposal must not mutate Group")
+                .lifecycle(),
+            GroupLifecycle::Blocked
+        );
+    }
+
+    /// Resource conflict after proposal leaves every recovery resource uncommitted atomically.
+    #[test]
+    fn recovery_commit_conflict_is_atomic_and_multi_mission_isolated() {
+        let mut fixture = recovery_fixture(true);
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = fixture
+            .control
+            .propose_role_recovery(
+                &fixture.state,
+                &candidates,
+                &fixture.requirement,
+                fixture.node_b_id.clone(),
+                vec![fixture.space_b.clone(), fixture.space_b_secondary.clone()],
+                TimestampMs::new(4),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("both Node B resources should be valid at proposal time");
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+        assert!(
+            !fixture
+                .control
+                .reservations
+                .contains_key(&fixture.space_b_secondary)
+        );
+
+        let mission_b_task = requirement_for_mission(
+            "mission-b",
+            "task-resource-owner",
+            "transport-b",
+            CapabilityKind::Transport,
+        );
+        let mission_b_candidates = fixture
+            .control
+            .match_capabilities(
+                &fixture.state,
+                &mission_b_task,
+                TimestampMs::new(5),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("Mission B should match Node B");
+        let mission_b_proposal = fixture
+            .control
+            .propose(
+                &fixture.state,
+                &mission_b_task,
+                &mission_b_candidates,
+                vec![RoleAssignment::new(
+                    RoleId::new("transport-b").expect("test role id must be valid"),
+                    fixture.node_b_id.clone(),
+                    vec![fixture.space_b_secondary.clone()],
+                )],
+                TimestampMs::new(5),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("Mission B proposal should remain independent");
+        fixture
+            .control
+            .commit(
+                &mission_b_proposal,
+                TimestampMs::new(5),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("Mission B should reserve the secondary resource");
+
+        assert!(matches!(
+            fixture.control.commit_role_recovery(
+                &fixture.state,
+                &fixture.requirement,
+                &proposal,
+                TimestampMs::new(6),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::ResourceConflict { resource_id, .. })
+                if resource_id == fixture.space_b_secondary
+        ));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+        let mission_b_reservation = fixture
+            .control
+            .reservations
+            .get(&fixture.space_b_secondary)
+            .expect("Mission B reservation must remain");
+        assert_eq!(&mission_b_reservation.task_ref, mission_b_task.task_ref());
+        assert!(mission_b_reservation.group_id.is_none());
+        let group_a = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("Mission A Group should remain pending");
+        assert_eq!(group_a.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group_a.is_role_unbound(&fixture.transport_role));
+        assert!(
+            fixture
+                .control
+                .reservations
+                .contains_key(&fixture.compute_c)
+        );
+    }
+
+    /// Rebind rejects a commitment-shaped value when reservation authority has no commitment.
+    #[test]
+    fn recovery_rebind_without_reservation_commit_is_rejected() {
+        let mut fixture = recovery_fixture(true);
+        begin_detected_transport_recovery(&mut fixture);
+        let uncommitted = CommittedRecoveryAssignment::new(
+            fixture.group_id.clone(),
+            fixture.task_ref.clone(),
+            fixture.transport_role.clone(),
+            fixture.node_a_id.clone(),
+            fixture.node_b_id.clone(),
+            vec![fixture.space_b.clone()],
+        );
+
+        assert!(matches!(
+            fixture.control.rebind_role(
+                &uncommitted,
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidProposal(_))
+        ));
+        let group = fixture
+            .control
+            .group(&fixture.group_id)
+            .expect("uncommitted rebind must retain Group");
+        assert_eq!(group.lifecycle(), GroupLifecycle::Blocked);
+        assert!(group.is_role_unbound(&fixture.transport_role));
+        assert!(!fixture.control.reservations.contains_key(&fixture.space_b));
+    }
+
+    /// Committed rebind is legal only for a Blocked Group with an unbound role.
+    #[test]
+    fn recovery_rebind_requires_blocked_lifecycle() {
+        let mut fixture = recovery_fixture(true);
+        let fake_commitment = CommittedRecoveryAssignment::new(
+            fixture.group_id.clone(),
+            fixture.task_ref.clone(),
+            fixture.transport_role.clone(),
+            fixture.node_a_id.clone(),
+            fixture.node_b_id.clone(),
+            vec![fixture.space_b.clone()],
+        );
+        assert!(matches!(
+            fixture.control.rebind_role(
+                &fake_commitment,
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Active))
+        ));
+
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
+        fixture
+            .control
+            .rebind_role(
+                &committed,
+                TimestampMs::new(6),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("Blocked committed recovery should rebind");
+        assert!(matches!(
+            fixture.control.rebind_role(
+                &committed,
+                TimestampMs::new(7),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidLifecycle(GroupLifecycle::Adapted))
+        ));
+    }
+
     /// Missing replacement input leaves the Group pending rather than Failed or Released.
     #[test]
     fn reconciliation_without_replacement_remains_pending() {
         let mut fixture = recovery_fixture(false);
-        mark_transport_unreachable(&mut fixture, TimestampMs::new(1));
-        let need = assess_transport_recovery(&mut fixture, TimestampMs::new(1));
-        let outcome = fixture
-            .control
-            .begin_role_recovery(
-                &need,
-                TimestampMs::new(2),
-                &fixture.correlation_id,
-                &mut fixture.events,
-            )
-            .expect("recovery should enter pending state without a proposal");
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
 
-        assert!(matches!(outcome, RecoveryOutcome::Pending { .. }));
+        assert!(candidates.is_empty());
         let group = fixture
             .control
             .group(&fixture.group_id)
@@ -1975,30 +2250,16 @@ mod tests {
             Err(ControlError::InvalidLifecycle(GroupLifecycle::Active))
         ));
 
-        block_fixture(&mut fixture);
-        fixture
-            .control
-            .release_role_binding(
-                &fixture.group_id,
-                &fixture.transport_role,
-                TimestampMs::new(2),
-                &fixture.correlation_id,
-                &mut fixture.events,
-            )
-            .expect("blocked Group should permit partial release");
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
         fixture
             .control
             .rebind_role(
-                &fixture.state,
-                &fixture.group_id,
-                &RoleRequirementView::new(RoleRequirement::new(
-                    fixture.transport_role.clone(),
-                    CapabilityKind::Transport,
-                    Some(ResourceKind::Space),
-                )),
-                fixture.node_b_id.clone(),
-                vec![fixture.space_b.clone()],
-                TimestampMs::new(3),
+                &committed,
+                TimestampMs::new(6),
                 &fixture.correlation_id,
                 &mut fixture.events,
             )
@@ -2007,7 +2268,7 @@ mod tests {
             fixture.control.release_role_binding(
                 &fixture.group_id,
                 &fixture.compute_role,
-                TimestampMs::new(4),
+                TimestampMs::new(7),
                 &fixture.correlation_id,
                 &mut fixture.events,
             ),
@@ -2028,30 +2289,16 @@ mod tests {
             .find(|assignment| assignment.role_id() == &fixture.compute_role)
             .expect("compute assignment should exist")
             .clone();
-        block_fixture(&mut fixture);
-        fixture
-            .control
-            .release_role_binding(
-                &fixture.group_id,
-                &fixture.transport_role,
-                TimestampMs::new(2),
-                &fixture.correlation_id,
-                &mut fixture.events,
-            )
-            .expect("failed transport binding should release");
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
         fixture
             .control
             .rebind_role(
-                &fixture.state,
-                &fixture.group_id,
-                &RoleRequirementView::new(RoleRequirement::new(
-                    fixture.transport_role.clone(),
-                    CapabilityKind::Transport,
-                    Some(ResourceKind::Space),
-                )),
-                fixture.node_b_id.clone(),
-                vec![fixture.space_b.clone()],
-                TimestampMs::new(3),
+                &committed,
+                TimestampMs::new(6),
                 &fixture.correlation_id,
                 &mut fixture.events,
             )
@@ -2088,7 +2335,7 @@ mod tests {
             .control
             .activate_group(
                 &fixture.group_id,
-                TimestampMs::new(4),
+                TimestampMs::new(7),
                 &fixture.correlation_id,
                 &mut fixture.events,
             )

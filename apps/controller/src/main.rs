@@ -4,7 +4,7 @@
 
 //! Executable evidence for the first DEAIOS Node Contract vertical slice.
 
-use control::{ControlPlane, GroupLifecycle, ReconciliationAssessment, RecoveryAssignmentProposal};
+use control::{ControlPlane, GroupLifecycle, ReconciliationAssessment};
 use domain::{
     Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand, ExecutionGroupId,
     LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId,
@@ -407,18 +407,47 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     control
         .begin_role_recovery(&need, TimestampMs::new(1), &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
-    let recovery_proposal = RecoveryAssignmentProposal::new(
-        group_id.clone(),
-        requirement.task_ref().clone(),
-        transport_role.clone(),
-        node_b.node_id().clone(),
-        vec![b_space],
-    );
-    control
-        .apply_role_recovery(
+    let recovery_candidates = control
+        .match_recovery_candidates(
+            &state,
+            &need,
+            &requirement,
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    if !recovery_candidates
+        .candidate_node_ids()
+        .contains(node_b.node_id())
+    {
+        return Err("bootstrap replacement node-b is not a recovery candidate".to_string());
+    }
+    let recovery_proposal = control
+        .propose_role_recovery(
+            &state,
+            &recovery_candidates,
+            &requirement,
+            node_b.node_id().clone(),
+            vec![b_space],
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    let committed_recovery = control
+        .commit_role_recovery(
             &state,
             &requirement,
             &recovery_proposal,
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .rebind_role(
+            &committed_recovery,
             TimestampMs::new(1),
             &correlation_id,
             &mut log,
@@ -491,6 +520,9 @@ mod tests {
             | EventPayload::ExecutionGroupBound { task_ref, .. }
             | EventPayload::ExecutionGroupActivated { task_ref, .. }
             | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
+            | EventPayload::RecoveryCandidatesMatched { task_ref, .. }
+            | EventPayload::RecoveryAssignmentProposed { task_ref, .. }
+            | EventPayload::RecoveryAssignmentCommitted { task_ref, .. }
             | EventPayload::RecoveryRebound { task_ref, .. }
             | EventPayload::ExecutionGroupCompleted { task_ref, .. }
             | EventPayload::ExecutionGroupBlocked { task_ref, .. }
@@ -512,7 +544,7 @@ mod tests {
     #[test]
     fn mvp_slice_recovers_after_node_failure() {
         let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-        assert_eq!(events.len(), 18);
+        assert_eq!(events.len(), 21);
         assert!(matches!(
             events[0].payload(),
             EventPayload::NodeRegistered { .. }
@@ -570,24 +602,39 @@ mod tests {
         ));
         assert!(matches!(
             events[13].payload(),
+            EventPayload::RecoveryCandidatesMatched { candidate_node_ids, .. }
+                if candidate_node_ids.iter().any(|node_id| node_id.as_str() == "node-b")
+        ));
+        assert!(matches!(
+            events[14].payload(),
+            EventPayload::RecoveryAssignmentProposed { replacement_node_id, .. }
+                if replacement_node_id.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[15].payload(),
+            EventPayload::RecoveryAssignmentCommitted { replacement_node_id, .. }
+                if replacement_node_id.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[16].payload(),
             EventPayload::RecoveryRebound { from_node, to_node, .. }
                 if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[14].payload(),
+            events[17].payload(),
             EventPayload::ExecutionGroupActivated { .. }
         ));
         assert!(matches!(
-            events[15].payload(),
+            events[18].payload(),
             EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
                 if node_id.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[16].payload(),
+            events[19].payload(),
             EventPayload::ExecutionGroupCompleted { .. }
         ));
         assert!(matches!(
-            events[17].payload(),
+            events[20].payload(),
             EventPayload::ExecutionGroupReleased { .. }
         ));
     }
@@ -984,15 +1031,35 @@ mod tests {
         control
             .begin_role_recovery(&need, TimestampMs::new(1), &trace_a, &mut log)
             .expect("Mission A should begin only transport recovery");
-        let recovery_proposal = RecoveryAssignmentProposal::new(
-            group_a.clone(),
-            requirement_a.task_ref().clone(),
-            transport_role.clone(),
-            node_b.node_id().clone(),
-            vec![space_b.clone()],
+        let recovery_candidates = control
+            .match_recovery_candidates(
+                &state,
+                &need,
+                &requirement_a,
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("Mission A transport recovery matching should succeed");
+        assert!(
+            recovery_candidates
+                .candidate_node_ids()
+                .contains(node_b.node_id())
         );
-        control
-            .apply_role_recovery(
+        let recovery_proposal = control
+            .propose_role_recovery(
+                &state,
+                &recovery_candidates,
+                &requirement_a,
+                node_b.node_id().clone(),
+                vec![space_b.clone()],
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("bootstrap scheduler should propose Node B");
+        let committed_recovery = control
+            .commit_role_recovery(
                 &state,
                 &requirement_a,
                 &recovery_proposal,
@@ -1000,7 +1067,10 @@ mod tests {
                 &trace_a,
                 &mut log,
             )
-            .expect("Mission A failed role should rebind");
+            .expect("Mission A replacement resources should commit");
+        control
+            .rebind_role(&committed_recovery, TimestampMs::new(1), &trace_a, &mut log)
+            .expect("Mission A committed replacement should rebind");
         assert_eq!(
             control
                 .group(&group_a)
