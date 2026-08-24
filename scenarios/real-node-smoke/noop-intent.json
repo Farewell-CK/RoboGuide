@@ -1,0 +1,8 @@
+{
+  "operation": {
+    "namespace": "system",
+    "name": "ping",
+    "version": "v1"
+  },
+  "parameters": {}
+}

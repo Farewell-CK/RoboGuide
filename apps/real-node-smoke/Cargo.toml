@@ -1,0 +1,11 @@
+[package]
+name = "real-node-smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+adapters = { path = "../../core/adapters" }
+domain = { path = "../../core/domain" }
+ports = { path = "../../core/ports" }
+runtime = { path = "../../core/runtime" }

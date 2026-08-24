@@ -5,8 +5,10 @@ members = [
     "core/state",
     "core/control",
     "core/runtime",
+    "core/adapters",
     "core/testkit",
     "apps/controller",
+    "apps/real-node-smoke",
 ]
 resolver = "2"
 

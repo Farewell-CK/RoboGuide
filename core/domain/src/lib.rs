@@ -722,7 +722,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0
+        MISSION_PLAN_SCHEMA_V0_1
     }
 
     /// Returns the original mission goal.

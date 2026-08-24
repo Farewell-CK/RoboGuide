@@ -45,11 +45,14 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
 - 当前 `mission/` 已提供确定性 Fixture Planner 和可配置的 Responses LLM Planner；
-- Mission 输出使用 `contracts/mission/v0/` 中的版本化合同，Controller 只消费校验后的 Task Graph；
+- Mission 输出使用 `contracts/mission/v0.1/` 中的版本化合同；每个 Role 分别声明
+  Capability/Resource requirement 与 canonical `ExecutionIntent`；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 `State & Memory Plane — Slice v0.1: Shared Node State`，
   Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
+- `core/adapters` 已提供第一份 backend-neutral HTTP reference adapter，
+  `apps/real-node-smoke` 默认只 probe registration/status，显式 `--execute` 才发送 intent；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
   [`docs/development/README.md`](docs/development/README.md)；
@@ -61,6 +64,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - DEAIOS 与本地 EAIOS/厂商运行时的语义边界由
   [`ADR-0002`](docs/decisions/0002-deaios-node-contract.md) 记录，当前状态为
   `Proposed for MVP Slice v0.1`。
+- 通用异构 EAIOS 接入、canonical operation 与 Local Skill 映射由
+  [`ADR-0006`](docs/decisions/0006-heterogeneous-eaios-integration-contract.md) 记录。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -124,8 +129,8 @@ Observed node unavailable
   -> Adapted -> Active
 ```
 
-Reconciler 不选择 replacement node，也不实现 Scheduler。Controller 暂时代表外部
-scheduler boundary，在 role-scoped Candidate Set 中显式确认场景预定的 Node B，再通过
+Reconciler 不选择 replacement node，也不实现 Scheduler。Controller 通过
+`DeterministicBootstrapScheduler` 在 role-scoped Candidate Set 上产生 selection，再通过
 Control API 创建 proposal。Proposal 不写 reservation；Commit 阶段重新验证 node
 eligibility、Role capability、resource ownership/conflict、TaskRef/Group/Role identity 和
 failed binding，并原子建立 existing Group 的 replacement reservation；Rebind 只接受
@@ -159,6 +164,29 @@ Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit�
 本切片未实现 background reconciliation loop、自动 Scheduler、multi-role failure、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
+
+### Heterogeneous EAIOS Integration Contract v0.1
+
+`ExecutionIntent` 以可扩展 `OperationRef(namespace, name, version)` 和稳定 scalar parameter
+map 表达 `What to execute`。它不使用 enum 固化 operation，也不携带厂商 Skill、ROS action、
+SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式关联；Matching 与
+Scheduler 不解析 intent，Runtime 只路由，Adapter/Local EAIOS 负责翻译成 Local How。
+
+`NodeGateway` 保持 transport-neutral，registration 显式声明 `roboguide.node.v0.1`，fallible
+`status()` 可报告 timeout/unavailable/protocol/rejected。status transport failure 不伪造
+reported `Offline`，Runtime 保留旧 reported health 并记录 liveness `Unreachable`。
+
+`core/adapters::http::HttpNodeGateway` 是第一份同步 HTTP/JSON reference transport；wire DTO
+与 serde 只存在于 adapter crate。`ConfiguredCommandBackend` 仅允许 canonical operation
+查找本地预配置 fixed argv，不接受网络 executable，也不拼 shell。HTTP 不是 Node Contract；
+异步 Accepted/Started/Completed lifecycle、operation catalog/discovery 与真实设备 backend
+仍未实现。合同见 [`contracts/node/v0.1/`](contracts/node/v0.1/)。
+
+```bash
+cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081
+cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081 \
+  --execute --intent scenarios/real-node-smoke/noop-intent.json
+```
 
 ### Embodied Execution Group
 

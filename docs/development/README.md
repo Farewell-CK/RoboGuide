@@ -28,16 +28,18 @@ core/
   control/                 Node、匹配、调度、提案、协调、Group、恢复和 Allocation projection
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
   state/                   已实现 Shared Node State 与 Allocation State v0.1
-  adapters/                Rust 传输、持久化、ROS 和厂商适配器
+  adapters/                已实现 generic HTTP reference adapter 与 backend mapping
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
   controller/              组合根和进程生命周期
+  real-node-smoke/         通用 Node Contract probe 与显式 intent invocation
 mission/
   src/mission/             Mission 规划、合同校验和模型适配器
   prompts/v0/              可版本化、可评审的 Planner 与 Reviewer Prompt
   tests/                   Mission 合同与 Adapter 的离线测试
 simulation/                未来的仿真器集成适配器，首次实现时再创建
 contracts/mission/         版本化的跨语言 Mission Plan 合同
+contracts/node/            版本化的异构 EAIOS Node Contract wire binding
 config/                    不含凭据的运行配置
 scenarios/                 版本化场景输入和预期事件轨迹
 tests/system/              仅用于黑盒跨进程测试
@@ -45,11 +47,13 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 ```
 
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
-`core/runtime`、`core/testkit`、`apps/controller` 和 `mission`。Mission 通过
+`core/runtime`、`core/adapters`、`core/testkit`、`apps/controller`、
+`apps/real-node-smoke` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
 不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State 与非权威
-Allocation View 的真实内存实现；
-没有维护实现前，不得创建未来的 `adapters`、`simulation` 或系统测试路径。禁止提交
+Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP reference transport
+和 configured reference backend，不代表真实 EAIOS backend 已完成。
+没有维护实现前，不得创建未来的 `simulation` 或系统测试路径。禁止提交
 空目录。
 
 ## 3. 模块边界
@@ -73,6 +77,26 @@ apps -> control/runtime/state/adapters -> ports -> domain
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；Python 通过 Adapter 边界与核心通信。
+
+### Heterogeneous EAIOS Integration Contract v0.1
+
+Domain `ExecutionIntent` 将 canonical `OperationRef` 与 scalar parameters 绑定到
+`PlannedTask` 的具体 Role；它与 RoleRequirement、Node assignment 和本地 Skill 名分离。
+Matching/Scheduler 不解析 intent，Runtime 不翻译 intent，Node Adapter/Local EAIOS 才将
+canonical operation 映射为本地 Skill、Service、Primitive 或厂商 API。
+
+`NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含 HTTP
+类型。`core/adapters/http` 独占 reqwest、serde 和 JSON DTO；registration/status/execute wire
+conversion 分模块实现。status 失败时 Runtime 只更新 liveness `Unreachable`，不会覆盖本地
+系统最后上报的 health。`SystemMonotonicClock` 为真实进程提供 RoboGuide-local receive time。
+
+`ConfiguredCommandBackend` 只映射 canonical operation 到本地白名单 fixed argv，不使用
+`shell=true`，不允许网络输入指定 executable，也不把 parameters 拼成 shell。参数化真实
+Skill 调用由后续具体 EAIOS backend 实现。
+
+`apps/real-node-smoke` 默认仅 probe；真实 action 必须显式提供 `--execute --intent FILE`。
+当前同步 invocation、HTTP reference transport 和 fixture smoke 不是 real-device verification。
+异步 execution lifecycle、operation catalog/discovery、认证、重试及真实 backend 延后。
 
 ### State & Memory Plane — Slice v0.1: Shared Node State
 

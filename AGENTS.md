@@ -36,6 +36,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `core/control/src/scheduler.rs` implements a stateless deterministic bootstrap
   `Who should` policy over supplied Candidate Sets; it does not re-run eligibility,
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
+- `core/adapters/` contains transport/backend adapters; its HTTP implementation is
+  only a reference NodeGateway binding and must not leak HTTP/serde into Domain or Ports.
+- `apps/real-node-smoke/` probes generic Node Contract endpoints by default and
+  executes only with explicit `--execute` plus a versioned intent fixture.
+- Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
+  not interpret it, Runtime only routes it, and adapters map it to Local EAIOS How.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -102,6 +108,8 @@ NoSelection/NoFeasible outcomes, and Decision/Proposal/Commit separation.
 Allocation projection tests cover Committed/Bound/RecoveryPending, partial release,
 Abort/Rebind/Release, orphan rejection, stable ordering, projection lag, and
 Control-to-State one-way authority. Scheduler v0.1 must not read Allocation State.
+Adapter tests cover contract-version rejection, wire/domain conversion, identity
+matching, transport errors, intent round trips, and heterogeneous local mappings.
 
 ## Commit & Pull Request Guidelines
 

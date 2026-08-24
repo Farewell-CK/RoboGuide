@@ -21,6 +21,13 @@ Requirements，但不能拥有节点选择、资源 Commit 或本地设备控制
 - 每个 Task 的描述、依赖和 Role Requirements；
 - Role 所需的 Capability 与可选 Resource Kind。
 
+Integration Contract v0.1 新增并存的 `roboguide.mission-plan/v0.1`，Schema 位于
+`contracts/mission/v0.1/mission-plan.schema.json`。它为每个 Role 增加 canonical
+`ExecutionIntent`（OperationRef + scalar parameters），用于描述该 Role 执行时的 What。
+旧 `v0` 文件继续保留，不静默改变已版本化字段语义。Intent 不得包含具体 Node、Local
+Skill、ROS action、vendor SDK method 或 shell command；具体 Local How 仍由 Adapter/EAIOS
+翻译和执行。
+
 合同不得包含 Node Assignment、Reservation、Commit、Execution Group、设备轨迹
 或厂商 SDK 类型。Python `mission/` 可以使用确定性 Planner、LLM、VLM 或混合
 规划器，但输出必须先经过 Schema 和图不变量校验。Rust `core/domain` 再将
