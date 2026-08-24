@@ -31,6 +31,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Committed-but-not-bound recovery assignments are Control-owned pending
   commitments keyed by Group/Role; Rebind consumes, Abort releases replacement
   resources, and terminal Group release removes all related ownership.
+- `core/control/src/scheduler.rs` implements a stateless deterministic bootstrap
+  `Who should` policy over supplied Candidate Sets; it does not re-run eligibility,
+  inspect reservations, validate proposals, commit resources, or mutate State/Groups.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -91,6 +94,9 @@ Recovery pipeline tests prove candidate membership, proposal/commit separation,
 atomic conflicts, committed-only rebind, and stable unaffected bindings.
 Commitment lifecycle tests cover one-pending-per-role, stale handles, atomic Abort,
 terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
+Scheduler tests require stable node/resource choices, CandidateSet confinement,
+normal/recovery policy consistency, decision-local exclusive-resource avoidance,
+NoSelection/NoFeasible outcomes, and Decision/Proposal/Commit separation.
 
 ## Commit & Pull Request Guidelines
 

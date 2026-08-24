@@ -4,12 +4,15 @@
 
 //! Executable evidence for the first DEAIOS Node Contract vertical slice.
 
-use control::{ControlPlane, GroupLifecycle, ReconciliationAssessment};
+use control::{
+    ControlPlane, DeterministicBootstrapScheduler, GroupLifecycle, ReconciliationAssessment,
+    RecoverySchedulingOutcome,
+};
 use domain::{
     Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand, ExecutionGroupId,
     LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId,
-    NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleAssignment,
-    RoleId, RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
+    RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use runtime::Runtime;
 use serde::Deserialize;
@@ -261,6 +264,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     )?;
 
     let mut control = ControlPlane::new();
+    let scheduler = DeterministicBootstrapScheduler::new();
     let mut state = InMemorySharedNodeState::new();
     let mut log = SharedEventLog::new();
     let timestamp = TimestampMs::new(0);
@@ -298,23 +302,22 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let candidates = control
         .match_capabilities(&state, &requirement, timestamp, &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
+    let scheduling_decision = scheduler
+        .schedule_task(
+            &state,
+            &requirement,
+            &candidates,
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
     let proposal = control
         .propose(
             &state,
             &requirement,
             &candidates,
-            vec![
-                RoleAssignment::new(
-                    transport_role.clone(),
-                    node_a.node_id().clone(),
-                    vec![a_space],
-                ),
-                RoleAssignment::new(
-                    compute_role.clone(),
-                    edge.node_id().clone(),
-                    vec![edge_compute],
-                ),
-            ],
+            scheduling_decision.proposed_assignments(),
             timestamp,
             &correlation_id,
             &mut log,
@@ -417,19 +420,27 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &mut log,
         )
         .map_err(|error| error.to_string())?;
-    if !recovery_candidates
-        .candidate_node_ids()
-        .contains(node_b.node_id())
-    {
-        return Err("bootstrap replacement node-b is not a recovery candidate".to_string());
-    }
+    let recovery_scheduling = scheduler
+        .schedule_recovery(
+            &state,
+            &requirement,
+            &recovery_candidates,
+            TimestampMs::new(1),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    let RecoverySchedulingOutcome::Selected(recovery_decision) = recovery_scheduling else {
+        return Err("bootstrap Scheduler found no recovery selection".to_string());
+    };
+    let replacement_node_id = recovery_decision.replacement_node_id().clone();
     let recovery_proposal = control
         .propose_role_recovery(
             &state,
             &recovery_candidates,
             &requirement,
-            node_b.node_id().clone(),
-            vec![b_space],
+            replacement_node_id.clone(),
+            recovery_decision.resource_ids().to_vec(),
             TimestampMs::new(1),
             &correlation_id,
             &mut log,
@@ -462,7 +473,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         task_id,
         group_id.clone(),
         transport_role,
-        NodeId::new("node-b").map_err(|error| error.to_string())?,
+        replacement_node_id,
         correlation_id.clone(),
     );
     runtime
@@ -488,7 +499,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
 mod tests {
     use super::*;
     use control::ControlError;
-    use domain::{EventPayload, NodeEvent, TaskRef};
+    use domain::{EventPayload, NodeEvent, RoleAssignment, TaskRef};
 
     /// Builds a two-role task used to exercise concurrent mission isolation.
     fn multi_mission_requirement(mission: &str, task: &str) -> TaskRequirement {
@@ -515,12 +526,15 @@ mod tests {
     fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         match payload {
             EventPayload::CandidatesMatched { task_ref }
+            | EventPayload::TaskSchedulingSelected { task_ref, .. }
             | EventPayload::ProposalCreated { task_ref }
             | EventPayload::PlanCommitted { task_ref }
             | EventPayload::ExecutionGroupBound { task_ref, .. }
             | EventPayload::ExecutionGroupActivated { task_ref, .. }
             | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
             | EventPayload::RecoveryCandidatesMatched { task_ref, .. }
+            | EventPayload::RecoverySchedulingSelected { task_ref, .. }
+            | EventPayload::RecoverySchedulingNoSelection { task_ref, .. }
             | EventPayload::RecoveryAssignmentProposed { task_ref, .. }
             | EventPayload::RecoveryAssignmentCommitted { task_ref, .. }
             | EventPayload::RecoveryAssignmentAborted { task_ref, .. }
@@ -545,7 +559,7 @@ mod tests {
     #[test]
     fn mvp_slice_recovers_after_node_failure() {
         let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-        assert_eq!(events.len(), 21);
+        assert_eq!(events.len(), 23);
         assert!(matches!(
             events[0].payload(),
             EventPayload::NodeRegistered { .. }
@@ -564,78 +578,87 @@ mod tests {
         ));
         assert!(matches!(
             events[4].payload(),
-            EventPayload::ProposalCreated { .. }
+            EventPayload::TaskSchedulingSelected { .. }
         ));
         assert!(matches!(
             events[5].payload(),
-            EventPayload::PlanCommitted { .. }
+            EventPayload::ProposalCreated { .. }
         ));
         assert!(matches!(
             events[6].payload(),
-            EventPayload::ExecutionGroupBound { .. }
+            EventPayload::PlanCommitted { .. }
         ));
         assert!(matches!(
             events[7].payload(),
-            EventPayload::ExecutionGroupActivated { .. }
+            EventPayload::ExecutionGroupBound { .. }
         ));
         assert!(matches!(
             events[8].payload(),
-            EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+            EventPayload::ExecutionGroupActivated { .. }
         ));
         assert!(matches!(
             events[9].payload(),
+            EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+        ));
+        assert!(matches!(
+            events[10].payload(),
             EventPayload::NodeObservation(domain::NodeEvent::TaskFailed { node_id, .. })
                 if node_id.as_str() == "node-a"
         ));
         assert!(matches!(
-            events[10].payload(),
+            events[11].payload(),
             EventPayload::ReconciliationRoleRecoveryRequired { role_id, node_id, .. }
                 if role_id.as_str() == "primary-transport" && node_id.as_str() == "node-a"
         ));
         assert!(matches!(
-            events[11].payload(),
+            events[12].payload(),
             EventPayload::ExecutionGroupBlocked { .. }
         ));
         assert!(matches!(
-            events[12].payload(),
+            events[13].payload(),
             EventPayload::ExecutionGroupRoleBindingReleased { role_id, .. }
                 if role_id.as_str() == "primary-transport"
         ));
         assert!(matches!(
-            events[13].payload(),
+            events[14].payload(),
             EventPayload::RecoveryCandidatesMatched { candidate_node_ids, .. }
                 if candidate_node_ids.iter().any(|node_id| node_id.as_str() == "node-b")
         ));
         assert!(matches!(
-            events[14].payload(),
-            EventPayload::RecoveryAssignmentProposed { replacement_node_id, .. }
-                if replacement_node_id.as_str() == "node-b"
-        ));
-        assert!(matches!(
             events[15].payload(),
-            EventPayload::RecoveryAssignmentCommitted { replacement_node_id, .. }
+            EventPayload::RecoverySchedulingSelected { replacement_node_id, .. }
                 if replacement_node_id.as_str() == "node-b"
         ));
         assert!(matches!(
             events[16].payload(),
+            EventPayload::RecoveryAssignmentProposed { replacement_node_id, .. }
+                if replacement_node_id.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[17].payload(),
+            EventPayload::RecoveryAssignmentCommitted { replacement_node_id, .. }
+                if replacement_node_id.as_str() == "node-b"
+        ));
+        assert!(matches!(
+            events[18].payload(),
             EventPayload::RecoveryRebound { from_node, to_node, .. }
                 if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[17].payload(),
+            events[19].payload(),
             EventPayload::ExecutionGroupActivated { .. }
         ));
         assert!(matches!(
-            events[18].payload(),
+            events[20].payload(),
             EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
                 if node_id.as_str() == "node-b"
         ));
         assert!(matches!(
-            events[19].payload(),
+            events[21].payload(),
             EventPayload::ExecutionGroupCompleted { .. }
         ));
         assert!(matches!(
-            events[20].payload(),
+            events[22].payload(),
             EventPayload::ExecutionGroupReleased { .. }
         ));
     }
@@ -858,6 +881,7 @@ mod tests {
         .expect("node registration should be valid");
 
         let mut control = ControlPlane::new();
+        let scheduler = DeterministicBootstrapScheduler::new();
         let mut state = InMemorySharedNodeState::new();
         let mut log = SharedEventLog::new();
         for registration in [&node_a, &node_b, &node_d, &edge_c, &edge_e] {
@@ -1042,18 +1066,27 @@ mod tests {
                 &mut log,
             )
             .expect("Mission A transport recovery matching should succeed");
-        assert!(
-            recovery_candidates
-                .candidate_node_ids()
-                .contains(node_b.node_id())
-        );
+        let recovery_scheduling = scheduler
+            .schedule_recovery(
+                &state,
+                &requirement_a,
+                &recovery_candidates,
+                TimestampMs::new(1),
+                &trace_a,
+                &mut log,
+            )
+            .expect("bootstrap Scheduler should evaluate recovery candidates");
+        let RecoverySchedulingOutcome::Selected(recovery_decision) = recovery_scheduling else {
+            panic!("Mission A should have a deterministic replacement selection");
+        };
+        let replacement_node_id = recovery_decision.replacement_node_id().clone();
         let recovery_proposal = control
             .propose_role_recovery(
                 &state,
                 &recovery_candidates,
                 &requirement_a,
-                node_b.node_id().clone(),
-                vec![space_b.clone()],
+                replacement_node_id.clone(),
+                recovery_decision.resource_ids().to_vec(),
                 TimestampMs::new(1),
                 &trace_a,
                 &mut log,
@@ -1110,7 +1143,7 @@ mod tests {
                 requirement_a.task_id().clone(),
                 group_a.clone(),
                 transport_role.clone(),
-                node_b.node_id().clone(),
+                replacement_node_id,
                 trace_a.clone(),
             ))
             .expect("Mission A replacement transport should complete");

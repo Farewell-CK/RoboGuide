@@ -4,14 +4,20 @@
 
 //! Global DEAIOS decision and coordination logic for the first vertical slice.
 //!
-//! This crate validates Proposal versus Commit, resource reservation, Execution
-//! Group binding, and role rebinding. It never sends raw actuator commands.
+//! This crate owns capability matching, deterministic bootstrap scheduling,
+//! Proposal versus Commit validation, resource reservation, Execution Group
+//! lifecycle, and recovery orchestration. It never sends raw actuator commands.
 
 mod reconciliation;
+mod scheduler;
 
 pub use reconciliation::{
     CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
     RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
+};
+pub use scheduler::{
+    DeterministicBootstrapScheduler, RecoverySchedulingDecision, RecoverySchedulingOutcome,
+    RoleSchedulingSelection, SchedulerError, TaskSchedulingDecision,
 };
 
 use domain::{

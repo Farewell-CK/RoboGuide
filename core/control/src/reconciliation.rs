@@ -28,7 +28,7 @@ pub struct RoleRecoveryNeed {
 
 impl RoleRecoveryNeed {
     /// Creates a recovery need from a detected assigned-node mismatch.
-    fn new(
+    pub(crate) fn new(
         group_id: ExecutionGroupId,
         task_ref: TaskRef,
         role_id: RoleId,
@@ -89,7 +89,7 @@ pub struct RecoveryCandidateSet {
 
 impl RecoveryCandidateSet {
     /// Creates a role-scoped candidate set after Control eligibility evaluation.
-    fn new(
+    pub(crate) fn new(
         group_id: ExecutionGroupId,
         task_ref: TaskRef,
         role_id: RoleId,

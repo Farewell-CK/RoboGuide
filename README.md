@@ -87,6 +87,25 @@ Control Plane 负责全局决策与协调：
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
+当前实现 **Control Plane — Embodied Scheduler v0.1: Selection Contract &
+Deterministic Bootstrap Policy**。Capability Matching 先产生 Candidate Set 回答 `Who can`；
+无状态 `DeterministicBootstrapScheduler` 只在该 Set 内回答 `Who should`，返回
+`TaskSchedulingDecision` 或 role-scoped `RecoverySchedulingDecision`。Decision 仍须通过
+Normal/Recovery Proposal validation，Scheduler 不调用 Proposal、Commit、Rebind，也不读取
+reservation authority 或修改 State/Group。
+
+Bootstrap policy 对 NodeId 稳定排序并选择第一个可形成当前 Role selection 的 candidate。
+ResourceKind 为空时不建议资源；存在 ResourceKind 时，只从 selected Node declaration 中按
+ResourceId 稳定排序选择一个尚未在当前 Task decision 使用的资源。如果 declaration-order
+greedy selection 无法避免明显的 exclusive resource 重复，则返回
+`NoFeasibleSelection(RoleId)`，不执行 backtracking、retry 或优化。
+
+Normal 与 Recovery 共用同一个私有 role-selection primitive。Recovery Candidate Set 为空时
+返回 `NoSelection`，Group 继续 Blocked/Pending，不表示 recovery exhausted。该策略仅建立
+Scheduler ownership/contract，不声称 optimal，也没有实现 Capability × Compute × Space ×
+Time 联合优化、load/spatial/traffic/deadline awareness、priority、fairness、preemption、
+batching、auction、RL 或 LLM scheduling。
+
 当前实现 **Control Plane — Reconciliation & Recovery Slice v0.1: Assigned Node
 Unavailability**：Control 将 Active Group 的当前 assignment 作为 desired execution
 configuration，并通过 Shared Node State 检查 assigned node 是否仍满足与 Capability

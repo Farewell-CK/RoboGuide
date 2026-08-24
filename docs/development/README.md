@@ -118,6 +118,31 @@ Receive-ordering 只是当前 deterministic bootstrap policy，不是 distribute
 ordering solution。本切片没有实现 NTP/PTP、clock offset estimation、Lamport/Vector/
 HLC 或全局时钟同步，也没有实现 Reconciliation。
 
+### Control Plane — Embodied Scheduler v0.1
+
+`DeterministicBootstrapScheduler` 是 stateless policy component，不存入 `ControlPlane`。
+Normal 输入 `TaskRequirement + CandidateSet + SharedNodeStateReader`，输出
+`TaskSchedulingDecision`；Recovery 输入 role-scoped `RecoveryCandidateSet`，输出
+`RecoverySchedulingDecision` 或 `NoSelection`。两条路径共用同一私有 `select_role`，不重新
+执行 health/freshness/liveness/lease/capability eligibility filtering，也不遍历 Candidate
+Set 之外的 State nodes。
+
+Policy 对 Candidate NodeId 稳定排序；无 ResourceKind 时选择空 resource list，有
+ResourceKind 时对 selected Node 的同类 declared ResourceId 稳定排序，并选择一个尚未在
+当前 Task decision 使用的资源。多 Role 仅采用 declaration-order first-feasible greedy，
+不做 backtracking；无法形成完整 decision 时返回 `NoFeasibleSelection(RoleId)`。
+
+Scheduler Decision 只是 selection evidence，不是 Assignment Proposal、reservation、Group
+binding 或 State truth。Composition layer 仍分别调用 `propose`/`propose_role_recovery`、
+Commit 和 Bind/Rebind。Scheduler 只回答 Who should；Capability Matching 回答 Who can；
+Shared Resource Coordination 决定资源能否 Commit；Execution Group Manager 应用 committed
+collaboration。
+
+v0.1 未实现 Capability × Compute × Space × Time optimization、load-aware placement、
+spatial/traffic/deadline scheduling、priority/fairness/preemption、batching、bidding/auction、
+RL/LLM policy 或 Scheduler persistence。演化这些能力前需要真实 Compute Load/Queue/GPU
+Memory、Pose/Travel/Traffic、Time Window/Deadline/Duration 与 contention evidence。
+
 ### Control Plane — Reconciliation & Recovery Slice v0.1
 
 当前只处理 Active Execution Group 中恰好一个 assigned node 不再满足 Control

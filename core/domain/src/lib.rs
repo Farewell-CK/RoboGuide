@@ -1151,6 +1151,13 @@ pub enum EventPayload {
         /// Mission-scoped task for which candidates were produced.
         task_ref: TaskRef,
     },
+    /// The deterministic bootstrap Scheduler selected all normal task assignments.
+    TaskSchedulingSelected {
+        /// Mission-scoped task represented by the selection decision.
+        task_ref: TaskRef,
+        /// Selected role, node, and proposed resource mappings.
+        assignments: Vec<RoleAssignment>,
+    },
     /// A scheduler proposal was accepted for validation.
     ProposalCreated {
         /// Mission-scoped task represented by the proposal.
@@ -1196,6 +1203,30 @@ pub enum EventPayload {
         role_id: RoleId,
         /// Eligible candidates in deterministic node order.
         candidate_node_ids: Vec<NodeId>,
+    },
+    /// The deterministic bootstrap Scheduler selected one recovery replacement.
+    RecoverySchedulingSelected {
+        /// Blocked Group awaiting the selected replacement.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task retained by the Group.
+        task_ref: TaskRef,
+        /// Unbound role being scheduled.
+        role_id: RoleId,
+        /// Failed node excluded from selection.
+        previous_node_id: NodeId,
+        /// Scheduler-selected replacement node.
+        replacement_node_id: NodeId,
+        /// Deterministically proposed resource IDs.
+        resource_ids: Vec<ResourceId>,
+    },
+    /// Recovery scheduling found no feasible candidate in the supplied Candidate Set.
+    RecoverySchedulingNoSelection {
+        /// Blocked Group that remains pending.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task retained by the Group.
+        task_ref: TaskRef,
+        /// Unbound role that remains without selection.
+        role_id: RoleId,
     },
     /// An external scheduler choice passed recovery proposal validation.
     RecoveryAssignmentProposed {
