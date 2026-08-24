@@ -1223,6 +1223,19 @@ pub enum EventPayload {
         /// Resources atomically reserved for the existing Group.
         resource_ids: Vec<ResourceId>,
     },
+    /// A committed-but-not-bound recovery assignment was explicitly aborted.
+    RecoveryAssignmentAborted {
+        /// Group that owned the pending commitment.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped task that owned the pending commitment.
+        task_ref: TaskRef,
+        /// Unbound role whose replacement attempt was aborted.
+        role_id: RoleId,
+        /// Replacement node no longer intended for rebind.
+        replacement_node_id: NodeId,
+        /// Replacement resources released by the abort.
+        resource_ids: Vec<ResourceId>,
+    },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),
     /// A role was rebound after a recoverable failure.

@@ -147,6 +147,29 @@ Group 仍为 Blocked/unbound。`rebind_role` 只接受 committed value，并验�
 be committed = Shared Resource Coordination；Apply committed collaboration change = Execution
 Group Manager/Rebind。Proposal != Commit，Commit != Rebind。
 
+#### Recovery Commitment Lifecycle v0.3
+
+Commit 成功后，Control 以 `(ExecutionGroupId, RoleId)` 保存唯一 authoritative pending
+recovery commitment，并在同一无失败 mutation 阶段写入 replacement reservations。
+`CommittedRecoveryAssignment` 是 caller handle，不是 authority；第二次 Commit 不会覆盖
+同一 Group/Role 的旧 pending entry。
+
+`rebind_role` 只接受与 Control pending authority 完全一致的 handle，并验证所有 resource
+reservation 属于同一 TaskRef/Role/Group。Rebind 更新 Group、进入 Adapted 后 Consume
+pending entry，但保留 reservation 作为 active binding ownership。
+
+`abort_role_recovery_commitment` 先验证所有 replacement resource ownership，再统一删除
+reservations 与 pending entry。Abort 后 Group 仍为 Blocked、Role 仍为 unbound，可重新
+进行 Recovery Match/Proposal/Commit；Abort 不进入 Failed。`release_group` 负责 terminal
+兜底，只有在 active assignment、pending commitment 和 reservation authority 相互一致时
+才统一清理，Released 后该 Group 不得拥有 reservation 或 pending entry。
+
+Pending recovery commitment 属于 Control/Shared Resource Coordination bootstrap，不是
+Group lifecycle、不进入 `ExecutionGroup.assignments`，也不属于 Shared Node State。
+持久化、crash recovery、timeout/auto-Abort、Allocation State 和 distributed transaction
+仍未实现。该 ownership 决策记录在
+[`ADR-0004`](../decisions/0004-recovery-commitment-lifecycle.md)。
+
 没有 candidate/proposal，或 commit conflict 时，Group 保持 Blocked/RecoveryPending；
 只有显式 `fail_group` 才表示 recovery exhausted。本切片没有 background loop、自动
 Scheduler、multi-role/spatial/timeout recovery、Mission replanning、Runtime command

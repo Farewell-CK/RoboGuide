@@ -352,7 +352,68 @@ fn validate_recovery_resources(
     Ok(())
 }
 
+/// Builds the deterministic authority key for one Group role commitment.
+fn recovery_commitment_key(
+    group_id: &ExecutionGroupId,
+    role_id: &RoleId,
+) -> (ExecutionGroupId, RoleId) {
+    (group_id.clone(), role_id.clone())
+}
+
 impl ControlPlane {
+    /// Returns the authoritative pending commitment for one Group role, if present.
+    pub fn pending_recovery_commitment(
+        &self,
+        group_id: &ExecutionGroupId,
+        role_id: &RoleId,
+    ) -> Option<&CommittedRecoveryAssignment> {
+        self.pending_recovery_commitments
+            .get(&recovery_commitment_key(group_id, role_id))
+    }
+
+    /// Verifies that a commitment handle is the current Control-owned pending value.
+    pub(crate) fn validate_pending_recovery_commitment(
+        &self,
+        committed: &CommittedRecoveryAssignment,
+    ) -> Result<(), ControlError> {
+        let pending = self
+            .pending_recovery_commitment(committed.group_id(), committed.role_id())
+            .ok_or_else(|| ControlError::PendingRecoveryCommitmentNotFound {
+                group_id: committed.group_id().clone(),
+                role_id: committed.role_id().clone(),
+            })?;
+        if pending != committed {
+            return Err(ControlError::PendingRecoveryCommitmentMismatch {
+                group_id: committed.group_id().clone(),
+                role_id: committed.role_id().clone(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Verifies that every committed resource remains owned by its Group and role.
+    pub(crate) fn validate_recovery_commitment_reservations(
+        &self,
+        committed: &CommittedRecoveryAssignment,
+    ) -> Result<(), ControlError> {
+        for resource_id in committed.committed_resource_ids() {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "pending recovery resource {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != *committed.task_ref()
+                || reservation.role_id != *committed.role_id()
+                || reservation.group_id.as_ref() != Some(committed.group_id())
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "resource {resource_id} is not owned by the pending recovery commitment"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Compares one active Group's desired assignments with current Shared Node State.
     pub fn assess_group<S: SharedNodeStateReader, E: EventSink>(
         &self,
@@ -629,6 +690,16 @@ impl ControlPlane {
                 "recovery proposal no longer matches the blocked group role".to_string(),
             ));
         }
+        let commitment_key = recovery_commitment_key(proposal.group_id(), proposal.role_id());
+        if self
+            .pending_recovery_commitments
+            .contains_key(&commitment_key)
+        {
+            return Err(ControlError::PendingRecoveryCommitmentExists {
+                group_id: proposal.group_id().clone(),
+                role_id: proposal.role_id().clone(),
+            });
+        }
         let replacement = state
             .node(proposal.replacement_node_id())
             .ok_or_else(|| ControlError::UnknownNode(proposal.replacement_node_id().clone()))?;
@@ -650,6 +721,14 @@ impl ControlPlane {
             }
         }
 
+        let committed = CommittedRecoveryAssignment::new(
+            proposal.group_id().clone(),
+            proposal.task_ref().clone(),
+            proposal.role_id().clone(),
+            previous_node,
+            proposal.replacement_node_id().clone(),
+            proposal.replacement_resource_ids().to_vec(),
+        );
         for resource_id in proposal.replacement_resource_ids() {
             self.reservations.insert(
                 resource_id.clone(),
@@ -660,14 +739,8 @@ impl ControlPlane {
                 },
             );
         }
-        let committed = CommittedRecoveryAssignment::new(
-            proposal.group_id().clone(),
-            proposal.task_ref().clone(),
-            proposal.role_id().clone(),
-            previous_node,
-            proposal.replacement_node_id().clone(),
-            proposal.replacement_resource_ids().to_vec(),
-        );
+        self.pending_recovery_commitments
+            .insert(commitment_key, committed.clone());
         events.append(
             timestamp,
             correlation_id,
@@ -681,5 +754,51 @@ impl ControlPlane {
             },
         );
         Ok(committed)
+    }
+
+    /// Aborts one authoritative pending commitment and releases only its resources.
+    pub fn abort_role_recovery_commitment<E: EventSink>(
+        &mut self,
+        committed: &CommittedRecoveryAssignment,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        self.validate_pending_recovery_commitment(committed)?;
+        let group = self
+            .groups
+            .get(committed.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(committed.group_id().clone()))?;
+        if group.lifecycle != GroupLifecycle::Blocked {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        if group.task_ref != *committed.task_ref() || !group.is_role_unbound(committed.role_id()) {
+            return Err(ControlError::InvalidProposal(
+                "pending recovery commitment does not match the blocked Group".to_string(),
+            ));
+        }
+        self.validate_recovery_commitment_reservations(committed)?;
+
+        for resource_id in committed.committed_resource_ids() {
+            self.reservations.remove(resource_id);
+        }
+        self.pending_recovery_commitments
+            .remove(&recovery_commitment_key(
+                committed.group_id(),
+                committed.role_id(),
+            ));
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::RecoveryAssignmentAborted {
+                group_id: committed.group_id().clone(),
+                task_ref: committed.task_ref().clone(),
+                role_id: committed.role_id().clone(),
+                replacement_node_id: committed.replacement_node_id().clone(),
+                resource_ids: committed.committed_resource_ids().to_vec(),
+            },
+        );
+        Ok(())
     }
 }

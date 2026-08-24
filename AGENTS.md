@@ -28,6 +28,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Recovery reassignment follows role-scoped Match -> Propose -> Commit -> Rebind:
   candidate matching may be empty, proposal creates no reservation, commit uses
   the single Control reservation authority, and rebind requires commitment.
+- Committed-but-not-bound recovery assignments are Control-owned pending
+  commitments keyed by Group/Role; Rebind consumes, Abort releases replacement
+  resources, and terminal Group release removes all related ownership.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
@@ -86,6 +89,8 @@ unaffected bindings and Multi-Mission isolation, and keep missing replacements
 Blocked/Pending rather than Failed.
 Recovery pipeline tests prove candidate membership, proposal/commit separation,
 atomic conflicts, committed-only rebind, and stable unaffected bindings.
+Commitment lifecycle tests cover one-pending-per-role, stale handles, atomic Abort,
+terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
 
 ## Commit & Pull Request Guidelines
 

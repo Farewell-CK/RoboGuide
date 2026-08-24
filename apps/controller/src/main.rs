@@ -523,6 +523,7 @@ mod tests {
             | EventPayload::RecoveryCandidatesMatched { task_ref, .. }
             | EventPayload::RecoveryAssignmentProposed { task_ref, .. }
             | EventPayload::RecoveryAssignmentCommitted { task_ref, .. }
+            | EventPayload::RecoveryAssignmentAborted { task_ref, .. }
             | EventPayload::RecoveryRebound { task_ref, .. }
             | EventPayload::ExecutionGroupCompleted { task_ref, .. }
             | EventPayload::ExecutionGroupBlocked { task_ref, .. }

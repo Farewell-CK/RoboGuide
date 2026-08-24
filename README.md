@@ -118,6 +118,25 @@ Capability Matching，`Who should` 仍属于外部 Scheduler boundary，资源�
 Shared Resource Coordination/Commit，已经 committed 的协作变化才由 Execution Group
 Manager Rebind。Proposal 不等于 Commit，Commit 也不等于 Group Binding。
 
+**Recovery Commitment Lifecycle v0.3** 显式管理 committed-but-not-rebound ownership：
+
+```text
+Recovery Commit
+  -> Control-owned Pending Recovery Commitment
+     -> Consume through Rebind
+     -> Abort and release replacement resources
+```
+
+Control 以 `(ExecutionGroupId, RoleId)` 保证同一 Role 至多一个 pending commitment；
+`CommittedRecoveryAssignment` 只是 handle，真正 authority 是 Control pending collection
+与唯一的 `reservations`。Rebind Consume 后删除 pending entry，但保留已经成为 active
+binding 的 reservation；Abort 只释放本次 replacement resources，Group 保持 Blocked、
+Role 保持 unbound。Terminal `release_group` 会交叉验证并清理 active bindings、pending
+commitments 及所有指向该 Group 的 reservations，确保 Released Group 不再拥有资源。
+
+Pending commitment 不是 Execution Group lifecycle state，也不写入 Shared Node State。
+Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit。
+
 本切片未实现 background reconciliation loop、自动 Scheduler、multi-role failure、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
@@ -275,7 +294,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     ├── decisions/
     │   ├── 0001-rust-core-python-edges.md
     │   ├── 0002-deaios-node-contract.md
-    │   └── 0003-mission-plan-contract.md
+    │   ├── 0003-mission-plan-contract.md
+    │   └── 0004-recovery-commitment-lifecycle.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
