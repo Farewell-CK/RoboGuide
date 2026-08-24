@@ -7,8 +7,11 @@ members = [
     "core/runtime",
     "core/adapters",
     "core/testkit",
+    "core/integration",
     "apps/controller",
     "apps/real-node-smoke",
+    "apps/integration-server",
+    "apps/node-connector",
 ]
 resolver = "2"
 

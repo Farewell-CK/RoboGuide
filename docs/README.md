@@ -22,6 +22,7 @@
 - [`decisions/0004-recovery-commitment-lifecycle.md`](decisions/0004-recovery-commitment-lifecycle.md)：Recovery Commit 到 Rebind 之间的 Pending、Consume、Abort 和 terminal cleanup ownership。
 - [`decisions/0005-allocation-state-projection-authority.md`](decisions/0005-allocation-state-projection-authority.md)：Control reservation authority 到非权威 Allocation State projection 的单向边界。
 - [`decisions/0007-mission-actor-continuity.md`](decisions/0007-mission-actor-continuity.md)：Mission Actor 跨 Task 连续绑定与版本策略。
+- [`decisions/0008-integration-server-node-connector.md`](decisions/0008-integration-server-node-connector.md)：Integration Server 与 Node Connector 长连接协议。
 
 ## 历史架构
 
