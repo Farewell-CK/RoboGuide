@@ -11,9 +11,9 @@ use control::{
 use domain::{
     AllocationPhase, Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand,
     ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
-    MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId, NodeRegistration, NodeStatus,
-    OperationRef, PlannedTask, Resource, ResourceId, ResourceKind, RoleId, RoleRequirement,
-    TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth, NodeId, NodeRegistration,
+    NodeStatus, OperationRef, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
+    RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
@@ -166,6 +166,7 @@ fn build_registration(
     Ok(NodeRegistration::new(
         node_id,
         runtime,
+        NodeContractVersion::v0_1(),
         capabilities,
         resources,
     ))

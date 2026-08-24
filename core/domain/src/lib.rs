@@ -22,6 +22,9 @@ pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
 /// Version identifier for Mission Plans carrying explicit role execution intents.
 pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
 
+/// Version identifier implemented by the first heterogeneous Node Contract.
+pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
+
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
@@ -120,6 +123,18 @@ define_identifier!(
     "correlation"
 );
 define_identifier!(LeaseId, "Identifies a renewable node lease.", "lease");
+define_identifier!(
+    NodeContractVersion,
+    "Identifies a versioned heterogeneous node integration contract.",
+    "node contract version"
+);
+
+impl NodeContractVersion {
+    /// Returns the first supported heterogeneous Node Contract version.
+    pub fn v0_1() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_1.to_string())
+    }
+}
 
 /// Uniquely identifies a mission-scoped task across concurrent missions.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -926,6 +941,8 @@ pub struct NodeRegistration {
     node_id: NodeId,
     /// Local EAIOS or equivalent runtime descriptor.
     local_runtime: LocalRuntime,
+    /// Semantic integration contract implemented by the adapter or bridge.
+    contract_version: NodeContractVersion,
     /// Capabilities currently advertised by the node.
     capabilities: Vec<Capability>,
     /// Resources currently advertised by the node.
@@ -937,12 +954,14 @@ impl NodeRegistration {
     pub fn new(
         node_id: NodeId,
         local_runtime: LocalRuntime,
+        contract_version: NodeContractVersion,
         capabilities: Vec<Capability>,
         resources: Vec<Resource>,
     ) -> Self {
         Self {
             node_id,
             local_runtime,
+            contract_version,
             capabilities,
             resources,
         }
@@ -956,6 +975,11 @@ impl NodeRegistration {
     /// Returns the local EAIOS or equivalent runtime descriptor.
     pub fn local_runtime(&self) -> &LocalRuntime {
         &self.local_runtime
+    }
+
+    /// Returns the semantic Node Contract version exposed by the integration boundary.
+    pub const fn contract_version(&self) -> &NodeContractVersion {
+        &self.contract_version
     }
 
     /// Returns the node's advertised capabilities.

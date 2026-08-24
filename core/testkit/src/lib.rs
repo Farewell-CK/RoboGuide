@@ -8,7 +8,7 @@ use domain::{
     CorrelationId, EventId, EventPayload, EventRecord, ExecutionCommand, NodeEvent, NodeHealth,
     NodeRegistration, NodeStatus, TimestampMs,
 };
-use ports::{Clock, EventSink, NodeGateway, NodeGatewayError};
+use ports::{Clock, EventSink, NodeGateway, NodeGatewayError, NodeGatewayErrorKind};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -163,6 +163,8 @@ pub struct FakeNode {
     registration: NodeRegistration,
     /// Latest deterministic health state.
     status: NodeStatus,
+    /// Optional deterministic failure returned by status observation.
+    status_failure: Option<NodeGatewayError>,
     /// Failure behavior to apply to the next command.
     failure_mode: FailureMode,
     /// Commands received by the fake node in order.
@@ -175,6 +177,7 @@ impl FakeNode {
         Self {
             registration,
             status: NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+            status_failure: None,
             failure_mode: FailureMode::Never,
             executed_commands: Vec::new(),
         }
@@ -192,6 +195,12 @@ impl FakeNode {
         self
     }
 
+    /// Configures a deterministic gateway failure for every status request.
+    pub fn with_status_failure(mut self, error: NodeGatewayError) -> Self {
+        self.status_failure = Some(error);
+        self
+    }
+
     /// Returns all commands received by this fake node.
     pub fn executed_commands(&self) -> &[ExecutionCommand] {
         &self.executed_commands
@@ -205,8 +214,8 @@ impl NodeGateway for FakeNode {
     }
 
     /// Returns the fake node's latest health snapshot.
-    fn status(&self) -> NodeStatus {
-        self.status
+    fn status(&self) -> Result<NodeStatus, NodeGatewayError> {
+        self.status_failure.clone().map_or(Ok(self.status), Err)
     }
 
     /// Executes deterministically and applies the configured failure injection.
@@ -214,6 +223,7 @@ impl NodeGateway for FakeNode {
         if !self.status.health().is_schedulable() {
             return Err(NodeGatewayError::new(
                 self.registration.node_id().clone(),
+                NodeGatewayErrorKind::Rejected,
                 "local node is not schedulable",
             ));
         }

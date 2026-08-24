@@ -102,6 +102,7 @@
         NodeRegistration::new(
             NodeId::new(node_id).expect("test node id must be valid"),
             domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime must be valid"),
+            domain::NodeContractVersion::v0_1(),
             vec![Capability::new(capability, true)],
             vec![
                 Resource::new(
@@ -128,6 +129,7 @@
         let node_b = NodeRegistration::new(
             NodeId::new("node-b").expect("test node id must be valid"),
             domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime must be valid"),
+            domain::NodeContractVersion::v0_1(),
             vec![Capability::new(CapabilityKind::Transport, true)],
             vec![
                 Resource::new(space_b.clone(), ResourceKind::Space, 1)

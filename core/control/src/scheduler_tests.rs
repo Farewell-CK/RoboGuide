@@ -37,6 +37,7 @@ fn registration(
     NodeRegistration::new(
         NodeId::new(node_id).expect("test node id must be valid"),
         LocalRuntime::new("scheduler-test-runtime", "0.1.0").expect("test runtime must be valid"),
+        domain::NodeContractVersion::v0_1(),
         vec![Capability::new(capability, true)],
         resources
             .into_iter()

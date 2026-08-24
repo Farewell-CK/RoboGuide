@@ -14,6 +14,7 @@ fn fake_node_retains_execution_intent() {
     let registration = NodeRegistration::new(
         NodeId::new("fake-node").expect("node id must be valid"),
         LocalRuntime::new("fake-eaios", "0.1.0").expect("runtime must be valid"),
+        domain::NodeContractVersion::v0_1(),
         vec![Capability::new(CapabilityKind::Observation, true)],
         vec![],
     );

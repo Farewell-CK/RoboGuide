@@ -145,6 +145,7 @@ mod tests {
         let registration = NodeRegistration::new(
             NodeId::new("node-a").expect("test node id should be valid"),
             LocalRuntime::new("vendor-runtime", "1.0.0").expect("test runtime should be valid"),
+            domain::NodeContractVersion::v0_1(),
             vec![Capability::new(CapabilityKind::Transport, true)],
             vec![
                 Resource::new(

@@ -4,9 +4,13 @@
 
 //! Runtime execution semantics between DEAIOS Control and local node adapters.
 
+mod clock;
+
+pub use clock::{FixedClock, SystemMonotonicClock};
+
 use domain::{
-    EventPayload, ExecutionCommand, NodeEvent, NodeHealthObservation, NodeId, NodeStatus,
-    TimestampMs,
+    EventPayload, ExecutionCommand, NODE_CONTRACT_VERSION_V0_1, NodeContractVersion, NodeEvent,
+    NodeHealthObservation, NodeId, NodeLiveness, NodeLivenessObservation, NodeStatus,
 };
 use ports::{
     Clock, EventSink, NodeGateway, NodeGatewayError, SharedNodeStateWriter, SharedStateError,
@@ -19,6 +23,13 @@ use std::fmt::{Display, Formatter};
 pub enum RuntimeError {
     /// No adapter was registered for the requested node.
     UnknownNode(NodeId),
+    /// The adapter implements a Node Contract version this Runtime does not support.
+    UnsupportedNodeContract {
+        /// Node advertising the unsupported contract.
+        node_id: NodeId,
+        /// Version advertised by the adapter.
+        version: NodeContractVersion,
+    },
     /// The local adapter rejected or failed the command.
     Gateway(NodeGatewayError),
     /// Shared Node State rejected a normalized runtime observation.
@@ -32,6 +43,10 @@ impl Display for RuntimeError {
             Self::UnknownNode(node_id) => {
                 write!(formatter, "runtime has no adapter for node {node_id}")
             }
+            Self::UnsupportedNodeContract { node_id, version } => write!(
+                formatter,
+                "node {node_id} advertises unsupported contract {version}"
+            ),
             Self::Gateway(error) => Display::fmt(error, formatter),
             Self::SharedState(error) => write!(formatter, "shared state error: {error}"),
         }
@@ -63,6 +78,12 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
     /// Registers one local EAIOS or vendor adapter.
     pub fn register_node(&mut self, node: Box<dyn NodeGateway>) -> Result<(), RuntimeError> {
         let node_id = node.registration().node_id().clone();
+        if node.registration().contract_version().as_str() != NODE_CONTRACT_VERSION_V0_1 {
+            return Err(RuntimeError::UnsupportedNodeContract {
+                node_id,
+                version: node.registration().contract_version().clone(),
+            });
+        }
         self.nodes.insert(node_id, node);
         Ok(())
     }
@@ -71,8 +92,9 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
     pub fn status(&self, node_id: &NodeId) -> Result<NodeStatus, RuntimeError> {
         self.nodes
             .get(node_id)
-            .map(|node| node.status())
-            .ok_or_else(|| RuntimeError::UnknownNode(node_id.clone()))
+            .ok_or_else(|| RuntimeError::UnknownNode(node_id.clone()))?
+            .status()
+            .map_err(RuntimeError::Gateway)
     }
 
     /// Adds RoboGuide receive time to one gateway health report and writes it to State.
@@ -90,7 +112,19 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
             .get(node_id)
             .ok_or_else(|| RuntimeError::UnknownNode(node_id.clone()))?;
         let received_at = self.clock.now();
-        let observation = NodeHealthObservation::new(node_id.clone(), node.status(), received_at);
+        let status = match node.status() {
+            Ok(status) => status,
+            Err(error) => {
+                state
+                    .record_node_liveness(
+                        node_id,
+                        NodeLivenessObservation::new(NodeLiveness::Unreachable, received_at),
+                    )
+                    .map_err(RuntimeError::SharedState)?;
+                return Err(RuntimeError::Gateway(error));
+            }
+        };
+        let observation = NodeHealthObservation::new(node_id.clone(), status, received_at);
         state
             .record_node_health(observation.clone())
             .map_err(RuntimeError::SharedState)?;
@@ -124,35 +158,15 @@ impl<C: Clock, E: EventSink> Runtime<C, E> {
     }
 }
 
-/// Provides the current runtime timestamp through a fixed value.
-#[derive(Debug, Clone, Copy)]
-pub struct FixedClock {
-    /// Timestamp returned by every clock read.
-    timestamp: TimestampMs,
-}
-
-impl FixedClock {
-    /// Creates a clock that always returns the supplied timestamp.
-    pub const fn new(timestamp: TimestampMs) -> Self {
-        Self { timestamp }
-    }
-}
-
-impl Clock for FixedClock {
-    /// Returns the configured fixed timestamp.
-    fn now(&self) -> TimestampMs {
-        self.timestamp
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use domain::{
         Capability, CapabilityKind, LocalRuntime, NodeHealth, NodeLiveness,
         NodeLivenessObservation, NodeRegistration, NodeStateSnapshot, Resource, ResourceId,
-        ResourceKind,
+        ResourceKind, TimestampMs,
     };
+    use ports::{NodeGatewayError, NodeGatewayErrorKind};
     use ports::{SharedNodeStateReader, SharedNodeStateWriter};
     use state::InMemorySharedNodeState;
     use testkit::{FakeNode, InMemoryEventLog};
@@ -162,6 +176,7 @@ mod tests {
         NodeRegistration::new(
             NodeId::new("node-a").expect("test node id should be valid"),
             LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime should be valid"),
+            domain::NodeContractVersion::v0_1(),
             vec![Capability::new(CapabilityKind::Transport, true)],
             vec![
                 Resource::new(
@@ -216,5 +231,70 @@ mod tests {
         assert_eq!(stored.reported_status_received_at(), TimestampMs::new(20));
         assert_eq!(stored.liveness().liveness(), NodeLiveness::Reachable);
         assert_eq!(stored.liveness().observed_at(), TimestampMs::new(20));
+    }
+
+    /// Gateway status failure changes liveness without forging a local Offline report.
+    #[test]
+    fn runtime_status_failure_preserves_reported_health() {
+        let registration = registration();
+        let node_id = registration.node_id().clone();
+        let reported_status = NodeStatus::new(NodeHealth::Online, TimestampMs::new(1_000));
+        let mut state = InMemorySharedNodeState::new();
+        state
+            .record_node(NodeStateSnapshot::new(
+                registration.clone(),
+                reported_status,
+                TimestampMs::new(10),
+                NodeLivenessObservation::new(NodeLiveness::Reachable, TimestampMs::new(10)),
+            ))
+            .expect("initial node facts should enter Shared State");
+        let mut runtime = Runtime::new(
+            FixedClock::new(TimestampMs::new(20)),
+            InMemoryEventLog::new(),
+        );
+        runtime
+            .register_node(Box::new(FakeNode::new(registration).with_status_failure(
+                NodeGatewayError::new(
+                    node_id.clone(),
+                    NodeGatewayErrorKind::Timeout,
+                    "status request timed out",
+                ),
+            )))
+            .expect("fake adapter registration should succeed");
+
+        let error = runtime
+            .observe_node_status(&node_id, &mut state)
+            .expect_err("status transport failure must remain visible");
+
+        assert!(matches!(error, RuntimeError::Gateway(_)));
+        let stored = state.node(&node_id).expect("node facts should remain");
+        assert_eq!(stored.reported_status(), reported_status);
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(10));
+        assert_eq!(stored.liveness().liveness(), NodeLiveness::Unreachable);
+        assert_eq!(stored.liveness().observed_at(), TimestampMs::new(20));
+    }
+
+    /// Runtime rejects unknown semantic Node Contract versions before registration.
+    #[test]
+    fn runtime_rejects_unknown_node_contract_version() {
+        let registration = NodeRegistration::new(
+            NodeId::new("node-legacy").expect("node id must be valid"),
+            LocalRuntime::new("legacy-eaios", "0.1.0").expect("runtime must be valid"),
+            domain::NodeContractVersion::new("roboguide.node.v9")
+                .expect("contract version must be valid"),
+            vec![],
+            vec![],
+        );
+        let mut runtime = Runtime::new(
+            FixedClock::new(TimestampMs::new(0)),
+            InMemoryEventLog::new(),
+        );
+
+        let result = runtime.register_node(Box::new(FakeNode::new(registration)));
+
+        assert!(matches!(
+            result,
+            Err(RuntimeError::UnsupportedNodeContract { .. })
+        ));
     }
 }
