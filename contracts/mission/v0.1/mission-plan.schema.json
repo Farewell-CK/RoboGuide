@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/v0.1/mission-plan.schema.json",
+  "title": "RoboGuide MissionPlan v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mission", "tasks"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "roboguide.mission-plan/v0.1"},
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "objective"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "objective": {"type": "string", "minLength": 1}
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "depends_on", "roles"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+          "description": {"type": "string", "minLength": 1},
+          "depends_on": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"}
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "capability", "resource_kind", "execution"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+                "capability": {
+                  "type": "string",
+                  "enum": ["mobility", "transport", "compute", "observation"]
+                },
+                "resource_kind": {
+                  "type": ["string", "null"],
+                  "enum": ["space", "compute", "time", null]
+                },
+                "execution": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["operation", "parameters"],
+                  "properties": {
+                    "operation": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["namespace", "name", "version"],
+                      "properties": {
+                        "namespace": {"type": "string", "minLength": 1},
+                        "name": {"type": "string", "minLength": 1},
+                        "version": {"type": "string", "minLength": 1}
+                      }
+                    },
+                    "parameters": {
+                      "type": "object",
+                      "additionalProperties": {"type": ["boolean", "integer", "number", "string"]}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -28,10 +28,22 @@ def test_valid_fixture_round_trips() -> None:
 def test_schema_version_declares_string_type_for_strict_providers() -> None:
     """Strict Responses providers require a type beside the version const constraint."""
     schema = json.loads(
-        Path("contracts/mission/v0/mission-plan.schema.json").read_text(encoding="utf-8")
+        Path("contracts/mission/v0.1/mission-plan.schema.json").read_text(encoding="utf-8")
     )
     version = schema["properties"]["schema_version"]
-    assert version == {"type": "string", "const": "roboguide.mission-plan/v0"}
+    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.1"}
+
+
+def test_structured_execution_parameter_is_rejected() -> None:
+    """Mission Plan v0.1 accepts only scalar transport-neutral parameters."""
+    raw = deepcopy(_fixture_json())
+    tasks = cast(list[JSONObject], raw["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    execution = cast(JSONObject, roles[0]["execution"])
+    parameters = cast(JSONObject, execution["parameters"])
+    parameters["unsafe"] = {"command": "walk"}
+    with pytest.raises(MissionPlanError, match="must be a scalar"):
+        MissionPlan.from_json(raw)
 
 
 def test_unknown_dependency_is_rejected() -> None:

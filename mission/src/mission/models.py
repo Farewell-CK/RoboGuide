@@ -9,7 +9,7 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0"
+MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.1"
 CAPABILITIES: Final = frozenset({"mobility", "transport", "compute", "observation"})
 RESOURCE_KINDS: Final = frozenset({"space", "compute", "time"})
 
@@ -49,18 +49,82 @@ def _exact_keys(value: JSONObject, required: set[str], path: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationRef:
+    """Identify one canonical operation independently of a local EAIOS skill."""
+
+    namespace: str
+    name: str
+    version: str
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> OperationRef:
+        """Parse a canonical operation reference from contract JSON."""
+        item = _object(value, path)
+        _exact_keys(item, {"namespace", "name", "version"}, path)
+        return cls(
+            namespace=_text(item["namespace"], f"{path}.namespace"),
+            name=_text(item["name"], f"{path}.name"),
+            version=_text(item["version"], f"{path}.version"),
+        )
+
+    def to_json(self) -> JSONObject:
+        """Serialize the canonical operation without adapter-local names."""
+        return {
+            "namespace": self.namespace,
+            "name": self.name,
+            "version": self.version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionIntent:
+    """Describe one canonical role operation and scalar parameters."""
+
+    operation: OperationRef
+    parameters: tuple[tuple[str, str | int | float | bool], ...]
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> ExecutionIntent:
+        """Parse an intent while rejecting structured or null parameter values."""
+        item = _object(value, path)
+        _exact_keys(item, {"operation", "parameters"}, path)
+        parameter_object = _object(item["parameters"], f"{path}.parameters")
+        parameters: list[tuple[str, str | int | float | bool]] = []
+        for key, parameter in sorted(parameter_object.items()):
+            if not key.strip():
+                raise MissionPlanError(f"{path}.parameters contains a blank key")
+            if parameter is None or isinstance(parameter, (list, dict)):
+                raise MissionPlanError(
+                    f"{path}.parameters.{key} must be a scalar string, number, or boolean"
+                )
+            parameters.append((key, parameter))
+        return cls(
+            operation=OperationRef.from_json(item["operation"], f"{path}.operation"),
+            parameters=tuple(parameters),
+        )
+
+    def to_json(self) -> JSONObject:
+        """Serialize intent parameters in stable lexical key order."""
+        return {
+            "operation": self.operation.to_json(),
+            "parameters": dict(self.parameters),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RoleRequirement:
     """Describe one role-level capability and optional resource requirement."""
 
     role_id: str
     capability: str
     resource_kind: str | None
+    execution: ExecutionIntent
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str) -> RoleRequirement:
         """Parse and validate one role requirement from contract JSON."""
         item = _object(value, path)
-        _exact_keys(item, {"id", "capability", "resource_kind"}, path)
+        _exact_keys(item, {"id", "capability", "resource_kind", "execution"}, path)
         role_id = _text(item["id"], f"{path}.id")
         capability = _text(item["capability"], f"{path}.capability")
         if capability not in CAPABILITIES:
@@ -70,7 +134,12 @@ class RoleRequirement:
             raise MissionPlanError(f"{path}.resource_kind must be text or null")
         if resource_value is not None and resource_value not in RESOURCE_KINDS:
             raise MissionPlanError(f"{path}.resource_kind is unsupported: {resource_value}")
-        return cls(role_id=role_id, capability=capability, resource_kind=resource_value)
+        return cls(
+            role_id=role_id,
+            capability=capability,
+            resource_kind=resource_value,
+            execution=ExecutionIntent.from_json(item["execution"], f"{path}.execution"),
+        )
 
     def to_json(self) -> JSONObject:
         """Serialize the role requirement without provider-specific values."""
@@ -78,6 +147,7 @@ class RoleRequirement:
             "id": self.role_id,
             "capability": self.capability,
             "resource_kind": self.resource_kind,
+            "execution": self.execution.to_json(),
         }
 
 

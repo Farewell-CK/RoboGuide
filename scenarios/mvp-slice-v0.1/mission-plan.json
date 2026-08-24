@@ -1,5 +1,5 @@
 {
-  "schema_version": "roboguide.mission-plan/v0",
+  "schema_version": "roboguide.mission-plan/v0.1",
   "mission": {
     "id": "mission-mvp-001",
     "objective": "使用可恢复的运输能力和共享算力完成异构节点协作任务"
@@ -13,12 +13,20 @@
         {
           "id": "primary-transport",
           "capability": "transport",
-          "resource_kind": "space"
+          "resource_kind": "space",
+          "execution": {
+            "operation": {"namespace": "mobility", "name": "move", "version": "v1"},
+            "parameters": {"destination": "delivery-zone"}
+          }
         },
         {
           "id": "execution-compute",
           "capability": "compute",
-          "resource_kind": "compute"
+          "resource_kind": "compute",
+          "execution": {
+            "operation": {"namespace": "compute", "name": "infer", "version": "v1"},
+            "parameters": {"model": "bootstrap-vlm"}
+          }
         }
       ]
     }

@@ -1,7 +1,7 @@
 [mission]
 planner = "llm"
-contract_version = "roboguide.mission-plan/v0"
-schema_path = "contracts/mission/v0/mission-plan.schema.json"
+contract_version = "roboguide.mission-plan/v0.1"
+schema_path = "contracts/mission/v0.1/mission-plan.schema.json"
 review_enabled = true
 
 [mission.prompts]

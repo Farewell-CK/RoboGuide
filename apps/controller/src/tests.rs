@@ -2,6 +2,15 @@ use super::*;
 use control::ControlError;
 use domain::{EventPayload, NodeEvent, RoleAssignment, TaskRef};
 
+/// Builds a canonical no-parameter intent for command-routing assertions.
+fn test_intent(namespace: &str, name: &str) -> ExecutionIntent {
+    ExecutionIntent::new(
+        OperationRef::new(namespace, name, "v1").expect("test operation must be valid"),
+        BTreeMap::new(),
+    )
+    .expect("test intent must be valid")
+}
+
 /// Builds a two-role task used to exercise concurrent mission isolation.
 fn multi_mission_requirement(mission: &str, task: &str) -> TaskRequirement {
     TaskRequirement::new(
@@ -498,6 +507,7 @@ fn concurrent_missions_rebind_and_release_independently() {
             group_a.clone(),
             compute_role.clone(),
             edge_c.node_id().clone(),
+            test_intent("compute", "infer"),
             trace_a.clone(),
         ))
         .expect("Mission A compute should complete");
@@ -508,6 +518,7 @@ fn concurrent_missions_rebind_and_release_independently() {
             group_b.clone(),
             compute_role.clone(),
             edge_e.node_id().clone(),
+            test_intent("compute", "infer"),
             trace_b.clone(),
         ))
         .expect("Mission B compute should complete");
@@ -518,6 +529,7 @@ fn concurrent_missions_rebind_and_release_independently() {
             group_a.clone(),
             transport_role.clone(),
             node_a.node_id().clone(),
+            test_intent("mobility", "move"),
             trace_a.clone(),
         ))
         .expect("failure injection should return an observation");
@@ -643,6 +655,7 @@ fn concurrent_missions_rebind_and_release_independently() {
             group_a.clone(),
             transport_role.clone(),
             replacement_node_id,
+            test_intent("mobility", "move"),
             trace_a.clone(),
         ))
         .expect("Mission A replacement transport should complete");
@@ -653,6 +666,7 @@ fn concurrent_missions_rebind_and_release_independently() {
             group_b.clone(),
             transport_role.clone(),
             node_d.node_id().clone(),
+            test_intent("mobility", "move"),
             trace_b.clone(),
         ))
         .expect("Mission B transport should complete");

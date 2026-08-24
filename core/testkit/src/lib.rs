@@ -253,3 +253,6 @@ impl NodeGateway for FakeNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -10,15 +10,16 @@ use control::{
 };
 use domain::{
     AllocationPhase, Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand,
-    ExecutionGroupId, LocalRuntime, MISSION_PLAN_SCHEMA_V0, MissionGoal, MissionId, MissionPlan,
-    NodeHealth, NodeId, NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId,
-    ResourceKind, RoleId, RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
+    MissionGoal, MissionId, MissionPlan, NodeHealth, NodeId, NodeRegistration, NodeStatus,
+    OperationRef, PlannedTask, Resource, ResourceId, ResourceKind, RoleId, RoleRequirement,
+    TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
 use serde::Deserialize;
 use state::{InMemoryAllocationState, InMemorySharedNodeState};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use testkit::{FailureMode, FakeNode, SharedEventLog, VirtualClock};
 
 /// JSON adapter document for one versioned Mission Plan artifact.
@@ -67,6 +68,30 @@ struct RoleDocument {
     capability: CapabilityDocument,
     /// Optional shared resource category required by the role.
     resource_kind: Option<ResourceDocument>,
+    /// Canonical operation requested from whichever node is selected.
+    execution: ExecutionDocument,
+}
+
+/// JSON adapter document for one canonical role execution intent.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionDocument {
+    /// Canonical operation identity independent of local skills.
+    operation: OperationDocument,
+    /// Scalar parameters interpreted by the target adapter or local EAIOS.
+    parameters: BTreeMap<String, serde_json::Value>,
+}
+
+/// JSON adapter document for one canonical operation reference.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OperationDocument {
+    /// Extensible operation family.
+    namespace: String,
+    /// Operation name within its family.
+    name: String,
+    /// Independently versioned operation semantics.
+    version: String,
 }
 
 /// Capability categories accepted by Mission Plan v0.
@@ -146,12 +171,45 @@ fn build_registration(
     ))
 }
 
+/// Converts one wire execution document into transport-neutral domain values.
+fn execution_intent(document: ExecutionDocument) -> Result<ExecutionIntent, String> {
+    let operation = OperationRef::new(
+        document.operation.namespace,
+        document.operation.name,
+        document.operation.version,
+    )
+    .map_err(|error| error.to_string())?;
+    let parameters = document
+        .parameters
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                serde_json::Value::Bool(value) => ExecutionValue::Bool(value),
+                serde_json::Value::Number(value) if value.is_i64() => ExecutionValue::Integer(
+                    value
+                        .as_i64()
+                        .ok_or_else(|| format!("execution parameter {key} exceeds i64"))?,
+                ),
+                serde_json::Value::Number(value) => ExecutionValue::Float(
+                    value
+                        .as_f64()
+                        .ok_or_else(|| format!("execution parameter {key} is not finite"))?,
+                ),
+                serde_json::Value::String(value) => ExecutionValue::String(value),
+                _ => return Err(format!("execution parameter {key} must be a scalar")),
+            };
+            Ok((key, value))
+        })
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    ExecutionIntent::new(operation, parameters).map_err(|error| error.to_string())
+}
+
 /// Loads the approved Mission Plan fixture and converts it into validated domain values.
 fn load_mission_plan() -> Result<MissionPlan, String> {
     let source = include_str!("../../../scenarios/mvp-slice-v0.1/mission-plan.json");
     let document: MissionPlanDocument =
         serde_json::from_str(source).map_err(|error| error.to_string())?;
-    if document.schema_version != MISSION_PLAN_SCHEMA_V0 {
+    if document.schema_version != MISSION_PLAN_SCHEMA_V0_1 {
         return Err(format!(
             "unsupported Mission Plan schema: {}",
             document.schema_version
@@ -165,17 +223,18 @@ fn load_mission_plan() -> Result<MissionPlan, String> {
         .into_iter()
         .map(|task| {
             let task_id = TaskId::new(task.id).map_err(|error| error.to_string())?;
-            let roles = task
-                .roles
-                .into_iter()
-                .map(|role| {
-                    Ok(RoleRequirement::new(
-                        RoleId::new(role.id).map_err(|error| error.to_string())?,
-                        role.capability.into(),
-                        role.resource_kind.map(Into::into),
-                    ))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
+            let mut roles = Vec::with_capacity(task.roles.len());
+            let mut execution_intents = BTreeMap::new();
+            for role in task.roles {
+                let role_id = RoleId::new(role.id).map_err(|error| error.to_string())?;
+                let intent = execution_intent(role.execution)?;
+                roles.push(RoleRequirement::new(
+                    role_id.clone(),
+                    role.capability.into(),
+                    role.resource_kind.map(Into::into),
+                ));
+                execution_intents.insert(role_id, intent);
+            }
             let requirement = TaskRequirement::new(mission_id.clone(), task_id, roles)
                 .map_err(|error| error.to_string())?;
             let dependencies = task
@@ -183,8 +242,13 @@ fn load_mission_plan() -> Result<MissionPlan, String> {
                 .into_iter()
                 .map(|dependency| TaskId::new(dependency).map_err(|error| error.to_string()))
                 .collect::<Result<Vec<_>, String>>()?;
-            PlannedTask::new(task.description, requirement, dependencies)
-                .map_err(|error| error.to_string())
+            PlannedTask::new(
+                task.description,
+                requirement,
+                execution_intents,
+                dependencies,
+            )
+            .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, String>>()?;
     let task_graph = TaskGraph::new(mission_id, tasks).map_err(|error| error.to_string())?;
@@ -414,8 +478,12 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         mission_id.clone(),
         task_id.clone(),
         group_id.clone(),
-        compute_role,
+        compute_role.clone(),
         NodeId::new("edge-gpu").map_err(|error| error.to_string())?,
+        planned_task
+            .execution_intent(&compute_role)
+            .ok_or_else(|| "compute role lacks execution intent".to_string())?
+            .clone(),
         correlation_id.clone(),
     );
     runtime
@@ -428,6 +496,10 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         group_id.clone(),
         transport_role.clone(),
         NodeId::new("node-a").map_err(|error| error.to_string())?,
+        planned_task
+            .execution_intent(&transport_role)
+            .ok_or_else(|| "transport role lacks execution intent".to_string())?
+            .clone(),
         correlation_id.clone(),
     );
     let failure = runtime
@@ -545,8 +617,12 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         mission_id,
         task_id,
         group_id.clone(),
-        transport_role,
+        transport_role.clone(),
         replacement_node_id,
+        planned_task
+            .execution_intent(&transport_role)
+            .ok_or_else(|| "transport role lacks execution intent".to_string())?
+            .clone(),
         correlation_id.clone(),
     );
     runtime

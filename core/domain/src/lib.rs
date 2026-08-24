@@ -11,11 +11,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 mod allocation;
+mod execution;
 
 pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
+pub use execution::{ExecutionIntent, ExecutionValue, OperationRef};
 
 /// Version identifier for the first cross-language Mission Plan contract.
 pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
+
+/// Version identifier for Mission Plans carrying explicit role execution intents.
+pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
 
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,12 +500,14 @@ impl MissionGoal {
 }
 
 /// One Task Graph node with dependencies and role-level execution requirements.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlannedTask {
     /// Human-readable task outcome used for review and diagnostics.
     description: String,
     /// Task requirements consumed by Control capability matching.
     requirement: TaskRequirement,
+    /// Canonical operation intent for each declared role.
+    execution_intents: BTreeMap<RoleId, ExecutionIntent>,
     /// Tasks that must complete before this task becomes ready.
     dependencies: Vec<TaskId>,
 }
@@ -510,6 +517,7 @@ impl PlannedTask {
     pub fn new(
         description: impl Into<String>,
         requirement: TaskRequirement,
+        execution_intents: BTreeMap<RoleId, ExecutionIntent>,
         dependencies: Vec<TaskId>,
     ) -> Result<Self, DomainError> {
         let description = description.into();
@@ -532,9 +540,24 @@ impl PlannedTask {
                 reason: format!("task {} depends on itself", requirement.task_id()),
             });
         }
+        let required_roles = requirement
+            .roles()
+            .iter()
+            .map(RoleRequirement::role_id)
+            .collect::<BTreeSet<_>>();
+        let intent_roles = execution_intents.keys().collect::<BTreeSet<_>>();
+        if required_roles != intent_roles {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "task {} execution intents must exactly cover its roles",
+                    requirement.task_id()
+                ),
+            });
+        }
         Ok(Self {
             description,
             requirement,
+            execution_intents,
             dependencies,
         })
     }
@@ -554,6 +577,16 @@ impl PlannedTask {
         &self.requirement
     }
 
+    /// Returns the canonical execution intent associated with one role.
+    pub fn execution_intent(&self, role_id: &RoleId) -> Option<&ExecutionIntent> {
+        self.execution_intents.get(role_id)
+    }
+
+    /// Returns all role intents in stable role-identity order.
+    pub const fn execution_intents(&self) -> &BTreeMap<RoleId, ExecutionIntent> {
+        &self.execution_intents
+    }
+
     /// Returns prerequisite task identities in declaration order.
     pub fn dependencies(&self) -> &[TaskId] {
         &self.dependencies
@@ -561,7 +594,7 @@ impl PlannedTask {
 }
 
 /// A validated acyclic Task Graph owned by one mission.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TaskGraph {
     /// Mission that owns every task in this graph.
     mission_id: MissionId,
@@ -653,7 +686,7 @@ impl TaskGraph {
 }
 
 /// A versioned Mission Intelligence result accepted by the DEAIOS core.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MissionPlan {
     /// User-visible goal preserved across planning and recovery.
     goal: MissionGoal,
@@ -1057,7 +1090,7 @@ pub enum NodeEvent {
 }
 
 /// A command sent through the runtime to a local node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionCommand {
     /// Mission-scoped task whose role is being invoked.
     task_ref: TaskRef,
@@ -1067,6 +1100,8 @@ pub struct ExecutionCommand {
     role_id: RoleId,
     /// Node that receives the command.
     node_id: NodeId,
+    /// Canonical operation and parameters requested from the local EAIOS.
+    intent: ExecutionIntent,
     /// Correlation identity for the command and its observations.
     correlation_id: CorrelationId,
 }
@@ -1079,6 +1114,7 @@ impl ExecutionCommand {
         group_id: ExecutionGroupId,
         role_id: RoleId,
         node_id: NodeId,
+        intent: ExecutionIntent,
         correlation_id: CorrelationId,
     ) -> Self {
         Self {
@@ -1086,6 +1122,7 @@ impl ExecutionCommand {
             group_id,
             role_id,
             node_id,
+            intent,
             correlation_id,
         }
     }
@@ -1118,6 +1155,11 @@ impl ExecutionCommand {
     /// Returns the node receiving this command.
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
+    }
+
+    /// Returns the canonical operation request for the local EAIOS adapter.
+    pub const fn intent(&self) -> &ExecutionIntent {
+        &self.intent
     }
 
     /// Returns the operation correlation identity.
@@ -1408,8 +1450,19 @@ mod tests {
         );
         let requirement = TaskRequirement::new(mission_id.clone(), task_id, vec![role])
             .expect("test requirement must be valid");
-        PlannedTask::new("transport payload", requirement, dependencies)
-            .expect("test task must be valid")
+        let role_id = requirement.roles()[0].role_id().clone();
+        let intent = ExecutionIntent::new(
+            OperationRef::new("mobility", "move", "v1").expect("test operation must be valid"),
+            BTreeMap::new(),
+        )
+        .expect("test intent must be valid");
+        PlannedTask::new(
+            "transport payload",
+            requirement,
+            BTreeMap::from([(role_id, intent)]),
+            dependencies,
+        )
+        .expect("test task must be valid")
     }
 
     /// Acyclic dependencies expose only tasks whose prerequisites have completed.
