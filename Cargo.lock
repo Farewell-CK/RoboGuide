@@ -677,12 +677,16 @@ dependencies = [
 name = "integration"
 version = "0.1.0"
 dependencies = [
+ "control",
  "domain",
+ "ports",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
  "serde",
  "serde_json",
+ "state",
+ "testkit",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -694,7 +698,11 @@ dependencies = [
 name = "integration-server"
 version = "0.1.0"
 dependencies = [
+ "control",
+ "domain",
  "integration",
+ "ports",
+ "state",
  "tokio",
  "tonic",
 ]
@@ -861,6 +869,7 @@ version = "0.1.0"
 dependencies = [
  "integration",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

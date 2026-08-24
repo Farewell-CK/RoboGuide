@@ -6,6 +6,9 @@ rust-version.workspace = true
 
 [dependencies]
 domain = { path = "../domain" }
+control = { path = "../control" }
+ports = { path = "../ports" }
+state = { path = "../state" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.53", features = ["io-util", "net", "sync", "time"] }
@@ -21,3 +24,4 @@ tonic-prost-build = "0.14.6"
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["macros", "rt", "time"] }
+testkit = { path = "../testkit" }

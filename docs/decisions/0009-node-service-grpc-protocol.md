@@ -24,3 +24,19 @@ RoboGuide 后续 reconciliation 使用。
 
 现有 NDJSON/TCP `NodeConnector` 与 `IntegrationServer` 保留为 reference/debug transport，
 不得被描述为正式 Node Protocol。生产入口 `apps/integration-server` 改用 tonic gRPC。
+
+## v0.1 生命周期补充
+
+同一个 `execution_id` 永久绑定首次 canonical invocation；不同 invocation 复用该 ID
+必须拒绝。Server route 仅在当前 session 的 matching lease heartbeat 未过期时可用；新
+session 注册会 fence 旧流，迟到旧消息不得更新 route、State 或 execution evidence。
+
+第一版 Robonix Adapter 位于 Node Service 侧，通过本地安装的公开 Robonix Python SDK
+使用 Atlas discovery/channel、Scene `goal_room` 与 Navigation `navigate/status/cancel`，
+把 `mobility.reach_region@v1` 转成 Robonix 本地执行。该 helper 是 local-only backend，
+其 Atlas/provider/stub 类型不进入 Node Protocol。
+
+Integration Server composition root 将 validated registration/heartbeat/execution facts 交给
+`IntegrationRuntimeBridge`：Registration/Heartbeat 复用 Control lease authority 并更新
+Shared Node State；Execute/Cancel 按既有 NodeId route；terminal ExecutionEvent 转为已有
+Runtime `NodeEvent` evidence。它不改变 Matching/Scheduler 算法。

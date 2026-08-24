@@ -8,7 +8,10 @@ mod adapter;
 mod config;
 mod service;
 
-pub use adapter::{AdapterError, FakeAdapter, LocalEaiosAdapter};
+pub use adapter::{
+    AdapterError, FakeAdapter, LocalEaiosAdapter, RobonixAdapter, RobonixClient,
+    RobonixCommandClient,
+};
 pub use config::{AdapterConfig, NodeServiceConfig};
 pub use service::{NodeService, NodeServiceError};
 
@@ -69,7 +72,7 @@ mod tests {
                 .expect("registration arrives")
                 .expect("event exists");
         assert!(
-            matches!(registered, GrpcNodeEvent::Registered(registration) if registration.node_id == "dog-a")
+            matches!(registered, GrpcNodeEvent::Registered { registration, .. } if registration.node_id == "dog-a")
         );
         router
             .execute(
@@ -87,7 +90,7 @@ mod tests {
             .expect("execute routes");
         let mut completed = false;
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while let Some(GrpcNodeEvent::NodeMessage(message)) = event_receiver.recv().await {
+            while let Some(GrpcNodeEvent::NodeMessage { message, .. }) = event_receiver.recv().await {
                 if matches!(message.message, Some(NodePayload::ExecutionEvent(event)) if event.phase == ExecutionPhase::Completed as i32) { completed = true; break; }
             }
         }).await.expect("completion arrives");

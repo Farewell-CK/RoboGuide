@@ -248,6 +248,11 @@ impl ControlPlane {
         self.actor_bindings
             .get(&(mission_id.clone(), actor_id.clone()))
     }
+
+    /// Returns the current lease authority for one node.
+    pub fn node_lease(&self, node_id: &NodeId) -> Option<&NodeLease> {
+        self.leases.get(node_id)
+    }
 }
 
 #[cfg(test)]

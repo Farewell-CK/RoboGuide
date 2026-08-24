@@ -1,0 +1,9 @@
+node_id = "robonix-node"
+server_endpoint = "http://127.0.0.1:50051"
+reconnect_delay_ms = 1000
+
+[adapter]
+type = "robonix"
+python = "python3"
+bridge_script = "apps/roboguide-node/robonix_bridge.py"
+atlas_endpoint = "127.0.0.1:50051"

@@ -17,9 +17,30 @@ use tonic::{Request, Response, Status};
 #[derive(Debug)]
 pub enum GrpcNodeEvent {
     /// A node completed registration in a new session.
-    Registered(crate::grpc::v0_1::NodeRegistration),
+    Registered {
+        /// New authoritative session identity.
+        session_id: String,
+        /// Server-issued lease identity.
+        lease_id: String,
+        /// Accepted node registration.
+        registration: crate::grpc::v0_1::NodeRegistration,
+    },
     /// A heartbeat or registration update was received.
-    NodeMessage(NodeMessage),
+    NodeMessage {
+        /// Stable node identity owning the message.
+        node_id: String,
+        /// Session identity validated before emission.
+        session_id: String,
+        /// Validated node message.
+        message: NodeMessage,
+    },
+    /// The current route disconnected or its lease expired.
+    Unavailable {
+        /// Node whose current route is unavailable.
+        node_id: String,
+        /// Fenced session identity.
+        session_id: String,
+    },
 }
 
 /// Cloneable command router for currently connected Node sessions.
@@ -35,6 +56,12 @@ struct RoutedSession {
     session_id: String,
     /// Outbound stream producer.
     sender: mpsc::UnboundedSender<Result<ServerMessage, Status>>,
+    /// Lease identity required on heartbeats.
+    lease_id: String,
+    /// Latest accepted heartbeat receive instant.
+    last_heartbeat: std::time::Instant,
+    /// Maximum heartbeat silence before routing is fenced.
+    lease_duration: std::time::Duration,
 }
 
 impl GrpcNodeRouter {
@@ -52,6 +79,9 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        if route.last_heartbeat.elapsed() >= route.lease_duration {
+            return Err(Status::unavailable("node lease expired"));
+        }
         route
             .sender
             .send(Ok(ServerMessage {
@@ -73,6 +103,9 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        if route.last_heartbeat.elapsed() >= route.lease_duration {
+            return Err(Status::unavailable("node lease expired"));
+        }
         route
             .sender
             .send(Ok(ServerMessage {
@@ -200,11 +233,11 @@ async fn run_grpc_session(
         .send(Ok(ServerMessage {
             message: Some(ServerPayload::Registered(Registered {
                 session_id: session_id.clone(),
-                lease_id,
+                lease_id: lease_id.clone(),
             })),
         }))
         .map_err(|_| Status::unavailable("response stream closed"))?;
-    router
+    let previous = router
         .sessions
         .lock()
         .map_err(|_| Status::internal("session registry unavailable"))?
@@ -213,11 +246,34 @@ async fn run_grpc_session(
             RoutedSession {
                 session_id: session_id.clone(),
                 sender: outbound.clone(),
+                lease_id: lease_id.clone(),
+                last_heartbeat: std::time::Instant::now(),
+                lease_duration: std::time::Duration::from_millis(15_000),
             },
         );
-    let _ = events.send(GrpcNodeEvent::Registered(registration));
-    while let Some(message) = inbound.next().await {
-        let message = message?;
+    if let Some(previous) = previous {
+        let _ = previous
+            .sender
+            .send(Err(Status::aborted("session superseded by reconnect")));
+    }
+    let node_id = registration.node_id.clone();
+    let _ = events.send(GrpcNodeEvent::Registered {
+        session_id: session_id.clone(),
+        lease_id,
+        registration,
+    });
+    let mut lease_check = tokio::time::interval(std::time::Duration::from_millis(250));
+    loop {
+        let message = tokio::select! {
+            message = inbound.next() => match message { Some(message) => message?, None => break },
+            _ = lease_check.tick() => {
+                if route_is_expired(&router, &node_id, &session_id)? { break; }
+                continue;
+            }
+        };
+        if !accept_current_message(&router, &node_id, &session_id, &message)? {
+            continue;
+        }
         let sequence = match &message.message {
             Some(NodePayload::Heartbeat(value)) => value.sequence,
             Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
@@ -225,12 +281,150 @@ async fn run_grpc_session(
             Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
             _ => 0,
         };
-        let _ = events.send(GrpcNodeEvent::NodeMessage(message));
+        let _ = events.send(GrpcNodeEvent::NodeMessage {
+            node_id: node_id.clone(),
+            session_id: session_id.clone(),
+            message,
+        });
         if sequence > 0 {
             let _ = outbound.send(Ok(ServerMessage {
                 message: Some(ServerPayload::Ack(Ack { sequence })),
             }));
         }
     }
+    let removed = {
+        let mut sessions = router
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        if sessions
+            .get(&node_id)
+            .is_some_and(|route| route.session_id == session_id)
+        {
+            sessions.remove(&node_id);
+            true
+        } else {
+            false
+        }
+    };
+    if removed {
+        let _ = events.send(GrpcNodeEvent::Unavailable {
+            node_id,
+            session_id,
+        });
+    }
     Ok(())
+}
+
+/// Returns whether the current route exceeded its heartbeat lease.
+fn route_is_expired(
+    router: &GrpcNodeRouter,
+    node_id: &str,
+    session_id: &str,
+) -> Result<bool, Status> {
+    let sessions = router
+        .sessions
+        .lock()
+        .map_err(|_| Status::internal("session registry unavailable"))?;
+    Ok(sessions.get(node_id).is_none_or(|route| {
+        route.session_id != session_id || route.last_heartbeat.elapsed() >= route.lease_duration
+    }))
+}
+
+/// Accepts only the current session and renews only its matching lease heartbeat.
+fn accept_current_message(
+    router: &GrpcNodeRouter,
+    node_id: &str,
+    session_id: &str,
+    message: &NodeMessage,
+) -> Result<bool, Status> {
+    let mut sessions = router
+        .sessions
+        .lock()
+        .map_err(|_| Status::internal("session registry unavailable"))?;
+    let Some(route) = sessions.get_mut(node_id) else {
+        return Ok(false);
+    };
+    if route.session_id != session_id {
+        return Ok(false);
+    }
+    if let Some(NodePayload::Heartbeat(heartbeat)) = &message.message {
+        if heartbeat.session_id != session_id || heartbeat.lease_id != route.lease_id {
+            return Ok(false);
+        }
+        route.last_heartbeat = std::time::Instant::now();
+    } else {
+        let message_session = match &message.message {
+            Some(NodePayload::RegistrationUpdate(value)) => &value.session_id,
+            Some(NodePayload::ExecutionEvent(value)) => &value.session_id,
+            Some(NodePayload::ExecutionSnapshot(value)) => &value.session_id,
+            _ => return Ok(false),
+        };
+        if message_session != session_id {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Expired leases cannot route Execute or Cancel.
+    #[test]
+    fn expired_lease_rejects_new_commands() {
+        let router = GrpcNodeRouter::default();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        router.sessions.lock().expect("registry lock").insert(
+            "dog-a".to_string(),
+            RoutedSession {
+                session_id: "session-old".to_string(),
+                sender,
+                lease_id: "lease-old".to_string(),
+                last_heartbeat: std::time::Instant::now() - std::time::Duration::from_secs(2),
+                lease_duration: std::time::Duration::from_secs(1),
+            },
+        );
+        assert_eq!(
+            router
+                .execute(
+                    "dog-a",
+                    "execution-1".to_string(),
+                    crate::grpc::v0_1::CanonicalInvocation::default()
+                )
+                .expect_err("expired route rejected")
+                .code(),
+            tonic::Code::Unavailable
+        );
+    }
+
+    /// A late message from a fenced session cannot refresh the current route.
+    #[test]
+    fn newer_session_fences_late_old_heartbeat() {
+        let router = GrpcNodeRouter::default();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        router.sessions.lock().expect("registry lock").insert(
+            "dog-a".to_string(),
+            RoutedSession {
+                session_id: "session-new".to_string(),
+                sender,
+                lease_id: "lease-new".to_string(),
+                last_heartbeat: std::time::Instant::now(),
+                lease_duration: std::time::Duration::from_secs(15),
+            },
+        );
+        let message = NodeMessage {
+            message: Some(NodePayload::Heartbeat(crate::grpc::v0_1::Heartbeat {
+                session_id: "session-old".to_string(),
+                lease_id: "lease-old".to_string(),
+                sequence: 10,
+                status: None,
+            })),
+        };
+        assert!(
+            !accept_current_message(&router, "dog-a", "session-old", &message)
+                .expect("message validates safely")
+        );
+    }
 }

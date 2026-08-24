@@ -4,7 +4,9 @@
 
 //! Long-running RoboGuide Node Service process.
 
-use node_service::{FakeAdapter, NodeService, NodeServiceConfig};
+use node_service::{
+    FakeAdapter, NodeService, NodeServiceConfig, RobonixAdapter, RobonixCommandClient,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -15,17 +17,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .map_or_else(|| PathBuf::from("config/node.toml"), PathBuf::from);
     let config = NodeServiceConfig::load(&path)?;
-    if config.adapter.adapter_type != "fake" {
-        return Err(format!(
-            "adapter type {} is not installed",
-            config.adapter.adapter_type
-        )
-        .into());
+    match config.adapter.adapter_type.as_str() {
+        "fake" => {
+            let runtime_name = text_setting(&config.adapter.settings, "runtime_name")?;
+            let runtime_version = text_setting(&config.adapter.settings, "runtime_version")?;
+            NodeService::new(
+                config,
+                FakeAdapter::new(runtime_name, runtime_version, BTreeMap::new()),
+            )
+            .run()
+            .await?;
+        }
+        "robonix" => {
+            let python = PathBuf::from(text_setting(&config.adapter.settings, "python")?);
+            let bridge = PathBuf::from(text_setting(&config.adapter.settings, "bridge_script")?);
+            let atlas = text_setting(&config.adapter.settings, "atlas_endpoint")?;
+            NodeService::new(
+                config,
+                RobonixAdapter::new(RobonixCommandClient::new(python, bridge, atlas)),
+            )
+            .run()
+            .await?;
+        }
+        other => return Err(format!("adapter type {other} is not installed").into()),
     }
-    let runtime_name = text_setting(&config.adapter.settings, "runtime_name")?;
-    let runtime_version = text_setting(&config.adapter.settings, "runtime_version")?;
-    let adapter = FakeAdapter::new(runtime_name, runtime_version, BTreeMap::new());
-    NodeService::new(config, adapter).run().await?;
     Ok(())
 }
 

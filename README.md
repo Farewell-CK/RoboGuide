@@ -321,6 +321,13 @@ cargo run -p roboguide-node -- config/node.toml
 `http://192.168.1.10:50051`。当前仓库提供 `fake` reference adapter；真实 Local EAIOS
 通过 `LocalEaiosAdapter` 接入，不修改 Node Service 或 Node Protocol。
 
+Robonix 节点使用 `config/node-robonix.toml`，并要求本机 Robonix Python SDK 与生成的
+contract stubs 已安装、Atlas/Scene/Navigation 已由 `rbnx boot` 启动：
+
+```bash
+cargo run -p roboguide-node -- config/node-robonix.toml
+```
+
 ## 当前开放问题
 
 V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)；MVP 具体场景、拓扑和验收指标的草案记录在 [`docs/mvp-definition.md`](docs/mvp-definition.md)。

@@ -4,8 +4,30 @@
 
 //! RoboGuide Integration Server process.
 
-use integration::GrpcIntegrationService;
 use integration::grpc::v0_1::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+use integration::{GrpcIntegrationService, IntegrationRuntimeBridge};
+use ports::EventSink;
+use std::sync::{Arc, Mutex};
+
+/// Process-local Runtime/Control event sink pending persistent event storage.
+#[derive(Default)]
+struct ProcessEventLog {
+    /// Immutable domain payloads retained for diagnostics.
+    records: Vec<domain::EventPayload>,
+}
+
+impl EventSink for ProcessEventLog {
+    /// Retains one event without leaking gRPC types into the core evidence model.
+    fn append(
+        &mut self,
+        _timestamp: domain::TimestampMs,
+        _correlation_id: &domain::CorrelationId,
+        _causation_id: Option<&domain::EventId>,
+        payload: domain::EventPayload,
+    ) {
+        self.records.push(payload);
+    }
+}
 
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
@@ -15,8 +37,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "127.0.0.1:50051".to_string())
         .parse()?;
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (service, _router) = GrpcIntegrationService::new(events);
-    tokio::spawn(async move { while receiver.recv().await.is_some() {} });
+    let (service, router) = GrpcIntegrationService::new(events);
+    let bridge = Arc::new(Mutex::new(IntegrationRuntimeBridge::new(
+        control::ControlPlane::new(),
+        state::InMemorySharedNodeState::new(),
+        ProcessEventLog::default(),
+        router,
+    )));
+    tokio::spawn(async move {
+        let correlation = domain::CorrelationId::new("integration-server")
+            .expect("static correlation id is valid");
+        let mut received_at = 0_u64;
+        while let Some(event) = receiver.recv().await {
+            received_at += 1;
+            if let Ok(mut bridge) = bridge.lock() {
+                let _ = bridge.consume(event, domain::TimestampMs::new(received_at), &correlation);
+            }
+        }
+    });
     tonic::transport::Server::builder()
         .add_service(RoboGuideNodeProtocolServer::new(service))
         .serve(address)

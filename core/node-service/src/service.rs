@@ -22,7 +22,16 @@ pub struct NodeService<A> {
     /// Injected Local EAIOS Adapter.
     adapter: Arc<A>,
     /// Connector-owned snapshots retained across gRPC sessions.
-    executions: Arc<Mutex<BTreeMap<String, ExecutionSnapshot>>>,
+    executions: Arc<Mutex<BTreeMap<String, ExecutionRecord>>>,
+}
+
+/// Connector-owned immutable invocation plus latest reconnect snapshot.
+#[derive(Clone)]
+struct ExecutionRecord {
+    /// Canonical invocation fingerprint fixed for the execution lifetime.
+    invocation: integration::grpc::v0_1::CanonicalInvocation,
+    /// Latest locally observed lifecycle state.
+    snapshot: ExecutionSnapshot,
 }
 
 impl<A: LocalEaiosAdapter> NodeService<A> {
@@ -130,20 +139,26 @@ impl<A: LocalEaiosAdapter> NodeService<A> {
         session_id: &str,
         outbound: &mpsc::UnboundedSender<NodeMessage>,
     ) -> Result<(), NodeServiceError> {
-        let mut snapshots = self
+        let adapter_snapshots = self
             .adapter
             .execution_snapshots()
             .map_err(NodeServiceError::Adapter)?;
-        snapshots.extend(
-            self.executions
-                .lock()
-                .map_err(|_| NodeServiceError::Registry)?
-                .values()
-                .cloned(),
-        );
-        snapshots.sort_by(|left, right| left.execution_id.cmp(&right.execution_id));
-        snapshots.dedup_by(|left, right| left.execution_id == right.execution_id);
-        for mut snapshot in snapshots {
+        let mut snapshots = adapter_snapshots
+            .into_iter()
+            .map(|snapshot| (snapshot.execution_id.clone(), snapshot))
+            .collect::<BTreeMap<_, _>>();
+        for record in self
+            .executions
+            .lock()
+            .map_err(|_| NodeServiceError::Registry)?
+            .values()
+        {
+            snapshots.insert(
+                record.snapshot.execution_id.clone(),
+                record.snapshot.clone(),
+            );
+        }
+        for mut snapshot in snapshots.into_values() {
             snapshot.session_id = session_id.to_string();
             outbound
                 .send(NodeMessage {
@@ -192,17 +207,21 @@ impl<A: LocalEaiosAdapter> NodeService<A> {
         session_id: String,
         outbound: mpsc::UnboundedSender<NodeMessage>,
     ) -> Result<(), NodeServiceError> {
-        if let Some(mut existing) = self
+        if let Some(existing) = self
             .executions
             .lock()
             .map_err(|_| NodeServiceError::Registry)?
             .get(&execution_id)
             .cloned()
         {
-            existing.session_id = session_id;
+            if existing.invocation != invocation {
+                return Err(NodeServiceError::ExecutionConflict(execution_id));
+            }
+            let mut snapshot = existing.snapshot;
+            snapshot.session_id = session_id;
             outbound
                 .send(NodeMessage {
-                    message: Some(NodePayload::ExecutionSnapshot(existing)),
+                    message: Some(NodePayload::ExecutionSnapshot(snapshot)),
                 })
                 .map_err(|_| NodeServiceError::Closed)?;
             return Ok(());
@@ -217,7 +236,13 @@ impl<A: LocalEaiosAdapter> NodeService<A> {
         self.executions
             .lock()
             .map_err(|_| NodeServiceError::Registry)?
-            .insert(execution_id.clone(), accepted);
+            .insert(
+                execution_id.clone(),
+                ExecutionRecord {
+                    invocation: invocation.clone(),
+                    snapshot: accepted,
+                },
+            );
         let mut events = self
             .adapter
             .execute(&execution_id, invocation)
@@ -227,8 +252,10 @@ impl<A: LocalEaiosAdapter> NodeService<A> {
             while let Some(mut event) = events.recv().await {
                 event.session_id = session_id.clone();
                 let snapshot = snapshot_from_event(&event);
-                if let Ok(mut registry) = executions.lock() {
-                    registry.insert(execution_id.clone(), snapshot);
+                if let Ok(mut registry) = executions.lock()
+                    && let Some(record) = registry.get_mut(&execution_id)
+                {
+                    record.snapshot = snapshot;
                 }
                 let _ = outbound.send(NodeMessage {
                     message: Some(NodePayload::ExecutionEvent(event)),
@@ -253,8 +280,10 @@ impl<A: LocalEaiosAdapter> NodeService<A> {
         tokio::spawn(async move {
             while let Some(mut event) = events.recv().await {
                 event.session_id = session_id.clone();
-                if let Ok(mut registry) = executions.lock() {
-                    registry.insert(execution_id.clone(), snapshot_from_event(&event));
+                if let Ok(mut registry) = executions.lock()
+                    && let Some(record) = registry.get_mut(&execution_id)
+                {
+                    record.snapshot = snapshot_from_event(&event);
                 }
                 let _ = outbound.send(NodeMessage {
                     message: Some(NodePayload::ExecutionEvent(event)),
@@ -291,6 +320,8 @@ pub enum NodeServiceError {
     Closed,
     /// Execution registry unavailable.
     Registry,
+    /// An execution identity was reused for a different canonical invocation.
+    ExecutionConflict(String),
 }
 impl Display for NodeServiceError {
     /// Formats the service failure.
@@ -302,7 +333,58 @@ impl Display for NodeServiceError {
             Self::Protocol(reason) => formatter.write_str(reason),
             Self::Closed => formatter.write_str("Node Protocol stream closed"),
             Self::Registry => formatter.write_str("execution registry unavailable"),
+            Self::ExecutionConflict(execution_id) => write!(
+                formatter,
+                "execution {execution_id} was reused with a different invocation"
+            ),
         }
     }
 }
 impl std::error::Error for NodeServiceError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FakeAdapter;
+    use integration::grpc::v0_1::CanonicalInvocation;
+
+    /// One execution identity rejects a different canonical invocation.
+    #[tokio::test]
+    async fn execution_id_rejects_different_invocation() {
+        let config = NodeServiceConfig {
+            node_id: "node-a".to_string(),
+            server_endpoint: "http://127.0.0.1:1".to_string(),
+            reconnect_delay_ms: 1,
+            adapter: crate::AdapterConfig {
+                adapter_type: "fake".to_string(),
+                settings: BTreeMap::new(),
+            },
+        };
+        let service = NodeService::new(
+            config,
+            FakeAdapter::new("fake".to_string(), "0.1".to_string(), BTreeMap::new()),
+        );
+        let (outbound, _receiver) = mpsc::unbounded_channel();
+        let first = CanonicalInvocation {
+            mission_id: "m".to_string(),
+            task_id: "t".to_string(),
+            group_id: "g".to_string(),
+            role_id: "r".to_string(),
+            capability_contract: "reference.noop@v1".to_string(),
+            parameters: std::collections::HashMap::new(),
+        };
+        service
+            .handle_execute(
+                "execution-1".to_string(),
+                first.clone(),
+                "session-1".to_string(),
+                outbound.clone(),
+            )
+            .expect("first invocation starts");
+        let mut different = first;
+        different.task_id = "other-task".to_string();
+        assert!(
+            matches!(service.handle_execute("execution-1".to_string(), different, "session-2".to_string(), outbound), Err(NodeServiceError::ExecutionConflict(id)) if id == "execution-1")
+        );
+    }
+}

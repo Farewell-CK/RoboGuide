@@ -13,6 +13,7 @@ mod execution;
 pub mod grpc;
 mod grpc_server;
 mod protocol;
+mod runtime_bridge;
 mod server;
 mod session;
 
@@ -22,6 +23,9 @@ pub use grpc_server::{GrpcIntegrationService, GrpcNodeEvent, GrpcNodeRouter};
 pub use protocol::{
     ClientFrame, ExecuteCommand, ExecutionFact, Hello, PROTOCOL_VERSION_V0_1, ProtocolError,
     Registration, SERVER_VERSION_V0_1, ServerFrame, WireCapability, WireResource,
+};
+pub use runtime_bridge::{
+    IntegrationRuntimeBridge, IntegrationRuntimeError, RemoteExecutionStatus,
 };
 pub use server::{IntegrationServer, ServerError, ServerEvent};
 pub use session::{SessionError, SessionState};

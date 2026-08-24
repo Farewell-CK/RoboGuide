@@ -43,6 +43,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   configuration, execution continuity, and the generic Local EAIOS Adapter boundary.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
+- `core/node-service` includes the first Robonix Local EAIOS Adapter for
+  `mobility.reach_region@v1`; Robonix Atlas/Scene/Navigation details remain
+  behind its local client/helper boundary and never enter Node Protocol.
 - `apps/real-node-smoke/` probes generic Node Contract endpoints by default and
   executes only with explicit `--execute` plus a versioned intent fixture.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
