@@ -424,7 +424,14 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         .map_err(|error| error.to_string())?;
 
     let candidates = control
-        .match_capabilities(&state, &requirement, timestamp, &correlation_id, &mut log)
+        .match_capabilities_for_mission(
+            &state,
+            &mission_plan,
+            &requirement,
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
         .map_err(|error| error.to_string())?;
     let scheduling_decision = scheduler
         .schedule_task(
@@ -458,9 +465,10 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         None,
     )?;
     control
-        .create_group(
+        .create_group_with_actor_bindings(
             group_id.clone(),
             &plan,
+            &requirement,
             timestamp,
             &correlation_id,
             &mut log,

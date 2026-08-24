@@ -40,6 +40,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::ProposalCreated { task_ref }
         | EventPayload::PlanCommitted { task_ref }
         | EventPayload::ExecutionGroupBound { task_ref, .. }
+        | EventPayload::MissionActorBound { task_ref, .. }
         | EventPayload::ExecutionGroupActivated { task_ref, .. }
         | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
         | EventPayload::RecoveryCandidatesMatched { task_ref, .. }
@@ -67,7 +68,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
 #[test]
 fn mvp_slice_recovers_after_node_failure() {
     let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-    assert_eq!(events.len(), 23);
+    assert_eq!(events.len(), 25);
     assert!(matches!(
         events[0].payload(),
         EventPayload::NodeRegistered { .. }
@@ -102,71 +103,79 @@ fn mvp_slice_recovers_after_node_failure() {
     ));
     assert!(matches!(
         events[8].payload(),
-        EventPayload::ExecutionGroupActivated { .. }
+        EventPayload::MissionActorBound { .. }
     ));
     assert!(matches!(
         events[9].payload(),
-        EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+        EventPayload::MissionActorBound { .. }
     ));
     assert!(matches!(
         events[10].payload(),
+        EventPayload::ExecutionGroupActivated { .. }
+    ));
+    assert!(matches!(
+        events[11].payload(),
+        EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+    ));
+    assert!(matches!(
+        events[12].payload(),
         EventPayload::NodeObservation(domain::NodeEvent::TaskFailed { node_id, .. })
             if node_id.as_str() == "node-a"
     ));
     assert!(matches!(
-        events[11].payload(),
+        events[13].payload(),
         EventPayload::ReconciliationRoleRecoveryRequired { role_id, node_id, .. }
             if role_id.as_str() == "primary-transport" && node_id.as_str() == "node-a"
     ));
     assert!(matches!(
-        events[12].payload(),
+        events[14].payload(),
         EventPayload::ExecutionGroupBlocked { .. }
     ));
     assert!(matches!(
-        events[13].payload(),
+        events[15].payload(),
         EventPayload::ExecutionGroupRoleBindingReleased { role_id, .. }
             if role_id.as_str() == "primary-transport"
     ));
     assert!(matches!(
-        events[14].payload(),
+        events[16].payload(),
         EventPayload::RecoveryCandidatesMatched { candidate_node_ids, .. }
             if candidate_node_ids.iter().any(|node_id| node_id.as_str() == "node-b")
     ));
     assert!(matches!(
-        events[15].payload(),
+        events[17].payload(),
         EventPayload::RecoverySchedulingSelected { replacement_node_id, .. }
             if replacement_node_id.as_str() == "node-b"
     ));
     assert!(matches!(
-        events[16].payload(),
+        events[18].payload(),
         EventPayload::RecoveryAssignmentProposed { replacement_node_id, .. }
             if replacement_node_id.as_str() == "node-b"
     ));
     assert!(matches!(
-        events[17].payload(),
+        events[19].payload(),
         EventPayload::RecoveryAssignmentCommitted { replacement_node_id, .. }
             if replacement_node_id.as_str() == "node-b"
     ));
     assert!(matches!(
-        events[18].payload(),
+        events[20].payload(),
         EventPayload::RecoveryRebound { from_node, to_node, .. }
             if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
     ));
     assert!(matches!(
-        events[19].payload(),
+        events[21].payload(),
         EventPayload::ExecutionGroupActivated { .. }
     ));
     assert!(matches!(
-        events[20].payload(),
+        events[22].payload(),
         EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
             if node_id.as_str() == "node-b"
     ));
     assert!(matches!(
-        events[21].payload(),
+        events[23].payload(),
         EventPayload::ExecutionGroupCompleted { .. }
     ));
     assert!(matches!(
-        events[22].payload(),
+        events[24].payload(),
         EventPayload::ExecutionGroupReleased { .. }
     ));
 }

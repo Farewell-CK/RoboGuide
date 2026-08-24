@@ -56,6 +56,15 @@ pub enum ControlError {
     UnknownGroup(ExecutionGroupId),
     /// A role had no eligible candidate.
     NoCandidate(RoleId),
+    /// A previously bound mission actor's node is no longer usable for a later task.
+    ActorBindingRequiresReconciliation {
+        /// Mission containing the actor binding.
+        mission_id: MissionId,
+        /// Actor whose continuity cannot currently be satisfied.
+        actor_id: ActorId,
+        /// Previously bound node requiring reconciliation.
+        node_id: NodeId,
+    },
     /// A proposal or internal invariant was invalid.
     InvalidProposal(String),
     /// Control allocation authority could not be projected due to an invariant violation.
@@ -119,6 +128,14 @@ impl Display for ControlError {
             Self::UnknownNode(id) => write!(formatter, "unknown node {id}"),
             Self::UnknownGroup(id) => write!(formatter, "unknown execution group {id}"),
             Self::NoCandidate(id) => write!(formatter, "no candidate for role {id}"),
+            Self::ActorBindingRequiresReconciliation {
+                mission_id,
+                actor_id,
+                node_id,
+            } => write!(
+                formatter,
+                "mission actor {mission_id}/{actor_id} remains bound to unavailable node {node_id}; reconciliation required"
+            ),
             Self::InvalidProposal(reason) => write!(formatter, "invalid proposal: {reason}"),
             Self::AllocationInvariant(reason) => {
                 write!(formatter, "allocation invariant violation: {reason}")
@@ -201,8 +218,8 @@ impl ControlPlane {
         }
     }
 
-    /// Records an actor binding after a successful committed task binding.
-    pub fn bind_actor(
+    /// Records an actor binding after a successful committed task and Group binding.
+    pub(crate) fn record_actor_binding(
         &mut self,
         mission_id: MissionId,
         actor_id: ActorId,

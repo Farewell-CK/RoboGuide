@@ -1,6 +1,7 @@
     use super::*;
     use domain::{
-        Capability, CapabilityKind, CorrelationId, EventPayload, ExecutionGroupId,
+        Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
+        ExecutionGroupId, ExecutionIntent, MissionGoal, MissionPlan, PlannedTask, TaskGraph,
         LeaseId, NodeHealth, NodeHealthObservation, NodeHeartbeat, NodeId, NodeLease,
         NodeLiveness, NodeLivenessObservation, NodeRegistration, NodeStatus, Resource, ResourceId,
         ResourceKind, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRef, TaskRequirement,

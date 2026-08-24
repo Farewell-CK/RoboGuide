@@ -2,7 +2,8 @@
 
 use crate::{ControlError, ControlPlane};
 use domain::{
-    CorrelationId, EventPayload, NodeId, RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload, MissionPlan, NodeId,
+    RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
 
@@ -78,22 +79,98 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CandidateSet, ControlError> {
-        let mut candidates =
-            self.match_capabilities(state, requirement, timestamp, correlation_id, events)?;
+        let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
             if let Some(actor_id) = role.actor_id()
                 && let Some(binding) = self.actor_binding(requirement.mission_id(), actor_id)
             {
-                let role_candidates = candidates
-                    .roles
-                    .iter_mut()
-                    .find(|candidate| candidate.role_id() == role.role_id())
-                    .expect("candidate exists for every role");
-                if !role_candidates.node_ids().contains(binding.node_id()) {
-                    return Err(ControlError::NoCandidate(role.role_id().clone()));
+                if !self.node_is_eligible_for_role(state, binding.node_id(), role, timestamp) {
+                    return Err(ControlError::ActorBindingRequiresReconciliation {
+                        mission_id: requirement.mission_id().clone(),
+                        actor_id: actor_id.clone(),
+                        node_id: binding.node_id().clone(),
+                    });
                 }
-                *role_candidates =
-                    RoleCandidates::new(role.role_id().clone(), vec![binding.node_id().clone()]);
+                roles.push(RoleCandidates::new(
+                    role.role_id().clone(),
+                    vec![binding.node_id().clone()],
+                ));
+                continue;
+            }
+            let node_ids = state
+                .nodes()
+                .into_iter()
+                .filter(|snapshot| {
+                    self.node_is_eligible_for_role(state, snapshot.node_id(), role, timestamp)
+                })
+                .map(|snapshot| snapshot.node_id().clone())
+                .collect::<Vec<_>>();
+            if node_ids.is_empty() {
+                return Err(ControlError::NoCandidate(role.role_id().clone()));
+            }
+            roles.push(RoleCandidates::new(role.role_id().clone(), node_ids));
+        }
+        let candidates = CandidateSet::new(requirement.task_ref().clone(), roles);
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::CandidatesMatched {
+                task_ref: requirement.task_ref().clone(),
+            },
+        );
+        Ok(candidates)
+    }
+
+    /// Matches a task while constraining every first-use actor to nodes capable of its whole plan.
+    pub fn match_capabilities_for_mission<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        mission: &MissionPlan,
+        requirement: &TaskRequirement,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CandidateSet, ControlError> {
+        if mission.goal().mission_id() != requirement.mission_id() {
+            return Err(ControlError::InvalidProposal(
+                "mission plan and task requirement belong to different missions".to_string(),
+            ));
+        }
+        let actor_requirements = mission.actor_requirements();
+        let mut candidates = self.match_capabilities_with_actor_bindings(
+            state,
+            requirement,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        for role in requirement.roles() {
+            if role.actor_id().is_none()
+                || self
+                    .actor_binding(requirement.mission_id(), role.actor_id().expect("checked"))
+                    .is_some()
+            {
+                continue;
+            }
+            let actor = role.actor_id().expect("checked");
+            let requirements = actor_requirements.get(actor).ok_or_else(|| {
+                ControlError::InvalidProposal(format!("actor {actor} is absent from MissionPlan"))
+            })?;
+            let role_candidates = candidates
+                .roles
+                .iter_mut()
+                .find(|candidate| candidate.role_id() == role.role_id())
+                .expect("candidate exists");
+            role_candidates.node_ids.retain(|node_id| {
+                state.node(node_id).is_some_and(|snapshot| {
+                    requirements.iter().all(|(capability, contract)| {
+                        node_supports_contract(snapshot.registration(), *capability, contract)
+                    })
+                })
+            });
+            if role_candidates.node_ids.is_empty() {
+                return Err(ControlError::NoCandidate(role.role_id().clone()));
             }
         }
         Ok(candidates)
@@ -135,4 +212,20 @@ impl ControlPlane {
         );
         Ok(candidates)
     }
+}
+
+/// Checks one node's advertised capability and exact contract pair.
+fn node_supports_contract(
+    registration: &domain::NodeRegistration,
+    capability: CapabilityKind,
+    contract: &CapabilityContractRef,
+) -> bool {
+    registration
+        .capabilities()
+        .iter()
+        .any(|item| item.kind() == capability && item.is_available())
+        && registration
+            .supported_contracts()
+            .iter()
+            .any(|supported| supported == contract)
 }

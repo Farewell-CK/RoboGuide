@@ -13,6 +13,7 @@ use std::fmt::{Display, Formatter};
 mod actor;
 mod allocation;
 mod execution;
+mod mission_plan;
 
 pub use actor::{ActorBinding, MissionActor};
 pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
@@ -776,26 +777,6 @@ impl MissionPlan {
         Ok(Self { goal, task_graph })
     }
 
-    /// Aggregates all actor capability and exact-contract requirements across the Task Graph.
-    pub fn actor_requirements(
-        &self,
-    ) -> BTreeMap<ActorId, Vec<(CapabilityKind, CapabilityContractRef)>> {
-        let mut requirements: BTreeMap<ActorId, Vec<(CapabilityKind, CapabilityContractRef)>> =
-            BTreeMap::new();
-        for task in self.task_graph.tasks() {
-            for role in task.requirement().roles() {
-                if let (Some(actor), Some(contract)) = (role.actor_id(), role.required_contract()) {
-                    let entry = requirements.entry(actor.clone()).or_default();
-                    let item = (role.capability(), contract.clone());
-                    if !entry.contains(&item) {
-                        entry.push(item);
-                    }
-                }
-            }
-        }
-        requirements
-    }
-
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
         MISSION_PLAN_SCHEMA_V0_1
@@ -1352,6 +1333,19 @@ pub enum EventPayload {
         group_id: ExecutionGroupId,
         /// Mission-scoped task assigned to the group.
         task_ref: TaskRef,
+    },
+    /// A mission actor became authoritative only after its task Group was bound.
+    MissionActorBound {
+        /// Mission namespace for the actor binding.
+        mission_id: MissionId,
+        /// Logical actor that gained continuity authority.
+        actor_id: ActorId,
+        /// Concrete node selected for the actor.
+        node_id: NodeId,
+        /// Task whose successful Group bind established the authority.
+        task_ref: TaskRef,
+        /// Group bind that established the authority.
+        group_id: ExecutionGroupId,
     },
     /// An execution group began executing its bound roles.
     ExecutionGroupActivated {

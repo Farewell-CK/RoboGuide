@@ -4,8 +4,8 @@ use crate::{
     CommittedPlan, CommittedRecoveryAssignment, ControlError, ControlPlane, RecoveryOutcome,
 };
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, NodeId, ResourceId, RoleAssignment, RoleId,
-    TaskId, TaskRef, TimestampMs,
+    ActorId, CorrelationId, EventPayload, ExecutionGroupId, NodeId, ResourceId, RoleAssignment,
+    RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
@@ -97,6 +97,71 @@ impl ExecutionGroup {
 }
 
 impl ControlPlane {
+    /// Creates a Group and establishes first-use Actor bindings after Group Bind succeeds.
+    pub fn create_group_with_actor_bindings<E: EventSink>(
+        &mut self,
+        group_id: ExecutionGroupId,
+        plan: &CommittedPlan,
+        requirement: &TaskRequirement,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<ExecutionGroup, ControlError> {
+        if plan.task_ref() != requirement.task_ref() {
+            return Err(ControlError::InvalidProposal(
+                "task requirement does not match committed plan".to_string(),
+            ));
+        }
+        let mut actor_nodes = std::collections::BTreeMap::<ActorId, NodeId>::new();
+        for role in requirement.roles() {
+            let Some(actor_id) = role.actor_id() else {
+                continue;
+            };
+            let assignment = plan
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == role.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!("missing role {}", role.role_id()))
+                })?;
+            if let Some(existing) = self.actor_binding(requirement.mission_id(), actor_id) {
+                if existing.node_id() != assignment.node_id() {
+                    return Err(ControlError::InvalidProposal(
+                        "mission actor is already bound to another node".to_string(),
+                    ));
+                }
+            } else {
+                let previous = actor_nodes.insert(actor_id.clone(), assignment.node_id().clone());
+                if previous.is_some_and(|node| node != *assignment.node_id()) {
+                    return Err(ControlError::InvalidProposal(
+                        "one mission actor cannot bind multiple nodes in one Group".to_string(),
+                    ));
+                }
+            }
+        }
+        let group = self.create_group(group_id.clone(), plan, timestamp, correlation_id, events)?;
+        for (actor_id, node_id) in actor_nodes {
+            self.record_actor_binding(
+                requirement.mission_id().clone(),
+                actor_id.clone(),
+                node_id.clone(),
+            )?;
+            events.append(
+                timestamp,
+                correlation_id,
+                None,
+                EventPayload::MissionActorBound {
+                    mission_id: requirement.mission_id().clone(),
+                    actor_id,
+                    node_id,
+                    task_ref: requirement.task_ref().clone(),
+                    group_id: group_id.clone(),
+                },
+            );
+        }
+        Ok(group)
+    }
+
     /// Creates and binds an Execution Group from a committed plan.
     pub fn create_group<E: EventSink>(
         &mut self,
