@@ -9,15 +9,15 @@ pub(crate) use registration::WireRegistration;
 pub(crate) use status::WireStatus;
 
 use crate::http::HttpAdapterError;
-use domain::{ExecutionIntent, ExecutionValue, OperationRef};
+use domain::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// HTTP representation of a canonical operation identity.
+/// HTTP representation of a canonical capability contract identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct WireOperationRef {
-    /// Extensible canonical operation family.
+pub(super) struct WireCapabilityContractRef {
+    /// Extensible canonical capability contract family.
     namespace: String,
     /// Operation name within its family.
     name: String,
@@ -43,15 +43,15 @@ pub(super) enum WireExecutionValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct WireExecutionIntent {
-    /// Canonical operation identity.
-    operation: WireOperationRef,
+    /// Canonical canonical capability contract identity.
+    capability_contract: WireCapabilityContractRef,
     /// Stable scalar parameter map.
     parameters: BTreeMap<String, WireExecutionValue>,
 }
 
-impl From<&OperationRef> for WireOperationRef {
-    /// Copies domain operation identity into an HTTP-only DTO.
-    fn from(operation: &OperationRef) -> Self {
+impl From<&CapabilityContractRef> for WireCapabilityContractRef {
+    /// Copies domain canonical capability contract identity into an HTTP-only DTO.
+    fn from(operation: &CapabilityContractRef) -> Self {
         Self {
             namespace: operation.namespace().to_string(),
             name: operation.name().to_string(),
@@ -60,11 +60,11 @@ impl From<&OperationRef> for WireOperationRef {
     }
 }
 
-impl TryFrom<WireOperationRef> for OperationRef {
+impl TryFrom<WireCapabilityContractRef> for CapabilityContractRef {
     type Error = HttpAdapterError;
 
-    /// Validates wire operation identity before it enters the domain.
-    fn try_from(operation: WireOperationRef) -> Result<Self, Self::Error> {
+    /// Validates wire canonical capability contract identity before it enters the domain.
+    fn try_from(operation: WireCapabilityContractRef) -> Result<Self, Self::Error> {
         Self::new(operation.namespace, operation.name, operation.version)
             .map_err(|error| HttpAdapterError::protocol(error.to_string()))
     }
@@ -98,7 +98,7 @@ impl From<&ExecutionIntent> for WireExecutionIntent {
     /// Copies a canonical domain intent into an HTTP-only DTO.
     fn from(intent: &ExecutionIntent) -> Self {
         Self {
-            operation: intent.operation().into(),
+            capability_contract: intent.capability_contract().into(),
             parameters: intent
                 .parameters()
                 .iter()
@@ -113,7 +113,7 @@ impl TryFrom<WireExecutionIntent> for ExecutionIntent {
 
     /// Validates a decoded wire intent before it crosses into Core domain values.
     fn try_from(intent: WireExecutionIntent) -> Result<Self, Self::Error> {
-        let operation = intent.operation.try_into()?;
+        let operation = intent.capability_contract.try_into()?;
         let parameters = intent
             .parameters
             .into_iter()

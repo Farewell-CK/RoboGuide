@@ -12,19 +12,23 @@
       "roles": [
         {
           "id": "primary-transport",
+          "actor": "carrier",
+          "contract": {"namespace":"mobility","name":"move","version":"v1"},
           "capability": "transport",
           "resource_kind": "space",
           "execution": {
-            "operation": {"namespace": "mobility", "name": "move", "version": "v1"},
+            "capability_contract": {"namespace": "mobility", "name": "move", "version": "v1"},
             "parameters": {"destination": "delivery-zone"}
           }
         },
         {
           "id": "execution-compute",
+          "actor": "compute",
+          "contract": {"namespace":"compute","name":"infer","version":"v1"},
           "capability": "compute",
           "resource_kind": "compute",
           "execution": {
-            "operation": {"namespace": "compute", "name": "infer", "version": "v1"},
+            "capability_contract": {"namespace": "compute", "name": "infer", "version": "v1"},
             "parameters": {"model": "bootstrap-vlm"}
           }
         }

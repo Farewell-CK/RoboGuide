@@ -30,15 +30,15 @@ failure leaves reported health unchanged and provides evidence that liveness is 
   "node_id": "node-a",
   "correlation_id": "trace-a",
   "intent": {
-    "operation": {"namespace": "mobility", "name": "move", "version": "v1"},
+    "capability_contract": {"namespace": "mobility", "name": "move", "version": "v1"},
     "parameters": {"destination": "zone-b", "speed": 0.5}
   }
 }
 ```
 
 The synchronous v0.1 response is `task_completed`, `task_failed`, or `safe_stopped`. Long-running
-`accepted -> started -> completed/failed` execution, callbacks, streaming observations, operation
+`accepted -> started -> completed/failed` execution, callbacks, streaming observations, capability_contract
 catalog discovery, and transport negotiation are deferred.
 
-Adapters map canonical `OperationRef` values to Local EAIOS skills, services, primitives, or vendor
+Adapters map canonical `CapabilityContractRef` values to Local EAIOS skills, services, primitives, or vendor
 APIs. Network callers never supply an executable or shell command.

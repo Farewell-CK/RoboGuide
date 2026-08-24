@@ -1,6 +1,6 @@
 //! Safe fixed-argument reference backend for proving canonical-to-local operation mapping.
 
-use domain::{ExecutionGroupId, ExecutionIntent, NodeId, OperationRef, RoleId, TaskRef};
+use domain::{CapabilityContractRef, ExecutionGroupId, ExecutionIntent, NodeId, RoleId, TaskRef};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
@@ -71,10 +71,10 @@ impl LocalInvocation {
 /// Failures while translating canonical intent into a local backend representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendError {
-    /// No local mapping exists for the canonical operation.
-    UnsupportedOperation(OperationRef),
+    /// No local mapping exists for the canonical capability contract.
+    UnsupportedOperation(CapabilityContractRef),
     /// A configured operation had no executable or contained a blank argv element.
-    InvalidConfiguredCommand(OperationRef),
+    InvalidConfiguredCommand(CapabilityContractRef),
 }
 
 impl Display for BackendError {
@@ -103,16 +103,18 @@ pub trait LocalEaiosBackend {
     ) -> Result<LocalInvocation, BackendError>;
 }
 
-/// Reference backend mapping canonical operations to preconfigured fixed argv.
+/// Reference backend mapping canonical capability contracts to preconfigured fixed argv.
 #[derive(Debug, Clone)]
 pub struct ConfiguredCommandBackend {
     /// Whitelisted operation mappings owned by local configuration.
-    commands: BTreeMap<OperationRef, Vec<String>>,
+    commands: BTreeMap<CapabilityContractRef, Vec<String>>,
 }
 
 impl ConfiguredCommandBackend {
     /// Validates and stores a whitelist of fixed local commands.
-    pub fn new(commands: BTreeMap<OperationRef, Vec<String>>) -> Result<Self, BackendError> {
+    pub fn new(
+        commands: BTreeMap<CapabilityContractRef, Vec<String>>,
+    ) -> Result<Self, BackendError> {
         if let Some((operation, _)) = commands.iter().find(|(_, argv)| {
             argv.is_empty() || argv.iter().any(|argument| argument.trim().is_empty())
         }) {
@@ -123,7 +125,7 @@ impl ConfiguredCommandBackend {
 }
 
 impl LocalEaiosBackend for ConfiguredCommandBackend {
-    /// Looks up fixed argv by canonical operation and ignores network parameters in v0.1.
+    /// Looks up fixed argv by canonical capability contract and ignores network parameters in v0.1.
     fn translate(
         &self,
         _context: &LocalExecutionContext,
@@ -131,9 +133,11 @@ impl LocalEaiosBackend for ConfiguredCommandBackend {
     ) -> Result<LocalInvocation, BackendError> {
         let argv = self
             .commands
-            .get(intent.operation())
+            .get(intent.capability_contract())
             .cloned()
-            .ok_or_else(|| BackendError::UnsupportedOperation(intent.operation().clone()))?;
+            .ok_or_else(|| {
+                BackendError::UnsupportedOperation(intent.capability_contract().clone())
+            })?;
         Ok(LocalInvocation { argv })
     }
 }

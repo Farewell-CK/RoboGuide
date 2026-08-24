@@ -2,8 +2,9 @@
 
 use super::*;
 use domain::{
-    Capability, CapabilityKind, CorrelationId, ExecutionGroupId, ExecutionIntent, ExecutionValue,
-    LocalRuntime, MissionId, NodeId, NodeRegistration, OperationRef, RoleId, TaskId,
+    Capability, CapabilityContractRef, CapabilityKind, CorrelationId, ExecutionGroupId,
+    ExecutionIntent, ExecutionValue, LocalRuntime, MissionId, NodeId, NodeRegistration, RoleId,
+    TaskId,
 };
 use ports::NodeGateway;
 use std::collections::BTreeMap;
@@ -19,7 +20,8 @@ fn fake_node_retains_execution_intent() {
         vec![],
     );
     let intent = ExecutionIntent::new(
-        OperationRef::new("observation", "capture", "v1").expect("operation must be valid"),
+        CapabilityContractRef::new("observation", "capture", "v1")
+            .expect("operation must be valid"),
         BTreeMap::from([(
             "camera".to_string(),
             ExecutionValue::String("front".to_string()),

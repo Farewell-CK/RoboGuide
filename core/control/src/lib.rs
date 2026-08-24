@@ -29,7 +29,8 @@ pub use scheduler::{
 
 use coordination::Reservation;
 use domain::{
-    ExecutionGroupId, LeaseId, NodeId, NodeLease, ResourceId, RoleId, TaskRef, TimestampMs,
+    ActorBinding, ActorId, ExecutionGroupId, LeaseId, MissionId, NodeId, NodeLease, ResourceId,
+    RoleId, TaskRef, TimestampMs,
 };
 use ports::SharedStateError;
 use std::collections::BTreeMap;
@@ -164,6 +165,8 @@ pub struct ControlPlane {
     pub(crate) leases: BTreeMap<NodeId, NodeLease>,
     /// Unique resource commitment authority.
     pub(crate) reservations: BTreeMap<ResourceId, Reservation>,
+    /// Mission-scoped actor binding authority, populated only after successful binding.
+    pub(crate) actor_bindings: BTreeMap<(MissionId, ActorId), ActorBinding>,
     /// Dynamic Execution Groups owned by Group Manager.
     pub(crate) groups: BTreeMap<ExecutionGroupId, ExecutionGroup>,
     /// Committed replacement assignments awaiting Consume or Abort.
@@ -191,10 +194,42 @@ impl ControlPlane {
         Self {
             leases: BTreeMap::new(),
             reservations: BTreeMap::new(),
+            actor_bindings: BTreeMap::new(),
             groups: BTreeMap::new(),
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
         }
+    }
+
+    /// Records an actor binding after a successful committed task binding.
+    pub fn bind_actor(
+        &mut self,
+        mission_id: MissionId,
+        actor_id: ActorId,
+        node_id: NodeId,
+    ) -> Result<(), ControlError> {
+        let key = (mission_id.clone(), actor_id.clone());
+        if let Some(existing) = self.actor_bindings.get(&key) {
+            if existing.node_id() != &node_id {
+                return Err(ControlError::InvalidProposal(
+                    "mission actor is already bound to another node".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        self.actor_bindings
+            .insert(key, ActorBinding::new(mission_id, actor_id, node_id));
+        Ok(())
+    }
+
+    /// Returns the authoritative binding for one mission actor, if any.
+    pub fn actor_binding(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+    ) -> Option<&ActorBinding> {
+        self.actor_bindings
+            .get(&(mission_id.clone(), actor_id.clone()))
     }
 }
 

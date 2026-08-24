@@ -4,16 +4,33 @@
   "title": "RoboGuide MissionPlan v0.1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "mission", "tasks"],
+  "required": [
+    "schema_version",
+    "mission",
+    "tasks"
+  ],
   "properties": {
-    "schema_version": {"type": "string", "const": "roboguide.mission-plan/v0.1"},
+    "schema_version": {
+      "type": "string",
+      "const": "roboguide.mission-plan/v0.1"
+    },
     "mission": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "objective"],
+      "required": [
+        "id",
+        "objective"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
-        "objective": {"type": "string", "minLength": 1}
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "tasks": {
@@ -22,14 +39,30 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "description", "depends_on", "roles"],
+        "required": [
+          "id",
+          "description",
+          "depends_on",
+          "roles"
+        ],
         "properties": {
-          "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
-          "description": {"type": "string", "minLength": 1},
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
           "depends_on": {
             "type": "array",
             "uniqueItems": true,
-            "items": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"}
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            }
           },
           "roles": {
             "type": "array",
@@ -37,35 +70,109 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["id", "capability", "resource_kind", "execution"],
+              "required": [
+                "id",
+                "actor",
+                "capability",
+                "contract",
+                "resource_kind",
+                "execution"
+              ],
               "properties": {
-                "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                },
                 "capability": {
                   "type": "string",
-                  "enum": ["mobility", "transport", "compute", "observation"]
+                  "enum": [
+                    "mobility",
+                    "transport",
+                    "compute",
+                    "observation"
+                  ]
                 },
                 "resource_kind": {
-                  "type": ["string", "null"],
-                  "enum": ["space", "compute", "time", null]
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "space",
+                    "compute",
+                    "time",
+                    null
+                  ]
                 },
                 "execution": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["operation", "parameters"],
+                  "required": [
+                    "capability_contract",
+                    "parameters"
+                  ],
                   "properties": {
-                    "operation": {
+                    "capability_contract": {
                       "type": "object",
                       "additionalProperties": false,
-                      "required": ["namespace", "name", "version"],
+                      "required": [
+                        "namespace",
+                        "name",
+                        "version"
+                      ],
                       "properties": {
-                        "namespace": {"type": "string", "minLength": 1},
-                        "name": {"type": "string", "minLength": 1},
-                        "version": {"type": "string", "minLength": 1}
+                        "namespace": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "string",
+                          "minLength": 1
+                        }
                       }
                     },
                     "parameters": {
                       "type": "object",
-                      "additionalProperties": {"type": ["boolean", "integer", "number", "string"]}
+                      "additionalProperties": {
+                        "type": [
+                          "boolean",
+                          "integer",
+                          "number",
+                          "string"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "actor": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "contract": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "namespace",
+                    "name",
+                    "version"
+                  ],
+                  "properties": {
+                    "namespace": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 }

@@ -2,8 +2,8 @@
 
 use crate::http::HttpAdapterError;
 use domain::{
-    Capability, CapabilityKind, LocalRuntime, NODE_CONTRACT_VERSION_V0_1, NodeContractVersion,
-    NodeId, NodeRegistration, Resource, ResourceId, ResourceKind,
+    Capability, CapabilityContractRef, CapabilityKind, LocalRuntime, NODE_CONTRACT_VERSION_V0_1,
+    NodeContractVersion, NodeId, NodeRegistration, Resource, ResourceId, ResourceKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,18 @@ struct WireResource {
     capacity: u32,
 }
 
+/// HTTP representation of an executable canonical capability contract.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireCapabilityContract {
+    /// Contract namespace.
+    namespace: String,
+    /// Contract operation name.
+    name: String,
+    /// Contract semantic version.
+    version: String,
+}
+
 /// Versioned HTTP registration response.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -51,6 +63,9 @@ pub(crate) struct WireRegistration {
     local_runtime: WireLocalRuntime,
     /// Exposed coarse capabilities.
     capabilities: Vec<WireCapability>,
+    /// Canonical contracts executable by the node adapter.
+    #[serde(default)]
+    supported_contracts: Vec<WireCapabilityContract>,
     /// Exposed reservable resources.
     resources: Vec<WireResource>,
 }
@@ -89,7 +104,15 @@ impl TryFrom<WireRegistration> for NodeRegistration {
                 .map_err(|error| HttpAdapterError::protocol(error.to_string()))
             })
             .collect::<Result<Vec<_>, HttpAdapterError>>()?;
-        Ok(Self::new(
+        let supported_contracts = registration
+            .supported_contracts
+            .into_iter()
+            .map(|contract| {
+                CapabilityContractRef::new(contract.namespace, contract.name, contract.version)
+                    .map_err(|error| HttpAdapterError::protocol(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::new_with_contracts(
             NodeId::new(registration.node_id)
                 .map_err(|error| HttpAdapterError::protocol(error.to_string()))?,
             LocalRuntime::new(
@@ -99,6 +122,7 @@ impl TryFrom<WireRegistration> for NodeRegistration {
             .map_err(|error| HttpAdapterError::protocol(error.to_string()))?,
             NodeContractVersion::v0_1(),
             capabilities,
+            supported_contracts,
             resources,
         ))
     }

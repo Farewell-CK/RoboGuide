@@ -74,3 +74,13 @@ def test_unknown_contract_field_is_rejected() -> None:
     raw["provider_metadata"] = {}
     with pytest.raises(MissionPlanError, match="keys mismatch"):
         MissionPlan.from_json(raw)
+
+
+def test_role_contract_must_match_execution_contract() -> None:
+    """A role cannot declare one executable contract and invoke another."""
+    raw = _fixture_json()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    roles[0]["contract"] = {"namespace": "camera", "name": "capture", "version": "v1"}
+    with pytest.raises(MissionPlanError, match="differs"):
+        MissionPlan.from_json(raw)

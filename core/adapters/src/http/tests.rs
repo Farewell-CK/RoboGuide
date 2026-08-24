@@ -3,8 +3,8 @@
 use super::client::HttpTransport;
 use super::*;
 use domain::{
-    CorrelationId, ExecutionCommand, ExecutionGroupId, ExecutionIntent, ExecutionValue, MissionId,
-    NodeEvent, NodeHealth, OperationRef, RoleId, TaskId,
+    CapabilityContractRef, CorrelationId, ExecutionCommand, ExecutionGroupId, ExecutionIntent,
+    ExecutionValue, MissionId, NodeEvent, NodeHealth, RoleId, TaskId,
 };
 use ports::{NodeGateway, NodeGatewayErrorKind};
 use serde_json::{Value, json};
@@ -91,7 +91,7 @@ fn command() -> ExecutionCommand {
 /// Builds one canonical execution command for a specified logical node.
 fn command_for(node_id: &str) -> ExecutionCommand {
     let intent = ExecutionIntent::new(
-        OperationRef::new("mobility", "move", "v1").expect("operation must be valid"),
+        CapabilityContractRef::new("mobility", "move", "v1").expect("operation must be valid"),
         BTreeMap::from([
             (
                 "destination".to_string(),
@@ -171,8 +171,11 @@ fn execute_intent_wire_round_trip_and_completion_conversion() {
     let request: Value = serde_json::from_str(&state.borrow().posted_bodies[0])
         .expect("captured execute request must be JSON");
     assert_eq!(request["schema_version"], "roboguide.node.v0.1");
-    assert_eq!(request["intent"]["operation"]["namespace"], "mobility");
-    assert_eq!(request["intent"]["operation"]["name"], "move");
+    assert_eq!(
+        request["intent"]["capability_contract"]["namespace"],
+        "mobility"
+    );
+    assert_eq!(request["intent"]["capability_contract"]["name"], "move");
     assert_eq!(request["intent"]["parameters"]["destination"], "zone-b");
 }
 
@@ -284,7 +287,7 @@ fn transport_timeout_is_preserved() {
 #[test]
 fn malformed_parameter_payload_is_rejected() {
     let source = json!({
-        "operation": {"namespace": "mobility", "name": "move", "version": "v1"},
+        "capability_contract": {"namespace": "mobility", "name": "move", "version": "v1"},
         "parameters": {"target": {"x": 1, "y": 2}}
     })
     .to_string();

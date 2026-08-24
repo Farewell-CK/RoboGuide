@@ -1,5 +1,5 @@
 {
-  "operation": {
+  "capability_contract": {
     "namespace": "system",
     "name": "ping",
     "version": "v1"

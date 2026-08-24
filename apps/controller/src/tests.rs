@@ -5,7 +5,7 @@ use domain::{EventPayload, NodeEvent, RoleAssignment, TaskRef};
 /// Builds a canonical no-parameter intent for command-routing assertions.
 fn test_intent(namespace: &str, name: &str) -> ExecutionIntent {
     ExecutionIntent::new(
-        OperationRef::new(namespace, name, "v1").expect("test operation must be valid"),
+        CapabilityContractRef::new(namespace, name, "v1").expect("test operation must be valid"),
         BTreeMap::new(),
     )
     .expect("test intent must be valid")

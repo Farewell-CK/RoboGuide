@@ -10,11 +10,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
+mod actor;
 mod allocation;
 mod execution;
 
+pub use actor::{ActorBinding, MissionActor};
 pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
-pub use execution::{ExecutionIntent, ExecutionValue, OperationRef};
+pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 
 /// Version identifier for the first cross-language Mission Plan contract.
 pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
@@ -104,6 +106,11 @@ define_identifier!(
     "mission"
 );
 define_identifier!(TaskId, "Identifies a task within a mission.", "task");
+define_identifier!(
+    ActorId,
+    "Identifies a logical execution actor within a mission.",
+    "actor"
+);
 define_identifier!(NodeId, "Identifies a logical execution node.", "node");
 define_identifier!(
     RoleId,
@@ -399,6 +406,10 @@ pub struct RoleRequirement {
     role_id: RoleId,
     /// Capability category needed to perform the role.
     capability: CapabilityKind,
+    /// Optional mission actor whose node binding must remain continuous across tasks.
+    actor_id: Option<ActorId>,
+    /// Exact canonical capability contract required by the role.
+    contract: Option<CapabilityContractRef>,
     /// Optional resource category that must be bound to the role.
     resource_kind: Option<ResourceKind>,
 }
@@ -413,6 +424,25 @@ impl RoleRequirement {
         Self {
             role_id,
             capability,
+            actor_id: None,
+            contract: None,
+            resource_kind,
+        }
+    }
+
+    /// Creates a role requirement with mission actor continuity and an exact contract.
+    pub fn new_with_actor_and_contract(
+        role_id: RoleId,
+        actor_id: ActorId,
+        capability: CapabilityKind,
+        contract: CapabilityContractRef,
+        resource_kind: Option<ResourceKind>,
+    ) -> Self {
+        Self {
+            role_id,
+            capability,
+            actor_id: Some(actor_id),
+            contract: Some(contract),
             resource_kind,
         }
     }
@@ -425,6 +455,16 @@ impl RoleRequirement {
     /// Returns the required capability.
     pub const fn capability(&self) -> CapabilityKind {
         self.capability
+    }
+
+    /// Returns the mission actor, when this role participates in continuity.
+    pub fn actor_id(&self) -> Option<&ActorId> {
+        self.actor_id.as_ref()
+    }
+
+    /// Returns the exact canonical contract, when declared.
+    pub fn required_contract(&self) -> Option<&CapabilityContractRef> {
+        self.contract.as_ref()
     }
 
     /// Returns the optional resource category required by this role.
@@ -568,6 +608,22 @@ impl PlannedTask {
                     requirement.task_id()
                 ),
             });
+        }
+        for role in requirement.roles() {
+            if let Some(contract) = role.required_contract() {
+                let intent = execution_intents
+                    .get(role.role_id())
+                    .expect("role set validated");
+                if intent.capability_contract() != contract {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "task {} role {} contract differs from execution intent",
+                            requirement.task_id(),
+                            role.role_id()
+                        ),
+                    });
+                }
+            }
         }
         Ok(Self {
             description,
@@ -718,6 +774,26 @@ impl MissionPlan {
             });
         }
         Ok(Self { goal, task_graph })
+    }
+
+    /// Aggregates all actor capability and exact-contract requirements across the Task Graph.
+    pub fn actor_requirements(
+        &self,
+    ) -> BTreeMap<ActorId, Vec<(CapabilityKind, CapabilityContractRef)>> {
+        let mut requirements: BTreeMap<ActorId, Vec<(CapabilityKind, CapabilityContractRef)>> =
+            BTreeMap::new();
+        for task in self.task_graph.tasks() {
+            for role in task.requirement().roles() {
+                if let (Some(actor), Some(contract)) = (role.actor_id(), role.required_contract()) {
+                    let entry = requirements.entry(actor.clone()).or_default();
+                    let item = (role.capability(), contract.clone());
+                    if !entry.contains(&item) {
+                        entry.push(item);
+                    }
+                }
+            }
+        }
+        requirements
     }
 
     /// Returns the versioned adapter contract represented by this domain shape.
@@ -945,6 +1021,8 @@ pub struct NodeRegistration {
     contract_version: NodeContractVersion,
     /// Capabilities currently advertised by the node.
     capabilities: Vec<Capability>,
+    /// Canonical capability contracts executable through this node's adapter boundary.
+    supported_contracts: Vec<CapabilityContractRef>,
     /// Resources currently advertised by the node.
     resources: Vec<Resource>,
 }
@@ -958,11 +1036,31 @@ impl NodeRegistration {
         capabilities: Vec<Capability>,
         resources: Vec<Resource>,
     ) -> Self {
+        Self::new_with_contracts(
+            node_id,
+            local_runtime,
+            contract_version,
+            capabilities,
+            Vec::new(),
+            resources,
+        )
+    }
+
+    /// Creates a registration with coarse capabilities and executable canonical contracts.
+    pub fn new_with_contracts(
+        node_id: NodeId,
+        local_runtime: LocalRuntime,
+        contract_version: NodeContractVersion,
+        capabilities: Vec<Capability>,
+        supported_contracts: Vec<CapabilityContractRef>,
+        resources: Vec<Resource>,
+    ) -> Self {
         Self {
             node_id,
             local_runtime,
             contract_version,
             capabilities,
+            supported_contracts,
             resources,
         }
     }
@@ -987,6 +1085,11 @@ impl NodeRegistration {
         &self.capabilities
     }
 
+    /// Returns canonical capability contracts exposed by this node.
+    pub fn supported_contracts(&self) -> &[CapabilityContractRef] {
+        &self.supported_contracts
+    }
+
     /// Returns the node's advertised resources.
     pub fn resources(&self) -> &[Resource] {
         &self.resources
@@ -997,12 +1100,17 @@ impl NodeRegistration {
         let has_capability = self.capabilities.iter().any(|capability| {
             capability.kind() == requirement.capability() && capability.is_available()
         });
+        let has_contract = requirement.required_contract().is_none_or(|contract| {
+            self.supported_contracts
+                .iter()
+                .any(|supported| supported == contract)
+        });
         let has_resource = requirement.resource_kind().is_none_or(|kind| {
             self.resources
                 .iter()
                 .any(|resource| resource.kind() == kind && resource.capacity() > 0)
         });
-        has_capability && has_resource
+        has_capability && has_contract && has_resource
     }
 
     /// Returns all resource identifiers of the requested category.
@@ -1181,7 +1289,7 @@ impl ExecutionCommand {
         &self.node_id
     }
 
-    /// Returns the canonical operation request for the local EAIOS adapter.
+    /// Returns the canonical capability contract request for the local EAIOS adapter.
     pub const fn intent(&self) -> &ExecutionIntent {
         &self.intent
     }
@@ -1476,7 +1584,8 @@ mod tests {
             .expect("test requirement must be valid");
         let role_id = requirement.roles()[0].role_id().clone();
         let intent = ExecutionIntent::new(
-            OperationRef::new("mobility", "move", "v1").expect("test operation must be valid"),
+            CapabilityContractRef::new("mobility", "move", "v1")
+                .expect("test operation must be valid"),
             BTreeMap::new(),
         )
         .expect("test intent must be valid");

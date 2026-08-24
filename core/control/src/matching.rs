@@ -69,6 +69,36 @@ impl CandidateSet {
 }
 
 impl ControlPlane {
+    /// Matches a task while reusing an existing mission actor binding as a singleton candidate.
+    pub fn match_capabilities_with_actor_bindings<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        requirement: &TaskRequirement,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CandidateSet, ControlError> {
+        let mut candidates =
+            self.match_capabilities(state, requirement, timestamp, correlation_id, events)?;
+        for role in requirement.roles() {
+            if let Some(actor_id) = role.actor_id()
+                && let Some(binding) = self.actor_binding(requirement.mission_id(), actor_id)
+            {
+                let role_candidates = candidates
+                    .roles
+                    .iter_mut()
+                    .find(|candidate| candidate.role_id() == role.role_id())
+                    .expect("candidate exists for every role");
+                if !role_candidates.node_ids().contains(binding.node_id()) {
+                    return Err(ControlError::NoCandidate(role.role_id().clone()));
+                }
+                *role_candidates =
+                    RoleCandidates::new(role.role_id().clone(), vec![binding.node_id().clone()]);
+            }
+        }
+        Ok(candidates)
+    }
+
     /// Matches every task role against currently eligible node facts.
     pub fn match_capabilities<S: SharedNodeStateReader, E: EventSink>(
         &self,

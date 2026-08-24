@@ -9,10 +9,10 @@ use control::{
     RecoverySchedulingOutcome,
 };
 use domain::{
-    AllocationPhase, Capability, CapabilityKind, CorrelationId, EventRecord, ExecutionCommand,
-    ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
-    MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth, NodeId, NodeRegistration,
-    NodeStatus, OperationRef, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
+    ActorId, AllocationPhase, Capability, CapabilityContractRef, CapabilityKind, CorrelationId,
+    EventRecord, ExecutionCommand, ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime,
+    MISSION_PLAN_SCHEMA_V0_1, MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth,
+    NodeId, NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
     RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
@@ -64,6 +64,10 @@ struct TaskDocument {
 struct RoleDocument {
     /// Stable role identity.
     id: String,
+    /// Mission-scoped logical actor identity.
+    actor: String,
+    /// Exact canonical capability contract required by this role.
+    contract: OperationDocument,
     /// Capability category required by the role.
     capability: CapabilityDocument,
     /// Optional shared resource category required by the role.
@@ -76,13 +80,13 @@ struct RoleDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExecutionDocument {
-    /// Canonical operation identity independent of local skills.
-    operation: OperationDocument,
+    /// Canonical canonical capability contract identity independent of local skills.
+    capability_contract: OperationDocument,
     /// Scalar parameters interpreted by the target adapter or local EAIOS.
     parameters: BTreeMap<String, serde_json::Value>,
 }
 
-/// JSON adapter document for one canonical operation reference.
+/// JSON adapter document for one canonical capability contract reference.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OperationDocument {
@@ -163,21 +167,33 @@ fn build_registration(
 ) -> Result<NodeRegistration, String> {
     let node_id = NodeId::new(node_name).map_err(|error| error.to_string())?;
     let runtime = LocalRuntime::new(runtime_name, "0.1.0").map_err(|error| error.to_string())?;
-    Ok(NodeRegistration::new(
+    let supported_contracts = capabilities
+        .iter()
+        .filter_map(|capability| {
+            let (namespace, name) = match capability.kind() {
+                CapabilityKind::Mobility | CapabilityKind::Transport => ("mobility", "move"),
+                CapabilityKind::Compute => ("compute", "infer"),
+                CapabilityKind::Observation => ("observation", "capture"),
+            };
+            CapabilityContractRef::new(namespace, name, "v1").ok()
+        })
+        .collect();
+    Ok(NodeRegistration::new_with_contracts(
         node_id,
         runtime,
         NodeContractVersion::v0_1(),
         capabilities,
+        supported_contracts,
         resources,
     ))
 }
 
 /// Converts one wire execution document into transport-neutral domain values.
 fn execution_intent(document: ExecutionDocument) -> Result<ExecutionIntent, String> {
-    let operation = OperationRef::new(
-        document.operation.namespace,
-        document.operation.name,
-        document.operation.version,
+    let operation = CapabilityContractRef::new(
+        document.capability_contract.namespace,
+        document.capability_contract.name,
+        document.capability_contract.version,
     )
     .map_err(|error| error.to_string())?;
     let parameters = document
@@ -229,9 +245,17 @@ fn load_mission_plan() -> Result<MissionPlan, String> {
             for role in task.roles {
                 let role_id = RoleId::new(role.id).map_err(|error| error.to_string())?;
                 let intent = execution_intent(role.execution)?;
-                roles.push(RoleRequirement::new(
+                let contract = CapabilityContractRef::new(
+                    role.contract.namespace,
+                    role.contract.name,
+                    role.contract.version,
+                )
+                .map_err(|error| error.to_string())?;
+                roles.push(RoleRequirement::new_with_actor_and_contract(
                     role_id.clone(),
+                    ActorId::new(role.actor).map_err(|error| error.to_string())?,
                     role.capability.into(),
+                    contract,
                     role.resource_kind.map(Into::into),
                 ));
                 execution_intents.insert(role_id, intent);

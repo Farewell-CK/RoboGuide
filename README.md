@@ -64,7 +64,7 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - DEAIOS 与本地 EAIOS/厂商运行时的语义边界由
   [`ADR-0002`](docs/decisions/0002-deaios-node-contract.md) 记录，当前状态为
   `Proposed for MVP Slice v0.1`。
-- 通用异构 EAIOS 接入、canonical operation 与 Local Skill 映射由
+- 通用异构 EAIOS 接入、canonical capability contract 与 Local Skill 映射由
   [`ADR-0006`](docs/decisions/0006-heterogeneous-eaios-integration-contract.md) 记录。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
@@ -167,7 +167,7 @@ exhaustion policy。
 
 ### Heterogeneous EAIOS Integration Contract v0.1
 
-`ExecutionIntent` 以可扩展 `OperationRef(namespace, name, version)` 和稳定 scalar parameter
+`ExecutionIntent` 以可扩展 `CapabilityContractRef(namespace, name, version)` 和稳定 scalar parameter
 map 表达 `What to execute`。它不使用 enum 固化 operation，也不携带厂商 Skill、ROS action、
 SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式关联；Matching 与
 Scheduler 不解析 intent，Runtime 只路由，Adapter/Local EAIOS 负责翻译成 Local How。
@@ -177,7 +177,7 @@ Scheduler 不解析 intent，Runtime 只路由，Adapter/Local EAIOS 负责翻�
 reported `Offline`，Runtime 保留旧 reported health 并记录 liveness `Unreachable`。
 
 `core/adapters::http::HttpNodeGateway` 是第一份同步 HTTP/JSON reference transport；wire DTO
-与 serde 只存在于 adapter crate。`ConfiguredCommandBackend` 仅允许 canonical operation
+与 serde 只存在于 adapter crate。`ConfiguredCommandBackend` 仅允许 canonical capability contract
 查找本地预配置 fixed argv，不接受网络 executable，也不拼 shell。HTTP 不是 Node Contract；
 异步 Accepted/Started/Completed lifecycle、operation catalog/discovery 与真实设备 backend
 仍未实现。合同见 [`contracts/node/v0.1/`](contracts/node/v0.1/)。
