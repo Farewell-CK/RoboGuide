@@ -1,5 +1,7 @@
 # RoboGuide Node Contract v0.1
 
+> Historical artifact. Production Server and Node Service compile and serve v0.2 only.
+
 This directory owns RoboGuide Node Protocol v0.1. `roboguide-node.proto` is the formal gRPC
 bidirectional streaming contract. The older HTTP paths below remain reference/debug bindings of
 the same transport-neutral Node Contract and are not the production session transport.

@@ -34,6 +34,16 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 可被发现、能够执行任务或提供资源的系统参与者。节点类型可以包括 Robot、
 Perception、Interaction、Compute 和 Infrastructure Node。Node 不等同于 Robot。
 
+每台参与节点机器运行一个通用 `roboguide-node`，作为 RoboGuide Runtime 在该机器上的
+接入端。它通过 Node Protocol 主动连接 RoboGuide Server，并在进程内部使用声明式
+Local Integration Engine 连接一个或多个 Local Embodied Systems。Adapter 是该引擎的
+配置与驱动职责，不是每种 EAIOS 各自部署的 RoboGuide 服务或编译期插件。
+
+Local Integration Engine 只执行部署者提供的、启动时完整校验的本地配置。配置声明
+Local System、Capability、Sensor、Resource、固定 Endpoint、受限字段映射和执行生命
+周期；不得把厂商 SDK、ROS Topic、Atlas/Pilot 等 Local How 提升为全局协议或 Control
+语义。新增 Local EAIOS 不修改或重新编译 RoboGuide Server 与 `roboguide-node`。
+
 ### Capability 与 Resource
 
 Capability 描述 Node 当前能够执行什么；静态能力支持不代表运行时一定可用。
@@ -100,6 +110,10 @@ Group 专属上下文默认不向全局广播。
 Runtime 定义与具体传输无关的 Discovery、Messaging、Invocation、Heartbeat、
 Lease、Adapter 和 Diagnostics 语义。DDS、ROS 2、gRPC、MQTT、数据库和序列化
 方式仍属于实现选型。
+
+节点侧部署边界固定为单一 `roboguide-node` 服务。其 Local Integration Engine 可内置
+多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行
+状态下自动切换本地系统或重放动作。
 
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、

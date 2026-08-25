@@ -165,22 +165,24 @@ Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit�
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
 
-### Heterogeneous EAIOS Integration Contract v0.1
+### Heterogeneous EAIOS Integration Contract v0.2
 
 `ExecutionIntent` 以可扩展 `CapabilityContractRef(namespace, name, version)` 和稳定 scalar parameter
 map 表达 `What to execute`。它不使用 enum 固化 operation，也不携带厂商 Skill、ROS action、
 SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式关联；Matching 与
-Scheduler 不解析 intent，Runtime 只路由，Adapter/Local EAIOS 负责翻译成 Local How。
+Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integration Engine 负责
+将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
-`NodeGateway` 保持 transport-neutral，registration 显式声明 `roboguide.node.v0.1`，fallible
-`status()` 可报告 timeout/unavailable/protocol/rejected。status transport failure 不伪造
-reported `Offline`，Runtime 保留旧 reported health 并记录 liveness `Unreachable`。
+正式 gRPC Node Protocol v0.2 支持一个 Node 聚合多个 Local System，所有 Capability、
+Sensor 和 Resource 都保留唯一 owner；Execute 携带 Control 已 Commit 的 resource IDs。
+`execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
 
 `core/adapters::http::HttpNodeGateway` 是第一份同步 HTTP/JSON reference transport；wire DTO
 与 serde 只存在于 adapter crate。`ConfiguredCommandBackend` 仅允许 canonical capability contract
 查找本地预配置 fixed argv，不接受网络 executable，也不拼 shell。HTTP 不是 Node Contract；
-异步 Accepted/Started/Completed lifecycle、operation catalog/discovery 与真实设备 backend
-仍未实现。合同见 [`contracts/node/v0.1/`](contracts/node/v0.1/)。
+该旧 HTTP probe 不是正式 Node Protocol。异步 lifecycle、配置驱动执行、SQLite journal、
+heartbeat/lease 与 session fencing 由 `roboguide-node`/Integration Server 实现。合同见
+[`contracts/node/v0.2/`](contracts/node/v0.2/)。
 
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081
@@ -303,7 +305,7 @@ Detect → Reconcile → Adapt
 
 恢复目标不是盲目重放旧命令，而是在当前物理世界中恢复任务进展，并且只升级到必要层级。
 
-## 启动 Node Protocol v0.1
+## 启动 Node Protocol v0.2
 
 Server 使用正式 gRPC bidirectional streaming：
 
@@ -318,19 +320,13 @@ cargo run -p roboguide-node -- config/node.toml
 ```
 
 `server_endpoint` 是节点主动连接的可达地址，例如
-`http://192.168.1.10:50051`。当前仓库提供 `fake` reference adapter；真实 Local EAIOS
-通过 `LocalEaiosAdapter` 接入，不修改 Node Service 或 Node Protocol。
+`http://192.168.1.10:50051`。每台节点机器只运行一个 `roboguide-node`；配置可聚合多个
+Local EAIOS/runtime，并用固定的 HTTP、dynamic gRPC 或 MCP workflow 描述能力、资源、
+状态与取消。新增 Local EAIOS 只修改本地配置，不修改或重新编译 RoboGuide。
 
-Robonix 节点使用 `config/node-robonix.toml`，并要求本机 Robonix Python SDK 与生成的
-contract stubs 已安装、Atlas/Scene/Navigation 已由 `rbnx boot` 启动：
-
-```bash
-cargo run -p roboguide-node -- config/node-robonix.toml
-```
-
-Node Service 启动一个常驻的 local-only Robonix helper，并在整个进程生命周期复用 Atlas
-与 capability gRPC clients。Navigation cancel accepted 不会直接上报任务已取消；最终
-`Cancelled` 仅来自后续 Robonix `CANCELED` 状态。
+配置启动时整体校验并冻结。执行前写入 SQLite WAL journal；进程重启后无法确认是否已
+触发的物理动作进入 ReconciliationRequired，绝不自动重放。Node 本地资源锁不取代
+Control reservation authority。
 
 ## 当前开放问题
 
@@ -349,7 +345,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission.toml
 │   └── node.toml
 ├── contracts/
-│   └── mission/v0/
+│   ├── mission/v0/
+│   └── node/v0.2/
 ├── mission/
 │   ├── src/mission/
 │   ├── prompts/v0/
@@ -364,8 +361,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── state/               # node and allocation projections
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
-│   ├── integration/         # formal gRPC + reference NDJSON transports
-│   ├── node-service/        # node-side lifecycle, config, Local EAIOS Adapter boundary
+│   ├── integration/         # formal gRPC Node Protocol v0.2
+│   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
 ├── apps/
 │   ├── controller/

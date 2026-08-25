@@ -29,9 +29,13 @@ core/
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
   state/                   已实现 Shared Node State 与 Allocation State v0.1
   adapters/                已实现 generic HTTP reference adapter 与 backend mapping
+  integration/             正式 gRPC Node Protocol v0.2 与 Runtime composition bridge
+  node-service/            单一 Node Service、声明式本地引擎和 durable journal
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
   controller/              组合根和进程生命周期
+  integration-server/      多 Node gRPC session composition root
+  roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
   real-node-smoke/         通用 Node Contract probe 与显式 intent invocation
 mission/
   src/mission/             Mission 规划、合同校验和模型适配器
@@ -66,38 +70,40 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
 | Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
 | State | 当前切片维护 Shared Node State 与非权威 Allocation View | 调度决策、Lease authority、Reservation commitment、Group lifecycle、Belief 或 Memory |
-| Adapters | 协议、仿真器、存储、模型、ROS 和厂商转换 | 核心策略决策 |
+| Adapters | Server-side reference protocol、存储和模型 binding | 核心策略决策、具体 Local EAIOS 产品分支 |
+| Integration | gRPC Node Protocol、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
+| Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide Adapter 服务 |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 
 允许的 Rust 依赖方向：
 
 ```text
-apps -> control/runtime/state/adapters -> ports -> domain
+apps -> node-service -> integration -> control/state -> ports -> domain
+apps -> runtime/adapters -> ports -> domain
 ```
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
-Python；Python 通过 Adapter 边界与核心通信。
+Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。
 
-### Heterogeneous EAIOS Integration Contract v0.1
+### Heterogeneous EAIOS Integration Contract v0.2
 
 Domain `ExecutionIntent` 将 canonical `OperationRef` 与 scalar parameters 绑定到
 `PlannedTask` 的具体 Role；它与 RoleRequirement、Node assignment 和本地 Skill 名分离。
-Matching/Scheduler 不解析 intent，Runtime 不翻译 intent，Node Adapter/Local EAIOS 才将
-canonical operation 映射为本地 Skill、Service、Primitive 或厂商 API。
+Matching/Scheduler 不解析 intent，Runtime 不翻译 intent。单一 `roboguide-node` 内的声明式
+Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP workflow 完成本地映射。
 
 `NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含 HTTP
 类型。`core/adapters/http` 独占 reqwest、serde 和 JSON DTO；registration/status/execute wire
 conversion 分模块实现。status 失败时 Runtime 只更新 liveness `Unreachable`，不会覆盖本地
 系统最后上报的 health。`SystemMonotonicClock` 为真实进程提供 RoboGuide-local receive time。
 
-`ConfiguredCommandBackend` 只映射 canonical operation 到本地白名单 fixed argv，不使用
-`shell=true`，不允许网络输入指定 executable，也不把 parameters 拼成 shell。参数化真实
-Skill 调用由后续具体 EAIOS backend 实现。
+每个 canonical capability 在 Node 配置内只有一个 local-system owner；endpoint、method、
+tool 和 descriptor 都由本地配置固定，网络输入只能进入受限 JSON Pointer/白名单函数映射。
+SQLite WAL journal 在本地 dispatch 前持久化 execution identity，Unknown 不自动重放。
 
 `apps/real-node-smoke` 默认仅 probe；真实 action 必须显式提供 `--execute --intent FILE`。
-当前同步 invocation、HTTP reference transport 和 fixture smoke 不是 real-device verification。
-异步 execution lifecycle、operation catalog/discovery、认证、重试及真实 backend 延后。
+同步 HTTP reference probe 仍不是 real-device verification，也不构成 v0.2 Node Protocol。
 
 ### State & Memory Plane — Slice v0.1: Shared Node State
 

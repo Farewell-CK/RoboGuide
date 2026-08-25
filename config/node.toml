@@ -1,8 +1,159 @@
+schema = "roboguide.node-config/v0.2"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
+state_directory = "node-state"
 reconnect_delay_ms = 1000
 
-[adapter]
-type = "fake"
-runtime_name = "reference-local-eaios"
+[[local_systems]]
+id = "local-runtime"
+runtime_name = "local-eaios"
 runtime_version = "0.1.0"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "runtime-health"
+connection = "local-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[local_systems]]
+id = "local-sensors"
+runtime_name = "sensor-runtime"
+runtime_version = "1.0.0"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "sensor-health"
+connection = "sensor-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "local-http"
+local_system = "local-runtime"
+endpoint = "http://127.0.0.1:8081"
+timeout_ms = 5000
+
+[[connections]]
+driver = "http"
+id = "sensor-http"
+local_system = "local-sensors"
+endpoint = "http://127.0.0.1:8082"
+timeout_ms = 5000
+
+[[capabilities]]
+contract = "compute.noop@v1"
+kind = "compute"
+owner = "local-runtime"
+required_resources = ["compute-slot"]
+local_locks = ["noop-executor"]
+
+[[resources]]
+id = "compute-slot"
+kind = "compute"
+capacity = 1
+owner = "local-runtime"
+
+[[sensors]]
+id = "front-camera"
+kind = "rgb-camera"
+owner = "local-sensors"
+
+[capabilities.workflow]
+poll_interval_ms = 250
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[capabilities.workflow.execute]]
+id = "dispatch"
+connection = "local-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[capabilities.workflow.execute.request]
+base = {}
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.status]]
+id = "status"
+connection = "local-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "cancel"
+connection = "local-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"

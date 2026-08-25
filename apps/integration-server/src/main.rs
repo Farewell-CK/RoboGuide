@@ -4,7 +4,7 @@
 
 //! RoboGuide Integration Server process.
 
-use integration::grpc::v0_1::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
 use integration::{GrpcIntegrationService, IntegrationRuntimeBridge};
 use ports::{Clock, EventSink};
 use std::sync::{Arc, Mutex};
@@ -49,8 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("static correlation id is valid");
         let clock = runtime::SystemMonotonicClock::new();
         while let Some(event) = receiver.recv().await {
-            if let Ok(mut bridge) = bridge.lock() {
-                let _ = bridge.consume(event, clock.now(), &correlation);
+            if let Ok(mut bridge) = bridge.lock()
+                && let Err(error) = bridge.consume(event, clock.now(), &correlation)
+            {
+                eprintln!("integration fact rejected by Runtime/Control: {error}");
             }
         }
     });

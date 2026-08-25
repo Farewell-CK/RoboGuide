@@ -21,3 +21,4 @@ build/
 artifacts/
 results/
 logs/
+/config/node-state/

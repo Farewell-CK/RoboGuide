@@ -24,6 +24,7 @@
 - [`decisions/0007-mission-actor-continuity.md`](decisions/0007-mission-actor-continuity.md)：Mission Actor 跨 Task 连续绑定与版本策略。
 - [`decisions/0008-integration-server-node-connector.md`](decisions/0008-integration-server-node-connector.md)：Integration Server 与 Node Connector 长连接协议。
 - [`decisions/0009-node-service-grpc-protocol.md`](decisions/0009-node-service-grpc-protocol.md)：正式 gRPC Node Protocol 与节点侧 Node Service/Adapter 边界。
+- [`decisions/0010-single-node-service-local-integration-engine.md`](decisions/0010-single-node-service-local-integration-engine.md)：单一 Node Service、声明式 Local Integration Engine 与本地执行日志。
 
 ## 历史架构
 

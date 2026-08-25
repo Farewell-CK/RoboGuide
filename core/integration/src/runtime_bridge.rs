@@ -1,14 +1,14 @@
 //! Composition bridge from formal Node Protocol facts into Runtime/Control/State semantics.
 
-use crate::grpc::v0_1::node_message::Message as NodePayload;
-use crate::grpc::v0_1::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
+use crate::grpc::v0_2::node_message::Message as NodePayload;
+use crate::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
 use crate::{GrpcNodeEvent, GrpcNodeRouter};
 use control::ControlPlane;
 use domain::{
     Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
-    ExecutionCommand, ExecutionValue, LeaseId, LocalRuntime, NodeContractVersion, NodeEvent,
-    NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus, Resource, ResourceId, ResourceKind,
-    TimestampMs,
+    ExecutionCommand, ExecutionValue, LeaseId, LocalRuntime, LocalSystemDescriptor, LocalSystemId,
+    NodeContractVersion, NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus,
+    Resource, ResourceId, ResourceKind, SensorDescriptor, SensorId, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateWriter};
 use state::InMemorySharedNodeState;
@@ -43,9 +43,34 @@ pub struct IntegrationRuntimeBridge<E> {
     /// Current formal gRPC Node routes.
     router: GrpcNodeRouter,
     /// Dispatched execution contexts needed to turn terminal facts into NodeEvent.
-    executions: BTreeMap<String, ExecutionCommand>,
+    executions: BTreeMap<String, RoutedExecution>,
     /// Latest execution lifecycle facts.
     execution_status: BTreeMap<String, RemoteExecutionStatus>,
+    /// Last accepted execution-local sequence across sessions and snapshot replay.
+    execution_sequences: BTreeMap<String, u64>,
+}
+
+/// One Runtime command and the Control-committed resources for its bound role.
+#[derive(Debug, Clone, PartialEq)]
+struct RoutedExecution {
+    /// Existing canonical Runtime command.
+    command: ExecutionCommand,
+    /// Stable sorted committed resource identities.
+    resource_ids: Vec<ResourceId>,
+}
+
+/// Validated execution fact context received from one current Node session.
+struct ReceivedExecutionFact<'a> {
+    /// Reporting node identity.
+    node_id: &'a str,
+    /// Stable cross-session execution identity.
+    execution_id: &'a str,
+    /// Execution-local monotonic sequence.
+    sequence: u64,
+    /// Wire execution phase.
+    phase: i32,
+    /// Local diagnostic detail.
+    reason: &'a str,
 }
 
 impl<E: EventSink> IntegrationRuntimeBridge<E> {
@@ -63,6 +88,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             router,
             executions: BTreeMap::new(),
             execution_status: BTreeMap::new(),
+            execution_sequences: BTreeMap::new(),
         }
     }
 
@@ -113,18 +139,24 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                     )?;
                 }
                 Some(NodePayload::ExecutionEvent(event)) => self.consume_execution(
-                    &node_id,
-                    &event.execution_id,
-                    event.phase,
-                    &event.reason,
+                    ReceivedExecutionFact {
+                        node_id: &node_id,
+                        execution_id: &event.execution_id,
+                        sequence: event.sequence,
+                        phase: event.phase,
+                        reason: &event.reason,
+                    },
                     received_at,
                     correlation_id,
                 )?,
                 Some(NodePayload::ExecutionSnapshot(snapshot)) => self.consume_execution(
-                    &node_id,
-                    &snapshot.execution_id,
-                    snapshot.phase,
-                    &snapshot.reason,
+                    ReceivedExecutionFact {
+                        node_id: &node_id,
+                        execution_id: &snapshot.execution_id,
+                        sequence: snapshot.last_sequence,
+                        phase: snapshot.phase,
+                        reason: &snapshot.reason,
+                    },
                     received_at,
                     correlation_id,
                 )?,
@@ -172,9 +204,20 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         &mut self,
         execution_id: String,
         command: ExecutionCommand,
+        mut resource_ids: Vec<ResourceId>,
     ) -> Result<(), IntegrationRuntimeError> {
+        if self.execution_status.contains_key(&execution_id)
+            && !self.executions.contains_key(&execution_id)
+        {
+            return Err(IntegrationRuntimeError::Protocol(
+                "execution was observed during reconnect; reconciliation is required before routing"
+                    .to_string(),
+            ));
+        }
+        resource_ids.sort();
+        resource_ids.dedup();
         if let Some(existing) = self.executions.get(&execution_id) {
-            if existing != &command {
+            if existing.command != command || existing.resource_ids != resource_ids {
                 return Err(IntegrationRuntimeError::ExecutionConflict(execution_id));
             }
             return Ok(());
@@ -183,8 +226,18 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             command.node_id().as_str(),
             execution_id.clone(),
             invocation_from_command(&command),
+            resource_ids
+                .iter()
+                .map(|resource_id| resource_id.as_str().to_string())
+                .collect(),
         )?;
-        self.executions.insert(execution_id.clone(), command);
+        self.executions.insert(
+            execution_id.clone(),
+            RoutedExecution {
+                command,
+                resource_ids,
+            },
+        );
         self.execution_status
             .insert(execution_id, RemoteExecutionStatus::Accepted);
         Ok(())
@@ -228,7 +281,11 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             intent,
             correlation_id,
         );
-        self.execute(execution_id, command.clone())?;
+        self.execute(
+            execution_id,
+            command.clone(),
+            assignment.resource_ids().to_vec(),
+        )?;
         Ok(command)
     }
 
@@ -239,7 +296,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             .get(execution_id)
             .ok_or_else(|| IntegrationRuntimeError::Protocol("unknown execution id".to_string()))?;
         self.router
-            .cancel(command.node_id().as_str(), execution_id.to_string())
+            .cancel(command.command.node_id().as_str(), execution_id.to_string())
             .map_err(Into::into)
     }
 
@@ -278,14 +335,20 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     /// Converts execution facts into Runtime evidence and terminal NodeEvent values.
     fn consume_execution(
         &mut self,
-        node_id: &str,
-        execution_id: &str,
-        phase: i32,
-        reason: &str,
+        fact: ReceivedExecutionFact<'_>,
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
-        let phase = ExecutionPhase::try_from(phase).map_err(|_| {
+        if self
+            .execution_sequences
+            .get(fact.execution_id)
+            .is_some_and(|current| fact.sequence <= *current)
+        {
+            return Ok(());
+        }
+        self.execution_sequences
+            .insert(fact.execution_id.to_string(), fact.sequence);
+        let phase = ExecutionPhase::try_from(fact.phase).map_err(|_| {
             IntegrationRuntimeError::Protocol("unknown execution phase".to_string())
         })?;
         let status = match phase {
@@ -297,11 +360,12 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             ExecutionPhase::Unknown | ExecutionPhase::Unspecified => RemoteExecutionStatus::Unknown,
         };
         self.execution_status
-            .insert(execution_id.to_string(), status);
-        let Some(command) = self.executions.get(execution_id) else {
+            .insert(fact.execution_id.to_string(), status);
+        let Some(execution) = self.executions.get(fact.execution_id) else {
             return Ok(());
         };
-        if command.node_id().as_str() != node_id {
+        let command = &execution.command;
+        if command.node_id().as_str() != fact.node_id {
             return Err(IntegrationRuntimeError::Protocol(
                 "execution fact node differs from dispatched command".to_string(),
             ));
@@ -318,7 +382,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 task_ref: command.task_ref().clone(),
                 group_id: command.group_id().clone(),
                 role_id: command.role_id().clone(),
-                reason: reason.to_string(),
+                reason: fact.reason.to_string(),
             }),
             _ => None,
         };
@@ -338,48 +402,89 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
 fn registration_from_wire(
     wire: NodeRegistration,
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
-    let runtime = wire.runtime.ok_or_else(|| {
-        IntegrationRuntimeError::Protocol("registration lacks runtime".to_string())
-    })?;
-    let mut capabilities = Vec::new();
-    let mut contracts = Vec::new();
-    for capability in wire.capabilities {
-        let kind = capability_kind(&capability.kind)?;
-        capabilities.push(Capability::new(kind, capability.available));
-        for contract in capability.contracts {
-            contracts.push(parse_contract(&contract)?);
-        }
-    }
-    let resources = wire
-        .resources
+    let local_systems = wire
+        .local_systems
         .into_iter()
-        .map(|resource| {
-            Ok(Resource::new(
-                ResourceId::new(resource.id)?,
-                resource_kind(&resource.kind)?,
-                resource.capacity,
-            )?)
+        .map(|local_system| {
+            let runtime = local_system.runtime.ok_or_else(|| {
+                IntegrationRuntimeError::Protocol("local system lacks runtime".to_string())
+            })?;
+            Ok(LocalSystemDescriptor::new(
+                LocalSystemId::new(local_system.id)?,
+                LocalRuntime::new(runtime.name, runtime.version)?,
+                local_system.metadata.into_iter().collect(),
+            ))
         })
         .collect::<Result<Vec<_>, IntegrationRuntimeError>>()?;
-    Ok(domain::NodeRegistration::new_with_contracts(
+    let mut capability_kinds = BTreeMap::<CapabilityKind, bool>::new();
+    let mut capability_owners = BTreeMap::new();
+    for capability in wire.capabilities {
+        let kind = capability_kind(&capability.kind)?;
+        capability_kinds
+            .entry(kind)
+            .and_modify(|available| *available |= capability.available)
+            .or_insert(capability.available);
+        let owner = LocalSystemId::new(capability.local_system_id)?;
+        for contract in capability.contracts {
+            if capability_owners
+                .insert(parse_contract(&contract)?, owner.clone())
+                .is_some()
+            {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "canonical capability has multiple owners".to_string(),
+                ));
+            }
+        }
+    }
+    let capabilities = capability_kinds
+        .into_iter()
+        .map(|(kind, available)| Capability::new(kind, available))
+        .collect();
+    let sensors = wire
+        .sensors
+        .into_iter()
+        .map(|sensor| {
+            Ok(SensorDescriptor::new(
+                SensorId::new(sensor.id)?,
+                sensor.kind,
+                LocalSystemId::new(sensor.local_system_id)?,
+                sensor.metadata.into_iter().collect(),
+            ))
+        })
+        .collect::<Result<Vec<_>, IntegrationRuntimeError>>()?;
+    let mut resources = Vec::new();
+    let mut resource_owners = BTreeMap::new();
+    for resource in wire.resources {
+        let resource_id = ResourceId::new(resource.id)?;
+        let owner = LocalSystemId::new(resource.local_system_id)?;
+        resources.push(Resource::new(
+            resource_id.clone(),
+            resource_kind(&resource.kind)?,
+            resource.capacity,
+        )?);
+        resource_owners.insert(resource_id, owner);
+    }
+    Ok(domain::NodeRegistration::new_with_local_systems(
         NodeId::new(wire.node_id)?,
-        LocalRuntime::new(runtime.name, runtime.version)?,
+        local_systems,
         NodeContractVersion::new(wire.node_contract_version)?,
         capabilities,
-        contracts,
+        capability_owners,
+        sensors,
         resources,
-    ))
+        resource_owners,
+    )?)
 }
 
 /// Converts current protocol health into Domain health.
 fn status_from_wire(
-    status: Option<&crate::grpc::v0_1::NodeStatus>,
+    status: Option<&crate::grpc::v0_2::NodeStatus>,
     observed_at: TimestampMs,
 ) -> Result<NodeStatus, IntegrationRuntimeError> {
-    let health = match status
-        .map(|value| value.health.as_str())
-        .unwrap_or("online")
-    {
+    let status = status.ok_or_else(|| {
+        IntegrationRuntimeError::Protocol("heartbeat is missing local health status".to_string())
+    })?;
+    let health = match status.health.as_str() {
         "online" => NodeHealth::Online,
         "degraded" => NodeHealth::Degraded,
         "offline" => NodeHealth::Offline,
@@ -443,7 +548,7 @@ fn invocation_from_command(command: &ExecutionCommand) -> CanonicalInvocation {
 }
 /// Converts one transport-neutral scalar.
 fn scalar(value: &ExecutionValue) -> ScalarValue {
-    use crate::grpc::v0_1::scalar_value::Value;
+    use crate::grpc::v0_2::scalar_value::Value;
     ScalarValue {
         value: Some(match value {
             ExecutionValue::Bool(value) => Value::BoolValue(*value),
@@ -510,7 +615,9 @@ impl From<tonic::Status> for IntegrationRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grpc::v0_1::{Capability as WireCapability, LocalRuntime as WireRuntime};
+    use crate::grpc::v0_2::{
+        Capability as WireCapability, LocalRuntime as WireRuntime, LocalSystemDescriptor,
+    };
     use ports::SharedNodeStateReader;
     use testkit::InMemoryEventLog;
 
@@ -532,19 +639,24 @@ mod tests {
                     lease_id: "lease-1".to_string(),
                     registration: NodeRegistration {
                         node_id: "dog-a".to_string(),
-                        runtime: Some(WireRuntime {
-                            name: "robonix".to_string(),
-                            version: "dev".to_string(),
-                        }),
+                        local_systems: vec![LocalSystemDescriptor {
+                            id: "motion".to_string(),
+                            runtime: Some(WireRuntime {
+                                name: "local-motion".to_string(),
+                                version: "1".to_string(),
+                            }),
+                            metadata: Default::default(),
+                        }],
                         capabilities: vec![WireCapability {
                             kind: "mobility".to_string(),
                             available: true,
                             contracts: vec!["mobility.reach_region@v1".to_string()],
+                            local_system_id: "motion".to_string(),
                         }],
                         sensors: Vec::new(),
                         resources: Vec::new(),
                         metadata: std::collections::HashMap::new(),
-                        node_contract_version: "roboguide.node.v0.1".to_string(),
+                        node_contract_version: "roboguide.node.v0.2".to_string(),
                     },
                 },
                 TimestampMs::new(0),
@@ -567,12 +679,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: crate::grpc::v0_1::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(crate::grpc::v0_1::Heartbeat {
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(crate::grpc::v0_2::Heartbeat {
                             session_id: "session-1".to_string(),
                             lease_id: "lease-1".to_string(),
                             sequence: 1,
-                            status: Some(crate::grpc::v0_1::NodeStatus {
+                            status: Some(crate::grpc::v0_2::NodeStatus {
                                 health: "degraded".to_string(),
                                 detail: String::new(),
                             }),
@@ -612,5 +724,113 @@ mod tests {
         assert!(
             matches!(bridge.execute_bound("execution-1".to_string(), &group_id, &role_id, intent, correlation), Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("unknown"))
         );
+    }
+
+    /// Older execution events cannot regress a newer reconnect snapshot.
+    #[test]
+    fn execution_sequence_fences_stale_reconnect_events() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("sequence-test").expect("correlation valid");
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-new".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::ExecutionSnapshot(
+                            crate::grpc::v0_2::ExecutionSnapshot {
+                                session_id: "session-new".to_string(),
+                                execution_id: "execution-1".to_string(),
+                                last_sequence: 3,
+                                phase: ExecutionPhase::Completed as i32,
+                                reason: String::new(),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(3),
+                &correlation,
+            )
+            .expect("snapshot is consumed");
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-new".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::ExecutionEvent(
+                            crate::grpc::v0_2::ExecutionEvent {
+                                session_id: "session-new".to_string(),
+                                execution_id: "execution-1".to_string(),
+                                sequence: 2,
+                                phase: ExecutionPhase::Started as i32,
+                                reason: String::new(),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(4),
+                &correlation,
+            )
+            .expect("stale event is ignored");
+        assert_eq!(
+            bridge.execution_status("execution-1"),
+            Some(RemoteExecutionStatus::Completed)
+        );
+    }
+
+    /// A reconnect snapshot without a current Runtime command cannot be silently re-dispatched.
+    #[test]
+    fn observed_reconnect_execution_requires_reconciliation_before_route() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("reconnect-command-test").expect("correlation valid");
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-new".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::ExecutionSnapshot(
+                            crate::grpc::v0_2::ExecutionSnapshot {
+                                session_id: "session-new".to_string(),
+                                execution_id: "execution-1".to_string(),
+                                last_sequence: 1,
+                                phase: ExecutionPhase::Started as i32,
+                                reason: String::new(),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("snapshot is consumed");
+        let command = ExecutionCommand::new(
+            domain::MissionId::new("mission").expect("mission valid"),
+            domain::TaskId::new("task").expect("task valid"),
+            domain::ExecutionGroupId::new("group").expect("group valid"),
+            domain::RoleId::new("role").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("compute", "noop", "v1").expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            correlation,
+        );
+        assert!(matches!(
+            bridge.execute("execution-1".to_string(), command, Vec::new()),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("reconciliation")
+        ));
     }
 }

@@ -1,8 +1,10 @@
 # ADR-0009：RoboGuide Node Service 与正式 gRPC Node Protocol v0.1
 
+> 历史记录：本文描述的 v0.1、编译期 Adapter 和 NDJSON 实现均已删除。当前决策见 ADR-0010 与 Node Protocol v0.2。
+
 ## 状态
 
-已接受（2026-08-24）。
+已由 ADR-0010 取代。本文仅记录被删除的早期实现，不代表当前节点接入边界。
 
 ## 决策
 

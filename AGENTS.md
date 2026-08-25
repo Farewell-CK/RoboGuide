@@ -38,14 +38,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
 - `core/adapters/` contains transport/backend adapters; its HTTP implementation is
   only a reference NodeGateway binding and must not leak HTTP/serde into Domain or Ports.
-- `core/integration/` owns the formal gRPC Node Protocol transport plus retained
-  NDJSON/TCP debug transport; `core/node-service/` owns node-side lifecycle,
-  configuration, execution continuity, and the generic Local EAIOS Adapter boundary.
+- `core/integration/` owns the formal gRPC Node Protocol v0.2 transport;
+  `core/node-service/` owns node-side lifecycle, configuration, durable execution
+  continuity, and the declarative Local Integration Engine.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
-- `core/node-service` includes the first Robonix Local EAIOS Adapter for
-  `mobility.reach_region@v1`; Robonix Atlas/Scene/Navigation details remain
-  behind its local client/helper boundary and never enter Node Protocol.
+- Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
+  startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
+  add an EAIOS-specific code branch or RoboGuide-side service.
 - `apps/real-node-smoke/` probes generic Node Contract endpoints by default and
   executes only with explicit `--execute` plus a versioned intent fixture.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do

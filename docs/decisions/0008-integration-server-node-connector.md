@@ -1,6 +1,6 @@
 # ADR-0008：Integration Server 与 Node Connector 长连接
 
-> 状态：其 NDJSON/TCP transport 决策已由 ADR-0009 取代；实现仅保留为 reference/debug transport。
+> 状态：已由 ADR-0009/ADR-0010 取代；NDJSON/TCP 实现已删除。
 
 ## 决策
 

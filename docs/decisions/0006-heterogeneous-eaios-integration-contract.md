@@ -1,5 +1,7 @@
 # ADR-0006：Heterogeneous EAIOS Integration Contract v0.1
 
+> 历史记录：同步 NodeGateway/HTTP reference binding 保留；节点侧异步接入与 Local Integration 边界已由 ADR-0010 和 Node Protocol v0.2 取代。
+
 - 状态：Proposed for Integration Contract v0.1
 - 日期：2026-08-24
 - 范围：RoboGuide Runtime 与异构 Local EAIOS / Vendor Runtime 的通用执行边界

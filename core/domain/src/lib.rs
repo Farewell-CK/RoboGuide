@@ -14,10 +14,12 @@ mod actor;
 mod allocation;
 mod execution;
 mod mission_plan;
+mod node_registration;
 
 pub use actor::{ActorBinding, MissionActor};
 pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
+pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 
 /// Version identifier for the first cross-language Mission Plan contract.
 pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
@@ -27,6 +29,9 @@ pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
+
+/// Version identifier implemented by the aggregate Local Integration Node Contract.
+pub const NODE_CONTRACT_VERSION_V0_2: &str = "roboguide.node.v0.2";
 
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +119,12 @@ define_identifier!(
 );
 define_identifier!(NodeId, "Identifies a logical execution node.", "node");
 define_identifier!(
+    LocalSystemId,
+    "Identifies one local embodied system within a node.",
+    "local system"
+);
+define_identifier!(SensorId, "Identifies one sensor within a node.", "sensor");
+define_identifier!(
     RoleId,
     "Identifies a responsibility inside an execution group.",
     "role"
@@ -141,6 +152,11 @@ impl NodeContractVersion {
     /// Returns the first supported heterogeneous Node Contract version.
     pub fn v0_1() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_1.to_string())
+    }
+
+    /// Returns the aggregate Local Integration Node Contract version.
+    pub fn v0_2() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_2.to_string())
     }
 }
 
@@ -996,16 +1012,22 @@ impl NodeLivenessObservation {
 pub struct NodeRegistration {
     /// Logical node identity exposed to DEAIOS.
     node_id: NodeId,
-    /// Local EAIOS or equivalent runtime descriptor.
-    local_runtime: LocalRuntime,
+    /// Local EAIOS/runtime descriptors aggregated behind this Node identity.
+    local_systems: Vec<LocalSystemDescriptor>,
     /// Semantic integration contract implemented by the adapter or bridge.
     contract_version: NodeContractVersion,
     /// Capabilities currently advertised by the node.
     capabilities: Vec<Capability>,
     /// Canonical capability contracts executable through this node's adapter boundary.
     supported_contracts: Vec<CapabilityContractRef>,
+    /// Unique local-system owner of each canonical contract.
+    capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+    /// Sensors exposed by configured local systems.
+    sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
     resources: Vec<Resource>,
+    /// Unique local-system owner of each node-wide resource.
+    resource_owners: BTreeMap<ResourceId, LocalSystemId>,
 }
 
 impl NodeRegistration {
@@ -1038,12 +1060,88 @@ impl NodeRegistration {
     ) -> Self {
         Self {
             node_id,
-            local_runtime,
+            local_systems: vec![LocalSystemDescriptor::new(
+                LocalSystemId("default".to_string()),
+                local_runtime,
+                BTreeMap::new(),
+            )],
+            contract_version,
+            capabilities,
+            capability_owners: supported_contracts
+                .iter()
+                .cloned()
+                .map(|contract| (contract, LocalSystemId("default".to_string())))
+                .collect(),
+            supported_contracts,
+            sensors: Vec::new(),
+            resource_owners: resources
+                .iter()
+                .map(|resource| (resource.id().clone(), LocalSystemId("default".to_string())))
+                .collect(),
+            resources,
+        }
+    }
+
+    /// Creates a v0.2 aggregate registration with explicit local ownership.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_local_systems(
+        node_id: NodeId,
+        local_systems: Vec<LocalSystemDescriptor>,
+        contract_version: NodeContractVersion,
+        capabilities: Vec<Capability>,
+        capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+        sensors: Vec<SensorDescriptor>,
+        resources: Vec<Resource>,
+        resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+    ) -> Result<Self, DomainError> {
+        let owners = local_systems
+            .iter()
+            .map(LocalSystemDescriptor::id)
+            .collect::<BTreeSet<_>>();
+        let sensor_ids = sensors
+            .iter()
+            .map(SensorDescriptor::id)
+            .collect::<BTreeSet<_>>();
+        let resource_ids = resources.iter().map(Resource::id).collect::<BTreeSet<_>>();
+        if local_systems.is_empty() || owners.len() != local_systems.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "node local systems must be nonempty and unique".to_string(),
+            });
+        }
+        if capability_owners
+            .values()
+            .any(|owner| !owners.contains(owner))
+            || sensors
+                .iter()
+                .any(|sensor| !owners.contains(sensor.local_system_id()))
+            || sensor_ids.len() != sensors.len()
+            || resource_owners
+                .values()
+                .any(|owner| !owners.contains(owner))
+            || resource_owners.len() != resources.len()
+            || resources
+                .iter()
+                .any(|resource| !resource_owners.contains_key(resource.id()))
+            || resource_owners
+                .keys()
+                .any(|resource_id| !resource_ids.contains(resource_id))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "node declaration references an unknown local system owner".to_string(),
+            });
+        }
+        let supported_contracts = capability_owners.keys().cloned().collect();
+        Ok(Self {
+            node_id,
+            local_systems,
             contract_version,
             capabilities,
             supported_contracts,
+            capability_owners,
+            sensors,
             resources,
-        }
+            resource_owners,
+        })
     }
 
     /// Returns the logical node identity.
@@ -1051,9 +1149,16 @@ impl NodeRegistration {
         &self.node_id
     }
 
-    /// Returns the local EAIOS or equivalent runtime descriptor.
+    /// Returns the first runtime for legacy single-runtime readers.
+    ///
+    /// Aggregate-aware consumers use [`Self::local_systems`] instead.
     pub fn local_runtime(&self) -> &LocalRuntime {
-        &self.local_runtime
+        self.local_systems[0].runtime()
+    }
+
+    /// Returns all configured local systems in stable declaration order.
+    pub fn local_systems(&self) -> &[LocalSystemDescriptor] {
+        &self.local_systems
     }
 
     /// Returns the semantic Node Contract version exposed by the integration boundary.
@@ -1071,9 +1176,24 @@ impl NodeRegistration {
         &self.supported_contracts
     }
 
+    /// Returns the configured owner of one canonical capability contract.
+    pub fn capability_owner(&self, contract: &CapabilityContractRef) -> Option<&LocalSystemId> {
+        self.capability_owners.get(contract)
+    }
+
+    /// Returns all node sensors in stable declaration order.
+    pub fn sensors(&self) -> &[SensorDescriptor] {
+        &self.sensors
+    }
+
     /// Returns the node's advertised resources.
     pub fn resources(&self) -> &[Resource] {
         &self.resources
+    }
+
+    /// Returns the configured local-system owner of one resource.
+    pub fn resource_owner(&self, resource_id: &ResourceId) -> Option<&LocalSystemId> {
+        self.resource_owners.get(resource_id)
     }
 
     /// Checks whether this registration can satisfy one role requirement.
