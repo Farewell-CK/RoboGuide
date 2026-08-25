@@ -8,3 +8,4 @@ include!("matching_coordination.rs");
 include!("node_state.rs");
 include!("allocation_projection.rs");
 include!("actor_continuity.rs");
+include!("mission_execution_group.rs");

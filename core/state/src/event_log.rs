@@ -487,7 +487,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    "domain.EventPayload.json/v1",
+                    "domain.EventPayload.json/v2",
                     payload_json,
                 ],
             )
@@ -602,7 +602,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, "domain.EventPayload.json/v1");
+        assert_eq!(events[0].payload_schema, "domain.EventPayload.json/v2");
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(

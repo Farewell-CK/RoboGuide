@@ -11,7 +11,7 @@ payload 的接收边界，没有规定持久化格式；直接把 Rust `Debug` �
 
 ## Decision
 
-`domain::EventPayload` 使用版本化 `domain.EventPayload.json/v1` JSON codec 写入
+`domain::EventPayload` 使用版本化 `domain.EventPayload.json/v2` JSON codec 写入
 `core/state::SqliteEventLog`。事件 envelope 保留 `event_id`、RoboGuide-local timestamp、
 correlation/causation identity 和 payload schema marker。`SqliteEventLog::decoded_events`
 只负责 codec 解码，不负责应用 Control mutation 或授予 reservation authority。

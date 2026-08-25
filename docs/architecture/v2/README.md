@@ -20,7 +20,7 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | Mission Intelligence | 生成 Task Graph 和 Execution Requirements |
 | Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Execution Group 管理和恢复决策 |
 | State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
-| Embodied Execution Group | 在 Control Plane 之外承载任务级分布式执行上下文 |
+| Embodied Execution Group | 由 Control/Runtime 承载 Mission-level 多 Task 分布式执行上下文 |
 | Distributed Embodied Runtime | 提供发现、消息、调用、Heartbeat、Lease、Adapter 和诊断 |
 | Local Embodied Systems | 保留感知、导航、运动、硬件控制和即时安全能力 |
 | Physical World | 被执行过程改变，并持续向系统反馈 Observation |
@@ -56,14 +56,15 @@ RoboGuide 联合调度四类资源：
 
 ### Embodied Execution Group（具身执行组）
 
-面向具体任务动态形成的执行上下文，由 Members、Roles、已提交的 Resource
-Bindings、Shared Context 和 Lifecycle 组成。
+Mission 进入实际执行阶段后形成的长期分布式执行上下文，由 Members、Roles、多个
+TaskExecution、已提交的 Resource Bindings、Recovery Context 和 Lifecycle 组成。v0.x
+默认一个 Mission 创建一个 Group，但该策略不是未来拆分多个 Group 的领域硬约束。
 
 Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 说明 Node 是否具备承担
 该 Role 的能力，Assignment 记录当前由哪个 Node 承担，Resource Binding 记录执行
-该职责已经提交的资源。如果 Task 直接绑定 Node，节点故障通常会迫使系统重新规划
-整个 Task；通过 Role 间接绑定后，系统可以只重新匹配和绑定失败的 Role，同时保留
-其他已完成工作、有效 Binding 和 Execution Group 上下文。
+该职责已经提交的资源。Task 完成只释放属于该 Task 的临时 binding/reservation，不销毁
+Group。节点故障时，Group 内可以 partial release、rebind，并经 `Adapted → Active`
+继续执行；只有 Mission 完成或最终失败后，Group 才进入 `Completed/Failed → Released`。
 
 Member 与 Binding 必须区分：GPU Node 可以是 Member，GPU quota 是 Compute
 Binding；走廊是 Spatial Binding，不是 Member。Group Manager 属于 Control Plane，

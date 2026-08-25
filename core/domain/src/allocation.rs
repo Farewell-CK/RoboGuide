@@ -2,6 +2,15 @@
 
 use crate::{ExecutionGroupId, ResourceId, RoleId, TaskRef, TimestampMs};
 
+/// Lifetime of a resource binding inside a Mission-level Execution Group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ResourceBindingScope {
+    /// Resource is temporary and is released when its TaskExecution ends.
+    Task,
+    /// Resource remains committed until its Mission Intelligence Context ends.
+    Context,
+}
+
 /// Observable stage of one resource commitment in the Control allocation pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocationPhase {

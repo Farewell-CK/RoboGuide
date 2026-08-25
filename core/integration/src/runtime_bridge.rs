@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v1";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v2";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -466,6 +466,11 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 group.lifecycle(),
                 control::GroupLifecycle::Active | control::GroupLifecycle::Adapted
             ) {
+                continue;
+            }
+            // Mission-level Groups aggregate TaskExecution lifecycles explicitly. The legacy
+            // single-task role scan must never release such a Group when one Task completes.
+            if group.task_executions().next().is_some() {
                 continue;
             }
             let roles = group

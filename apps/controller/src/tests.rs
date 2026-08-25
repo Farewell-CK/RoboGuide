@@ -40,6 +40,10 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::ProposalCreated { task_ref }
         | EventPayload::PlanCommitted { task_ref }
         | EventPayload::ExecutionGroupBound { task_ref, .. }
+        | EventPayload::TaskExecutionRegistered { task_ref, .. }
+        | EventPayload::TaskExecutionActivated { task_ref, .. }
+        | EventPayload::TaskExecutionCompleted { task_ref, .. }
+        | EventPayload::TaskExecutionBindingsReleased { task_ref, .. }
         | EventPayload::MissionActorBound { task_ref, .. }
         | EventPayload::ExecutionGroupActivated { task_ref, .. }
         | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
@@ -60,6 +64,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         EventPayload::NodeRegistered { .. }
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
+        | EventPayload::ExecutionGroupCreated { .. }
         | EventPayload::NodeObservation(NodeEvent::SafeStopped { .. }) => None,
     }
 }

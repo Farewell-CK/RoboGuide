@@ -9,7 +9,7 @@
 | Q1 | State Authority | Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；哪些状态必须保留 authoritative owner |
 | Q2 | Spatial Authority | Map、Pose、World Model 如何建立共同空间关系和系统级 reference authority |
 | Q3 | Control Topology | 集中式 Control Plane、层级控制和 Federation 的适用边界 |
-| Q4 | Execution Group Authority | Group 生命周期、Task ownership 与成员节点权威如何划分 |
+| Q4 | Execution Group Authority | Mission-level Group、TaskExecution ownership、Context semantics 与成员节点权威如何划分 |
 | Q5 | Scheduling vs Runtime Coordination | Plan-time allocation、资源协调与 execution-time adaptation 的边界 |
 | Q6 | Temporal Assurance | 同步、时钟偏差、deadline 和时间窗口如何成为架构约束 |
 | Q7 | Resource Commitment Semantics | Commit、Lease expiry、preemption、partial release 需要何种一致性保证 |

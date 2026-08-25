@@ -192,19 +192,20 @@ cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081 \
 
 ### Embodied Execution Group
 
-Execution Group 是 Control Plane 之外、由 Runtime 承载的任务级动态分布式执行上下文。Group Manager 位于 Control Plane，Group 本体跨多个节点存在。
+Execution Group 是进入实际执行阶段后由 Control/Runtime 承载的 Mission-level 长期分布式执行上下文。v0.x 默认一个 Mission 创建一个 Group，Group 本体跨多个节点并承载多个 Task；该默认策略不禁止未来拆分多个 Group。
 
 - `Members`：参与执行的 Robot、Perception、Interaction、Compute 或 Infrastructure Node；
 - `Roles`：成员在当前任务中的职责；
 - `Resource Bindings`：已提交的 Space、Compute、Device、Time 占用；
 - `Shared Context`：仅当前 Group 需要的上下文；
-- `Lifecycle`：Create → Bind → Activate → Adapt → Complete → Release。
+- `TaskExecution`：每个 Task 在 Group 内独立经历 Ready → Active → Completed/Blocked/Failed；
+- `Lifecycle`：Group Create → Bind → Active → Adapt → Mission Complete/Failed → Release。
 
-`Blocked` 是等待 Reconciliation & Recovery 的非终态，不等于 Group 已失败或应被
-销毁。单个 Role/Member/Resource Binding 失效时，Control 只 partial release 该
-Role 的 binding 和 reservation，保留 Group identity、TaskRef 与其他有效 binding；
-恢复成功后经 `Adapted → Active` 继续执行。只有 `Completed`，或恢复明确耗尽后的
-`Failed`，才能执行 whole-group `Release`。
+`Blocked` 是等待 Reconciliation & Recovery 的非终态，不等于 Group 已失败或应被销毁。
+单个 Task 完成时只释放该 Task 的临时 binding 和 reservation；单个 Role/Member/Resource
+Binding 失效时，Control 只 partial release 受影响 binding，保留 Group、其他 Task 和
+有效 binding。恢复成功后经 `Adapted → Active` 继续执行。只有 Mission `Completed`，或
+恢复明确耗尽后的 `Failed`，才能执行 whole-group `Release`。
 
 Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 是 Node 能否承担该 Role 的
 依据，Assignment 指明当前承担者，Resource Binding 则记录已经提交的执行资源。
@@ -414,7 +415,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0009-node-service-grpc-protocol.md
     │   ├── 0010-single-node-service-local-integration-engine.md
     │   ├── 0011-event-evidence-codec.md
-    │   └── 0012-controller-checkpoint-recovery.md
+    │   ├── 0012-controller-checkpoint-recovery.md
+    │   └── 0013-mission-level-execution-group.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png

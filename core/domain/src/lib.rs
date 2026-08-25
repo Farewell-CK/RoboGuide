@@ -15,17 +15,24 @@ mod allocation;
 mod execution;
 mod mission_plan;
 mod node_registration;
+mod task_execution;
 
 pub use actor::{ActorBinding, MissionActor};
-pub use allocation::{AllocationPhase, AllocationViewSnapshot, ResourceAllocation};
+pub use allocation::{
+    AllocationPhase, AllocationViewSnapshot, ResourceAllocation, ResourceBindingScope,
+};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
+pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 
 /// Version identifier for the first cross-language Mission Plan contract.
 pub const MISSION_PLAN_SCHEMA_V0: &str = "roboguide.mission-plan/v0";
 
 /// Version identifier for Mission Plans carrying explicit role execution intents.
 pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
+
+/// Version identifier for Mission Plans declaring Context and ContextRole continuity.
+pub const MISSION_PLAN_SCHEMA_V0_2: &str = "roboguide.mission-plan/v0.2";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
@@ -134,6 +141,16 @@ define_identifier!(
     ExecutionGroupId,
     "Identifies a dynamic execution group.",
     "execution group"
+);
+define_identifier!(
+    CoordinationContextId,
+    "Identifies one Mission Intelligence coordination context.",
+    "coordination context"
+);
+define_identifier!(
+    ContextRoleId,
+    "Identifies one role that remains continuous across Tasks in a Context.",
+    "context role"
 );
 define_identifier!(EventId, "Identifies one immutable event record.", "event");
 define_identifier!(
@@ -1461,6 +1478,45 @@ pub enum EventPayload {
         group_id: ExecutionGroupId,
         /// Mission-scoped task assigned to the group.
         task_ref: TaskRef,
+    },
+    /// A Mission-level Execution Group was created for long-lived multi-Task execution.
+    ExecutionGroupCreated {
+        /// Group identity.
+        group_id: ExecutionGroupId,
+        /// Mission owning the Group.
+        mission_id: MissionId,
+    },
+    /// A Task became an execution unit inside an existing Mission-level Group.
+    TaskExecutionRegistered {
+        /// Group hosting the Task execution.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped Task identity.
+        task_ref: TaskRef,
+        /// Mission Intelligence context referenced by the Task.
+        context_id: CoordinationContextId,
+    },
+    /// A Task execution became active inside its existing Group.
+    TaskExecutionActivated {
+        /// Group hosting the Task execution.
+        group_id: ExecutionGroupId,
+        /// Task that became active.
+        task_ref: TaskRef,
+    },
+    /// A Task execution completed without closing its parent Group.
+    TaskExecutionCompleted {
+        /// Group retaining the Mission execution context.
+        group_id: ExecutionGroupId,
+        /// Task that completed.
+        task_ref: TaskRef,
+    },
+    /// Temporary Task bindings were released while the parent Group remained alive.
+    TaskExecutionBindingsReleased {
+        /// Group retaining unaffected members and Context bindings.
+        group_id: ExecutionGroupId,
+        /// Task whose temporary bindings were released.
+        task_ref: TaskRef,
+        /// Resources released for this Task only.
+        resource_ids: Vec<ResourceId>,
     },
     /// A mission actor became authoritative only after its task Group was bound.
     MissionActorBound {

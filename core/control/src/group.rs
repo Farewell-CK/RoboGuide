@@ -4,13 +4,14 @@ use crate::{
     CommittedPlan, CommittedRecoveryAssignment, ControlError, ControlPlane, RecoveryOutcome,
 };
 use domain::{
-    ActorId, CorrelationId, EventPayload, ExecutionGroupId, NodeId, ResourceId, RoleAssignment,
-    RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    ActorId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId, NodeId,
+    ResourceId, RoleAssignment, RoleId, TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef,
+    TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
 
-/// Lifecycle states for the task-level Execution Group.
+/// Lifecycle states for the Mission-level Execution Group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GroupLifecycle {
     /// The group exists with committed member/resource bindings.
@@ -43,6 +44,8 @@ pub(crate) struct UnboundRole {
 pub struct ExecutionGroup {
     /// Dynamic execution-group identity.
     pub(crate) group_id: ExecutionGroupId,
+    /// Mission owning the long-lived coordination context.
+    pub(crate) mission_id: domain::MissionId,
     /// Mission-scoped task owned by the group.
     pub(crate) task_ref: TaskRef,
     /// Current role, member, and resource bindings.
@@ -51,6 +54,8 @@ pub struct ExecutionGroup {
     pub(crate) unbound_roles: BTreeMap<RoleId, UnboundRole>,
     /// Lifecycle state used by adaptation and recovery.
     pub(crate) lifecycle: GroupLifecycle,
+    /// Task execution units retained while the Group remains alive.
+    pub(crate) task_executions: BTreeMap<TaskRef, TaskExecution>,
 }
 
 impl ExecutionGroup {
@@ -58,16 +63,40 @@ impl ExecutionGroup {
     pub(crate) fn new(group_id: ExecutionGroupId, plan: &CommittedPlan) -> Self {
         Self {
             group_id,
+            mission_id: plan.task_ref().mission_id().clone(),
             task_ref: plan.task_ref().clone(),
             assignments: plan.assignments().to_vec(),
             unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
+            task_executions: BTreeMap::new(),
+        }
+    }
+
+    /// Creates a Mission-level Group with its first Task execution unit.
+    pub(crate) fn new_mission(
+        group_id: ExecutionGroupId,
+        mission_id: domain::MissionId,
+        initial_task_ref: TaskRef,
+    ) -> Self {
+        Self {
+            group_id,
+            mission_id,
+            task_ref: initial_task_ref,
+            assignments: Vec::new(),
+            unbound_roles: BTreeMap::new(),
+            lifecycle: GroupLifecycle::Bound,
+            task_executions: BTreeMap::new(),
         }
     }
 
     /// Returns the group identity.
     pub fn group_id(&self) -> &ExecutionGroupId {
         &self.group_id
+    }
+
+    /// Returns the Mission owning this long-lived Execution Group.
+    pub const fn mission_id(&self) -> &domain::MissionId {
+        &self.mission_id
     }
 
     /// Returns the complete mission-scoped task identity.
@@ -94,9 +123,226 @@ impl ExecutionGroup {
     pub const fn lifecycle(&self) -> GroupLifecycle {
         self.lifecycle
     }
+
+    /// Returns all Task execution units retained by this Group.
+    pub fn task_executions(&self) -> impl Iterator<Item = &TaskExecution> {
+        self.task_executions.values()
+    }
+
+    /// Returns one Task execution unit retained by this Group.
+    pub fn task_execution(&self, task_ref: &TaskRef) -> Option<&TaskExecution> {
+        self.task_executions.get(task_ref)
+    }
 }
 
 impl ControlPlane {
+    /// Creates the default Mission-level Group before its first Task begins execution.
+    pub fn create_mission_group<E: EventSink>(
+        &mut self,
+        group_id: ExecutionGroupId,
+        mission_id: domain::MissionId,
+        initial_task_ref: TaskRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<ExecutionGroup, ControlError> {
+        if mission_id != *initial_task_ref.mission_id() {
+            return Err(ControlError::InvalidProposal(
+                "initial Task belongs to another Mission".to_string(),
+            ));
+        }
+        if self.groups.contains_key(&group_id) {
+            return Err(ControlError::InvalidProposal(
+                "execution group identity already exists".to_string(),
+            ));
+        }
+        let group =
+            ExecutionGroup::new_mission(group_id.clone(), mission_id.clone(), initial_task_ref);
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupCreated {
+                group_id,
+                mission_id,
+            },
+        );
+        self.groups.insert(group.group_id().clone(), group.clone());
+        Ok(group)
+    }
+
+    /// Registers one Task execution unit without creating or destroying its parent Group.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: TaskRef,
+        context_id: CoordinationContextId,
+        assignments: Vec<RoleAssignment>,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<TaskExecution, ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.mission_id() != task_ref.mission_id() {
+            return Err(ControlError::InvalidProposal(
+                "Task belongs to another Mission than its Execution Group".to_string(),
+            ));
+        }
+        if group.task_executions.contains_key(&task_ref) {
+            return Err(ControlError::InvalidProposal(
+                "Task execution already exists in the Execution Group".to_string(),
+            ));
+        }
+        let execution = TaskExecution::new(task_ref.clone(), context_id.clone(), assignments);
+        group
+            .task_executions
+            .insert(task_ref.clone(), execution.clone());
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionRegistered {
+                group_id: group_id.clone(),
+                task_ref,
+                context_id,
+            },
+        );
+        Ok(execution)
+    }
+
+    /// Activates a registered Task while retaining the Mission-level Group.
+    pub fn activate_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::Pending | TaskExecutionLifecycle::Ready
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "Task execution is not ready to activate".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::Active),
+        );
+        if matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Adapted
+        ) {
+            group.lifecycle = GroupLifecycle::Active;
+        }
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionActivated {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Completes one Task and leaves its parent Group alive for later Tasks.
+    pub fn complete_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Ready
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "Task execution is not active".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::Completed),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionCompleted {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Releases only the supplied temporary Task resources and retains the parent Group.
+    pub fn release_task_bindings<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        resource_ids: &[ResourceId],
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.task_execution(task_ref).is_none() {
+            return Err(ControlError::InvalidProposal(
+                "unknown Task execution".to_string(),
+            ));
+        }
+        for resource_id in resource_ids {
+            let Some(reservation) = self.reservations.get(resource_id) else {
+                continue;
+            };
+            if reservation.group_id.as_ref() == Some(group_id) && reservation.task_ref == *task_ref
+            {
+                self.reservations.remove(resource_id);
+            }
+        }
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionBindingsReleased {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+                resource_ids: resource_ids.to_vec(),
+            },
+        );
+        Ok(())
+    }
+
     /// Creates a Group and establishes first-use Actor bindings after Group Bind succeeds.
     pub fn create_group_with_actor_bindings<E: EventSink>(
         &mut self,
