@@ -702,6 +702,7 @@ dependencies = [
  "domain",
  "integration",
  "ports",
+ "runtime",
  "state",
  "tokio",
  "tonic",
@@ -867,10 +868,14 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 name = "node-service"
 version = "0.1.0"
 dependencies = [
+ "control",
+ "domain",
  "integration",
  "serde",
  "serde_json",
+ "state",
  "tempfile",
+ "testkit",
  "thiserror",
  "tokio",
  "tokio-stream",

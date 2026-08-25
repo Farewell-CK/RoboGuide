@@ -6,7 +6,7 @@
 
 use integration::grpc::v0_1::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
 use integration::{GrpcIntegrationService, IntegrationRuntimeBridge};
-use ports::EventSink;
+use ports::{Clock, EventSink};
 use std::sync::{Arc, Mutex};
 
 /// Process-local Runtime/Control event sink pending persistent event storage.
@@ -47,11 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let correlation = domain::CorrelationId::new("integration-server")
             .expect("static correlation id is valid");
-        let mut received_at = 0_u64;
+        let clock = runtime::SystemMonotonicClock::new();
         while let Some(event) = receiver.recv().await {
-            received_at += 1;
             if let Ok(mut bridge) = bridge.lock() {
-                let _ = bridge.consume(event, domain::TimestampMs::new(received_at), &correlation);
+                let _ = bridge.consume(event, clock.now(), &correlation);
             }
         }
     });

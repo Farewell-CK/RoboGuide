@@ -190,6 +190,48 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
+    /// Builds and routes a command only from a Control-owned bound Group role.
+    pub fn execute_bound(
+        &mut self,
+        execution_id: String,
+        group_id: &domain::ExecutionGroupId,
+        role_id: &domain::RoleId,
+        intent: domain::ExecutionIntent,
+        correlation_id: CorrelationId,
+    ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        let group = self.control.group(group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
+        })?;
+        if !matches!(
+            group.lifecycle(),
+            control::GroupLifecycle::Bound
+                | control::GroupLifecycle::Active
+                | control::GroupLifecycle::Adapted
+        ) {
+            return Err(IntegrationRuntimeError::Protocol(
+                "execution group is not bound".to_string(),
+            ));
+        }
+        let assignment = group
+            .assignments()
+            .iter()
+            .find(|assignment| assignment.role_id() == role_id)
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol("group role is not bound".to_string())
+            })?;
+        let command = ExecutionCommand::new(
+            group.task_ref().mission_id().clone(),
+            group.task_id().clone(),
+            group_id.clone(),
+            role_id.clone(),
+            assignment.node_id().clone(),
+            intent,
+            correlation_id,
+        );
+        self.execute(execution_id, command.clone())?;
+        Ok(command)
+    }
+
     /// Routes cancellation without claiming local cancellation completion.
     pub fn cancel(&self, execution_id: &str) -> Result<(), IntegrationRuntimeError> {
         let command = self
@@ -205,9 +247,17 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     pub const fn control(&self) -> &ControlPlane {
         &self.control
     }
+    /// Returns mutable Control authority for composition-level Group lifecycle.
+    pub const fn control_mut(&mut self) -> &mut ControlPlane {
+        &mut self.control
+    }
     /// Returns current Shared Node State.
     pub const fn state(&self) -> &InMemorySharedNodeState {
         &self.state
+    }
+    /// Returns mutable Shared Node State for composition-level Control calls.
+    pub const fn state_mut(&mut self) -> &mut InMemorySharedNodeState {
+        &mut self.state
     }
     /// Returns current remote execution status.
     pub fn execution_status(&self, execution_id: &str) -> Option<RemoteExecutionStatus> {
@@ -541,6 +591,26 @@ mod tests {
                 .reported_status()
                 .health(),
             NodeHealth::Degraded
+        );
+    }
+
+    /// Bound Group assignments are the only source of NodeId for Runtime routing.
+    #[test]
+    fn execute_bound_rejects_unbound_group_role() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let group_id = domain::ExecutionGroupId::new("group-unknown").expect("group id valid");
+        let role_id = domain::RoleId::new("carrier").expect("role id valid");
+        let contract =
+            CapabilityContractRef::new("mobility", "reach_region", "v1").expect("contract valid");
+        let intent = domain::ExecutionIntent::new(contract, BTreeMap::new()).expect("intent valid");
+        let correlation = CorrelationId::new("bound-route-test").expect("correlation valid");
+        assert!(
+            matches!(bridge.execute_bound("execution-1".to_string(), &group_id, &role_id, intent, correlation), Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("unknown"))
         );
     }
 }

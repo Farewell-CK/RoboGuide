@@ -5,8 +5,9 @@ use integration::grpc::v0_1::{
     LocalRuntime, NodeRegistration, NodeStatus,
 };
 use std::fmt::{Display, Formatter};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use tokio::sync::mpsc;
 
 /// Adapter boundary for discovery, health, execution, cancellation, and reconciliation facts.
@@ -67,6 +68,20 @@ pub struct RobonixCommandClient {
     bridge_script: PathBuf,
     /// Local Atlas endpoint inherited only by the helper process.
     atlas_endpoint: String,
+    /// One long-lived local bridge process and its reusable Robonix clients.
+    process: std::sync::Mutex<Option<RobonixBridgeProcess>>,
+}
+
+/// Owned IPC endpoints for one long-lived Python bridge process.
+struct RobonixBridgeProcess {
+    /// Child process retained so its lifecycle follows the Adapter.
+    child: Child,
+    /// Structured request stream.
+    stdin: ChildStdin,
+    /// Structured response stream.
+    stdout: BufReader<ChildStdout>,
+    /// Monotonic request identity used to reject response drift.
+    next_request_id: u64,
 }
 
 impl RobonixCommandClient {
@@ -76,29 +91,95 @@ impl RobonixCommandClient {
             python,
             bridge_script,
             atlas_endpoint,
+            process: std::sync::Mutex::new(None),
         }
     }
 
-    /// Calls the fixed helper with structured JSON input and output.
+    /// Calls the fixed long-lived helper with one JSON-lines request/response.
+    ///
+    /// Transport failures are never retried automatically because the request
+    /// may already have started a physical action in Robonix.
     fn call(
         &self,
         operation: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, AdapterError> {
-        let output = Command::new(&self.python)
-            .arg(&self.bridge_script)
-            .arg(operation)
-            .arg(payload.to_string())
-            .env("ROBONIX_ATLAS", &self.atlas_endpoint)
-            .output()
-            .map_err(|error| AdapterError(format!("failed to start Robonix bridge: {error}")))?;
-        if !output.status.success() {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| AdapterError("Robonix bridge lock unavailable".to_string()))?;
+        if process.is_none() {
+            *process = Some(self.start_bridge()?);
+        }
+        let bridge = process.as_mut().expect("bridge process was initialized");
+        bridge.next_request_id += 1;
+        let request_id = bridge.next_request_id;
+        let request = serde_json::json!({
+            "id": request_id,
+            "operation": operation,
+            "payload": payload,
+        });
+        if writeln!(bridge.stdin, "{request}")
+            .and_then(|()| bridge.stdin.flush())
+            .is_err()
+        {
+            *process = None;
+            return Err(AdapterError("Robonix bridge request failed".to_string()));
+        }
+        let mut response = String::new();
+        if bridge.stdout.read_line(&mut response).is_err() || response.is_empty() {
+            *process = None;
+            return Err(AdapterError("Robonix bridge response failed".to_string()));
+        }
+        let response: serde_json::Value = serde_json::from_str(&response)
+            .map_err(|error| AdapterError(format!("invalid Robonix bridge response: {error}")))?;
+        if response.get("id").and_then(serde_json::Value::as_u64) != Some(request_id) {
             return Err(AdapterError(
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                "Robonix bridge response id mismatch".to_string(),
             ));
         }
-        serde_json::from_slice(&output.stdout)
-            .map_err(|error| AdapterError(format!("invalid Robonix bridge response: {error}")))
+        if let Some(error) = response.get("error").and_then(serde_json::Value::as_str) {
+            return Err(AdapterError(error.to_string()));
+        }
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| AdapterError("Robonix bridge response lacks result".to_string()))
+    }
+
+    /// Starts the single local helper process with persistent Atlas/provider clients.
+    fn start_bridge(&self) -> Result<RobonixBridgeProcess, AdapterError> {
+        let mut child = Command::new(&self.python)
+            .arg(&self.bridge_script)
+            .arg("--serve")
+            .env("ROBONIX_ATLAS", &self.atlas_endpoint)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|error| AdapterError(format!("failed to start Robonix bridge: {error}")))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AdapterError("Robonix bridge has no stdin".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AdapterError("Robonix bridge has no stdout".to_string()))?;
+        Ok(RobonixBridgeProcess {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            next_request_id: 0,
+        })
+    }
+}
+
+impl Drop for RobonixBridgeProcess {
+    /// Terminates the local helper when the Node Service Adapter shuts down.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -291,14 +372,7 @@ impl<C: RobonixClient> LocalEaiosAdapter for RobonixAdapter<C> {
             .cloned()
             .ok_or_else(|| AdapterError("unknown Robonix execution".to_string()))?;
         self.client.cancel_navigation(&run_id)?;
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let _ = sender.send(ExecutionEvent {
-            session_id: String::new(),
-            execution_id: execution_id.to_string(),
-            sequence: 4,
-            phase: ExecutionPhase::Cancelled as i32,
-            reason: String::new(),
-        });
+        let (_sender, receiver) = mpsc::unbounded_channel();
         Ok(receiver)
     }
 
@@ -447,6 +521,7 @@ mod tests {
     use super::*;
     use integration::grpc::v0_1::{ScalarValue, scalar_value};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct MockRobonix {
         cancelled: Mutex<Vec<String>>,
@@ -523,5 +598,75 @@ mod tests {
             ]
         );
         assert!(adapter.cancel("execution-1").is_ok());
+    }
+
+    struct CancelAwareRobonix {
+        /// Becomes true only after the local cancel request was accepted.
+        cancel_requested: std::sync::Arc<AtomicBool>,
+    }
+
+    impl RobonixClient for CancelAwareRobonix {
+        fn discover_contracts(&self) -> Result<Vec<String>, AdapterError> {
+            Ok(Vec::new())
+        }
+        fn status(&self) -> Result<NodeStatus, AdapterError> {
+            Ok(NodeStatus::default())
+        }
+        fn reach_region(&self, _region_id: &str) -> Result<String, AdapterError> {
+            Ok("run-cancel".to_string())
+        }
+        fn navigation_status(&self, _run_id: &str) -> Result<(String, String), AdapterError> {
+            if self.cancel_requested.load(Ordering::SeqCst) {
+                Ok(("CANCELED".to_string(), String::new()))
+            } else {
+                Ok(("RUNNING".to_string(), String::new()))
+            }
+        }
+        fn cancel_navigation(&self, _run_id: &str) -> Result<(), AdapterError> {
+            self.cancel_requested.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// Cancel acceptance emits no terminal fact until Robonix reports CANCELED.
+    #[tokio::test]
+    async fn cancel_waits_for_terminal_robonix_status() {
+        let requested = std::sync::Arc::new(AtomicBool::new(false));
+        let adapter = RobonixAdapter::new(CancelAwareRobonix {
+            cancel_requested: std::sync::Arc::clone(&requested),
+        });
+        let invocation = CanonicalInvocation {
+            capability_contract: "mobility.reach_region@v1".to_string(),
+            parameters: std::collections::HashMap::from([(
+                "region_id".to_string(),
+                ScalarValue {
+                    value: Some(scalar_value::Value::StringValue("library".to_string())),
+                },
+            )]),
+            ..CanonicalInvocation::default()
+        };
+        let mut execution_events = adapter
+            .execute("execution-cancel", invocation)
+            .expect("execution starts");
+        assert_eq!(
+            execution_events.recv().await.expect("accepted event").phase,
+            ExecutionPhase::Accepted as i32
+        );
+        assert_eq!(
+            execution_events.recv().await.expect("started event").phase,
+            ExecutionPhase::Started as i32
+        );
+        let mut cancel_events = adapter
+            .cancel("execution-cancel")
+            .expect("cancel request accepted");
+        assert!(cancel_events.recv().await.is_none());
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), execution_events.recv())
+                .await
+                .expect("terminal status arrives")
+                .expect("terminal event")
+                .phase,
+            ExecutionPhase::Cancelled as i32
+        );
     }
 }

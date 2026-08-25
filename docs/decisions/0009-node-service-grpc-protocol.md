@@ -40,3 +40,21 @@ Integration Server composition root 将 validated registration/heartbeat/executi
 `IntegrationRuntimeBridge`：Registration/Heartbeat 复用 Control lease authority 并更新
 Shared Node State；Execute/Cancel 按既有 NodeId route；terminal ExecutionEvent 转为已有
 Runtime `NodeEvent` evidence。它不改变 Matching/Scheduler 算法。
+
+## 真实执行闭环补充
+
+Robonix helper 是 `roboguide-node` 生命周期内的单一常驻进程，通过带 request id 的
+JSON-lines IPC 复用 Atlas、Scene 与 Navigation gRPC clients。每次 status poll、执行或
+取消不得重新启动 Python。IPC/transport failure 不自动重试可能已经触发物理动作的请求。
+
+Navigation cancel 返回 accepted 只说明取消请求已提交。Adapter 不在此时发送
+`Cancelled`；原 execution status loop 继续查询 `navigate/status`，只有 Robonix 返回
+`CANCELED` 后才产生 terminal `Cancelled` ExecutionEvent。
+
+Integration Server 使用 `SystemMonotonicClock` 为 Registration、Heartbeat、ExecutionEvent
+等事实记录统一的 process-local receive time，不以事件序号代替时间。该时钟不与 Node
+source clock 比较，也不声称分布式时钟同步。
+
+`IntegrationRuntimeBridge::execute_bound` 只从 Control-owned Execution Group 的当前
+Role assignment 派生 TaskRef 与 NodeId，然后生成现有 `ExecutionCommand` 并路由。未知、
+未绑定或 terminal Group 不得通过该入口执行；Scheduler 与 reservation authority 不变。

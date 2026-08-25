@@ -10,5 +10,6 @@ control = { path = "../../core/control" }
 domain = { path = "../../core/domain" }
 ports = { path = "../../core/ports" }
 state = { path = "../../core/state" }
+runtime = { path = "../../core/runtime" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "sync"] }
 tonic = { version = "0.14.6", features = ["transport"] }

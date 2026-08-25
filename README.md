@@ -328,6 +328,10 @@ contract stubs 已安装、Atlas/Scene/Navigation 已由 `rbnx boot` 启动：
 cargo run -p roboguide-node -- config/node-robonix.toml
 ```
 
+Node Service 启动一个常驻的 local-only Robonix helper，并在整个进程生命周期复用 Atlas
+与 capability gRPC clients。Navigation cancel accepted 不会直接上报任务已取消；最终
+`Cancelled` 仅来自后续 Robonix `CANCELED` 状态。
+
 ## 当前开放问题
 
 V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)；MVP 具体场景、拓扑和验收指标的草案记录在 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
