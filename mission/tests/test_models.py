@@ -46,6 +46,19 @@ def test_structured_execution_parameter_is_rejected() -> None:
         MissionPlan.from_json(raw)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_execution_parameter_is_rejected(value: float) -> None:
+    """Mission artifacts must remain portable standard JSON across language boundaries."""
+    raw = deepcopy(_fixture_json())
+    tasks = cast(list[JSONObject], raw["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    execution = cast(JSONObject, roles[0]["execution"])
+    parameters = cast(JSONObject, execution["parameters"])
+    parameters["non_finite"] = value
+    with pytest.raises(MissionPlanError, match="finite number"):
+        MissionPlan.from_json(raw)
+
+
 def test_unknown_dependency_is_rejected() -> None:
     """A task may depend only on another task declared in the same graph."""
     raw = deepcopy(_fixture_json())

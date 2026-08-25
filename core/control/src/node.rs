@@ -10,7 +10,7 @@ use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
 
 impl ControlPlane {
     /// Registers one node with a generated lease and records its visibility.
-    pub fn register_node<S: SharedNodeStateWriter, E: EventSink>(
+    pub fn register_node<S: SharedNodeStateReader + SharedNodeStateWriter, E: EventSink>(
         &mut self,
         state: &mut S,
         registration: NodeRegistration,
@@ -41,7 +41,10 @@ impl ControlPlane {
 
     /// Registers one node with an explicit lease from the Node Contract.
     #[allow(clippy::too_many_arguments)]
-    pub fn register_node_with_lease<S: SharedNodeStateWriter, E: EventSink>(
+    pub fn register_node_with_lease<
+        S: SharedNodeStateReader + SharedNodeStateWriter,
+        E: EventSink,
+    >(
         &mut self,
         state: &mut S,
         registration: NodeRegistration,
@@ -62,6 +65,10 @@ impl ControlPlane {
                 lease_id: lease.lease_id().clone(),
             });
         }
+        self.ensure_resource_identities_available(state, &registration)?;
+        if let Some(current) = state.node(registration.node_id()) {
+            self.ensure_committed_resources_remain_declared(current, &registration)?;
+        }
         let node_id = registration.node_id().clone();
         let lease_id = lease.lease_id().clone();
         state
@@ -73,6 +80,53 @@ impl ControlPlane {
             ))
             .map_err(ControlError::SharedState)?;
         self.leases.insert(node_id.clone(), lease);
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::NodeRegistered { node_id, lease_id },
+        );
+        Ok(())
+    }
+
+    /// Replaces declarations for a current node while preserving health, liveness, and lease time.
+    pub fn update_node_registration<
+        S: SharedNodeStateReader + SharedNodeStateWriter,
+        E: EventSink,
+    >(
+        &mut self,
+        state: &mut S,
+        registration: NodeRegistration,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let node_id = registration.node_id().clone();
+        let current = state
+            .node(&node_id)
+            .cloned()
+            .ok_or_else(|| ControlError::UnknownNode(node_id.clone()))?;
+        let lease = self
+            .leases
+            .get(&node_id)
+            .ok_or_else(|| ControlError::UnknownNode(node_id.clone()))?;
+        if !lease.is_active_at(timestamp) {
+            return Err(ControlError::LeaseExpired {
+                node_id,
+                lease_id: lease.lease_id().clone(),
+            });
+        }
+        self.ensure_resource_identities_available(state, &registration)?;
+        self.ensure_committed_resources_remain_declared(&current, &registration)?;
+        let lease_id = lease.lease_id().clone();
+        state
+            .record_node(NodeStateSnapshot::new(
+                registration,
+                current.reported_status(),
+                current.reported_status_received_at(),
+                current.liveness(),
+            ))
+            .map_err(ControlError::SharedState)?;
         events.append(
             timestamp,
             correlation_id,
@@ -193,5 +247,48 @@ impl ControlPlane {
                     .is_some_and(|lease| lease.is_active_at(timestamp))
                 && snapshot.registration().supports_role(role)
         })
+    }
+
+    /// Rejects resource identities already advertised by a different node.
+    fn ensure_resource_identities_available<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        registration: &NodeRegistration,
+    ) -> Result<(), ControlError> {
+        for snapshot in state.nodes() {
+            if snapshot.node_id() == registration.node_id() {
+                continue;
+            }
+            for resource in registration.resources() {
+                if snapshot.registration().owns_resource(resource.id(), None) {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "resource identity {} is already advertised by node {}, not node {}",
+                        resource.id(),
+                        snapshot.node_id(),
+                        registration.node_id()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Prevents a registration update from invalidating an authoritative reservation.
+    fn ensure_committed_resources_remain_declared(
+        &self,
+        current: &NodeStateSnapshot,
+        replacement: &NodeRegistration,
+    ) -> Result<(), ControlError> {
+        for resource in current.registration().resources() {
+            if self.reservations.contains_key(resource.id())
+                && !replacement.owns_resource(resource.id(), Some(resource.kind()))
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "registration update changes committed resource {}",
+                    resource.id()
+                )));
+            }
+        }
+        Ok(())
     }
 }

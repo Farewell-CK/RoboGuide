@@ -5,6 +5,7 @@ use domain::{
     CorrelationId, EventPayload, RoleAssignment, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
+use std::collections::BTreeSet;
 
 /// A Scheduler selection accepted for validation but not yet committed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +65,7 @@ impl ControlPlane {
             ));
         }
 
+        let mut proposed_resources = BTreeSet::new();
         for role in requirement.roles() {
             let assignment = assignments
                 .iter()
@@ -103,6 +105,13 @@ impl ControlPlane {
                     "role {} references a resource it does not own",
                     role.role_id()
                 )));
+            }
+            for resource_id in assignment.resource_ids() {
+                if !proposed_resources.insert(resource_id) {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "resource {resource_id} is assigned more than once"
+                    )));
+                }
             }
         }
 

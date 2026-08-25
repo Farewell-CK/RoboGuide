@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Final
 
@@ -97,6 +98,8 @@ class ExecutionIntent:
                 raise MissionPlanError(
                     f"{path}.parameters.{key} must be a scalar string, number, or boolean"
                 )
+            if isinstance(parameter, float) and not math.isfinite(parameter):
+                raise MissionPlanError(f"{path}.parameters.{key} must be a finite number")
             parameters.append((key, parameter))
         return cls(
             capability_contract=CapabilityContractRef.from_json(

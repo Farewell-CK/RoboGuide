@@ -56,6 +56,79 @@
         assert_eq!(plan.assignments().len(), 1);
     }
 
+    /// A proposal cannot bind one exclusive resource to more than one role.
+    #[test]
+    fn proposal_rejects_duplicate_resource_across_roles() {
+        let node = registration("node-a", CapabilityKind::Transport, "space-a");
+        let node_id = node.node_id().clone();
+        let resource_id = ResourceId::new("space-a").expect("test resource id must be valid");
+        let first_role = RoleId::new("carrier-a").expect("test role id must be valid");
+        let second_role = RoleId::new("carrier-b").expect("test role id must be valid");
+        let requirement = TaskRequirement::new(
+            domain::MissionId::new("mission-duplicate-resource")
+                .expect("test mission id must be valid"),
+            TaskId::new("task-duplicate-resource").expect("test task id must be valid"),
+            vec![
+                RoleRequirement::new(
+                    first_role.clone(),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                ),
+                RoleRequirement::new(
+                    second_role.clone(),
+                    CapabilityKind::Transport,
+                    Some(ResourceKind::Space),
+                ),
+            ],
+        )
+        .expect("test requirement must be valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                &mut state,
+                node,
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("node registration should succeed");
+        let candidates = control
+            .match_capabilities(
+                &state,
+                &requirement,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("both roles should match before resource selection");
+
+        assert!(matches!(
+            control.propose(
+                &state,
+                &requirement,
+                &candidates,
+                vec![
+                    RoleAssignment::new(
+                        first_role,
+                        node_id.clone(),
+                        vec![resource_id.clone()],
+                    ),
+                    RoleAssignment::new(second_role, node_id, vec![resource_id]),
+                ],
+                timestamp,
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidProposal(reason)) if reason.contains("more than once")
+        ));
+        assert!(control.reservations.is_empty());
+    }
+
     /// Matching reads heterogeneous node capability facts from Shared State.
     #[test]
     fn matching_reads_shared_state_capability_facts() {

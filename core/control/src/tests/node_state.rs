@@ -292,6 +292,44 @@
         assert!(matches!(error, ControlError::UnknownLease { .. }));
     }
 
+    /// Resource identities are global Control keys and cannot be advertised by two nodes.
+    #[test]
+    fn registration_rejects_cross_node_resource_identity_conflict() {
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        control
+            .register_node(
+                &mut state,
+                registration("node-a", CapabilityKind::Transport, "shared-space"),
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("first resource owner should register");
+
+        assert!(matches!(
+            control.register_node(
+                &mut state,
+                registration("node-b", CapabilityKind::Transport, "shared-space"),
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation_id,
+                &mut events,
+            ),
+            Err(ControlError::InvalidProposal(reason))
+                if reason.contains("shared-space")
+                    && reason.contains("node-a")
+                    && reason.contains("node-b")
+        ));
+        assert!(state
+            .node(&NodeId::new("node-b").expect("test node id must be valid"))
+            .is_none());
+    }
+
     /// A group without a safe replacement is recorded as blocked, never complete.
     #[test]
     fn group_can_be_marked_blocked_after_recovery_exhaustion() {

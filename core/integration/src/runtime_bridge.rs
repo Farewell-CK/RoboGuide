@@ -48,6 +48,8 @@ pub struct IntegrationRuntimeBridge<E> {
     execution_status: BTreeMap<String, RemoteExecutionStatus>,
     /// Last accepted execution-local sequence across sessions and snapshot replay.
     execution_sequences: BTreeMap<String, u64>,
+    /// Node that first reported or received each stable execution identity.
+    execution_nodes: BTreeMap<String, NodeId>,
 }
 
 /// One Runtime command and the Control-committed resources for its bound role.
@@ -89,6 +91,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             executions: BTreeMap::new(),
             execution_status: BTreeMap::new(),
             execution_sequences: BTreeMap::new(),
+            execution_nodes: BTreeMap::new(),
         }
     }
 
@@ -115,7 +118,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 self.control.register_node_with_lease(
                     &mut self.state,
                     registration,
-                    NodeStatus::new(NodeHealth::Online, received_at),
+                    NodeStatus::new(NodeHealth::Offline, received_at),
                     lease,
                     received_at,
                     correlation_id,
@@ -167,18 +170,9 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                                 "registration update is empty".to_string(),
                             )
                         })?)?;
-                    let lease_id = self.control_lease_id(registration.node_id())?;
-                    let lease = NodeLease::new(
-                        lease_id,
-                        registration.node_id().clone(),
-                        received_at,
-                        15_000,
-                    )?;
-                    self.control.register_node_with_lease(
+                    self.control.update_node_registration(
                         &mut self.state,
                         registration,
-                        NodeStatus::new(NodeHealth::Online, received_at),
-                        lease,
                         received_at,
                         correlation_id,
                         &mut self.events,
@@ -231,6 +225,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 .map(|resource_id| resource_id.as_str().to_string())
                 .collect(),
         )?;
+        let node_id = command.node_id().clone();
         self.executions.insert(
             execution_id.clone(),
             RoutedExecution {
@@ -238,6 +233,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 resource_ids,
             },
         );
+        self.execution_nodes.insert(execution_id.clone(), node_id);
         self.execution_status
             .insert(execution_id, RemoteExecutionStatus::Accepted);
         Ok(())
@@ -320,18 +316,6 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     pub fn execution_status(&self, execution_id: &str) -> Option<RemoteExecutionStatus> {
         self.execution_status.get(execution_id).copied()
     }
-    /// Returns the current lease id for a registered node.
-    fn control_lease_id(&self, node_id: &NodeId) -> Result<LeaseId, IntegrationRuntimeError> {
-        self.control
-            .node_lease(node_id)
-            .map(|lease| lease.lease_id().clone())
-            .ok_or_else(|| {
-                IntegrationRuntimeError::Protocol(
-                    "registration update has no active lease".to_string(),
-                )
-            })
-    }
-
     /// Converts execution facts into Runtime evidence and terminal NodeEvent values.
     fn consume_execution(
         &mut self,
@@ -339,6 +323,19 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
+        let phase = ExecutionPhase::try_from(fact.phase).map_err(|_| {
+            IntegrationRuntimeError::Protocol("unknown execution phase".to_string())
+        })?;
+        let node_id = NodeId::new(fact.node_id)?;
+        if self
+            .execution_nodes
+            .get(fact.execution_id)
+            .is_some_and(|expected| expected != &node_id)
+        {
+            return Err(IntegrationRuntimeError::Protocol(
+                "execution fact node differs from execution owner".to_string(),
+            ));
+        }
         if self
             .execution_sequences
             .get(fact.execution_id)
@@ -346,11 +343,6 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         {
             return Ok(());
         }
-        self.execution_sequences
-            .insert(fact.execution_id.to_string(), fact.sequence);
-        let phase = ExecutionPhase::try_from(fact.phase).map_err(|_| {
-            IntegrationRuntimeError::Protocol("unknown execution phase".to_string())
-        })?;
         let status = match phase {
             ExecutionPhase::Accepted => RemoteExecutionStatus::Accepted,
             ExecutionPhase::Started => RemoteExecutionStatus::Running,
@@ -359,17 +351,34 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             ExecutionPhase::Cancelled => RemoteExecutionStatus::Cancelled,
             ExecutionPhase::Unknown | ExecutionPhase::Unspecified => RemoteExecutionStatus::Unknown,
         };
+        if let Some(current) = self.execution_status.get(fact.execution_id)
+            && current.is_terminal()
+        {
+            if *current == status {
+                return Ok(());
+            }
+            return Err(IntegrationRuntimeError::Protocol(
+                "terminal execution status is immutable".to_string(),
+            ));
+        }
+        if let Some(execution) = self.executions.get(fact.execution_id)
+            && execution.command.node_id() != &node_id
+        {
+            return Err(IntegrationRuntimeError::Protocol(
+                "execution fact node differs from dispatched command".to_string(),
+            ));
+        }
+        self.execution_sequences
+            .insert(fact.execution_id.to_string(), fact.sequence);
+        self.execution_nodes
+            .entry(fact.execution_id.to_string())
+            .or_insert(node_id);
         self.execution_status
             .insert(fact.execution_id.to_string(), status);
         let Some(execution) = self.executions.get(fact.execution_id) else {
             return Ok(());
         };
         let command = &execution.command;
-        if command.node_id().as_str() != fact.node_id {
-            return Err(IntegrationRuntimeError::Protocol(
-                "execution fact node differs from dispatched command".to_string(),
-            ));
-        }
         let node_event = match phase {
             ExecutionPhase::Completed => Some(NodeEvent::TaskCompleted {
                 node_id: command.node_id().clone(),
@@ -395,6 +404,13 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             );
         }
         Ok(())
+    }
+}
+
+impl RemoteExecutionStatus {
+    /// Returns whether no later execution lifecycle fact may change this status.
+    const fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
     }
 }
 
@@ -672,7 +688,7 @@ mod tests {
                 .expect("node visible")
                 .reported_status()
                 .health(),
-            NodeHealth::Online
+            NodeHealth::Offline
         );
         bridge
             .consume(
@@ -704,6 +720,50 @@ mod tests {
                 .health(),
             NodeHealth::Degraded
         );
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-1".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::RegistrationUpdate(
+                            crate::grpc::v0_2::RegistrationUpdate {
+                                session_id: "session-1".to_string(),
+                                sequence: 2,
+                                registration: Some(NodeRegistration {
+                                    node_id: "dog-a".to_string(),
+                                    local_systems: vec![LocalSystemDescriptor {
+                                        id: "motion".to_string(),
+                                        runtime: Some(WireRuntime {
+                                            name: "local-motion".to_string(),
+                                            version: "2".to_string(),
+                                        }),
+                                        metadata: Default::default(),
+                                    }],
+                                    capabilities: vec![WireCapability {
+                                        kind: "mobility".to_string(),
+                                        available: true,
+                                        contracts: vec!["mobility.reach_region@v1".to_string()],
+                                        local_system_id: "motion".to_string(),
+                                    }],
+                                    sensors: Vec::new(),
+                                    resources: Vec::new(),
+                                    metadata: std::collections::HashMap::new(),
+                                    node_contract_version: "roboguide.node.v0.2".to_string(),
+                                }),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("registration update is consumed");
+        let updated = bridge.state().node(&node_id).expect("updated node visible");
+        assert_eq!(updated.reported_status().health(), NodeHealth::Degraded);
+        assert_eq!(updated.reported_status_received_at(), TimestampMs::new(1));
+        assert_eq!(updated.liveness().observed_at(), TimestampMs::new(1));
+        assert_eq!(updated.registration().local_runtime().version(), "2");
     }
 
     /// Bound Group assignments are the only source of NodeId for Runtime routing.
@@ -784,6 +844,121 @@ mod tests {
         );
     }
 
+    /// A terminal execution fact is immutable even when a conflicting fact has a higher sequence.
+    #[test]
+    fn terminal_execution_status_rejects_later_conflict() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("terminal-test").expect("correlation valid");
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-terminal", 3, ExecutionPhase::Completed),
+                TimestampMs::new(3),
+                &correlation,
+            )
+            .expect("terminal snapshot is consumed");
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-terminal", 4, ExecutionPhase::Completed),
+                TimestampMs::new(4),
+                &correlation,
+            )
+            .expect("same terminal status is idempotent");
+
+        assert!(matches!(
+            bridge.consume(
+                execution_snapshot("dog-a", "execution-terminal", 5, ExecutionPhase::Failed),
+                TimestampMs::new(5),
+                &correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("immutable")
+        ));
+        assert_eq!(
+            bridge.execution_status("execution-terminal"),
+            Some(RemoteExecutionStatus::Completed)
+        );
+        assert_eq!(
+            bridge.execution_sequences.get("execution-terminal"),
+            Some(&3)
+        );
+    }
+
+    /// A high-sequence fact from another node cannot fence the execution owner's later fact.
+    #[test]
+    fn wrong_node_execution_fact_does_not_poison_sequence() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("wrong-node-test").expect("correlation valid");
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-owned", 1, ExecutionPhase::Started),
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("owner snapshot is consumed");
+
+        assert!(matches!(
+            bridge.consume(
+                execution_snapshot("dog-b", "execution-owned", 100, ExecutionPhase::Failed),
+                TimestampMs::new(2),
+                &correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("owner")
+        ));
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-owned", 2, ExecutionPhase::Completed),
+                TimestampMs::new(3),
+                &correlation,
+            )
+            .expect("owner's next fact remains admissible");
+        assert_eq!(
+            bridge.execution_status("execution-owned"),
+            Some(RemoteExecutionStatus::Completed)
+        );
+        assert_eq!(bridge.execution_sequences.get("execution-owned"), Some(&2));
+    }
+
+    /// An invalid phase cannot advance the execution sequence before validation succeeds.
+    #[test]
+    fn invalid_execution_phase_does_not_poison_sequence() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("invalid-phase-test").expect("correlation valid");
+        assert!(matches!(
+            bridge.consume(
+                execution_snapshot_with_phase("dog-a", "execution-phase", 100, i32::MAX),
+                TimestampMs::new(1),
+                &correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("phase")
+        ));
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-phase", 1, ExecutionPhase::Started),
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("valid lower sequence is accepted after invalid phase");
+        assert_eq!(
+            bridge.execution_status("execution-phase"),
+            Some(RemoteExecutionStatus::Running)
+        );
+        assert_eq!(bridge.execution_sequences.get("execution-phase"), Some(&1));
+    }
+
     /// A reconnect snapshot without a current Runtime command cannot be silently re-dispatched.
     #[test]
     fn observed_reconnect_execution_requires_reconciliation_before_route() {
@@ -832,5 +1007,39 @@ mod tests {
             bridge.execute("execution-1".to_string(), command, Vec::new()),
             Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("reconciliation")
         ));
+    }
+
+    /// Builds one reconnect snapshot event with a validated execution phase.
+    fn execution_snapshot(
+        node_id: &str,
+        execution_id: &str,
+        sequence: u64,
+        phase: ExecutionPhase,
+    ) -> GrpcNodeEvent {
+        execution_snapshot_with_phase(node_id, execution_id, sequence, phase as i32)
+    }
+
+    /// Builds one reconnect snapshot event with an arbitrary raw phase value.
+    fn execution_snapshot_with_phase(
+        node_id: &str,
+        execution_id: &str,
+        sequence: u64,
+        phase: i32,
+    ) -> GrpcNodeEvent {
+        GrpcNodeEvent::NodeMessage {
+            node_id: node_id.to_string(),
+            session_id: "session-test".to_string(),
+            message: crate::grpc::v0_2::NodeMessage {
+                message: Some(NodePayload::ExecutionSnapshot(
+                    crate::grpc::v0_2::ExecutionSnapshot {
+                        session_id: "session-test".to_string(),
+                        execution_id: execution_id.to_string(),
+                        last_sequence: sequence,
+                        phase,
+                        reason: String::new(),
+                    },
+                )),
+            },
+        }
     }
 }
