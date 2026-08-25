@@ -11,7 +11,7 @@ use ports::EventSink;
 use std::collections::BTreeMap;
 
 /// Lifecycle states for the task-level Execution Group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GroupLifecycle {
     /// The group exists with committed member/resource bindings.
     Bound,
@@ -30,7 +30,7 @@ pub enum GroupLifecycle {
 }
 
 /// Context retained when one role binding is released for recovery.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct UnboundRole {
     /// Node that held the failed binding before partial release.
     pub(crate) previous_node_id: NodeId,
@@ -39,7 +39,7 @@ pub(crate) struct UnboundRole {
 }
 
 /// A dynamic group of members, roles, and resource bindings.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionGroup {
     /// Dynamic execution-group identity.
     pub(crate) group_id: ExecutionGroupId,

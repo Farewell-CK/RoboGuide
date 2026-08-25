@@ -42,6 +42,24 @@ pub const DEFAULT_NODE_STATUS_TTL_MS: u64 = 5_000;
 /// Default lease duration assigned by convenience registration.
 pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
 
+/// Versioned durable representation of Control-owned commitments and Group state.
+///
+/// Process-local leases are deliberately absent because their monotonic timestamps cannot remain
+/// authoritative after a process restart.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ControlCheckpoint {
+    /// Unique resource commitments keyed by resource identity.
+    reservations: BTreeMap<ResourceId, Reservation>,
+    /// Mission-scoped actor bindings represented as values to avoid composite JSON map keys.
+    actor_bindings: Vec<ActorBinding>,
+    /// Execution Groups represented as values to avoid relying on map-key codecs.
+    groups: Vec<ExecutionGroup>,
+    /// Committed replacement assignments awaiting Rebind or Abort.
+    pending_recovery_commitments: Vec<CommittedRecoveryAssignment>,
+    /// Maximum receive-time age accepted by Control eligibility policy.
+    max_status_age_ms: u64,
+}
+
 /// Evaluates freshness using RoboGuide-local receive and decision times.
 pub(crate) fn is_fresh_at(received_at: TimestampMs, now: TimestampMs, max_age_ms: u64) -> bool {
     now.as_millis().saturating_sub(received_at.as_millis()) <= max_age_ms
@@ -218,6 +236,66 @@ impl ControlPlane {
         }
     }
 
+    /// Captures durable Control authority without process-local lease timestamps.
+    pub fn checkpoint(&self) -> ControlCheckpoint {
+        ControlCheckpoint {
+            reservations: self.reservations.clone(),
+            actor_bindings: self.actor_bindings.values().cloned().collect(),
+            groups: self.groups.values().cloned().collect(),
+            pending_recovery_commitments: self
+                .pending_recovery_commitments
+                .values()
+                .cloned()
+                .collect(),
+            max_status_age_ms: self.max_status_age_ms,
+        }
+    }
+
+    /// Restores durable Control authority and rejects duplicate or inconsistent checkpoint data.
+    ///
+    /// Node leases start empty so every node must establish fresh authority in the new process.
+    pub fn restore(checkpoint: ControlCheckpoint) -> Result<Self, ControlError> {
+        let mut actor_bindings = BTreeMap::new();
+        for binding in checkpoint.actor_bindings {
+            let key = (binding.mission_id().clone(), binding.actor_id().clone());
+            if actor_bindings.insert(key, binding).is_some() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains duplicate actor binding".to_string(),
+                ));
+            }
+        }
+        let mut groups = BTreeMap::new();
+        for group in checkpoint.groups {
+            if groups.insert(group.group_id().clone(), group).is_some() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains duplicate execution group".to_string(),
+                ));
+            }
+        }
+        let mut pending_recovery_commitments = BTreeMap::new();
+        for commitment in checkpoint.pending_recovery_commitments {
+            let key = (commitment.group_id().clone(), commitment.role_id().clone());
+            if pending_recovery_commitments
+                .insert(key, commitment)
+                .is_some()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains duplicate pending recovery commitment".to_string(),
+                ));
+            }
+        }
+        let restored = Self {
+            leases: BTreeMap::new(),
+            reservations: checkpoint.reservations,
+            actor_bindings,
+            groups,
+            pending_recovery_commitments,
+            max_status_age_ms: checkpoint.max_status_age_ms,
+        };
+        restored.allocation_snapshot(TimestampMs::new(0))?;
+        Ok(restored)
+    }
+
     /// Records an actor binding after a successful committed task and Group binding.
     pub(crate) fn record_actor_binding(
         &mut self,
@@ -253,7 +331,38 @@ impl ControlPlane {
     pub fn node_lease(&self, node_id: &NodeId) -> Option<&NodeLease> {
         self.leases.get(node_id)
     }
+
+    /// Returns all current Execution Group identities in deterministic order.
+    pub fn group_ids(&self) -> Vec<ExecutionGroupId> {
+        self.groups.keys().cloned().collect()
+    }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    /// The versioned Control checkpoint remains JSON-compatible with typed resource map keys.
+    #[test]
+    fn checkpoint_round_trips_typed_resource_keys() {
+        let mut control = ControlPlane::new();
+        control.reservations.insert(
+            ResourceId::new("space-a").expect("resource id valid"),
+            Reservation {
+                task_ref: TaskRef::new(
+                    MissionId::new("mission-a").expect("mission id valid"),
+                    domain::TaskId::new("task-a").expect("task id valid"),
+                ),
+                role_id: RoleId::new("role-a").expect("role id valid"),
+                group_id: None,
+            },
+        );
+        let json = serde_json::to_string(&control.checkpoint()).expect("checkpoint serializes");
+        let decoded: ControlCheckpoint =
+            serde_json::from_str(&json).expect("checkpoint deserializes");
+        assert!(ControlPlane::restore(decoded).is_ok());
+    }
+}

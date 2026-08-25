@@ -1,0 +1,33 @@
+# ADR-0011：Event Evidence JSON Codec
+
+- 状态：Accepted for State & Memory evidence bootstrap
+- 日期：2026-08-25
+
+## Context
+
+Integration Server 需要在进程重启后保留不可变事件证据。原有 `EventSink` 只规定了领域
+payload 的接收边界，没有规定持久化格式；直接把 Rust `Debug` 文本写入 SQLite 无法为
+后续 State/Control projection replay 提供稳定输入。
+
+## Decision
+
+`domain::EventPayload` 使用版本化 `domain.EventPayload.json/v1` JSON codec 写入
+`core/state::SqliteEventLog`。事件 envelope 保留 `event_id`、RoboGuide-local timestamp、
+correlation/causation identity 和 payload schema marker。`SqliteEventLog::decoded_events`
+只负责 codec 解码，不负责应用 Control mutation 或授予 reservation authority。
+
+JSON codec 版本升级必须使用新的 schema marker，并保留旧版本读取路径，直到已有数据库完成
+迁移。完整 event-sourced projection replay 必须额外定义 event ordering、idempotency 和
+非法状态转换策略；当前 controller checkpoint recovery 的边界见
+[`ADR-0012`](0012-controller-checkpoint-recovery.md)。
+
+单个 Integration fact 及其同步 Group lifecycle evidence 采用一个 SQLite batch。批次只保证
+evidence 的原子可见性；当前 `ControlPlane` 仍不是可回滚事务对象，因此 append/commit 失败
+必须触发进程级 fail-stop，不能继续提供看似健康的控制服务。
+
+## Consequences
+
+- Evidence 可以被工具和未来 projection 读取，而不依赖 Rust `Debug` 输出。
+- SQLite WAL 仍然只是单控制器持久化，不提供复制、HA 或跨进程 Control authority。
+- 删除或重建 projection 不会改变 Control reservation 的权威归属。
+- 事件 codec 兼容性成为 State & Memory 后续实现的测试要求。

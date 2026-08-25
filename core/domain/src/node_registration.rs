@@ -4,7 +4,7 @@ use crate::{LocalRuntime, LocalSystemId, SensorId};
 use std::collections::BTreeMap;
 
 /// One Local EAIOS/runtime aggregated behind a node identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LocalSystemDescriptor {
     /// Stable node-local owner identity.
     id: LocalSystemId,
@@ -45,7 +45,7 @@ impl LocalSystemDescriptor {
 }
 
 /// One sensor advertised by a configured local system.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SensorDescriptor {
     /// Stable node-wide sensor identity.
     id: SensorId,

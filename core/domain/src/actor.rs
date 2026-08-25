@@ -22,7 +22,7 @@ impl MissionActor {
 }
 
 /// Control-owned binding of one mission actor to one concrete node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ActorBinding {
     /// Mission namespace for the binding authority key.
     mission_id: MissionId,

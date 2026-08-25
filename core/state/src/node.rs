@@ -8,7 +8,10 @@
 //! decide scheduling eligibility, own leases or reservations, project
 //! Execution Groups, implement Shared Belief, or provide Memory persistence.
 
-use domain::{NodeHealthObservation, NodeId, NodeLivenessObservation, NodeStateSnapshot};
+use domain::{
+    NodeHealthObservation, NodeId, NodeLiveness, NodeLivenessObservation, NodeStateSnapshot,
+    TimestampMs,
+};
 use ports::{SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
 
@@ -25,6 +28,37 @@ impl InMemorySharedNodeState {
         Self {
             nodes: BTreeMap::new(),
         }
+    }
+
+    /// Restores reported node facts while rebasing process-local ordering and liveness evidence.
+    ///
+    /// Every restored node starts unreachable at `restored_at`; later registration or heartbeat
+    /// reception establishes current-process freshness. Duplicate node identities are rejected.
+    pub fn restore(
+        snapshots: Vec<NodeStateSnapshot>,
+        restored_at: TimestampMs,
+    ) -> Result<Self, String> {
+        let mut nodes = BTreeMap::new();
+        for snapshot in snapshots {
+            let node_id = snapshot.node_id().clone();
+            let rebased = NodeStateSnapshot::new(
+                snapshot.registration().clone(),
+                snapshot.reported_status(),
+                restored_at,
+                NodeLivenessObservation::new(NodeLiveness::Unreachable, restored_at),
+            );
+            if nodes.insert(node_id.clone(), rebased).is_some() {
+                return Err(format!(
+                    "checkpoint contains duplicate shared node {node_id}"
+                ));
+            }
+        }
+        Ok(Self { nodes })
+    }
+
+    /// Returns owned snapshots in deterministic node-identity order for persistence.
+    pub fn snapshots(&self) -> Vec<NodeStateSnapshot> {
+        self.nodes.values().cloned().collect()
     }
 }
 

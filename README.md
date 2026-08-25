@@ -48,8 +48,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - Mission 输出使用 `contracts/mission/v0.1/` 中的版本化合同；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
-- `core/state` 已实现 `State & Memory Plane — Slice v0.1: Shared Node State`，
-  Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
+- `core/state` 已实现 Shared Node State、Allocation State v0.1 和 SQLite WAL evidence
+  envelope；Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
 - `core/adapters` 已提供第一份 backend-neutral HTTP reference adapter，
   `apps/real-node-smoke` 默认只 probe registration/status，显式 `--execute` 才发送 intent；
@@ -313,6 +313,24 @@ Server 使用正式 gRPC bidirectional streaming：
 cargo run -p integration-server -- 0.0.0.0:50051
 ```
 
+Integration Server 还接受 controller evidence SQLite 路径和只读 HTTP 诊断地址，默认分别
+为 `roboguide-controller.sqlite3` 与 `127.0.0.1:8080`：
+
+```bash
+cargo run -p integration-server -- \
+  0.0.0.0:50051 ./var/controller-events.sqlite3 127.0.0.1:8080
+curl http://127.0.0.1:8080/healthz
+curl 'http://127.0.0.1:8080/v1/events?limit=100&after=0'
+# 查询已接收的 execution 状态；取消只会发出 Node Cancel 请求
+curl http://127.0.0.1:8080/v1/executions/<execution-id>
+curl -X POST http://127.0.0.1:8080/v1/executions/<execution-id>/cancel
+```
+
+HTTP 面只提供 health 和 immutable evidence 查询，不绕过 Control 修改 reservation；身份
+认证与传输安全不在当前切片范围内。若 SQLite 中存在与事件末尾一致的版本化 controller
+checkpoint，Integration Server 会恢复 Control/State/Runtime projection；缺少 checkpoint、
+schema 不支持或序号不一致时 fail-closed。
+
 节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：
 
 ```bash
@@ -389,16 +407,24 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0002-deaios-node-contract.md
     │   ├── 0003-mission-plan-contract.md
     │   ├── 0004-recovery-commitment-lifecycle.md
-    │   └── 0005-allocation-state-projection-authority.md
+    │   ├── 0005-allocation-state-projection-authority.md
+    │   ├── 0006-heterogeneous-eaios-integration-contract.md
+    │   ├── 0007-mission-actor-continuity.md
+    │   ├── 0008-integration-server-node-connector.md
+    │   ├── 0009-node-service-grpc-protocol.md
+    │   ├── 0010-single-node-service-local-integration-engine.md
+    │   ├── 0011-event-evidence-codec.md
+    │   └── 0012-controller-checkpoint-recovery.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
         └── distributed-embodied-ai-os-architecture-v1.1.png
 ```
 
-当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node
-Shared Node State 与 Allocation State v0.1 已实现，但完整 State & Memory Plane 和 MVP
-Definition 均未完成；
+当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node State、
+Allocation State v0.1、Node terminal execution 到 Group lifecycle 推进、SQLite evidence
+envelope 和 controller projection checkpoint restore 已实现，但完整 State & Memory Plane
+（event-sourced replay、Task/Group 历史 projection、复制）和 MVP Definition 均未完成；
 完整 MVP 的测试、适配器和仿真环境尚未完成。
 
 ## Mission Intelligence 开发

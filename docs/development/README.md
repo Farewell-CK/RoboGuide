@@ -252,17 +252,33 @@ Group lifecycle、不进入 `ExecutionGroup.assignments`，也不属于 Shared N
 Scheduler、multi-role/spatial/timeout recovery、Mission replanning、Runtime command
 replay 或自动 failure escalation。
 
-本切片明确不是完整 State & Memory Plane。以下内容延后：
+当前切片仍不是完整 State & Memory Plane。以下内容延后：
 
-- Allocation State；
 - Execution Group State Projection；
 - Physical / Spatial State；
 - Shared Belief；
 - Provenance / uncertainty fusion；
 - Distributed Memory；
-- Persistence / Replication；
+- Projection replay / Replication；
 - State Authority resolution；
 - Lease ownership resolution。
+
+### Durable Evidence Bootstrap
+
+`core/state::SqliteEventLog` 提供 SQLite WAL-backed immutable event envelope。它保存
+`event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
+和 `domain.EventPayload.json/v1` 版本化 JSON payload，供 Integration Server 的事件查询使用。该切片已验证跨进程
+重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
+`roboguide.controller-checkpoint/v1` projection；启动时要求 checkpoint 序号与事件末尾严格
+一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
+置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
+fail-closed。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、
+复制或 State Authority resolution。
+
+Integration fact 与其同步触发的 Group lifecycle evidence 使用一个 SQLite event batch；
+rejection 会 rollback，成功路径统一 commit。批次开放期间查询不会看到中间行。若 evidence
+append 或 commit 失败，Integration Server 整体 fail-stop，因为当前内存 `ControlPlane`
+不支持 transaction rollback；服务不得继续以已变更但未持久化的 authority 接受流量。
 
 Control 当前仍持有 `NodeId -> NodeLease`、Reservation、Execution Group 及其
 Blocked/Recovery/Partial Release/Failed/Release 生命周期。Lease 的 Control / Runtime /

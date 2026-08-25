@@ -42,7 +42,7 @@ impl CommittedPlan {
 }
 
 /// The task and role that currently hold a resource commitment.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Reservation {
     /// Mission-scoped task currently holding the resource.
     pub(crate) task_ref: TaskRef,

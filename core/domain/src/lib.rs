@@ -78,7 +78,7 @@ impl std::error::Error for DomainError {}
 macro_rules! define_identifier {
     ($name:ident, $doc:literal, $kind:literal) => {
         #[doc = $doc]
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
         pub struct $name(String);
 
         impl $name {
@@ -161,7 +161,9 @@ impl NodeContractVersion {
 }
 
 /// Uniquely identifies a mission-scoped task across concurrent missions.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct TaskRef {
     /// Mission that owns the task namespace.
     mission_id: MissionId,
@@ -200,7 +202,9 @@ impl Display for TaskRef {
 ///
 /// Readings from independent source clocks and RoboGuide clocks are not
 /// directly comparable merely because they share this representation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct TimestampMs(u64);
 
 impl TimestampMs {
@@ -216,7 +220,7 @@ impl TimestampMs {
 }
 
 /// A renewable time-bound authority for a node to remain schedulable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeLease {
     /// Stable identity of the lease instance.
     lease_id: LeaseId,
@@ -291,7 +295,7 @@ impl NodeLease {
 }
 
 /// Identifies the local runtime implementation behind a node adapter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LocalRuntime {
     /// Human-readable name of the local EAIOS implementation.
     name: String,
@@ -329,7 +333,9 @@ impl LocalRuntime {
 }
 
 /// Capability categories understood by the first DEAIOS slice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum CapabilityKind {
     /// Ability to move through the shared physical space.
     Mobility,
@@ -342,7 +348,7 @@ pub enum CapabilityKind {
 }
 
 /// One capability advertised by a node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Capability {
     /// Capability category exposed by the node.
     kind: CapabilityKind,
@@ -368,7 +374,9 @@ impl Capability {
 }
 
 /// Resource categories that may participate in a proposal or commitment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ResourceKind {
     /// A shared physical region, lane, or corridor.
     Space,
@@ -379,7 +387,7 @@ pub enum ResourceKind {
 }
 
 /// A resource advertised by a node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Resource {
     /// Stable identity of the reservable resource.
     id: ResourceId,
@@ -810,7 +818,7 @@ impl MissionPlan {
 }
 
 /// A node's proposed assignment for one execution-group role.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RoleAssignment {
     /// Role receiving the assignment.
     role_id: RoleId,
@@ -847,7 +855,7 @@ impl RoleAssignment {
 }
 
 /// The health state a node reports to the distributed system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NodeHealth {
     /// The node is available for normal scheduling and execution.
     Online,
@@ -867,7 +875,7 @@ impl NodeHealth {
 }
 
 /// A timestamped health snapshot for a node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeStatus {
     /// Most recent health classification reported by the node.
     health: NodeHealth,
@@ -970,7 +978,7 @@ impl NodeHealthObservation {
 }
 
 /// Minimal system-observed reachability of one node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NodeLiveness {
     /// RoboGuide successfully observed or reached the node.
     Reachable,
@@ -979,7 +987,7 @@ pub enum NodeLiveness {
 }
 
 /// A timestamped liveness fact derived by RoboGuide rather than the local EAIOS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeLivenessObservation {
     /// Current minimal reachability classification.
     liveness: NodeLiveness,
@@ -1008,7 +1016,7 @@ impl NodeLivenessObservation {
 }
 
 /// The local runtime and resources a node exposes to DEAIOS.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeRegistration {
     /// Logical node identity exposed to DEAIOS.
     node_id: NodeId,
@@ -1232,7 +1240,7 @@ impl NodeRegistration {
 }
 
 /// The latest shared registration, reported health, and liveness facts for one node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeStateSnapshot {
     /// Local runtime, capability, and resource facts advertised by the node.
     registration: NodeRegistration,
@@ -1287,7 +1295,7 @@ impl NodeStateSnapshot {
 }
 
 /// The result reported by a local node after receiving an execution command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NodeEvent {
     /// The local node completed the assigned role.
     TaskCompleted {
@@ -1323,7 +1331,7 @@ pub enum NodeEvent {
 }
 
 /// A command sent through the runtime to a local node.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionCommand {
     /// Mission-scoped task whose role is being invoked.
     task_ref: TaskRef,
@@ -1402,7 +1410,7 @@ impl ExecutionCommand {
 }
 
 /// A serializable-in-spirit event payload before a transport is selected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
     /// A node registration became visible to control.
     NodeRegistered {
@@ -1624,7 +1632,7 @@ pub enum EventPayload {
 }
 
 /// One immutable event with trace identities.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EventRecord {
     /// Stable identity of this immutable event.
     event_id: EventId,

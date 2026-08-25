@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
 /// Identifies one extensible RoboGuide canonical capability contract independently of local skills.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct CapabilityContractRef {
     /// Extensible operation family such as `mobility` or `compute`.
     namespace: String,
@@ -61,7 +63,7 @@ impl Display for CapabilityContractRef {
 }
 
 /// Describes what one role should execute without prescribing local implementation details.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionIntent {
     /// Canonical operation translated by the target adapter or local EAIOS.
     capability_contract: CapabilityContractRef,

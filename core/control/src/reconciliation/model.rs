@@ -204,7 +204,7 @@ impl RecoveryAssignmentProposal {
 }
 
 /// Replacement assignment whose resources are committed to the existing Group.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommittedRecoveryAssignment {
     /// Existing Group that owns the replacement commitment.
     group_id: ExecutionGroupId,

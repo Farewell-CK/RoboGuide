@@ -3,3 +3,7 @@ name = "domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

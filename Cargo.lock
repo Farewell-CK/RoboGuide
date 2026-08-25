@@ -210,6 +210,8 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "ports",
+ "serde",
+ "serde_json",
  "state",
 ]
 
@@ -295,6 +297,10 @@ dependencies = [
 [[package]]
 name = "domain"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "dunce"
@@ -758,6 +764,8 @@ dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "serde",
+ "serde_json",
  "state",
  "testkit",
  "tokio",
@@ -776,6 +784,7 @@ dependencies = [
  "integration",
  "ports",
  "runtime",
+ "serde_json",
  "state",
  "tokio",
  "tonic",
@@ -1751,6 +1760,9 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "ports",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

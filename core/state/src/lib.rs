@@ -5,7 +5,9 @@
 //! State & Memory Plane facade for implemented observable projections.
 
 mod allocation;
+mod event_log;
 mod node;
 
 pub use allocation::InMemoryAllocationState;
+pub use event_log::{PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError};
 pub use node::InMemorySharedNodeState;
