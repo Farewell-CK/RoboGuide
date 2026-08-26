@@ -1,4 +1,4 @@
-"""Contract tests for MissionPlan v0 parsing and graph invariants."""
+"""Contract tests for MissionPlan v0.2 parsing and graph invariants."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 from mission.models import JSONObject, MissionPlan, MissionPlanError
 
-FIXTURE = Path("scenarios/mvp-slice-v0.1/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
 
 
 def _fixture_json() -> JSONObject:
@@ -28,14 +28,14 @@ def test_valid_fixture_round_trips() -> None:
 def test_schema_version_declares_string_type_for_strict_providers() -> None:
     """Strict Responses providers require a type beside the version const constraint."""
     schema = json.loads(
-        Path("contracts/mission/v0.1/mission-plan.schema.json").read_text(encoding="utf-8")
+        Path("contracts/mission/v0.2/mission-plan.schema.json").read_text(encoding="utf-8")
     )
     version = schema["properties"]["schema_version"]
-    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.1"}
+    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.2"}
 
 
 def test_structured_execution_parameter_is_rejected() -> None:
-    """Mission Plan v0.1 accepts only scalar transport-neutral parameters."""
+    """Mission Plan v0.2 accepts only scalar transport-neutral parameters."""
     raw = deepcopy(_fixture_json())
     tasks = cast(list[JSONObject], raw["tasks"])
     roles = cast(list[JSONObject], tasks[0]["roles"])

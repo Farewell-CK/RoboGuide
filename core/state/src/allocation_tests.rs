@@ -1,5 +1,7 @@
 use super::*;
-use domain::{AllocationPhase, ExecutionGroupId, MissionId, RoleId, TaskId, TaskRef};
+use domain::{
+    AllocationOwner, AllocationPhase, ExecutionGroupId, MissionId, RoleId, TaskId, TaskRef,
+};
 
 /// Builds one projected allocation for deterministic state tests.
 fn allocation(resource_id: &str) -> ResourceAllocation {
@@ -12,6 +14,10 @@ fn allocation(resource_id: &str) -> ResourceAllocation {
         RoleId::new("transport").expect("test role id must be valid"),
         Some(ExecutionGroupId::new("group-a").expect("test group id must be valid")),
         AllocationPhase::Bound,
+        AllocationOwner::Task(TaskRef::new(
+            MissionId::new("mission-a").expect("test mission id must be valid"),
+            TaskId::new("task-a").expect("test task id must be valid"),
+        )),
     )
 }
 

@@ -14,7 +14,7 @@ from mission.models import JSONObject
 from mission.planners import FixturePlanner
 from mission.responses import MissionProviderError, ResponsesMissionPlanner
 
-FIXTURE = Path("scenarios/mvp-slice-v0.1/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
 
 
 def _response(output: JSONObject) -> JSONObject:
@@ -73,7 +73,7 @@ def test_fixture_planner_loads_the_approved_plan() -> None:
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     mission = raw["mission"]
     plan = FixturePlanner(FIXTURE).plan(mission["id"], mission["objective"])
-    assert plan.mission.mission_id == "mission-mvp-001"
+    assert plan.mission.mission_id == "mission-phase1-001"
 
 
 def test_responses_planner_uses_strict_output_and_review() -> None:

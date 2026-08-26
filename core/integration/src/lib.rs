@@ -15,5 +15,5 @@ mod runtime_bridge;
 pub use grpc_server::{GrpcIntegrationService, GrpcNodeEvent, GrpcNodeRouter};
 pub use runtime_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge, IntegrationRuntimeError,
-    RemoteExecutionStatus,
+    ObservedTaskOutcome, ObservedTaskResult, RemoteExecutionStatus,
 };

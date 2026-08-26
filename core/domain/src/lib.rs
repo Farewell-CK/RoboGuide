@@ -12,6 +12,7 @@ use std::fmt::{Display, Formatter};
 
 mod actor;
 mod allocation;
+mod context;
 mod execution;
 mod mission_plan;
 mod node_registration;
@@ -19,8 +20,10 @@ mod task_execution;
 
 pub use actor::{ActorBinding, MissionActor};
 pub use allocation::{
-    AllocationPhase, AllocationViewSnapshot, ResourceAllocation, ResourceBindingScope,
+    AllocationOwner, AllocationPhase, AllocationViewSnapshot, ResourceAllocation,
+    ResourceBindingScope,
 };
+pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
@@ -442,7 +445,7 @@ impl Resource {
 }
 
 /// A role and the capability/resource facts required to perform it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RoleRequirement {
     /// Responsibility identity required by the task.
     role_id: RoleId,
@@ -516,7 +519,7 @@ impl RoleRequirement {
 }
 
 /// A mission task's role-level execution requirements.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskRequirement {
     /// Mission-scoped task whose execution requirements are being described.
     task_ref: TaskRef,
@@ -562,7 +565,7 @@ impl TaskRequirement {
 }
 
 /// A user-visible mission objective before global scheduling decisions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MissionGoal {
     /// Stable mission identity shared by every task in the graph.
     mission_id: MissionId,
@@ -597,7 +600,7 @@ impl MissionGoal {
 }
 
 /// One Task Graph node with dependencies and role-level execution requirements.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlannedTask {
     /// Human-readable task outcome used for review and diagnostics.
     description: String,
@@ -607,6 +610,8 @@ pub struct PlannedTask {
     execution_intents: BTreeMap<RoleId, ExecutionIntent>,
     /// Tasks that must complete before this task becomes ready.
     dependencies: Vec<TaskId>,
+    /// Context and resource-lifetime declarations supplied by Mission Intelligence.
+    continuity: TaskContinuity,
 }
 
 impl PlannedTask {
@@ -616,6 +621,7 @@ impl PlannedTask {
         requirement: TaskRequirement,
         execution_intents: BTreeMap<RoleId, ExecutionIntent>,
         dependencies: Vec<TaskId>,
+        continuity: TaskContinuity,
     ) -> Result<Self, DomainError> {
         let description = description.into();
         if description.trim().is_empty() {
@@ -651,6 +657,19 @@ impl PlannedTask {
                 ),
             });
         }
+        if continuity
+            .context_roles()
+            .keys()
+            .chain(continuity.resource_scopes().keys())
+            .any(|role_id| !required_roles.contains(role_id))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "task {} continuity references an unknown role",
+                    requirement.task_id()
+                ),
+            });
+        }
         for role in requirement.roles() {
             if let Some(contract) = role.required_contract() {
                 let intent = execution_intents
@@ -672,6 +691,7 @@ impl PlannedTask {
             requirement,
             execution_intents,
             dependencies,
+            continuity,
         })
     }
 
@@ -704,10 +724,15 @@ impl PlannedTask {
     pub fn dependencies(&self) -> &[TaskId] {
         &self.dependencies
     }
+
+    /// Returns this Task's semantic continuity and resource-lifetime declaration.
+    pub const fn continuity(&self) -> &TaskContinuity {
+        &self.continuity
+    }
 }
 
 /// A validated acyclic Task Graph owned by one mission.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskGraph {
     /// Mission that owns every task in this graph.
     mission_id: MissionId,
@@ -799,28 +824,91 @@ impl TaskGraph {
 }
 
 /// A versioned Mission Intelligence result accepted by the DEAIOS core.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MissionPlan {
     /// User-visible goal preserved across planning and recovery.
     goal: MissionGoal,
     /// Validated task decomposition and execution requirements.
     task_graph: TaskGraph,
+    /// Mission Intelligence contexts available to every planned Task.
+    contexts: Vec<CoordinationContext>,
 }
 
 impl MissionPlan {
     /// Creates a plan only when the goal and Task Graph share one mission identity.
-    pub fn new(goal: MissionGoal, task_graph: TaskGraph) -> Result<Self, DomainError> {
+    pub fn new(
+        goal: MissionGoal,
+        task_graph: TaskGraph,
+        contexts: Vec<CoordinationContext>,
+    ) -> Result<Self, DomainError> {
         if goal.mission_id() != task_graph.mission_id() {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "goal and task graph mission ids differ".to_string(),
             });
         }
-        Ok(Self { goal, task_graph })
+        let context_ids = contexts
+            .iter()
+            .map(CoordinationContext::context_id)
+            .collect::<BTreeSet<_>>();
+        if context_ids.len() != contexts.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "Mission Plan has duplicate context ids".to_string(),
+            });
+        }
+        for task in task_graph.tasks() {
+            let context = contexts
+                .iter()
+                .find(|context| context.context_id() == task.continuity().context_id())
+                .ok_or_else(|| DomainError::InvalidMissionPlan {
+                    reason: format!("task {} references an unknown context", task.task_id()),
+                })?;
+            for (role_id, context_role_id) in task.continuity().context_roles() {
+                let context_role = context.role(context_role_id).ok_or_else(|| {
+                    DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "task {} role {role_id} references an unknown context role",
+                            task.task_id()
+                        ),
+                    }
+                })?;
+                let actor_id = task
+                    .requirement()
+                    .roles()
+                    .iter()
+                    .find(|role| role.role_id() == role_id)
+                    .and_then(RoleRequirement::actor_id);
+                if actor_id != Some(context_role.actor_id()) {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "task {} role {role_id} actor differs from its context role",
+                            task.task_id()
+                        ),
+                    });
+                }
+            }
+            for (role_id, scope) in task.continuity().resource_scopes() {
+                if *scope == ResourceBindingScope::Context
+                    && task.continuity().context_role(role_id).is_none()
+                {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "task {} context-scoped role {role_id} has no ContextRole",
+                            task.task_id()
+                        ),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            goal,
+            task_graph,
+            contexts,
+        })
     }
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_1
+        MISSION_PLAN_SCHEMA_V0_2
     }
 
     /// Returns the original mission goal.
@@ -831,6 +919,11 @@ impl MissionPlan {
     /// Returns the validated Task Graph.
     pub const fn task_graph(&self) -> &TaskGraph {
         &self.task_graph
+    }
+
+    /// Returns Mission Intelligence contexts in declaration order.
+    pub fn contexts(&self) -> &[CoordinationContext] {
+        &self.contexts
     }
 }
 
@@ -1795,6 +1888,11 @@ mod tests {
             requirement,
             BTreeMap::from([(role_id, intent)]),
             dependencies,
+            TaskContinuity::new(
+                CoordinationContextId::new("context-test").expect("test context id must be valid"),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
         )
         .expect("test task must be valid")
     }
@@ -1856,7 +1954,18 @@ mod tests {
         .expect("test task graph must be valid");
 
         assert!(matches!(
-            MissionPlan::new(goal, graph),
+            MissionPlan::new(
+                goal,
+                graph,
+                vec![
+                    CoordinationContext::new(
+                        CoordinationContextId::new("context-test")
+                            .expect("test context id must be valid"),
+                        Vec::new(),
+                    )
+                    .expect("test context must be valid")
+                ],
+            ),
             Err(DomainError::InvalidMissionPlan { .. })
         ));
     }

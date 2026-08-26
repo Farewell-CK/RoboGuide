@@ -8,7 +8,8 @@ Node Assignment、Resource Commit、Execution Group 或本地设备控制。
 - `src/mission/`：合同值、配置加载、Fixture Planner、Responses Adapter 和 CLI；
 - `prompts/v0/`：独立版本化的 Planner 与 Reviewer Prompt；
 - `tests/`：合同、配置、安全边界和 Fake Responses 的离线测试；
-- `../contracts/mission/v0.1/`：Python 与 Rust 共同遵守、含 role execution intent 的
+- `../contracts/mission/v0.2/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role
+  execution intent 和 Task/Context resource scope 的
   MissionPlan v0.1 Schema；旧 `v0/` 继续保留，避免静默改写已版本化合同。
 
 配置位于 `config/mission.toml`，凭据只从 `OPENAI_API_KEY` 读取。远程明文 HTTP

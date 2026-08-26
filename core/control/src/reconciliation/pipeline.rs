@@ -417,6 +417,7 @@ impl ControlPlane {
                     role_id: proposal.role_id().clone(),
                     group_id: Some(proposal.group_id().clone()),
                     scope: domain::ResourceBindingScope::Task,
+                    owner: domain::AllocationOwner::Task(proposal.task_ref().clone()),
                 },
             );
         }

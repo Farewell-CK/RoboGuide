@@ -4,6 +4,7 @@ members = [
     "core/ports",
     "core/state",
     "core/control",
+    "core/orchestration",
     "core/runtime",
     "core/adapters",
     "core/testkit",

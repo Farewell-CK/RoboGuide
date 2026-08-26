@@ -36,10 +36,70 @@ pub struct TaskExecution {
     lifecycle: TaskExecutionLifecycle,
     /// Current Task-local role bindings.
     assignments: Vec<RoleAssignment>,
-    /// Lifetime declared for each resource binding.
-    binding_scopes: BTreeMap<ResourceId, ResourceBindingScope>,
-    /// Optional ContextRole continuity identity for each Task role.
+    /// Resource lifetime declared for each Task role before binding.
+    #[serde(with = "role_scope_serde")]
+    role_scopes: BTreeMap<RoleId, ResourceBindingScope>,
+    /// ContextRole continuity identity for each Task role.
+    #[serde(with = "role_context_serde")]
     context_roles: BTreeMap<RoleId, ContextRoleId>,
+}
+
+/// Encodes role-to-scope maps as JSON arrays without relying on typed object keys.
+mod role_scope_serde {
+    use super::{ResourceBindingScope, RoleId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes role resource scopes as typed records.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<RoleId, ResourceBindingScope>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores role resource scopes and rejects duplicate roles.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<RoleId, ResourceBindingScope>, D::Error> {
+        let entries: Vec<(RoleId, ResourceBindingScope)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (role_id, scope) in entries {
+            if values.insert(role_id, scope).is_some() {
+                return Err(serde::de::Error::custom("duplicate role scope"));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes role-to-ContextRole maps as JSON arrays without typed object keys.
+mod role_context_serde {
+    use super::{ContextRoleId, RoleId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes role ContextRole mappings as typed records.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<RoleId, ContextRoleId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores role ContextRole mappings and rejects duplicate roles.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<RoleId, ContextRoleId>, D::Error> {
+        let entries: Vec<(RoleId, ContextRoleId)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (role_id, context_role_id) in entries {
+            if values.insert(role_id, context_role_id).is_some() {
+                return Err(serde::de::Error::custom("duplicate role ContextRole"));
+            }
+        }
+        Ok(values)
+    }
 }
 
 impl TaskExecution {
@@ -47,19 +107,16 @@ impl TaskExecution {
     pub fn new(
         task_ref: TaskRef,
         context_id: CoordinationContextId,
-        assignments: Vec<RoleAssignment>,
+        context_roles: BTreeMap<RoleId, ContextRoleId>,
+        role_scopes: BTreeMap<RoleId, ResourceBindingScope>,
     ) -> Self {
         Self {
             task_ref,
             context_id,
             lifecycle: TaskExecutionLifecycle::Pending,
-            binding_scopes: assignments
-                .iter()
-                .flat_map(|assignment| assignment.resource_ids().iter().cloned())
-                .map(|resource_id| (resource_id, ResourceBindingScope::Task))
-                .collect(),
-            context_roles: BTreeMap::new(),
-            assignments,
+            role_scopes,
+            context_roles,
+            assignments: Vec::new(),
         }
     }
 
@@ -85,15 +142,24 @@ impl TaskExecution {
 
     /// Returns the declared lifetime of one bound resource.
     pub fn binding_scope(&self, resource_id: &ResourceId) -> ResourceBindingScope {
-        self.binding_scopes
-            .get(resource_id)
+        self.assignments
+            .iter()
+            .find(|assignment| assignment.resource_ids().contains(resource_id))
+            .map(|assignment| self.role_scope(assignment.role_id()))
+            .unwrap_or(ResourceBindingScope::Task)
+    }
+
+    /// Returns the declared resource lifetime for one Task role.
+    pub fn role_scope(&self, role_id: &RoleId) -> ResourceBindingScope {
+        self.role_scopes
+            .get(role_id)
             .copied()
             .unwrap_or(ResourceBindingScope::Task)
     }
 
-    /// Returns all resource lifetimes in deterministic resource order.
-    pub const fn binding_scopes(&self) -> &BTreeMap<ResourceId, ResourceBindingScope> {
-        &self.binding_scopes
+    /// Returns all explicit role-level resource lifetimes.
+    pub const fn role_scopes(&self) -> &BTreeMap<RoleId, ResourceBindingScope> {
+        &self.role_scopes
     }
 
     /// Returns the ContextRole continuity identity for one Task role, when declared.
@@ -101,46 +167,10 @@ impl TaskExecution {
         self.context_roles.get(role_id)
     }
 
-    /// Returns a copy associating one Task role with a persistent ContextRole.
-    pub fn with_context_role(&self, role_id: RoleId, context_role_id: ContextRoleId) -> Self {
-        let mut copy = self.clone();
-        if copy
-            .assignments
-            .iter()
-            .any(|assignment| assignment.role_id() == &role_id)
-        {
-            copy.context_roles.insert(role_id, context_role_id);
-        }
-        copy
-    }
-
-    /// Returns a copy with one resource lifetime changed before execution begins.
-    pub fn with_binding_scope(&self, resource_id: ResourceId, scope: ResourceBindingScope) -> Self {
-        let mut copy = self.clone();
-        if copy
-            .assignments
-            .iter()
-            .any(|assignment| assignment.resource_ids().contains(&resource_id))
-        {
-            copy.binding_scopes.insert(resource_id, scope);
-        }
-        copy
-    }
-
-    /// Returns a copy with the supplied role bindings retained and missing resource scopes removed.
+    /// Returns a copy with the supplied committed role bindings.
     pub fn with_assignments(&self, assignments: Vec<RoleAssignment>) -> Self {
         let mut copy = self.clone();
         copy.assignments = assignments;
-        copy.binding_scopes.retain(|resource_id, _| {
-            copy.assignments
-                .iter()
-                .any(|assignment| assignment.resource_ids().contains(resource_id))
-        });
-        copy.context_roles.retain(|role_id, _| {
-            copy.assignments
-                .iter()
-                .any(|assignment| assignment.role_id() == role_id)
-        });
         copy
     }
 
@@ -150,7 +180,7 @@ impl TaskExecution {
             task_ref: self.task_ref.clone(),
             context_id: self.context_id.clone(),
             lifecycle,
-            binding_scopes: self.binding_scopes.clone(),
+            role_scopes: self.role_scopes.clone(),
             context_roles: self.context_roles.clone(),
             assignments: self.assignments.clone(),
         }

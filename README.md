@@ -45,12 +45,13 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
 - 当前 `mission/` 已提供确定性 Fixture Planner 和可配置的 Responses LLM Planner；
-- Mission 输出使用 `contracts/mission/v0.1/` 中的版本化合同；每个 Role 分别声明
+- Mission 输出使用 `contracts/mission/v0.2/` 中的版本化合同；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1 和 SQLite WAL evidence
   envelope；Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
-- 核心 Rust 包按职责位于 `core/`，可运行组合入口位于 `apps/controller/`；
+- 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
+  `apps/controller/` 和 `apps/integration-server/`；
 - `core/adapters` 已提供第一份 backend-neutral HTTP reference adapter，
   `apps/real-node-smoke` 默认只 probe registration/status，显式 `--execute` 才发送 intent；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；

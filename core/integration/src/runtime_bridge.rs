@@ -35,6 +35,43 @@ pub enum RemoteExecutionStatus {
     Unknown,
 }
 
+/// Terminal Task result derived from role execution facts without mutating Control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservedTaskResult {
+    /// Every currently bound role completed successfully.
+    Succeeded,
+    /// At least one currently bound role failed, cancelled, or became unknown.
+    Failed,
+}
+
+/// One terminal Task result for Mission orchestration to consume explicitly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedTaskOutcome {
+    /// Mission-level Group containing the TaskExecution.
+    group_id: domain::ExecutionGroupId,
+    /// Mission-scoped Task represented by the result.
+    task_ref: domain::TaskRef,
+    /// Runtime-derived terminal role result.
+    result: ObservedTaskResult,
+}
+
+impl ObservedTaskOutcome {
+    /// Returns the Mission-level Group containing this Task.
+    pub const fn group_id(&self) -> &domain::ExecutionGroupId {
+        &self.group_id
+    }
+
+    /// Returns the Mission-scoped Task represented by this result.
+    pub const fn task_ref(&self) -> &domain::TaskRef {
+        &self.task_ref
+    }
+
+    /// Returns the terminal role result observed by Runtime.
+    pub const fn result(&self) -> ObservedTaskResult {
+        self.result
+    }
+}
+
 /// Live composition state consuming Integration events and routing Runtime commands.
 pub struct IntegrationRuntimeBridge<E> {
     /// Existing Control authority for node leases and registration.
@@ -495,196 +532,57 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         self.execution_status.get(execution_id).copied()
     }
 
-    /// Advances Group lifecycle from terminal execution facts already accepted by Runtime.
-    pub fn advance_group_lifecycle(
-        &mut self,
-        timestamp: TimestampMs,
-        correlation_id: &CorrelationId,
-    ) -> Result<(), IntegrationRuntimeError> {
-        let group_ids = self.control.group_ids();
-        for group_id in group_ids {
-            let Some(group) = self.control.group(&group_id).cloned() else {
+    /// Reports terminal outcomes for active TaskExecutions without changing Mission or Group state.
+    pub fn terminal_task_outcomes(&self) -> Vec<ObservedTaskOutcome> {
+        let mut outcomes = Vec::new();
+        for group_id in self.control.group_ids() {
+            let Some(group) = self.control.group(&group_id) else {
                 continue;
             };
-            if !matches!(
-                group.lifecycle(),
-                control::GroupLifecycle::Active | control::GroupLifecycle::Adapted
-            ) {
-                continue;
-            }
-            if group.task_executions().next().is_some() {
-                let task_refs = group
-                    .task_executions()
-                    .map(|execution| execution.task_ref().clone())
-                    .collect::<Vec<_>>();
-                let mut all_tasks_completed = true;
-                let mut failed_task = None;
-                for task_ref in task_refs {
-                    let Some(task_execution) = group.task_execution(&task_ref) else {
-                        continue;
-                    };
-                    if matches!(
-                        task_execution.lifecycle(),
-                        domain::TaskExecutionLifecycle::Completed
-                            | domain::TaskExecutionLifecycle::Failed
-                            | domain::TaskExecutionLifecycle::Cancelled
-                    ) {
-                        if task_execution.lifecycle() != domain::TaskExecutionLifecycle::Completed {
-                            failed_task = Some(task_ref);
+            for task in group.task_executions().filter(|task| {
+                task.lifecycle() == domain::TaskExecutionLifecycle::Active
+                    && !task.assignments().is_empty()
+            }) {
+                let mut all_completed = true;
+                let mut failed = false;
+                for assignment in task.assignments() {
+                    let status = self
+                        .active_executions
+                        .get(&(
+                            group_id.clone(),
+                            task.task_ref().clone(),
+                            assignment.role_id().clone(),
+                        ))
+                        .and_then(|execution_id| self.execution_status.get(execution_id))
+                        .copied();
+                    match status {
+                        Some(RemoteExecutionStatus::Completed) => {}
+                        Some(
+                            RemoteExecutionStatus::Failed
+                            | RemoteExecutionStatus::Cancelled
+                            | RemoteExecutionStatus::Unknown,
+                        ) => {
+                            failed = true;
+                            all_completed = false;
                             break;
                         }
-                        continue;
-                    }
-                    let roles = task_execution
-                        .assignments()
-                        .iter()
-                        .map(|assignment| assignment.role_id().clone())
-                        .collect::<Vec<_>>();
-                    let mut task_completed = true;
-                    for role_id in roles {
-                        match self
-                            .active_executions
-                            .get(&(group_id.clone(), task_ref.clone(), role_id))
-                            .and_then(|execution_id| self.execution_status.get(execution_id))
-                            .copied()
-                        {
-                            Some(RemoteExecutionStatus::Completed) => {}
-                            Some(
-                                RemoteExecutionStatus::Failed
-                                | RemoteExecutionStatus::Cancelled
-                                | RemoteExecutionStatus::Unknown,
-                            ) => {
-                                failed_task = Some(task_ref.clone());
-                                task_completed = false;
-                                break;
-                            }
-                            _ => task_completed = false,
-                        }
-                    }
-                    if failed_task.is_some() {
-                        break;
-                    }
-                    if task_completed {
-                        self.control.complete_task_execution(
-                            &group_id,
-                            &task_ref,
-                            timestamp,
-                            correlation_id,
-                            &mut self.events,
-                        )?;
-                        let task_resources = task_execution
-                            .assignments()
-                            .iter()
-                            .flat_map(|assignment| assignment.resource_ids())
-                            .filter(|resource_id| {
-                                task_execution.binding_scope(resource_id)
-                                    == domain::ResourceBindingScope::Task
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        self.control.release_task_bindings(
-                            &group_id,
-                            &task_ref,
-                            &task_resources,
-                            timestamp,
-                            correlation_id,
-                            &mut self.events,
-                        )?;
-                    } else {
-                        all_tasks_completed = false;
+                        _ => all_completed = false,
                     }
                 }
-                if let Some(task_ref) = failed_task {
-                    self.control.fail_task_execution(
-                        &group_id,
-                        &task_ref,
-                        timestamp,
-                        correlation_id,
-                        &mut self.events,
-                    )?;
-                    self.control.block_group(
-                        &group_id,
-                        format!("execution for Task {task_ref} failed or is unknown"),
-                        timestamp,
-                        correlation_id,
-                        &mut self.events,
-                    )?;
-                } else if all_tasks_completed
-                    && self
-                        .control
-                        .group(&group_id)
-                        .map(|current| {
-                            current.task_executions().all(|execution| {
-                                execution.lifecycle() == domain::TaskExecutionLifecycle::Completed
-                            })
-                        })
-                        .unwrap_or(false)
-                {
-                    self.control.complete_group(
-                        &group_id,
-                        timestamp,
-                        correlation_id,
-                        &mut self.events,
-                    )?;
-                    self.control.release_group(
-                        &group_id,
-                        timestamp,
-                        correlation_id,
-                        &mut self.events,
-                    )?;
+                if failed || all_completed {
+                    outcomes.push(ObservedTaskOutcome {
+                        group_id: group_id.clone(),
+                        task_ref: task.task_ref().clone(),
+                        result: if failed {
+                            ObservedTaskResult::Failed
+                        } else {
+                            ObservedTaskResult::Succeeded
+                        },
+                    });
                 }
-                continue;
-            }
-            let roles = group
-                .assignments()
-                .iter()
-                .map(|assignment| assignment.role_id().clone())
-                .collect::<Vec<_>>();
-            let mut all_completed = true;
-            let mut failed_role = None;
-            for role_id in roles {
-                let status = self
-                    .active_executions
-                    .get(&(group_id.clone(), group.task_ref().clone(), role_id.clone()))
-                    .and_then(|execution_id| self.execution_status.get(execution_id))
-                    .copied();
-                match status {
-                    Some(RemoteExecutionStatus::Completed) => {}
-                    Some(
-                        RemoteExecutionStatus::Failed
-                        | RemoteExecutionStatus::Cancelled
-                        | RemoteExecutionStatus::Unknown,
-                    ) => {
-                        failed_role = Some(role_id);
-                        break;
-                    }
-                    _ => all_completed = false,
-                }
-            }
-            if let Some(role_id) = failed_role {
-                self.control.block_group(
-                    &group_id,
-                    format!("execution for role {role_id} failed or is unknown"),
-                    timestamp,
-                    correlation_id,
-                    &mut self.events,
-                )?;
-            } else if all_completed {
-                self.control.complete_group(
-                    &group_id,
-                    timestamp,
-                    correlation_id,
-                    &mut self.events,
-                )?;
-                self.control.release_group(
-                    &group_id,
-                    timestamp,
-                    correlation_id,
-                    &mut self.events,
-                )?;
             }
         }
-        Ok(())
+        outcomes
     }
     /// Converts execution facts into Runtime evidence and terminal NodeEvent values.
     fn consume_execution(
@@ -1634,9 +1532,7 @@ mod tests {
             "execution-current".to_string(),
         );
 
-        bridge
-            .advance_group_lifecycle(TimestampMs::new(1), &correlation)
-            .expect("current running execution does not block group");
+        assert!(bridge.terminal_task_outcomes().is_empty());
         assert_eq!(
             bridge
                 .control()
@@ -1649,16 +1545,14 @@ mod tests {
             "execution-current".to_string(),
             RemoteExecutionStatus::Completed,
         );
-        bridge
-            .advance_group_lifecycle(TimestampMs::new(2), &correlation)
-            .expect("current completion releases group");
+        assert!(bridge.terminal_task_outcomes().is_empty());
         assert_eq!(
             bridge
                 .control()
                 .group(&group_id)
                 .expect("group exists")
                 .lifecycle(),
-            control::GroupLifecycle::Released
+            control::GroupLifecycle::Active
         );
     }
 

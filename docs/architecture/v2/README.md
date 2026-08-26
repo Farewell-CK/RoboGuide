@@ -17,8 +17,9 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |
-| Mission Intelligence | 生成 Task Graph 和 Execution Requirements |
-| Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Execution Group 管理和恢复决策 |
+| Mission Intelligence | 生成带 Context/ContextRole 的完整 MissionPlan、Task Graph 和 Execution Requirements |
+| Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Group 内 TaskExecution 绑定和恢复决策 |
+| Mission Orchestration | 持有完整 MissionPlan，推进 DAG Ready/Active/Completed，并明确驱动 Mission/Group 终态 |
 | State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
 | Embodied Execution Group | 由 Control/Runtime 承载 Mission-level 多 Task 分布式执行上下文 |
 | Distributed Embodied Runtime | 提供发现、消息、调用、Heartbeat、Lease、Adapter 和诊断 |
@@ -73,15 +74,16 @@ Group 本体由 Runtime 承载并跨节点运行。
 ## 4. 决策与承诺语义
 
 ```text
-Plan → Match → Propose → Coordinate → Commit → Bind → Execute
+Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → Execute
 ```
 
 1. Capability Matching 输出 Candidate Set，回答 `Who can?`；
 2. Embodied Scheduler 输出 Assignment Proposal，回答 `Who should / Where / When?`；
 3. Shared Resource Coordination 检测竞争，并执行 Reservation、Negotiation 或重新分配；
 4. Commit 使资源义务生效，并在 Allocation / Reservation State 中可观察；
-5. Execution Group Manager 根据 Committed Plan 创建并绑定 Group；
-6. Runtime 承载绑定后的执行过程，使其跨节点运行。
+5. Mission Orchestration 在执行阶段从完整 DAG 创建一个 Mission-level Group 和全部 TaskExecution；
+6. Control 将每个 Task 的 Committed Plan 绑定回同一个 Group；
+7. Runtime 承载绑定后的执行过程，使其跨节点运行，并只上报 execution facts。
 
 未提交的 Proposal 绝不能被当作已经生效的资源分配。
 

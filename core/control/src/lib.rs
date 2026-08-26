@@ -15,7 +15,7 @@ mod scheduler;
 
 pub use allocation::AllocationProjectionError;
 pub use coordination::CommittedPlan;
-pub use group::{ExecutionGroup, GroupLifecycle, RoleRequirementView};
+pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use matching::{CandidateSet, RoleCandidates};
 pub use proposal::AssignmentProposal;
 pub use reconciliation::{
@@ -363,6 +363,10 @@ mod checkpoint_tests {
                 role_id: RoleId::new("role-a").expect("role id valid"),
                 group_id: None,
                 scope: domain::ResourceBindingScope::Task,
+                owner: domain::AllocationOwner::Task(TaskRef::new(
+                    MissionId::new("mission-a").expect("mission id valid"),
+                    domain::TaskId::new("task-a").expect("task id valid"),
+                )),
             },
         );
         let json = serde_json::to_string(&control.checkpoint()).expect("checkpoint serializes");

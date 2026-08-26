@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/v0.2/mission-plan.schema.json",
+  "title": "RoboGuide MissionPlan v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mission", "contexts", "tasks"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "roboguide.mission-plan/v0.2"},
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "objective"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "objective": {"type": "string", "minLength": 1}
+      }
+    },
+    "contexts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "roles"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "actor"],
+              "properties": {
+                "id": {"$ref": "#/$defs/id"},
+                "actor": {"$ref": "#/$defs/id"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "context_id", "depends_on", "roles"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "description": {"type": "string", "minLength": 1},
+          "context_id": {"$ref": "#/$defs/id"},
+          "depends_on": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"$ref": "#/$defs/id"}
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/$defs/role"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "name", "version"],
+      "properties": {
+        "namespace": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "actor", "capability", "contract", "resource_kind",
+        "execution", "context_role", "resource_scope"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "actor": {"$ref": "#/$defs/id"},
+        "capability": {"enum": ["mobility", "transport", "compute", "observation"]},
+        "contract": {"$ref": "#/$defs/contract"},
+        "resource_kind": {"enum": ["space", "compute", "time", null]},
+        "context_role": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "resource_scope": {"enum": ["task", "context"]},
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability_contract", "parameters"],
+          "properties": {
+            "capability_contract": {"$ref": "#/$defs/contract"},
+            "parameters": {
+              "type": "object",
+              "additionalProperties": {"type": ["boolean", "integer", "number", "string"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}

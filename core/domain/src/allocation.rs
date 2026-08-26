@@ -1,6 +1,25 @@
 //! Transport-neutral observable allocation projection types.
 
-use crate::{ExecutionGroupId, ResourceId, RoleId, TaskRef, TimestampMs};
+use crate::{
+    ContextRoleId, CoordinationContextId, ExecutionGroupId, MissionId, ResourceId, RoleId, TaskRef,
+    TimestampMs,
+};
+
+/// Authoritative lifetime owner represented by a Control reservation projection.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AllocationOwner {
+    /// Ownership ends with one TaskExecution.
+    Task(TaskRef),
+    /// Ownership remains continuous until one Mission Intelligence Context ends.
+    Context {
+        /// Mission owning the Context.
+        mission_id: MissionId,
+        /// Semantic Context owning the resource.
+        context_id: CoordinationContextId,
+        /// Persistent ContextRole owning the resource.
+        context_role_id: ContextRoleId,
+    },
+}
 
 /// Lifetime of a resource binding inside a Mission-level Execution Group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -42,6 +61,8 @@ pub struct ResourceAllocation {
     group_id: Option<ExecutionGroupId>,
     /// Observable commitment stage at projection time.
     phase: AllocationPhase,
+    /// Task- or Context-scoped commitment owner.
+    owner: AllocationOwner,
 }
 
 impl ResourceAllocation {
@@ -52,6 +73,7 @@ impl ResourceAllocation {
         role_id: RoleId,
         group_id: Option<ExecutionGroupId>,
         phase: AllocationPhase,
+        owner: AllocationOwner,
     ) -> Self {
         Self {
             resource_id,
@@ -59,6 +81,7 @@ impl ResourceAllocation {
             role_id,
             group_id,
             phase,
+            owner,
         }
     }
 
@@ -85,6 +108,11 @@ impl ResourceAllocation {
     /// Returns the projected commitment phase.
     pub const fn phase(&self) -> AllocationPhase {
         self.phase
+    }
+
+    /// Returns the Task- or Context-scoped reservation owner.
+    pub const fn owner(&self) -> &AllocationOwner {
+        &self.owner
     }
 }
 

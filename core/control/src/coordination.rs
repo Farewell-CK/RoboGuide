@@ -2,8 +2,8 @@
 
 use crate::{AssignmentProposal, ControlError, ControlPlane};
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, ResourceBindingScope, RoleAssignment, RoleId,
-    TaskId, TaskRef, TimestampMs,
+    AllocationOwner, CorrelationId, EventPayload, ExecutionGroupId, ResourceBindingScope,
+    RoleAssignment, RoleId, TaskId, TaskRef, TimestampMs,
 };
 use ports::EventSink;
 
@@ -53,6 +53,8 @@ pub(crate) struct Reservation {
     /// Lifetime of the reservation inside its Mission-level Group.
     #[serde(default)]
     pub(crate) scope: ResourceBindingScope,
+    /// Explicit Task or Context ownership authority.
+    pub(crate) owner: AllocationOwner,
 }
 
 impl ControlPlane {
@@ -85,6 +87,7 @@ impl ControlPlane {
                         role_id: assignment.role_id().clone(),
                         group_id: None,
                         scope: ResourceBindingScope::Task,
+                        owner: AllocationOwner::Task(proposal.task_ref().clone()),
                     },
                 );
             }
@@ -101,4 +104,114 @@ impl ControlPlane {
         );
         Ok(plan)
     }
+
+    /// Commits a ready Task proposal using its declared Task or Context resource ownership.
+    pub fn commit_for_group<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CommittedPlan, ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group.task_execution(proposal.task_ref()).ok_or_else(|| {
+            ControlError::InvalidProposal("Task is absent from the Mission Group".to_string())
+        })?;
+        if execution.lifecycle() != domain::TaskExecutionLifecycle::Ready {
+            return Err(ControlError::InvalidProposal(
+                "only a ready Task can commit resources".to_string(),
+            ));
+        }
+        validate_task_assignments(execution, proposal.assignments())?;
+        let mut owners = Vec::new();
+        for assignment in proposal.assignments() {
+            let scope = *execution
+                .role_scopes()
+                .get(assignment.role_id())
+                .expect("task assignment roles validated above");
+            let owner = match scope {
+                ResourceBindingScope::Task => AllocationOwner::Task(proposal.task_ref().clone()),
+                ResourceBindingScope::Context => AllocationOwner::Context {
+                    mission_id: proposal.task_ref().mission_id().clone(),
+                    context_id: execution.context_id().clone(),
+                    context_role_id: execution
+                        .context_role(assignment.role_id())
+                        .cloned()
+                        .ok_or_else(|| {
+                            ControlError::InvalidProposal(
+                                "Context-scoped role has no ContextRole".to_string(),
+                            )
+                        })?,
+                },
+            };
+            owners.push((assignment, scope, owner));
+        }
+        for (assignment, _, owner) in &owners {
+            for resource_id in assignment.resource_ids() {
+                if let Some(reservation) = self.reservations.get(resource_id)
+                    && (&reservation.owner != owner
+                        || reservation.group_id.as_ref() != Some(group_id))
+                {
+                    return Err(ControlError::ResourceConflict {
+                        resource_id: resource_id.clone(),
+                        owner_task_ref: reservation.task_ref.clone(),
+                        owner_role_id: reservation.role_id.clone(),
+                    });
+                }
+            }
+        }
+        for (assignment, scope, owner) in owners {
+            for resource_id in assignment.resource_ids() {
+                self.reservations
+                    .entry(resource_id.clone())
+                    .or_insert_with(|| Reservation {
+                        task_ref: proposal.task_ref().clone(),
+                        role_id: assignment.role_id().clone(),
+                        group_id: None,
+                        scope,
+                        owner: owner.clone(),
+                    });
+            }
+        }
+        let plan = CommittedPlan::new(proposal.task_ref().clone(), proposal.assignments().to_vec());
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::PlanCommitted {
+                task_ref: proposal.task_ref().clone(),
+            },
+        );
+        Ok(plan)
+    }
+}
+
+/// Rejects incomplete, duplicate, or unknown role assignments before reservation mutation.
+fn validate_task_assignments(
+    execution: &domain::TaskExecution,
+    assignments: &[RoleAssignment],
+) -> Result<(), ControlError> {
+    let expected = execution
+        .role_scopes()
+        .keys()
+        .collect::<std::collections::BTreeSet<_>>();
+    let actual = assignments
+        .iter()
+        .map(RoleAssignment::role_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    if expected != actual {
+        return Err(ControlError::InvalidProposal(
+            "committed assignments must exactly cover TaskExecution roles".to_string(),
+        ));
+    }
+    if assignments.len() != actual.len() {
+        return Err(ControlError::InvalidProposal(
+            "committed assignments contain duplicate roles".to_string(),
+        ));
+    }
+    Ok(())
 }

@@ -9,11 +9,12 @@ use control::{
     RecoverySchedulingOutcome,
 };
 use domain::{
-    ActorId, AllocationPhase, Capability, CapabilityContractRef, CapabilityKind, CorrelationId,
-    EventRecord, ExecutionCommand, ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime,
-    MISSION_PLAN_SCHEMA_V0_1, MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth,
-    NodeId, NodeRegistration, NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId,
-    RoleRequirement, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    ActorId, AllocationPhase, Capability, CapabilityContractRef, CapabilityKind,
+    CoordinationContext, CoordinationContextId, CorrelationId, EventRecord, ExecutionCommand,
+    ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
+    MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth, NodeId, NodeRegistration,
+    NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId, RoleRequirement,
+    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
@@ -235,6 +236,8 @@ fn load_mission_plan() -> Result<MissionPlan, String> {
     let mission_id = MissionId::new(document.mission.id).map_err(|error| error.to_string())?;
     let goal = MissionGoal::new(mission_id.clone(), document.mission.objective)
         .map_err(|error| error.to_string())?;
+    let context_id = CoordinationContextId::new("legacy-controller-context")
+        .map_err(|error| error.to_string())?;
     let tasks = document
         .tasks
         .into_iter()
@@ -272,12 +275,15 @@ fn load_mission_plan() -> Result<MissionPlan, String> {
                 requirement,
                 execution_intents,
                 dependencies,
+                TaskContinuity::new(context_id.clone(), BTreeMap::new(), BTreeMap::new()),
             )
             .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, String>>()?;
     let task_graph = TaskGraph::new(mission_id, tasks).map_err(|error| error.to_string())?;
-    MissionPlan::new(goal, task_graph).map_err(|error| error.to_string())
+    let context =
+        CoordinationContext::new(context_id, Vec::new()).map_err(|error| error.to_string())?;
+    MissionPlan::new(goal, task_graph, vec![context]).map_err(|error| error.to_string())
 }
 
 /// Finds the unique role requiring one capability in the selected task.

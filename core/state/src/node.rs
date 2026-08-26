@@ -16,7 +16,7 @@ use ports::{SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
 
 /// Deterministic current-state store for shared node facts.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemorySharedNodeState {
     /// Latest accepted node snapshots indexed in stable identity order.
     nodes: BTreeMap<NodeId, NodeStateSnapshot>,

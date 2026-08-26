@@ -2,8 +2,8 @@
 
 use crate::{ControlError, ControlPlane};
 use domain::{
-    AllocationPhase, AllocationViewSnapshot, ExecutionGroupId, ResourceAllocation, ResourceId,
-    RoleId, TaskRef, TimestampMs,
+    AllocationOwner, AllocationPhase, AllocationViewSnapshot, ExecutionGroupId, ResourceAllocation,
+    ResourceId, RoleId, TaskRef, TimestampMs,
 };
 use std::collections::BTreeMap;
 
@@ -17,6 +17,8 @@ struct ExpectedOwnership {
     task_ref: TaskRef,
     /// Role expected to own the reservation.
     role_id: RoleId,
+    /// Explicit Task or Context lifetime owner.
+    owner: AllocationOwner,
 }
 
 impl ControlPlane {
@@ -76,6 +78,7 @@ impl ControlPlane {
                 reservation.role_id.clone(),
                 group_id,
                 phase,
+                reservation.owner.clone(),
             ));
         }
 
@@ -99,6 +102,7 @@ impl ControlPlane {
                             ExpectedOwnership {
                                 task_ref: group.task_ref().clone(),
                                 role_id: assignment.role_id().clone(),
+                                owner: AllocationOwner::Task(group.task_ref().clone()),
                             },
                         )
                         .is_some()
@@ -112,6 +116,11 @@ impl ControlPlane {
             for execution in group.task_executions() {
                 for assignment in execution.assignments() {
                     for resource_id in assignment.resource_ids() {
+                        if execution.binding_scope(resource_id)
+                            == domain::ResourceBindingScope::Context
+                        {
+                            continue;
+                        }
                         let key = (group_id.clone(), resource_id.clone());
                         if ownership
                             .insert(
@@ -119,6 +128,7 @@ impl ControlPlane {
                                 ExpectedOwnership {
                                     task_ref: execution.task_ref().clone(),
                                     role_id: assignment.role_id().clone(),
+                                    owner: AllocationOwner::Task(execution.task_ref().clone()),
                                 },
                             )
                             .is_some()
@@ -127,6 +137,30 @@ impl ControlPlane {
                                 "group {group_id} binds resource {resource_id} more than once"
                             )));
                         }
+                    }
+                }
+            }
+            for binding in group.context_bindings() {
+                for resource_id in binding.assignment().resource_ids() {
+                    let key = (group_id.clone(), resource_id.clone());
+                    if ownership
+                        .insert(
+                            key,
+                            ExpectedOwnership {
+                                task_ref: binding.origin_task_ref().clone(),
+                                role_id: binding.assignment().role_id().clone(),
+                                owner: AllocationOwner::Context {
+                                    mission_id: group.mission_id().clone(),
+                                    context_id: binding.context_id().clone(),
+                                    context_role_id: binding.context_role_id().clone(),
+                                },
+                            },
+                        )
+                        .is_some()
+                    {
+                        return Err(ControlError::AllocationInvariant(format!(
+                            "group {group_id} binds context resource {resource_id} more than once"
+                        )));
                     }
                 }
             }
@@ -168,6 +202,7 @@ impl ControlPlane {
                         ExpectedOwnership {
                             task_ref: commitment.task_ref().clone(),
                             role_id: role_id.clone(),
+                            owner: AllocationOwner::Task(commitment.task_ref().clone()),
                         },
                     )
                     .is_some()
@@ -209,7 +244,10 @@ fn validate_expected_owner(
     reservation: &crate::coordination::Reservation,
     expected: &ExpectedOwnership,
 ) -> Result<(), ControlError> {
-    if reservation.task_ref != expected.task_ref || reservation.role_id != expected.role_id {
+    if reservation.task_ref != expected.task_ref
+        || reservation.role_id != expected.role_id
+        || reservation.owner != expected.owner
+    {
         return Err(ControlError::AllocationInvariant(format!(
             "resource {resource_id} reservation task/role ownership is inconsistent"
         )));

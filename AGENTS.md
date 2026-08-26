@@ -16,8 +16,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   composition roots.
 - `core/state/` implements only State & Memory Plane Slice v0.1: deterministic
   Shared Node State plus Allocation State v0.1 behind transport-neutral ports.
+- `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
+  creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
+- Phase 1 uses `roboguide.mission-plan/v0.2`: Context/ContextRole continuity is
+  Mission Intelligence metadata, while Task/Context resource ownership is recorded
+  independently in Control and its Group projection.
 - Runtime observation ingestion normalizes `NodeGateway.status()` into reported
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.

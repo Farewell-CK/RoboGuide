@@ -33,9 +33,33 @@ fn continuity_plan() -> (domain::MissionPlan, TaskRequirement, TaskRequirement) 
         )
         .expect("intent valid")
     };
+    let context_id = domain::CoordinationContextId::new("delivery")
+        .expect("context id must be valid");
+    let carrier_context_role = domain::ContextRoleId::new("carrier")
+        .expect("context role id must be valid");
+    let manipulator_context_role = domain::ContextRoleId::new("manipulator")
+        .expect("context role id must be valid");
     let task = |description: &str, requirement: TaskRequirement, dependencies: Vec<TaskId>| {
         let role_id = requirement.roles()[0].role_id().clone();
-        PlannedTask::new(description, requirement, BTreeMap::from([(role_id, intent(description))]), dependencies)
+        let context_role = if requirement.roles()[0]
+            .actor_id()
+            .is_some_and(|actor| actor.as_str() == "carrier")
+        {
+            carrier_context_role.clone()
+        } else {
+            manipulator_context_role.clone()
+        };
+        PlannedTask::new(
+            description,
+            requirement,
+            BTreeMap::from([(role_id.clone(), intent(description))]),
+            dependencies,
+            domain::TaskContinuity::new(
+                context_id.clone(),
+                BTreeMap::from([(role_id, context_role)]),
+                BTreeMap::new(),
+            ),
+        )
             .expect("planned task valid")
     };
     let graph = TaskGraph::new(mission_id.clone(), vec![
@@ -44,7 +68,21 @@ fn continuity_plan() -> (domain::MissionPlan, TaskRequirement, TaskRequirement) 
         task("return-user", t3.clone(), vec![TaskId::new("t2").expect("task id valid")]),
     ]).expect("graph valid");
     let goal = MissionGoal::new(mission_id, "deliver book").expect("goal valid");
-    (MissionPlan::new(goal, graph).expect("plan valid"), t1, t3)
+    let context = domain::CoordinationContext::new(
+        context_id,
+        vec![
+            domain::ContextRole::new(
+                carrier_context_role,
+                domain::ActorId::new("carrier").expect("actor id valid"),
+            ),
+            domain::ContextRole::new(
+                manipulator_context_role,
+                domain::ActorId::new("manipulator").expect("actor id valid"),
+            ),
+        ],
+    )
+    .expect("context valid");
+    (MissionPlan::new(goal, graph, vec![context]).expect("plan valid"), t1, t3)
 }
 
 /// Registers a node with one capability and one exact mission contract.

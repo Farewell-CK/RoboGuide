@@ -1,0 +1,16 @@
+[package]
+name = "orchestration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+control = { path = "../control" }
+domain = { path = "../domain" }
+ports = { path = "../ports" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+testkit = { path = "../testkit" }
+state = { path = "../state" }

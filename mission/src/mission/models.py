@@ -10,7 +10,7 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.1"
+MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.2"
 CAPABILITIES: Final = frozenset({"mobility", "transport", "compute", "observation"})
 RESOURCE_KINDS: Final = frozenset({"space", "compute", "time"})
 
@@ -125,13 +125,26 @@ class RoleRequirement:
     capability: str
     resource_kind: str | None
     execution: ExecutionIntent
+    context_role: str | None
+    resource_scope: str
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str) -> RoleRequirement:
         """Parse and validate one role requirement from contract JSON."""
         item = _object(value, path)
         _exact_keys(
-            item, {"id", "actor", "capability", "contract", "resource_kind", "execution"}, path
+            item,
+            {
+                "id",
+                "actor",
+                "capability",
+                "contract",
+                "resource_kind",
+                "execution",
+                "context_role",
+                "resource_scope",
+            },
+            path,
         )
         role_id = _text(item["id"], f"{path}.id")
         capability = _text(item["capability"], f"{path}.capability")
@@ -146,12 +159,22 @@ class RoleRequirement:
             raise MissionPlanError(f"{path}.resource_kind must be text or null")
         if resource_value is not None and resource_value not in RESOURCE_KINDS:
             raise MissionPlanError(f"{path}.resource_kind is unsupported: {resource_value}")
+        context_role_value = item["context_role"]
+        if context_role_value is not None:
+            context_role_value = _text(context_role_value, f"{path}.context_role")
+        resource_scope = _text(item["resource_scope"], f"{path}.resource_scope")
+        if resource_scope not in {"task", "context"}:
+            raise MissionPlanError(f"{path}.resource_scope is unsupported: {resource_scope}")
+        if resource_scope == "context" and context_role_value is None:
+            raise MissionPlanError(f"{path}.context_role is required for context scope")
         return cls(
             role_id=role_id,
             actor_id=_text(item["actor"], f"{path}.actor"),
             capability=capability,
             resource_kind=resource_value,
             execution=execution,
+            context_role=context_role_value,
+            resource_scope=resource_scope,
         )
 
     def to_json(self) -> JSONObject:
@@ -163,7 +186,56 @@ class RoleRequirement:
             "contract": self.execution.capability_contract.to_json(),
             "resource_kind": self.resource_kind,
             "execution": self.execution.to_json(),
+            "context_role": self.context_role,
+            "resource_scope": self.resource_scope,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ContextRole:
+    """Associate one continuous semantic role with a Mission actor."""
+
+    role_id: str
+    actor_id: str
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> ContextRole:
+        """Parse one ContextRole without introducing runtime node placement."""
+        item = _object(value, path)
+        _exact_keys(item, {"id", "actor"}, path)
+        return cls(
+            role_id=_text(item["id"], f"{path}.id"),
+            actor_id=_text(item["actor"], f"{path}.actor"),
+        )
+
+    def to_json(self) -> JSONObject:
+        """Serialize one semantic ContextRole."""
+        return {"id": self.role_id, "actor": self.actor_id}
+
+
+@dataclass(frozen=True, slots=True)
+class MissionContext:
+    """Describe semantic continuity shared by one or more Tasks."""
+
+    context_id: str
+    roles: tuple[ContextRole, ...]
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> MissionContext:
+        """Parse one Context and reject duplicate ContextRole identities."""
+        item = _object(value, path)
+        _exact_keys(item, {"id", "roles"}, path)
+        roles = tuple(
+            ContextRole.from_json(role, f"{path}.roles[{index}]")
+            for index, role in enumerate(_array(item["roles"], f"{path}.roles"))
+        )
+        if len({role.role_id for role in roles}) != len(roles):
+            raise MissionPlanError(f"{path}.roles contains duplicate ids")
+        return cls(context_id=_text(item["id"], f"{path}.id"), roles=roles)
+
+    def to_json(self) -> JSONObject:
+        """Serialize one Context in declaration order."""
+        return {"id": self.context_id, "roles": [role.to_json() for role in self.roles]}
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,12 +246,13 @@ class MissionTask:
     description: str
     depends_on: tuple[str, ...]
     roles: tuple[RoleRequirement, ...]
+    context_id: str
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str) -> MissionTask:
         """Parse one task and reject empty or duplicate role requirements."""
         item = _object(value, path)
-        _exact_keys(item, {"id", "description", "depends_on", "roles"}, path)
+        _exact_keys(item, {"id", "description", "depends_on", "roles", "context_id"}, path)
         dependencies = tuple(
             _text(dependency, f"{path}.depends_on[{index}]")
             for index, dependency in enumerate(_array(item["depends_on"], f"{path}.depends_on"))
@@ -200,6 +273,7 @@ class MissionTask:
             description=_text(item["description"], f"{path}.description"),
             depends_on=dependencies,
             roles=roles,
+            context_id=_text(item["context_id"], f"{path}.context_id"),
         )
 
     def to_json(self) -> JSONObject:
@@ -209,6 +283,7 @@ class MissionTask:
             "description": self.description,
             "depends_on": list(self.depends_on),
             "roles": [role.to_json() for role in self.roles],
+            "context_id": self.context_id,
         }
 
 
@@ -241,12 +316,13 @@ class MissionPlan:
     schema_version: str
     mission: MissionSpec
     tasks: tuple[MissionTask, ...]
+    contexts: tuple[MissionContext, ...]
 
     @classmethod
     def from_json(cls, value: JSONValue) -> MissionPlan:
         """Parse a plan and enforce version, identity, and graph invariants."""
         item = _object(value, "mission_plan")
-        _exact_keys(item, {"schema_version", "mission", "tasks"}, "mission_plan")
+        _exact_keys(item, {"schema_version", "mission", "contexts", "tasks"}, "mission_plan")
         version = _text(item["schema_version"], "schema_version")
         if version != MISSION_PLAN_VERSION:
             raise MissionPlanError(f"unsupported schema_version: {version}")
@@ -254,9 +330,38 @@ class MissionPlan:
             MissionTask.from_json(task, f"tasks[{index}]")
             for index, task in enumerate(_array(item["tasks"], "tasks"))
         )
-        plan = cls(version, MissionSpec.from_json(item["mission"]), tasks)
+        contexts = tuple(
+            MissionContext.from_json(context, f"contexts[{index}]")
+            for index, context in enumerate(_array(item["contexts"], "contexts"))
+        )
+        plan = cls(version, MissionSpec.from_json(item["mission"]), tasks, contexts)
         plan.validate_graph()
+        plan.validate_contexts()
         return plan
+
+    def validate_contexts(self) -> None:
+        """Reject unknown Contexts/ContextRoles and mismatched Actor continuity."""
+        context_ids = [context.context_id for context in self.contexts]
+        if len(set(context_ids)) != len(context_ids):
+            raise MissionPlanError("contexts contains duplicate ids")
+        contexts = {context.context_id: context for context in self.contexts}
+        for task in self.tasks:
+            context = contexts.get(task.context_id)
+            if context is None:
+                raise MissionPlanError(f"task {task.task_id} references unknown context")
+            context_roles = {role.role_id: role for role in context.roles}
+            for role in task.roles:
+                if role.context_role is None:
+                    continue
+                context_role = context_roles.get(role.context_role)
+                if context_role is None:
+                    raise MissionPlanError(
+                        f"task {task.task_id} role {role.role_id} references unknown context role"
+                    )
+                if context_role.actor_id != role.actor_id:
+                    raise MissionPlanError(
+                        f"task {task.task_id} role {role.role_id} actor differs from context role"
+                    )
 
     def validate_graph(self) -> None:
         """Reject empty graphs, duplicate tasks, unknown dependencies, and cycles."""
@@ -288,5 +393,6 @@ class MissionPlan:
         return {
             "schema_version": self.schema_version,
             "mission": self.mission.to_json(),
+            "contexts": [context.to_json() for context in self.contexts],
             "tasks": [task.to_json() for task in self.tasks],
         }
