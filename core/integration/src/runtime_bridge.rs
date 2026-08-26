@@ -11,12 +11,15 @@ use domain::{
     Resource, ResourceId, ResourceKind, SensorDescriptor, SensorId, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateWriter};
+use runtime::{
+    ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
+};
 use state::InMemorySharedNodeState;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v3";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v4";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -82,41 +85,10 @@ pub struct IntegrationRuntimeBridge<E> {
     events: E,
     /// Current formal gRPC Node routes.
     router: GrpcNodeRouter,
-    /// Dispatched execution contexts needed to turn terminal facts into NodeEvent.
-    executions: BTreeMap<String, RoutedExecution>,
-    /// Latest execution lifecycle facts.
-    execution_status: BTreeMap<String, RemoteExecutionStatus>,
-    /// Last accepted execution-local sequence across sessions and snapshot replay.
-    execution_sequences: BTreeMap<String, u64>,
-    /// Node that first reported or received each stable execution identity.
-    execution_nodes: BTreeMap<String, NodeId>,
-    /// Current authoritative execution identity for each Group Task role.
-    active_executions:
-        BTreeMap<(domain::ExecutionGroupId, domain::TaskRef, domain::RoleId), String>,
-    /// Commands recovered from durable state that must never be implicitly sent again.
-    restored_executions: BTreeSet<String>,
-}
-
-/// One Runtime command and the Control-committed resources for its bound role.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-struct RoutedExecution {
-    /// Existing canonical Runtime command.
-    command: ExecutionCommand,
-    /// Stable sorted committed resource identities.
-    resource_ids: Vec<ResourceId>,
-}
-
-/// Serializable Group-role execution identity without a composite JSON map key.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ActiveExecutionCheckpoint {
-    /// Group owning the execution.
-    group_id: domain::ExecutionGroupId,
-    /// Task owning the role execution.
-    task_ref: domain::TaskRef,
-    /// Role owning the execution.
-    role_id: domain::RoleId,
-    /// Stable execution identity currently associated with the role.
-    execution_id: String,
+    /// Runtime-owned live execution registry and sole execution checkpoint authority.
+    runtime: RuntimeExecutionManager,
+    /// Canonical Runtime transitions awaiting application/orchestration consumption.
+    runtime_events: VecDeque<ExecutionEvent>,
 }
 
 /// Complete durable projection required to reconstruct the controller process.
@@ -128,16 +100,8 @@ struct ControllerCheckpoint {
     control: control::ControlCheckpoint,
     /// Shared reported node facts; local receive/liveness times are rebased on restore.
     nodes: Vec<domain::NodeStateSnapshot>,
-    /// Runtime command contexts retained for reconciliation and terminal fact conversion.
-    executions: BTreeMap<String, RoutedExecution>,
-    /// Latest accepted remote status by execution identity.
-    execution_status: BTreeMap<String, RemoteExecutionStatus>,
-    /// Latest accepted node-local sequence by execution identity.
-    execution_sequences: BTreeMap<String, u64>,
-    /// Stable node ownership observed for each execution identity.
-    execution_nodes: BTreeMap<String, NodeId>,
-    /// Current execution identity for every Group role.
-    active_executions: Vec<ActiveExecutionCheckpoint>,
+    /// Runtime-owned live execution contexts and continuity state.
+    runtime: RuntimeExecutionCheckpoint,
 }
 
 /// Validated execution fact context received from one current Node session.
@@ -167,12 +131,8 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             state,
             events,
             router,
-            executions: BTreeMap::new(),
-            execution_status: BTreeMap::new(),
-            execution_sequences: BTreeMap::new(),
-            execution_nodes: BTreeMap::new(),
-            active_executions: BTreeMap::new(),
-            restored_executions: BTreeSet::new(),
+            runtime: RuntimeExecutionManager::new(),
+            runtime_events: VecDeque::new(),
         }
     }
 
@@ -182,22 +142,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             schema: CONTROLLER_CHECKPOINT_SCHEMA.to_string(),
             control: self.control.checkpoint(),
             nodes: self.state.snapshots(),
-            executions: self.executions.clone(),
-            execution_status: self.execution_status.clone(),
-            execution_sequences: self.execution_sequences.clone(),
-            execution_nodes: self.execution_nodes.clone(),
-            active_executions: self
-                .active_executions
-                .iter()
-                .map(
-                    |((group_id, task_ref, role_id), execution_id)| ActiveExecutionCheckpoint {
-                        group_id: group_id.clone(),
-                        task_ref: task_ref.clone(),
-                        role_id: role_id.clone(),
-                        execution_id: execution_id.clone(),
-                    },
-                )
-                .collect(),
+            runtime: self.runtime.checkpoint(),
         };
         serde_json::to_string(&checkpoint)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))
@@ -221,43 +166,18 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 checkpoint.schema
             )));
         }
-        validate_execution_checkpoint(&checkpoint)?;
         let control = ControlPlane::restore(checkpoint.control)?;
         let state = InMemorySharedNodeState::restore(checkpoint.nodes, restored_at)
             .map_err(IntegrationRuntimeError::Checkpoint)?;
-        let mut active_executions = BTreeMap::new();
-        for active in checkpoint.active_executions {
-            let key = (active.group_id, active.task_ref, active.role_id);
-            if active_executions.insert(key, active.execution_id).is_some() {
-                return Err(IntegrationRuntimeError::Checkpoint(
-                    "checkpoint contains duplicate active Group role".to_string(),
-                ));
-            }
-        }
-        let restored_executions = checkpoint.executions.keys().cloned().collect();
-        let execution_status = checkpoint
-            .execution_status
-            .into_iter()
-            .map(|(execution_id, status)| {
-                let restored_status = if status.is_terminal() {
-                    status
-                } else {
-                    RemoteExecutionStatus::Unknown
-                };
-                (execution_id, restored_status)
-            })
-            .collect();
+        let runtime = RuntimeExecutionManager::restore(checkpoint.runtime)
+            .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         Ok(Self {
             control,
             state,
             events,
             router,
-            executions: checkpoint.executions,
-            execution_status,
-            execution_sequences: checkpoint.execution_sequences,
-            execution_nodes: checkpoint.execution_nodes,
-            active_executions,
-            restored_executions,
+            runtime,
+            runtime_events: VecDeque::new(),
         })
     }
 
@@ -366,28 +286,15 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         command: ExecutionCommand,
         mut resource_ids: Vec<ResourceId>,
     ) -> Result<(), IntegrationRuntimeError> {
-        if self.restored_executions.contains(&execution_id) {
-            return Err(IntegrationRuntimeError::Protocol(
-                "execution was restored after controller restart; reconciliation is required before routing"
-                    .to_string(),
-            ));
-        }
-        if self.execution_status.contains_key(&execution_id)
-            && !self.executions.contains_key(&execution_id)
-        {
-            return Err(IntegrationRuntimeError::Protocol(
-                "execution was observed during reconnect; reconciliation is required before routing"
-                    .to_string(),
-            ));
+        let dispatch = self
+            .runtime
+            .validate_dispatch(&execution_id, &command, &resource_ids)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        if dispatch == runtime::DispatchDecision::AlreadyRouted {
+            return Ok(());
         }
         resource_ids.sort();
         resource_ids.dedup();
-        if let Some(existing) = self.executions.get(&execution_id) {
-            if existing.command != command || existing.resource_ids != resource_ids {
-                return Err(IntegrationRuntimeError::ExecutionConflict(execution_id));
-            }
-            return Ok(());
-        }
         self.router.execute(
             command.node_id().as_str(),
             execution_id.clone(),
@@ -397,24 +304,9 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 .map(|resource_id| resource_id.as_str().to_string())
                 .collect(),
         )?;
-        let node_id = command.node_id().clone();
-        let execution_role = (
-            command.group_id().clone(),
-            command.task_ref().clone(),
-            command.role_id().clone(),
-        );
-        self.executions.insert(
-            execution_id.clone(),
-            RoutedExecution {
-                command,
-                resource_ids,
-            },
-        );
-        self.execution_nodes.insert(execution_id.clone(), node_id);
-        self.active_executions
-            .insert(execution_role, execution_id.clone());
-        self.execution_status
-            .insert(execution_id, RemoteExecutionStatus::Accepted);
+        self.runtime
+            .record_dispatched(execution_id, command, resource_ids)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         Ok(())
     }
 
@@ -502,12 +394,12 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
 
     /// Routes cancellation without claiming local cancellation completion.
     pub fn cancel(&self, execution_id: &str) -> Result<(), IntegrationRuntimeError> {
-        let command = self
-            .executions
-            .get(execution_id)
+        let node_id = self
+            .runtime
+            .cancellation_node(execution_id)
             .ok_or_else(|| IntegrationRuntimeError::Protocol("unknown execution id".to_string()))?;
         self.router
-            .cancel(command.command.node_id().as_str(), execution_id.to_string())
+            .cancel(node_id.as_str(), execution_id.to_string())
             .map_err(Into::into)
     }
 
@@ -529,7 +421,14 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     }
     /// Returns current remote execution status.
     pub fn execution_status(&self, execution_id: &str) -> Option<RemoteExecutionStatus> {
-        self.execution_status.get(execution_id).copied()
+        self.runtime
+            .execution_status(execution_id)
+            .map(remote_status)
+    }
+
+    /// Drains canonical Runtime transitions for application-level lifecycle handling.
+    pub fn take_runtime_events(&mut self) -> Vec<ExecutionEvent> {
+        self.runtime_events.drain(..).collect()
     }
 
     /// Reports terminal outcomes for active TaskExecutions without changing Mission or Group state.
@@ -543,42 +442,23 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 task.lifecycle() == domain::TaskExecutionLifecycle::Active
                     && !task.assignments().is_empty()
             }) {
-                let mut all_completed = true;
-                let mut failed = false;
-                for assignment in task.assignments() {
-                    let status = self
-                        .active_executions
-                        .get(&(
-                            group_id.clone(),
-                            task.task_ref().clone(),
-                            assignment.role_id().clone(),
-                        ))
-                        .and_then(|execution_id| self.execution_status.get(execution_id))
-                        .copied();
-                    match status {
-                        Some(RemoteExecutionStatus::Completed) => {}
-                        Some(
-                            RemoteExecutionStatus::Failed
-                            | RemoteExecutionStatus::Cancelled
-                            | RemoteExecutionStatus::Unknown,
-                        ) => {
-                            failed = true;
-                            all_completed = false;
-                            break;
-                        }
-                        _ => all_completed = false,
-                    }
-                }
-                if failed || all_completed {
+                let role_ids = task
+                    .assignments()
+                    .iter()
+                    .map(|assignment| assignment.role_id());
+                if let Some(result) = self
+                    .runtime
+                    .task_result(&group_id, task.task_ref(), role_ids)
+                {
                     outcomes.push(ObservedTaskOutcome {
                         group_id: group_id.clone(),
                         task_ref: task.task_ref().clone(),
-                        result: if failed {
-                            ObservedTaskResult::Failed
-                        } else {
-                            ObservedTaskResult::Succeeded
+                        result: match result {
+                            runtime::ObservedTaskResult::Succeeded => ObservedTaskResult::Succeeded,
+                            runtime::ObservedTaskResult::Failed => ObservedTaskResult::Failed,
                         },
                     });
+                    continue;
                 }
             }
         }
@@ -595,139 +475,85 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             IntegrationRuntimeError::Protocol("unknown execution phase".to_string())
         })?;
         let node_id = NodeId::new(fact.node_id)?;
-        if self
-            .execution_nodes
-            .get(fact.execution_id)
-            .is_some_and(|expected| expected != &node_id)
-        {
-            return Err(IntegrationRuntimeError::Protocol(
-                "execution fact node differs from execution owner".to_string(),
-            ));
-        }
-        if self
-            .execution_sequences
-            .get(fact.execution_id)
-            .is_some_and(|current| fact.sequence <= *current)
-        {
-            return Ok(());
-        }
-        let status = match phase {
-            ExecutionPhase::Accepted => RemoteExecutionStatus::Accepted,
-            ExecutionPhase::Started => RemoteExecutionStatus::Running,
-            ExecutionPhase::Completed => RemoteExecutionStatus::Completed,
-            ExecutionPhase::Failed => RemoteExecutionStatus::Failed,
-            ExecutionPhase::Cancelled => RemoteExecutionStatus::Cancelled,
-            ExecutionPhase::Unknown | ExecutionPhase::Unspecified => RemoteExecutionStatus::Unknown,
+        let runtime_status = match phase {
+            ExecutionPhase::Accepted => ExecutionStatus::Accepted,
+            ExecutionPhase::Started => ExecutionStatus::Running,
+            ExecutionPhase::Completed => ExecutionStatus::Completed,
+            ExecutionPhase::Failed => ExecutionStatus::Failed,
+            ExecutionPhase::Cancelled => ExecutionStatus::Cancelled,
+            ExecutionPhase::Unknown | ExecutionPhase::Unspecified => ExecutionStatus::Unknown,
         };
-        if let Some(current) = self.execution_status.get(fact.execution_id)
-            && current.is_terminal()
-        {
-            if *current == status {
-                return Ok(());
-            }
-            return Err(IntegrationRuntimeError::Protocol(
-                "terminal execution status is immutable".to_string(),
-            ));
-        }
-        if let Some(execution) = self.executions.get(fact.execution_id)
-            && execution.command.node_id() != &node_id
-        {
-            return Err(IntegrationRuntimeError::Protocol(
-                "execution fact node differs from dispatched command".to_string(),
-            ));
-        }
-        self.execution_sequences
-            .insert(fact.execution_id.to_string(), fact.sequence);
-        self.execution_nodes
-            .entry(fact.execution_id.to_string())
-            .or_insert(node_id);
-        self.execution_status
-            .insert(fact.execution_id.to_string(), status);
-        let Some(execution) = self.executions.get(fact.execution_id) else {
-            return Ok(());
-        };
-        let command = &execution.command;
-        let node_event = match phase {
-            ExecutionPhase::Completed => Some(NodeEvent::TaskCompleted {
-                node_id: command.node_id().clone(),
-                task_ref: command.task_ref().clone(),
-                group_id: command.group_id().clone(),
-                role_id: command.role_id().clone(),
-            }),
-            ExecutionPhase::Failed | ExecutionPhase::Cancelled => Some(NodeEvent::TaskFailed {
-                node_id: command.node_id().clone(),
-                task_ref: command.task_ref().clone(),
-                group_id: command.group_id().clone(),
-                role_id: command.role_id().clone(),
-                reason: fact.reason.to_string(),
-            }),
-            _ => None,
-        };
-        if let Some(node_event) = node_event {
-            self.events.append(
-                received_at,
-                correlation_id,
-                None,
-                EventPayload::NodeObservation(node_event),
-            );
+        let runtime_events = self
+            .runtime
+            .observe_execution(
+                fact.execution_id,
+                node_id.clone(),
+                fact.sequence,
+                runtime_status,
+                fact.reason,
+            )
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        for event in runtime_events {
+            append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
+            self.runtime_events.push_back(event);
         }
         Ok(())
     }
 }
 
-impl RemoteExecutionStatus {
-    /// Returns whether no later execution lifecycle fact may change this status.
-    const fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
-    }
+/// Persists canonical Runtime facts without granting Integration lifecycle authority.
+fn append_runtime_evidence<E: EventSink>(
+    events: &mut E,
+    event: &ExecutionEvent,
+    timestamp: TimestampMs,
+    correlation_id: &CorrelationId,
+) {
+    let payload = match event {
+        ExecutionEvent::TaskActivated { .. } => return,
+        ExecutionEvent::RoleCompleted { command } => {
+            EventPayload::NodeObservation(NodeEvent::TaskCompleted {
+                node_id: command.node_id().clone(),
+                task_ref: command.task_ref().clone(),
+                group_id: command.group_id().clone(),
+                role_id: command.role_id().clone(),
+            })
+        }
+        ExecutionEvent::RoleFailed { command, reason } => {
+            EventPayload::NodeObservation(NodeEvent::TaskFailed {
+                node_id: command.node_id().clone(),
+                task_ref: command.task_ref().clone(),
+                group_id: command.group_id().clone(),
+                role_id: command.role_id().clone(),
+                reason: reason.clone(),
+            })
+        }
+        ExecutionEvent::RecoveryRequired {
+            execution_id,
+            node_id,
+            context,
+            reason,
+        } => EventPayload::RuntimeExecutionRecoveryRequired {
+            execution_id: execution_id.clone(),
+            node_id: node_id.clone(),
+            group_id: context.as_ref().map(|command| command.group_id().clone()),
+            task_ref: context.as_ref().map(|command| command.task_ref().clone()),
+            role_id: context.as_ref().map(|command| command.role_id().clone()),
+            reason: reason.clone(),
+        },
+    };
+    events.append(timestamp, correlation_id, None, payload);
 }
 
-/// Validates cross-map Runtime checkpoint invariants before constructing live state.
-fn validate_execution_checkpoint(
-    checkpoint: &ControllerCheckpoint,
-) -> Result<(), IntegrationRuntimeError> {
-    for (execution_id, routed) in &checkpoint.executions {
-        if execution_id.is_empty() {
-            return Err(IntegrationRuntimeError::Checkpoint(
-                "checkpoint contains an empty execution id".to_string(),
-            ));
-        }
-        if checkpoint.execution_nodes.get(execution_id) != Some(routed.command.node_id()) {
-            return Err(IntegrationRuntimeError::Checkpoint(format!(
-                "execution {execution_id} has inconsistent node ownership"
-            )));
-        }
-        if !checkpoint.execution_status.contains_key(execution_id) {
-            return Err(IntegrationRuntimeError::Checkpoint(format!(
-                "execution {execution_id} has no status"
-            )));
-        }
+/// Converts the transport-neutral Runtime status into the bridge compatibility enum.
+fn remote_status(status: ExecutionStatus) -> RemoteExecutionStatus {
+    match status {
+        ExecutionStatus::Dispatched | ExecutionStatus::Accepted => RemoteExecutionStatus::Accepted,
+        ExecutionStatus::Running => RemoteExecutionStatus::Running,
+        ExecutionStatus::Completed => RemoteExecutionStatus::Completed,
+        ExecutionStatus::Failed => RemoteExecutionStatus::Failed,
+        ExecutionStatus::Cancelled => RemoteExecutionStatus::Cancelled,
+        ExecutionStatus::Unknown => RemoteExecutionStatus::Unknown,
     }
-    for active in &checkpoint.active_executions {
-        let Some(routed) = checkpoint.executions.get(&active.execution_id) else {
-            return Err(IntegrationRuntimeError::Checkpoint(format!(
-                "active execution {} has no routed command",
-                active.execution_id
-            )));
-        };
-        if routed.command.group_id() != &active.group_id
-            || routed.command.task_ref() != &active.task_ref
-            || routed.command.role_id() != &active.role_id
-        {
-            return Err(IntegrationRuntimeError::Checkpoint(format!(
-                "active execution {} differs from its command Group role",
-                active.execution_id
-            )));
-        }
-    }
-    for execution_id in checkpoint.execution_sequences.keys() {
-        if !checkpoint.execution_status.contains_key(execution_id) {
-            return Err(IntegrationRuntimeError::Checkpoint(format!(
-                "execution sequence {execution_id} has no status"
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Converts a formal registration into transport-neutral Domain facts.
@@ -1200,10 +1026,6 @@ mod tests {
             bridge.execution_status("execution-terminal"),
             Some(RemoteExecutionStatus::Completed)
         );
-        assert_eq!(
-            bridge.execution_sequences.get("execution-terminal"),
-            Some(&3)
-        );
     }
 
     /// A high-sequence fact from another node cannot fence the execution owner's later fact.
@@ -1243,7 +1065,6 @@ mod tests {
             bridge.execution_status("execution-owned"),
             Some(RemoteExecutionStatus::Completed)
         );
-        assert_eq!(bridge.execution_sequences.get("execution-owned"), Some(&2));
     }
 
     /// An invalid phase cannot advance the execution sequence before validation succeeds.
@@ -1275,7 +1096,53 @@ mod tests {
             bridge.execution_status("execution-phase"),
             Some(RemoteExecutionStatus::Running)
         );
-        assert_eq!(bridge.execution_sequences.get("execution-phase"), Some(&1));
+    }
+
+    /// Unknown execution is persisted and queued for reconciliation without a terminal outcome.
+    #[test]
+    fn unknown_execution_emits_recovery_evidence() {
+        let command = ExecutionCommand::new(
+            domain::MissionId::new("mission").expect("mission valid"),
+            domain::TaskId::new("task").expect("task valid"),
+            domain::ExecutionGroupId::new("group").expect("group valid"),
+            domain::RoleId::new("role").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("compute", "noop", "v1").expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            CorrelationId::new("unknown-test").expect("correlation valid"),
+        );
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        bridge
+            .runtime
+            .record_dispatched("execution-unknown".to_string(), command, Vec::new())
+            .expect("dispatch records");
+
+        bridge
+            .consume(
+                execution_snapshot("dog-a", "execution-unknown", 1, ExecutionPhase::Unknown),
+                TimestampMs::new(1),
+                &CorrelationId::new("unknown-test").expect("correlation valid"),
+            )
+            .expect("unknown fact is accepted");
+
+        assert!(bridge.terminal_task_outcomes().is_empty());
+        assert!(matches!(
+            bridge.take_runtime_events().as_slice(),
+            [ExecutionEvent::RecoveryRequired { .. }]
+        ));
+        assert!(bridge.events.contains_payload(|payload| matches!(
+            payload,
+            EventPayload::RuntimeExecutionRecoveryRequired { execution_id, .. }
+                if execution_id == "execution-unknown"
+        )));
     }
 
     /// A reconnect snapshot without a current Runtime command cannot be silently re-dispatched.
@@ -1378,30 +1245,20 @@ mod tests {
             .expect("intent valid"),
             correlation,
         );
-        bridge.executions.insert(
-            "execution-1".to_string(),
-            RoutedExecution {
-                command: command.clone(),
-                resource_ids: Vec::new(),
-            },
-        );
         bridge
-            .execution_status
-            .insert("execution-1".to_string(), RemoteExecutionStatus::Running);
+            .runtime
+            .record_dispatched("execution-1".to_string(), command.clone(), Vec::new())
+            .expect("execution dispatch records");
         bridge
-            .execution_sequences
-            .insert("execution-1".to_string(), 4);
-        bridge
-            .execution_nodes
-            .insert("execution-1".to_string(), node_id.clone());
-        bridge.active_executions.insert(
-            (
-                command.group_id().clone(),
-                command.task_ref().clone(),
-                command.role_id().clone(),
-            ),
-            "execution-1".to_string(),
-        );
+            .runtime
+            .observe_execution(
+                "execution-1",
+                node_id.clone(),
+                4,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("running fact records");
 
         let checkpoint = bridge.checkpoint_json().expect("checkpoint serializes");
         let mut restored = IntegrationRuntimeBridge::restore_from_checkpoint(
@@ -1511,26 +1368,34 @@ mod tests {
         );
         let mut bridge =
             IntegrationRuntimeBridge::new(control, state, events, GrpcNodeRouter::default());
-        for execution_id in ["execution-old", "execution-current"] {
-            bridge.executions.insert(
-                execution_id.to_string(),
-                RoutedExecution {
-                    command: command.clone(),
-                    resource_ids: Vec::new(),
-                },
-            );
-        }
         bridge
-            .execution_status
-            .insert("execution-old".to_string(), RemoteExecutionStatus::Failed);
-        bridge.execution_status.insert(
-            "execution-current".to_string(),
-            RemoteExecutionStatus::Running,
-        );
-        bridge.active_executions.insert(
-            (group_id.clone(), requirement.task_ref().clone(), role_id),
-            "execution-current".to_string(),
-        );
+            .runtime
+            .record_dispatched("execution-old".to_string(), command.clone(), Vec::new())
+            .expect("old execution records");
+        bridge
+            .runtime
+            .observe_execution(
+                "execution-old",
+                command.node_id().clone(),
+                1,
+                ExecutionStatus::Failed,
+                "old failure",
+            )
+            .expect("old failure records");
+        bridge
+            .runtime
+            .record_dispatched("execution-current".to_string(), command.clone(), Vec::new())
+            .expect("current execution records");
+        bridge
+            .runtime
+            .observe_execution(
+                "execution-current",
+                command.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("current running fact records");
 
         assert!(bridge.terminal_task_outcomes().is_empty());
         assert_eq!(
@@ -1541,10 +1406,16 @@ mod tests {
                 .lifecycle(),
             control::GroupLifecycle::Active
         );
-        bridge.execution_status.insert(
-            "execution-current".to_string(),
-            RemoteExecutionStatus::Completed,
-        );
+        bridge
+            .runtime
+            .observe_execution(
+                "execution-current",
+                command.node_id().clone(),
+                2,
+                ExecutionStatus::Completed,
+                "",
+            )
+            .expect("current completion records");
         assert!(bridge.terminal_task_outcomes().is_empty());
         assert_eq!(
             bridge

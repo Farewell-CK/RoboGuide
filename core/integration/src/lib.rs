@@ -5,8 +5,10 @@
 //! Formal RoboGuide Node Protocol v0.2 transport and Runtime composition bridge.
 //!
 //! Integration owns generated tonic gRPC streaming, concurrent Node sessions,
-//! lease fencing, NodeId command routes, and conversion into existing Control,
-//! Runtime, and Shared State semantics. It contains no Local EAIOS implementation.
+//! lease fencing, NodeId command routes, and wire/domain conversion. The runtime
+//! bridge is a composition facade that delegates live execution identity and fact
+//! reduction to `core/runtime`; Integration itself owns no execution lifecycle.
+//! It contains no Local EAIOS implementation.
 
 pub mod grpc;
 mod grpc_server;

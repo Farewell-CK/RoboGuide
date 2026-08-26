@@ -1741,6 +1741,21 @@ pub enum EventPayload {
     },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),
+    /// Runtime detected an execution whose physical outcome requires reconciliation.
+    RuntimeExecutionRecoveryRequired {
+        /// Stable cross-session execution identity.
+        execution_id: String,
+        /// Node that reported or owns the ambiguous execution.
+        node_id: NodeId,
+        /// Committed Group identity when Runtime knows the execution context.
+        group_id: Option<ExecutionGroupId>,
+        /// Committed Task identity when Runtime knows the execution context.
+        task_ref: Option<TaskRef>,
+        /// Committed role identity when Runtime knows the execution context.
+        role_id: Option<RoleId>,
+        /// Diagnostic explaining why execution cannot safely continue.
+        reason: String,
+    },
     /// A role was rebound after a recoverable failure.
     RecoveryRebound {
         /// Group being adapted.

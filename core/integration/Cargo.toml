@@ -8,6 +8,7 @@ rust-version.workspace = true
 domain = { path = "../domain" }
 control = { path = "../control" }
 ports = { path = "../ports" }
+runtime = { path = "../runtime" }
 state = { path = "../state" }
 tokio = { version = "1.53", features = ["net", "sync", "time"] }
 tokio-stream = "0.1"

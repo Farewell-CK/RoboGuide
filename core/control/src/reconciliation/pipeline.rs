@@ -102,14 +102,20 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Active {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if group.task_ref != *requirement.task_ref() {
+        if group.task_ref != *requirement.task_ref()
+            && group.task_execution(requirement.task_ref()).is_none()
+        {
             return Err(ControlError::InvalidProposal(
                 "reconciliation requirement belongs to another task".to_string(),
             ));
         }
 
         let mut unavailable = Vec::new();
-        for assignment in &group.assignments {
+        let assignments = group
+            .task_execution(requirement.task_ref())
+            .map(|execution| execution.assignments())
+            .unwrap_or_else(|| group.assignments.as_slice());
+        for assignment in assignments {
             let role = requirement
                 .roles()
                 .iter()
@@ -130,7 +136,7 @@ impl ControlPlane {
             [(role_id, node_id)] => {
                 let need = RoleRecoveryNeed::new(
                     group_id.clone(),
-                    group.task_ref.clone(),
+                    requirement.task_ref().clone(),
                     role_id.clone(),
                     node_id.clone(),
                 );
@@ -140,7 +146,7 @@ impl ControlPlane {
                     None,
                     EventPayload::ReconciliationRoleRecoveryRequired {
                         group_id: group_id.clone(),
-                        task_ref: group.task_ref.clone(),
+                        task_ref: requirement.task_ref().clone(),
                         role_id: role_id.clone(),
                         node_id: node_id.clone(),
                     },
@@ -169,8 +175,12 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Active {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if group.task_ref != *need.task_ref()
-            || !group.assignments.iter().any(|assignment| {
+        let assignments = group
+            .task_execution(need.task_ref())
+            .map(|execution| execution.assignments())
+            .unwrap_or_else(|| group.assignments.as_slice());
+        if (group.task_ref != *need.task_ref() && group.task_execution(need.task_ref()).is_none())
+            || !assignments.iter().any(|assignment| {
                 assignment.role_id() == need.role_id()
                     && assignment.node_id() == need.current_node_id()
             })
@@ -179,6 +189,7 @@ impl ControlPlane {
                 "recovery need no longer matches the active group assignment".to_string(),
             ));
         }
+        let task_scoped = group.task_execution(need.task_ref()).is_some();
 
         self.block_group(
             need.group_id(),
@@ -191,13 +202,24 @@ impl ControlPlane {
             correlation_id,
             events,
         )?;
-        self.release_role_binding(
-            need.group_id(),
-            need.role_id(),
-            timestamp,
-            correlation_id,
-            events,
-        )?;
+        if task_scoped {
+            self.release_task_role_binding(
+                need.group_id(),
+                need.task_ref(),
+                need.role_id(),
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+        } else {
+            self.release_role_binding(
+                need.group_id(),
+                need.role_id(),
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+        }
         Ok(RecoveryOutcome::Pending {
             group_id: need.group_id().clone(),
             task_ref: need.task_ref().clone(),
@@ -226,11 +248,18 @@ impl ControlPlane {
         let previous_node = group
             .unbound_roles
             .get(need.role_id())
+            .or_else(|| {
+                group
+                    .task_unbound_roles
+                    .get(&(need.task_ref().clone(), need.role_id().clone()))
+            })
             .map(|binding| binding.previous_node_id.clone())
             .ok_or_else(|| {
                 ControlError::InvalidProposal("recovery role is not unbound".to_string())
             })?;
-        if group.task_ref != *need.task_ref() || previous_node != *need.current_node_id() {
+        if (group.task_ref != *need.task_ref() && group.task_execution(need.task_ref()).is_none())
+            || previous_node != *need.current_node_id()
+        {
             return Err(ControlError::InvalidProposal(
                 "recovery need no longer matches the blocked group role".to_string(),
             ));
@@ -287,7 +316,10 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if group.task_ref != *candidates.task_ref() || !group.is_role_unbound(candidates.role_id())
+        if (group.task_ref != *candidates.task_ref()
+            && group.task_execution(candidates.task_ref()).is_none())
+            || (!group.is_role_unbound(candidates.role_id())
+                && !group.is_task_role_unbound(candidates.task_ref(), candidates.role_id()))
         {
             return Err(ControlError::InvalidProposal(
                 "recovery candidates do not match the blocked group role".to_string(),

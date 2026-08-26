@@ -19,10 +19,11 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |
 | Mission Intelligence | 生成带 Context/ContextRole 的完整 MissionPlan、Task Graph 和 Execution Requirements |
 | Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Group 内 TaskExecution 绑定和恢复决策 |
-| Mission Orchestration | 持有完整 MissionPlan，推进 DAG Ready/Active/Completed，并明确驱动 Mission/Group 终态 |
+| Mission Orchestration | 持有完整 MissionPlan，推进 DAG readiness，并根据 Runtime execution facts 明确驱动 Mission/Group 终态 |
 | State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
 | Embodied Execution Group | 由 Control/Runtime 承载 Mission-level 多 Task 分布式执行上下文 |
-| Distributed Embodied Runtime | 提供发现、消息、调用、Heartbeat、Lease、Adapter 和诊断 |
+| Distributed Embodied Runtime | 持续承载已 Commit 的 Group/TaskExecution 运行上下文，管理 execution identity、事件、timer、取消和 checkpoint/resume |
+| Integration | 提供 Node Protocol、Messaging、Transport、Session 和 Router，不拥有执行生命周期 |
 | Local Embodied Systems | 保留感知、导航、运动、硬件控制和即时安全能力 |
 | Physical World | 被执行过程改变，并持续向系统反馈 Observation |
 
@@ -69,7 +70,8 @@ Group。节点故障时，Group 内可以 partial release、rebind，并经 `Ada
 
 Member 与 Binding 必须区分：GPU Node 可以是 Member，GPU quota 是 Compute
 Binding；走廊是 Spatial Binding，不是 Member。Group Manager 属于 Control Plane，
-Group 本体由 Runtime 承载并跨节点运行。
+负责 committed binding、reservation、rebind 和 release authority；Group 的 live execution
+context 由 Runtime 承载并跨节点运行。State 只保存二者的事实和投影。
 
 ## 4. 决策与承诺语义
 
@@ -83,7 +85,8 @@ Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → E
 4. Commit 使资源义务生效，并在 Allocation / Reservation State 中可观察；
 5. Mission Orchestration 在执行阶段从完整 DAG 创建一个 Mission-level Group 和全部 TaskExecution；
 6. Control 将每个 Task 的 Committed Plan 绑定回同一个 Group；
-7. Runtime 承载绑定后的执行过程，使其跨节点运行，并只上报 execution facts。
+7. Runtime 接收 committed execution configuration，承载绑定后的执行过程并产生 canonical
+   execution facts；Integration 只负责把 command/event 送达正确的 Node session。
 
 未提交的 Proposal 绝不能被当作已经生效的资源分配。
 
@@ -110,9 +113,15 @@ Group 专属上下文默认不向全局广播。
 
 ## 6. Runtime 与本地自治
 
-Runtime 定义与具体传输无关的 Discovery、Messaging、Invocation、Heartbeat、
-Lease、Adapter 和 Diagnostics 语义。DDS、ROS 2、gRPC、MQTT、数据库和序列化
-方式仍属于实现选型。
+Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它维护
+Mission-level Group 的 live context、TaskExecution 状态、execution identity、依赖推进、
+timer、取消、事件归约以及 checkpoint/resume；它不执行 Matching、Scheduling、Reservation、
+Commit 或 replacement selection。
+
+Integration 定义 Node Protocol、Messaging、Transport、Session、Router 和 wire conversion。
+DDS、ROS 2、gRPC、MQTT 和序列化属于 Integration 实现选型，不因此获得 execution
+lifecycle authority。Node Service / Adapter 将 canonical execution intent 映射到本地 How，
+并维护节点侧 durable execution continuity；它不管理 Mission 或 Group 生命周期。
 
 节点侧部署边界固定为单一 `roboguide-node` 服务。其 Local Integration Engine 可内置
 多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行

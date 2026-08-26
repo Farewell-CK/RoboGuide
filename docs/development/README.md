@@ -270,7 +270,7 @@ replay 或自动 failure escalation。
 `event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
 和 `domain.EventPayload.json/v2` 版本化 JSON payload，供 Integration Server 的事件查询使用。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-`roboguide.controller-checkpoint/v4` projection；启动时要求 checkpoint 序号与事件末尾严格
+`roboguide.controller-checkpoint/v5` projection；启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
 fail-closed。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、

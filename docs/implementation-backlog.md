@@ -24,6 +24,26 @@
 - 延迟、恢复时间、资源冲突和任务完成的最小指标；
 - 导盲等后续领域场景如何通过领域层接入通用核心。
 
+## 真机 Runtime 稳定基线 Gate
+
+当前 [`ADR-0015`](decisions/0015-runtime-execution-boundary.md) 实现可作为 Runtime
+职责边界和正常路径的开发基线，也可用于有人值守、低风险、允许人工停止的真机 smoke
+experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、进程重启恢复、可靠取消或
+无人值守运行的稳定 Runtime 基线：
+
+| ID | 阻塞项 | 稳定基线验收条件 |
+| --- | --- | --- |
+| RT-G1 | Durable dispatch | Controller 在产生网络副作用前持久化不可变 dispatch intent；崩溃窗口内不得产生无法关联 Group/Task/Role 的孤立物理执行 |
+| RT-G2 | Recovery closed loop | `Unknown`、session loss、timeout 和 restart fencing 能进入 Assess -> Partial Release -> Match -> Propose -> Commit -> Rebind，并明确 Resume、Redispatch 或最终失败 |
+| RT-G3 | Attempt identity | logical Task/Role execution 与每次 physical attempt 分离；rebind 到新 Node 不复用冲突 identity，旧 attempt 被显式 supersede/fence |
+| RT-G4 | Durable cancellation | Runtime 持久化 CancelRequested、ack、deadline、retry 和 completion race；Mission cancel 会覆盖所有仍在运行的 execution，且不伪造物理终态 |
+| RT-G5 | Timer and liveness driving | Runtime timer 将 heartbeat/lease/session observation 转为 execution ambiguity evidence，并触发外部 Control reconciliation，而不是让 Running 无限悬挂 |
+| RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
+
+Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
+dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得
+把 Recovery Decision 下沉到 Runtime，也不得让 Integration 获得 execution lifecycle authority。
+
 ## 开发 Bootstrap 提案
 
 - 提议使用 Rust 实现 Domain、Control、Runtime 和 State 核心，Python 承载 Mission

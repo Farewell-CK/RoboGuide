@@ -13,7 +13,7 @@ discard reservations while physical work may still exist.
 
 ## Decision
 
-The Integration Server persists a versioned `roboguide.controller-checkpoint/v3` JSON projection in
+The Integration bridge now persists a versioned `roboguide.controller-checkpoint/v4` JSON projection in
 the same SQLite transaction as each accepted fact and its lifecycle evidence. The checkpoint
 contains Control commitments, actor bindings, Groups, pending recovery commitments, Shared Node
 State registrations, and Runtime execution contexts/statuses. Its event sequence must equal the
@@ -24,7 +24,7 @@ Recovery is conservative across the process-local monotonic clock boundary:
 - Control leases are cleared and must be re-established by node registration;
 - restored Shared Node State keeps registration and reported health but rebases receive/liveness
   times and marks liveness `Unreachable`;
-- nonterminal Runtime executions become `Unknown`;
+- nonterminal Runtime executions become `Unknown` and remain recovery-pending rather than terminally failed;
 - restored execution IDs are fenced from ordinary routing, and no command is automatically replayed;
 - fresh gRPC routes wait for nodes to reconnect and report current facts.
 

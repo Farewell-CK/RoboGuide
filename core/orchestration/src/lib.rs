@@ -228,13 +228,14 @@ impl MissionOrchestrator {
                     .task_execution(task_ref)
                     .filter(|task_execution| {
                         task_execution.lifecycle() == TaskExecutionLifecycle::Ready
+                            && task_execution.assignments().is_empty()
                     })
                     .map(|_| task_ref.clone())
             })
             .collect()
     }
 
-    /// Drives one Ready Task through Match, Schedule, Propose, Commit, Bind, and Activate.
+    /// Drives one unbound Ready Task through Match, Schedule, Propose, Commit, and Bind.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_task<S: SharedNodeStateReader, E: EventSink>(
         &mut self,
@@ -301,7 +302,6 @@ impl MissionOrchestrator {
             correlation_id,
             events,
         )?;
-        control.activate_task_execution(&group_id, task_ref, timestamp, correlation_id, events)?;
         control
             .group(&group_id)
             .and_then(|group| group.task_execution(task_ref))
@@ -803,7 +803,16 @@ mod tests {
                     &correlation,
                     &mut events,
                 )
-                .expect("ready Task should bind and activate");
+                .expect("ready Task should bind");
+            control
+                .activate_task_execution(
+                    &group_id,
+                    &task_ref,
+                    TimestampMs::new(3 + index as u64),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("test Runtime transition should activate the bound Task");
             orchestrator
                 .task_succeeded(
                     &mission_id,

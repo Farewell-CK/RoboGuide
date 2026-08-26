@@ -764,6 +764,7 @@ dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "runtime",
  "serde",
  "serde_json",
  "state",
@@ -1471,6 +1472,7 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "ports",
+ "serde",
  "state",
  "testkit",
 ]

@@ -30,4 +30,4 @@ Released。
 - Runtime execution identity 至少包含 Group、Task 和 role，避免不同 Task 的同名 role 冲突。
 - v0.x 的单 Group 策略可以在未来演化为多个 Group，而无需重新定义 Task DAG。
 - Mission-level Group/TaskExecution 事件使用新的 `domain.EventPayload.json/v2`；Phase 1 的
-  外层 Controller checkpoint 使用 `roboguide.controller-checkpoint/v4`，旧投影不得静默恢复。
+  外层 Controller checkpoint 使用 `roboguide.controller-checkpoint/v5`，旧投影不得静默恢复。

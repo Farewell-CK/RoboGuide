@@ -279,7 +279,13 @@ ownership resolution 均未实现。
 
 ### Distributed Embodied Runtime
 
-Runtime 提供 Discovery、Messaging、Invocation、Heartbeat、Lease、Adapter、Diagnostics 等执行语义。它让跨机器调用、成员关系、资源绑定和状态传播真正发生，但不拥有全局资源选择权。
+Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它承载
+Mission-level Group 的 live execution context。当前 slice 已实现 TaskExecution 的 execution
+identity、事件顺序归约、checkpoint fencing、recovery-required evidence 和 lifecycle
+transition；Runtime-owned timer、取消状态与显式 resume protocol 仍待后续实现。Matching、
+Scheduling、Reservation、Commit 和 replacement selection 仍属于
+Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service /
+Adapter 负责 canonical intent 到本地 EAIOS How 的映射。
 
 ### Local Embodied Systems & Physical World
 
@@ -330,7 +336,8 @@ curl -X POST http://127.0.0.1:8080/v1/executions/<execution-id>/cancel
 
 HTTP 面只提供 health 和 immutable evidence 查询，不绕过 Control 修改 reservation；身份
 认证与传输安全不在当前切片范围内。若 SQLite 中存在与事件末尾一致的版本化 controller
-checkpoint，Integration Server 会恢复 Control/State/Runtime projection；缺少 checkpoint、
+checkpoint，Integration Server 会恢复 Control/State/Runtime projection；非终态 execution
+恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission 失败。缺少 checkpoint、
 schema 不支持或序号不一致时 fail-closed。
 
 节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：

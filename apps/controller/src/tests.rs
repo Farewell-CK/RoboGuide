@@ -63,6 +63,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::ExecutionGroupReleased { task_ref, .. }
         | EventPayload::NodeObservation(NodeEvent::TaskCompleted { task_ref, .. })
         | EventPayload::NodeObservation(NodeEvent::TaskFailed { task_ref, .. }) => Some(task_ref),
+        EventPayload::RuntimeExecutionRecoveryRequired { task_ref, .. } => task_ref.as_ref(),
         EventPayload::NodeRegistered { .. }
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 /// Schema marker for the Phase 1 server checkpoint including Mission orchestration.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v4";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v5";
 
 /// Live process state sharing one Control authority with Mission orchestration.
 struct ControllerState {
@@ -132,6 +132,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let now = clock.now();
                     if let Err(error) = controller.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
+                    } else if let Err(error) = apply_runtime_events(
+                        &mut controller,
+                        now,
+                        &correlation,
+                        &mut receiver_event_log.clone(),
+                    ) {
+                        drop(controller);
+                        let _ = receiver_event_log.rollback_batch();
+                        let _ = fatal_sender.send(format!(
+                            "Runtime lifecycle transition failed after fact acceptance: {error}"
+                        ));
+                        return;
                     } else if let Err(error) = apply_runtime_outcomes(
                         &mut controller,
                         now,
@@ -221,6 +233,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result = server => result.map_err(Into::into),
         fatal = fatal_receiver => Err(fatal.unwrap_or_else(|_| "fact consumer stopped unexpectedly".to_string()).into()),
     }
+}
+
+/// Applies Runtime-owned lifecycle transitions without giving Integration Control authority.
+fn apply_runtime_events(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for event in controller.bridge.take_runtime_events() {
+        match event {
+            runtime::ExecutionEvent::TaskActivated { group_id, task_ref } => {
+                let should_activate = controller
+                    .bridge
+                    .control()
+                    .group(&group_id)
+                    .and_then(|group| group.task_execution(&task_ref))
+                    .is_some_and(|task| task.lifecycle() == domain::TaskExecutionLifecycle::Ready);
+                if should_activate {
+                    controller.bridge.control_mut().activate_task_execution(
+                        &group_id,
+                        &task_ref,
+                        timestamp,
+                        correlation_id,
+                        events,
+                    )?;
+                }
+            }
+            runtime::ExecutionEvent::RoleCompleted { .. }
+            | runtime::ExecutionEvent::RoleFailed { .. }
+            | runtime::ExecutionEvent::RecoveryRequired { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 /// Serializes Integration and Mission orchestration into one versioned durable wrapper.

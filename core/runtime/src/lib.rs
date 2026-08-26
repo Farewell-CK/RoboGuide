@@ -5,8 +5,13 @@
 //! Runtime execution semantics between DEAIOS Control and local node adapters.
 
 mod clock;
+mod execution;
 
 pub use clock::{FixedClock, SystemMonotonicClock};
+pub use execution::{
+    DispatchDecision, ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionStatus,
+    ObservedTaskResult, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
+};
 
 use domain::{
     EventPayload, ExecutionCommand, NODE_CONTRACT_VERSION_V0_1, NodeContractVersion, NodeEvent,

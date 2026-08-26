@@ -26,6 +26,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Runtime observation ingestion normalizes `NodeGateway.status()` into reported
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.
+- `core/runtime` owns the transport-neutral live execution registry, stable execution
+  identity, ordered fact reduction, recovery-required fencing, and its checkpoint.
+  `core/integration/runtime_bridge.rs` is a transport/composition facade and must not
+  keep a second authoritative execution map or directly mutate Task lifecycle.
+- Runtime `Unknown` means recovery-pending physical ambiguity, never terminal Task or
+  Mission failure. Integration persists the evidence; application orchestration applies
+  Runtime lifecycle transitions, while Control retains recovery decisions.
 - Observation time semantics preserve source-local `NodeStatus.observed_at` while
   State ordering and Control freshness use RoboGuide-local `received_at`; do not
   compare independent source clocks or claim distributed clock synchronization.
