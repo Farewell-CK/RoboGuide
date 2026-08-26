@@ -38,7 +38,9 @@ impl ControlPlane {
                             "reservation {resource_id} references unknown group {group_id}"
                         ))
                     })?;
-                    if group.task_ref() != &reservation.task_ref {
+                    let task_known = group.task_ref() == &reservation.task_ref
+                        || group.task_execution(&reservation.task_ref).is_some();
+                    if !task_known {
                         return Err(ControlError::AllocationInvariant(format!(
                             "reservation {resource_id} task differs from group {group_id}"
                         )));
@@ -107,6 +109,27 @@ impl ControlPlane {
                     }
                 }
             }
+            for execution in group.task_executions() {
+                for assignment in execution.assignments() {
+                    for resource_id in assignment.resource_ids() {
+                        let key = (group_id.clone(), resource_id.clone());
+                        if ownership
+                            .insert(
+                                key,
+                                ExpectedOwnership {
+                                    task_ref: execution.task_ref().clone(),
+                                    role_id: assignment.role_id().clone(),
+                                },
+                            )
+                            .is_some()
+                        {
+                            return Err(ControlError::AllocationInvariant(format!(
+                                "group {group_id} binds resource {resource_id} more than once"
+                            )));
+                        }
+                    }
+                }
+            }
         }
         Ok(ownership)
     }
@@ -116,8 +139,11 @@ impl ControlPlane {
         &self,
     ) -> Result<BTreeMap<(ExecutionGroupId, ResourceId), ExpectedOwnership>, ControlError> {
         let mut ownership = BTreeMap::new();
-        for ((group_id, role_id), commitment) in &self.pending_recovery_commitments {
-            if commitment.group_id() != group_id || commitment.role_id() != role_id {
+        for ((group_id, task_ref, role_id), commitment) in &self.pending_recovery_commitments {
+            if commitment.group_id() != group_id
+                || commitment.task_ref() != task_ref
+                || commitment.role_id() != role_id
+            {
                 return Err(ControlError::AllocationInvariant(format!(
                     "pending commitment key differs from group {group_id}, role {role_id}"
                 )));
@@ -127,7 +153,9 @@ impl ControlPlane {
                     "pending commitment references unknown group {group_id}"
                 ))
             })?;
-            if group.task_ref() != commitment.task_ref() {
+            if group.task_ref() != commitment.task_ref()
+                && group.task_execution(commitment.task_ref()).is_none()
+            {
                 return Err(ControlError::AllocationInvariant(format!(
                     "pending commitment task differs from group {group_id}"
                 )));

@@ -13,7 +13,7 @@ discard reservations while physical work may still exist.
 
 ## Decision
 
-The Integration Server persists a versioned `roboguide.controller-checkpoint/v2` JSON projection in
+The Integration Server persists a versioned `roboguide.controller-checkpoint/v3` JSON projection in
 the same SQLite transaction as each accepted fact and its lifecycle evidence. The checkpoint
 contains Control commitments, actor bindings, Groups, pending recovery commitments, Shared Node
 State registrations, and Runtime execution contexts/statuses. Its event sequence must equal the

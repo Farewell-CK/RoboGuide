@@ -20,7 +20,22 @@ impl ControlPlane {
         role_id: &RoleId,
     ) -> Option<&CommittedRecoveryAssignment> {
         self.pending_recovery_commitments
-            .get(&recovery_commitment_key(group_id, role_id))
+            .iter()
+            .find(|((pending_group, _, pending_role), _)| {
+                pending_group == group_id && pending_role == role_id
+            })
+            .map(|(_, commitment)| commitment)
+    }
+
+    /// Returns the authoritative pending commitment for one Group Task role.
+    pub fn pending_recovery_commitment_for_task(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &RoleId,
+    ) -> Option<&CommittedRecoveryAssignment> {
+        self.pending_recovery_commitments
+            .get(&recovery_commitment_key(group_id, task_ref, role_id))
     }
 
     /// Verifies that a commitment handle is the current Control-owned pending value.
@@ -29,7 +44,11 @@ impl ControlPlane {
         committed: &CommittedRecoveryAssignment,
     ) -> Result<(), ControlError> {
         let pending = self
-            .pending_recovery_commitment(committed.group_id(), committed.role_id())
+            .pending_recovery_commitment_for_task(
+                committed.group_id(),
+                committed.task_ref(),
+                committed.role_id(),
+            )
             .ok_or_else(|| ControlError::PendingRecoveryCommitmentNotFound {
                 group_id: committed.group_id().clone(),
                 role_id: committed.role_id().clone(),
@@ -330,11 +349,19 @@ impl ControlPlane {
         let previous_node = group
             .unbound_roles
             .get(proposal.role_id())
+            .or_else(|| {
+                group
+                    .task_unbound_roles
+                    .get(&(proposal.task_ref().clone(), proposal.role_id().clone()))
+            })
             .map(|binding| binding.previous_node_id.clone())
             .ok_or_else(|| {
                 ControlError::InvalidProposal("recovery role is not unbound".to_string())
             })?;
-        if group.task_ref != *proposal.task_ref()
+        if (group.task_ref != *proposal.task_ref()
+            && group.task_execution(proposal.task_ref()).is_none())
+            || !group.is_role_unbound(proposal.role_id())
+                && !group.is_task_role_unbound(proposal.task_ref(), proposal.role_id())
             || previous_node != *proposal.previous_node_id()
             || proposal.replacement_node_id() == proposal.previous_node_id()
         {
@@ -342,7 +369,8 @@ impl ControlPlane {
                 "recovery proposal no longer matches the blocked group role".to_string(),
             ));
         }
-        let commitment_key = recovery_commitment_key(proposal.group_id(), proposal.role_id());
+        let commitment_key =
+            recovery_commitment_key(proposal.group_id(), proposal.task_ref(), proposal.role_id());
         if self
             .pending_recovery_commitments
             .contains_key(&commitment_key)
@@ -388,6 +416,7 @@ impl ControlPlane {
                     task_ref: proposal.task_ref().clone(),
                     role_id: proposal.role_id().clone(),
                     group_id: Some(proposal.group_id().clone()),
+                    scope: domain::ResourceBindingScope::Task,
                 },
             );
         }
@@ -424,7 +453,11 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if group.task_ref != *committed.task_ref() || !group.is_role_unbound(committed.role_id()) {
+        if (group.task_ref != *committed.task_ref()
+            && group.task_execution(committed.task_ref()).is_none())
+            || (!group.is_role_unbound(committed.role_id())
+                && !group.is_task_role_unbound(committed.task_ref(), committed.role_id()))
+        {
             return Err(ControlError::InvalidProposal(
                 "pending recovery commitment does not match the blocked Group".to_string(),
             ));
@@ -437,6 +470,7 @@ impl ControlPlane {
         self.pending_recovery_commitments
             .remove(&recovery_commitment_key(
                 committed.group_id(),
+                committed.task_ref(),
                 committed.role_id(),
             ));
         events.append(

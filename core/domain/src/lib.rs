@@ -1495,6 +1495,13 @@ pub enum EventPayload {
         /// Mission Intelligence context referenced by the Task.
         context_id: CoordinationContextId,
     },
+    /// A registered Task became eligible after its DAG dependencies were satisfied.
+    TaskExecutionReady {
+        /// Group hosting the Task execution.
+        group_id: ExecutionGroupId,
+        /// Task that became ready.
+        task_ref: TaskRef,
+    },
     /// A Task execution became active inside its existing Group.
     TaskExecutionActivated {
         /// Group hosting the Task execution.
@@ -1509,6 +1516,13 @@ pub enum EventPayload {
         /// Task that completed.
         task_ref: TaskRef,
     },
+    /// A Task execution reached an unrecoverable failure state.
+    TaskExecutionFailed {
+        /// Group hosting the failed Task.
+        group_id: ExecutionGroupId,
+        /// Task that failed.
+        task_ref: TaskRef,
+    },
     /// Temporary Task bindings were released while the parent Group remained alive.
     TaskExecutionBindingsReleased {
         /// Group retaining unaffected members and Context bindings.
@@ -1516,6 +1530,15 @@ pub enum EventPayload {
         /// Task whose temporary bindings were released.
         task_ref: TaskRef,
         /// Resources released for this Task only.
+        resource_ids: Vec<ResourceId>,
+    },
+    /// Context-scoped bindings were released when a Mission Intelligence Context ended.
+    ContextBindingsReleased {
+        /// Group retaining the Mission execution context.
+        group_id: ExecutionGroupId,
+        /// Context whose continuous resources ended.
+        context_id: CoordinationContextId,
+        /// Resources released for the Context.
         resource_ids: Vec<ResourceId>,
     },
     /// A mission actor became authoritative only after its task Group was bound.

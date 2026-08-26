@@ -354,7 +354,8 @@ pub(super) fn validate_recovery_resources(
 /// Builds the deterministic authority key for one Group role commitment.
 pub(super) fn recovery_commitment_key(
     group_id: &ExecutionGroupId,
+    task_ref: &TaskRef,
     role_id: &RoleId,
-) -> (ExecutionGroupId, RoleId) {
-    (group_id.clone(), role_id.clone())
+) -> (ExecutionGroupId, TaskRef, RoleId) {
+    (group_id.clone(), task_ref.clone(), role_id.clone())
 }

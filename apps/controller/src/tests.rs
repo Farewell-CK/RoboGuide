@@ -42,7 +42,9 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::ExecutionGroupBound { task_ref, .. }
         | EventPayload::TaskExecutionRegistered { task_ref, .. }
         | EventPayload::TaskExecutionActivated { task_ref, .. }
+        | EventPayload::TaskExecutionReady { task_ref, .. }
         | EventPayload::TaskExecutionCompleted { task_ref, .. }
+        | EventPayload::TaskExecutionFailed { task_ref, .. }
         | EventPayload::TaskExecutionBindingsReleased { task_ref, .. }
         | EventPayload::MissionActorBound { task_ref, .. }
         | EventPayload::ExecutionGroupActivated { task_ref, .. }
@@ -65,6 +67,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
+        | EventPayload::ContextBindingsReleased { .. }
         | EventPayload::NodeObservation(NodeEvent::SafeStopped { .. }) => None,
     }
 }

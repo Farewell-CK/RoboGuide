@@ -11,6 +11,13 @@ pub enum ResourceBindingScope {
     Context,
 }
 
+impl Default for ResourceBindingScope {
+    /// Defaults legacy reservations to the Task lifetime.
+    fn default() -> Self {
+        Self::Task
+    }
+}
+
 /// Observable stage of one resource commitment in the Control allocation pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocationPhase {

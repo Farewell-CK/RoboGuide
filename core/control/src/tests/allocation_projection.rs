@@ -318,6 +318,7 @@ fn allocation_projection_rejects_orphan_reservation() {
             task_ref: fixture.task_ref.clone(),
             role_id: fixture.transport_role.clone(),
             group_id: Some(fixture.group_id.clone()),
+            scope: domain::ResourceBindingScope::Task,
         },
     );
 

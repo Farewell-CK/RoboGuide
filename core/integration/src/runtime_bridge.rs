@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v2";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v3";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -53,8 +53,9 @@ pub struct IntegrationRuntimeBridge<E> {
     execution_sequences: BTreeMap<String, u64>,
     /// Node that first reported or received each stable execution identity.
     execution_nodes: BTreeMap<String, NodeId>,
-    /// Current authoritative execution identity for each Group role.
-    active_executions: BTreeMap<(domain::ExecutionGroupId, domain::RoleId), String>,
+    /// Current authoritative execution identity for each Group Task role.
+    active_executions:
+        BTreeMap<(domain::ExecutionGroupId, domain::TaskRef, domain::RoleId), String>,
     /// Commands recovered from durable state that must never be implicitly sent again.
     restored_executions: BTreeSet<String>,
 }
@@ -73,6 +74,8 @@ struct RoutedExecution {
 struct ActiveExecutionCheckpoint {
     /// Group owning the execution.
     group_id: domain::ExecutionGroupId,
+    /// Task owning the role execution.
+    task_ref: domain::TaskRef,
     /// Role owning the execution.
     role_id: domain::RoleId,
     /// Stable execution identity currently associated with the role.
@@ -150,8 +153,9 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 .active_executions
                 .iter()
                 .map(
-                    |((group_id, role_id), execution_id)| ActiveExecutionCheckpoint {
+                    |((group_id, task_ref, role_id), execution_id)| ActiveExecutionCheckpoint {
                         group_id: group_id.clone(),
+                        task_ref: task_ref.clone(),
                         role_id: role_id.clone(),
                         execution_id: execution_id.clone(),
                     },
@@ -186,7 +190,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             .map_err(IntegrationRuntimeError::Checkpoint)?;
         let mut active_executions = BTreeMap::new();
         for active in checkpoint.active_executions {
-            let key = (active.group_id, active.role_id);
+            let key = (active.group_id, active.task_ref, active.role_id);
             if active_executions.insert(key, active.execution_id).is_some() {
                 return Err(IntegrationRuntimeError::Checkpoint(
                     "checkpoint contains duplicate active Group role".to_string(),
@@ -357,7 +361,11 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 .collect(),
         )?;
         let node_id = command.node_id().clone();
-        let execution_role = (command.group_id().clone(), command.role_id().clone());
+        let execution_role = (
+            command.group_id().clone(),
+            command.task_ref().clone(),
+            command.role_id().clone(),
+        );
         self.executions.insert(
             execution_id.clone(),
             RoutedExecution {
@@ -382,6 +390,33 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         intent: domain::ExecutionIntent,
         correlation_id: CorrelationId,
     ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        let task_ref = self
+            .control
+            .group(group_id)
+            .map(|group| group.task_ref().clone())
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
+            })?;
+        self.execute_task_bound(
+            execution_id,
+            group_id,
+            &task_ref,
+            role_id,
+            intent,
+            correlation_id,
+        )
+    }
+
+    /// Builds and routes a command for one specific Task execution inside a Group.
+    pub fn execute_task_bound(
+        &mut self,
+        execution_id: String,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+        intent: domain::ExecutionIntent,
+        correlation_id: CorrelationId,
+    ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
         let group = self.control.group(group_id).ok_or_else(|| {
             IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
         })?;
@@ -395,16 +430,25 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 "execution group is not bound".to_string(),
             ));
         }
-        let assignment = group
-            .assignments()
-            .iter()
-            .find(|assignment| assignment.role_id() == role_id)
+        let assignment =
+            if task_ref == group.task_ref() && group.task_executions().next().is_none() {
+                group
+                    .assignments()
+                    .iter()
+                    .find(|assignment| assignment.role_id() == role_id)
+            } else {
+                group
+                    .task_execution(task_ref)
+                    .into_iter()
+                    .flat_map(|execution| execution.assignments())
+                    .find(|assignment| assignment.role_id() == role_id)
+            }
             .ok_or_else(|| {
                 IntegrationRuntimeError::Protocol("group role is not bound".to_string())
             })?;
         let command = ExecutionCommand::new(
-            group.task_ref().mission_id().clone(),
-            group.task_id().clone(),
+            task_ref.mission_id().clone(),
+            task_ref.task_id().clone(),
             group_id.clone(),
             role_id.clone(),
             assignment.node_id().clone(),
@@ -459,7 +503,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     ) -> Result<(), IntegrationRuntimeError> {
         let group_ids = self.control.group_ids();
         for group_id in group_ids {
-            let Some(group) = self.control.group(&group_id) else {
+            let Some(group) = self.control.group(&group_id).cloned() else {
                 continue;
             };
             if !matches!(
@@ -468,9 +512,127 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             ) {
                 continue;
             }
-            // Mission-level Groups aggregate TaskExecution lifecycles explicitly. The legacy
-            // single-task role scan must never release such a Group when one Task completes.
             if group.task_executions().next().is_some() {
+                let task_refs = group
+                    .task_executions()
+                    .map(|execution| execution.task_ref().clone())
+                    .collect::<Vec<_>>();
+                let mut all_tasks_completed = true;
+                let mut failed_task = None;
+                for task_ref in task_refs {
+                    let Some(task_execution) = group.task_execution(&task_ref) else {
+                        continue;
+                    };
+                    if matches!(
+                        task_execution.lifecycle(),
+                        domain::TaskExecutionLifecycle::Completed
+                            | domain::TaskExecutionLifecycle::Failed
+                            | domain::TaskExecutionLifecycle::Cancelled
+                    ) {
+                        if task_execution.lifecycle() != domain::TaskExecutionLifecycle::Completed {
+                            failed_task = Some(task_ref);
+                            break;
+                        }
+                        continue;
+                    }
+                    let roles = task_execution
+                        .assignments()
+                        .iter()
+                        .map(|assignment| assignment.role_id().clone())
+                        .collect::<Vec<_>>();
+                    let mut task_completed = true;
+                    for role_id in roles {
+                        match self
+                            .active_executions
+                            .get(&(group_id.clone(), task_ref.clone(), role_id))
+                            .and_then(|execution_id| self.execution_status.get(execution_id))
+                            .copied()
+                        {
+                            Some(RemoteExecutionStatus::Completed) => {}
+                            Some(
+                                RemoteExecutionStatus::Failed
+                                | RemoteExecutionStatus::Cancelled
+                                | RemoteExecutionStatus::Unknown,
+                            ) => {
+                                failed_task = Some(task_ref.clone());
+                                task_completed = false;
+                                break;
+                            }
+                            _ => task_completed = false,
+                        }
+                    }
+                    if failed_task.is_some() {
+                        break;
+                    }
+                    if task_completed {
+                        self.control.complete_task_execution(
+                            &group_id,
+                            &task_ref,
+                            timestamp,
+                            correlation_id,
+                            &mut self.events,
+                        )?;
+                        let task_resources = task_execution
+                            .assignments()
+                            .iter()
+                            .flat_map(|assignment| assignment.resource_ids())
+                            .filter(|resource_id| {
+                                task_execution.binding_scope(resource_id)
+                                    == domain::ResourceBindingScope::Task
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        self.control.release_task_bindings(
+                            &group_id,
+                            &task_ref,
+                            &task_resources,
+                            timestamp,
+                            correlation_id,
+                            &mut self.events,
+                        )?;
+                    } else {
+                        all_tasks_completed = false;
+                    }
+                }
+                if let Some(task_ref) = failed_task {
+                    self.control.fail_task_execution(
+                        &group_id,
+                        &task_ref,
+                        timestamp,
+                        correlation_id,
+                        &mut self.events,
+                    )?;
+                    self.control.block_group(
+                        &group_id,
+                        format!("execution for Task {task_ref} failed or is unknown"),
+                        timestamp,
+                        correlation_id,
+                        &mut self.events,
+                    )?;
+                } else if all_tasks_completed
+                    && self
+                        .control
+                        .group(&group_id)
+                        .map(|current| {
+                            current.task_executions().all(|execution| {
+                                execution.lifecycle() == domain::TaskExecutionLifecycle::Completed
+                            })
+                        })
+                        .unwrap_or(false)
+                {
+                    self.control.complete_group(
+                        &group_id,
+                        timestamp,
+                        correlation_id,
+                        &mut self.events,
+                    )?;
+                    self.control.release_group(
+                        &group_id,
+                        timestamp,
+                        correlation_id,
+                        &mut self.events,
+                    )?;
+                }
                 continue;
             }
             let roles = group
@@ -483,7 +645,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             for role_id in roles {
                 let status = self
                     .active_executions
-                    .get(&(group_id.clone(), role_id.clone()))
+                    .get(&(group_id.clone(), group.task_ref().clone(), role_id.clone()))
                     .and_then(|execution_id| self.execution_status.get(execution_id))
                     .copied();
                 match status {
@@ -651,6 +813,7 @@ fn validate_execution_checkpoint(
             )));
         };
         if routed.command.group_id() != &active.group_id
+            || routed.command.task_ref() != &active.task_ref
             || routed.command.role_id() != &active.role_id
         {
             return Err(IntegrationRuntimeError::Checkpoint(format!(
@@ -1334,7 +1497,11 @@ mod tests {
             .execution_nodes
             .insert("execution-1".to_string(), node_id.clone());
         bridge.active_executions.insert(
-            (command.group_id().clone(), command.role_id().clone()),
+            (
+                command.group_id().clone(),
+                command.task_ref().clone(),
+                command.role_id().clone(),
+            ),
             "execution-1".to_string(),
         );
 
@@ -1462,9 +1629,10 @@ mod tests {
             "execution-current".to_string(),
             RemoteExecutionStatus::Running,
         );
-        bridge
-            .active_executions
-            .insert((group_id.clone(), role_id), "execution-current".to_string());
+        bridge.active_executions.insert(
+            (group_id.clone(), requirement.task_ref().clone(), role_id),
+            "execution-current".to_string(),
+        );
 
         bridge
             .advance_group_lifecycle(TimestampMs::new(1), &correlation)

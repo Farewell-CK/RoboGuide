@@ -2,8 +2,8 @@
 
 use crate::{AssignmentProposal, ControlError, ControlPlane};
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, RoleAssignment, RoleId, TaskId, TaskRef,
-    TimestampMs,
+    CorrelationId, EventPayload, ExecutionGroupId, ResourceBindingScope, RoleAssignment, RoleId,
+    TaskId, TaskRef, TimestampMs,
 };
 use ports::EventSink;
 
@@ -18,7 +18,7 @@ pub struct CommittedPlan {
 
 impl CommittedPlan {
     /// Creates a committed plan after reservation checks succeed.
-    fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
+    pub(crate) fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
         Self {
             task_ref,
             assignments,
@@ -50,6 +50,9 @@ pub(crate) struct Reservation {
     pub(crate) role_id: RoleId,
     /// Group currently owning the binding after creation, if any.
     pub(crate) group_id: Option<ExecutionGroupId>,
+    /// Lifetime of the reservation inside its Mission-level Group.
+    #[serde(default)]
+    pub(crate) scope: ResourceBindingScope,
 }
 
 impl ControlPlane {
@@ -81,6 +84,7 @@ impl ControlPlane {
                         task_ref: proposal.task_ref().clone(),
                         role_id: assignment.role_id().clone(),
                         group_id: None,
+                        scope: ResourceBindingScope::Task,
                     },
                 );
             }

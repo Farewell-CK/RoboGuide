@@ -4,9 +4,9 @@ use crate::{
     CommittedPlan, CommittedRecoveryAssignment, ControlError, ControlPlane, RecoveryOutcome,
 };
 use domain::{
-    ActorId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId, NodeId,
-    ResourceId, RoleAssignment, RoleId, TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef,
-    TaskRequirement, TimestampMs,
+    ActorId, ContextRoleId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId,
+    NodeId, ResourceBindingScope, ResourceId, RoleAssignment, RoleId, TaskExecution,
+    TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
@@ -52,6 +52,8 @@ pub struct ExecutionGroup {
     pub(crate) assignments: Vec<RoleAssignment>,
     /// Roles awaiting replacement while the Group identity and context remain.
     pub(crate) unbound_roles: BTreeMap<RoleId, UnboundRole>,
+    /// Task-local roles awaiting replacement while sibling Tasks remain intact.
+    pub(crate) task_unbound_roles: BTreeMap<(TaskRef, RoleId), UnboundRole>,
     /// Lifecycle state used by adaptation and recovery.
     pub(crate) lifecycle: GroupLifecycle,
     /// Task execution units retained while the Group remains alive.
@@ -67,6 +69,7 @@ impl ExecutionGroup {
             task_ref: plan.task_ref().clone(),
             assignments: plan.assignments().to_vec(),
             unbound_roles: BTreeMap::new(),
+            task_unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
             task_executions: BTreeMap::new(),
         }
@@ -84,6 +87,7 @@ impl ExecutionGroup {
             task_ref: initial_task_ref,
             assignments: Vec::new(),
             unbound_roles: BTreeMap::new(),
+            task_unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
             task_executions: BTreeMap::new(),
         }
@@ -117,6 +121,12 @@ impl ExecutionGroup {
     /// Returns whether a role is retained by the Group but awaits a new binding.
     pub fn is_role_unbound(&self, role_id: &RoleId) -> bool {
         self.unbound_roles.contains_key(role_id)
+    }
+
+    /// Returns whether one Task-local role is awaiting replacement.
+    pub fn is_task_role_unbound(&self, task_ref: &TaskRef, role_id: &RoleId) -> bool {
+        self.task_unbound_roles
+            .contains_key(&(task_ref.clone(), role_id.clone()))
     }
 
     /// Returns the current group lifecycle.
@@ -171,14 +181,13 @@ impl ControlPlane {
         Ok(group)
     }
 
-    /// Registers one Task execution unit without creating or destroying its parent Group.
+    /// Registers one already-committed Task execution without creating or destroying its Group.
     #[allow(clippy::too_many_arguments)]
     pub fn register_task_execution<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
-        task_ref: TaskRef,
+        plan: &CommittedPlan,
         context_id: CoordinationContextId,
-        assignments: Vec<RoleAssignment>,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
@@ -187,17 +196,47 @@ impl ControlPlane {
             .groups
             .get_mut(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let task_ref = plan.task_ref();
         if group.mission_id() != task_ref.mission_id() {
             return Err(ControlError::InvalidProposal(
                 "Task belongs to another Mission than its Execution Group".to_string(),
             ));
         }
-        if group.task_executions.contains_key(&task_ref) {
+        if group.task_executions.contains_key(task_ref) {
             return Err(ControlError::InvalidProposal(
                 "Task execution already exists in the Execution Group".to_string(),
             ));
         }
-        let execution = TaskExecution::new(task_ref.clone(), context_id.clone(), assignments);
+        for assignment in plan.assignments() {
+            for resource_id in assignment.resource_ids() {
+                let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "committed resource {resource_id} has no reservation"
+                    ))
+                })?;
+                if reservation.task_ref != *task_ref
+                    || reservation.role_id != *assignment.role_id()
+                    || reservation.group_id.is_some()
+                {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "resource {resource_id} is not an unbound reservation for this Task"
+                    )));
+                }
+            }
+        }
+        for assignment in plan.assignments() {
+            for resource_id in assignment.resource_ids() {
+                self.reservations
+                    .get_mut(resource_id)
+                    .expect("reservation validated above")
+                    .group_id = Some(group_id.clone());
+            }
+        }
+        let execution = TaskExecution::new(
+            task_ref.clone(),
+            context_id.clone(),
+            plan.assignments().to_vec(),
+        );
         group
             .task_executions
             .insert(task_ref.clone(), execution.clone());
@@ -207,11 +246,219 @@ impl ControlPlane {
             None,
             EventPayload::TaskExecutionRegistered {
                 group_id: group_id.clone(),
-                task_ref,
+                task_ref: task_ref.clone(),
                 context_id,
             },
         );
         Ok(execution)
+    }
+
+    /// Marks a registered Task ready after its DAG dependencies have been satisfied.
+    pub fn ready_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if execution.lifecycle() != TaskExecutionLifecycle::Pending {
+            return Err(ControlError::InvalidProposal(
+                "only a pending Task can become ready".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::Ready),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionReady {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Declares a committed Task resource as Context-scoped before that Task starts.
+    pub fn set_binding_scope(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        resource_id: &ResourceId,
+        scope: ResourceBindingScope,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if execution.lifecycle() != TaskExecutionLifecycle::Pending
+            && execution.lifecycle() != TaskExecutionLifecycle::Ready
+        {
+            return Err(ControlError::InvalidProposal(
+                "binding scope can only change before Task activation".to_string(),
+            ));
+        }
+        let reservation = self.reservations.get_mut(resource_id).ok_or_else(|| {
+            ControlError::InvalidProposal(format!("resource {resource_id} has no reservation"))
+        })?;
+        if reservation.group_id.as_ref() != Some(group_id)
+            || reservation.task_ref != *task_ref
+            || !execution
+                .assignments()
+                .iter()
+                .any(|assignment| assignment.resource_ids().contains(resource_id))
+        {
+            return Err(ControlError::InvalidProposal(
+                "resource is not owned by this Task execution".to_string(),
+            ));
+        }
+        reservation.scope = scope;
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_binding_scope(resource_id.clone(), scope),
+        );
+        Ok(())
+    }
+
+    /// Associates a Task-local role with a persistent Mission Intelligence ContextRole.
+    pub fn set_context_role(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+        context_role_id: ContextRoleId,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::Pending | TaskExecutionLifecycle::Ready
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "ContextRole can only be declared before Task activation".to_string(),
+            ));
+        }
+        if !execution
+            .assignments()
+            .iter()
+            .any(|assignment| assignment.role_id() == role_id)
+        {
+            return Err(ControlError::InvalidProposal(format!(
+                "Task has no role {role_id}"
+            )));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_context_role(role_id.clone(), context_role_id),
+        );
+        Ok(())
+    }
+
+    /// Releases all Context-scoped resources when their Intelligence Context ends.
+    pub fn release_context_bindings<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        context_id: &CoordinationContextId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<Vec<ResourceId>, ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?
+            .clone();
+        let mut resources = Vec::new();
+        for execution in group.task_executions() {
+            if execution.context_id() != context_id {
+                continue;
+            }
+            for assignment in execution.assignments() {
+                for resource_id in assignment.resource_ids() {
+                    if execution.binding_scope(resource_id) == ResourceBindingScope::Context {
+                        resources.push(resource_id.clone());
+                    }
+                }
+            }
+        }
+        resources.sort();
+        resources.dedup();
+        for resource_id in &resources {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "Context resource {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.group_id.as_ref() != Some(group_id)
+                || reservation.scope != ResourceBindingScope::Context
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "Context does not own resource {resource_id}"
+                )));
+            }
+        }
+        for resource_id in &resources {
+            self.reservations.remove(resource_id);
+        }
+        let group_mut = self
+            .groups
+            .get_mut(group_id)
+            .expect("group validated above");
+        for execution in group_mut.task_executions.values_mut() {
+            if execution.context_id() != context_id {
+                continue;
+            }
+            let remaining = execution
+                .assignments()
+                .iter()
+                .map(|assignment| {
+                    RoleAssignment::new(
+                        assignment.role_id().clone(),
+                        assignment.node_id().clone(),
+                        assignment
+                            .resource_ids()
+                            .iter()
+                            .filter(|resource_id| !resources.contains(resource_id))
+                            .cloned()
+                            .collect(),
+                    )
+                })
+                .collect();
+            *execution = execution.with_assignments(remaining);
+        }
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ContextBindingsReleased {
+                group_id: group_id.clone(),
+                context_id: context_id.clone(),
+                resource_ids: resources.clone(),
+            },
+        );
+        Ok(resources)
     }
 
     /// Activates a registered Task while retaining the Mission-level Group.
@@ -231,10 +478,7 @@ impl ControlPlane {
             .task_executions
             .get(task_ref)
             .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
-        if !matches!(
-            execution.lifecycle(),
-            TaskExecutionLifecycle::Pending | TaskExecutionLifecycle::Ready
-        ) {
+        if !matches!(execution.lifecycle(), TaskExecutionLifecycle::Ready) {
             return Err(ControlError::InvalidProposal(
                 "Task execution is not ready to activate".to_string(),
             ));
@@ -278,10 +522,7 @@ impl ControlPlane {
             .task_executions
             .get(task_ref)
             .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
-        if !matches!(
-            execution.lifecycle(),
-            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Ready
-        ) {
+        if !matches!(execution.lifecycle(), TaskExecutionLifecycle::Active) {
             return Err(ControlError::InvalidProposal(
                 "Task execution is not active".to_string(),
             ));
@@ -295,6 +536,47 @@ impl ControlPlane {
             correlation_id,
             None,
             EventPayload::TaskExecutionCompleted {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Marks one active Task failed while retaining the parent Group for recovery policy.
+    pub fn fail_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Blocked
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "only an active or blocked Task can fail".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::Failed),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskExecutionFailed {
                 group_id: group_id.clone(),
                 task_ref: task_ref.clone(),
             },
@@ -316,20 +598,83 @@ impl ControlPlane {
             .groups
             .get(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if group.task_execution(task_ref).is_none() {
+        let execution = group
+            .task_execution(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::Completed
+                | TaskExecutionLifecycle::Failed
+                | TaskExecutionLifecycle::Cancelled
+        ) {
             return Err(ControlError::InvalidProposal(
-                "unknown Task execution".to_string(),
+                "Task bindings can only be released after terminal completion".to_string(),
             ));
         }
-        for resource_id in resource_ids {
-            let Some(reservation) = self.reservations.get(resource_id) else {
-                continue;
-            };
-            if reservation.group_id.as_ref() == Some(group_id) && reservation.task_ref == *task_ref
+        let expected = execution
+            .assignments()
+            .iter()
+            .flat_map(|assignment| assignment.resource_ids())
+            .filter(|resource_id| {
+                execution.binding_scope(resource_id) == ResourceBindingScope::Task
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut expected_sorted = expected;
+        expected_sorted.sort();
+        let mut supplied = resource_ids.to_vec();
+        supplied.sort();
+        supplied.dedup();
+        if supplied != expected_sorted {
+            return Err(ControlError::InvalidProposal(
+                "released resources must exactly match Task-scoped bindings".to_string(),
+            ));
+        }
+        for resource_id in &expected_sorted {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "Task resource {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.group_id.as_ref() != Some(group_id)
+                || reservation.task_ref != *task_ref
+                || reservation.scope != ResourceBindingScope::Task
             {
-                self.reservations.remove(resource_id);
+                return Err(ControlError::InvalidProposal(format!(
+                    "Task does not own resource {resource_id}"
+                )));
             }
         }
+        for resource_id in &expected_sorted {
+            self.reservations.remove(resource_id);
+        }
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .expect("group validated above");
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .expect("Task validated above");
+        let remaining = execution
+            .assignments()
+            .iter()
+            .map(|assignment| {
+                RoleAssignment::new(
+                    assignment.role_id().clone(),
+                    assignment.node_id().clone(),
+                    assignment
+                        .resource_ids()
+                        .iter()
+                        .filter(|resource_id| !expected_sorted.contains(resource_id))
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect();
+        group
+            .task_executions
+            .insert(task_ref.clone(), execution.with_assignments(remaining));
         events.append(
             timestamp,
             correlation_id,
@@ -337,7 +682,7 @@ impl ControlPlane {
             EventPayload::TaskExecutionBindingsReleased {
                 group_id: group_id.clone(),
                 task_ref: task_ref.clone(),
-                resource_ids: resource_ids.to_vec(),
+                resource_ids: expected_sorted,
             },
         );
         Ok(())
@@ -570,6 +915,97 @@ impl ControlPlane {
         Ok(())
     }
 
+    /// Releases one Task-local role binding without affecting sibling Task executions.
+    pub fn release_task_role_binding<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.lifecycle != GroupLifecycle::Blocked {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        let execution = group.task_execution(task_ref).ok_or_else(|| {
+            ControlError::InvalidProposal("Task execution is not registered".to_string())
+        })?;
+        let assignment_index = execution
+            .assignments()
+            .iter()
+            .position(|assignment| assignment.role_id() == role_id)
+            .ok_or_else(|| ControlError::InvalidProposal(format!("Task has no role {role_id}")))?;
+        let assignment = &execution.assignments()[assignment_index];
+        let node_id = assignment.node_id().clone();
+        let resource_ids = assignment.resource_ids().to_vec();
+        for resource_id in &resource_ids {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "Task binding {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != *task_ref
+                || reservation.role_id != *role_id
+                || reservation.group_id.as_ref() != Some(group_id)
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "Task {task_ref} does not own role reservation {resource_id}"
+                )));
+            }
+            if reservation.scope == ResourceBindingScope::Context {
+                return Err(ControlError::InvalidProposal(
+                    "Context-scoped role bindings must end with their Context before recovery release"
+                        .to_string(),
+                ));
+            }
+        }
+        for resource_id in &resource_ids {
+            if self
+                .reservations
+                .get(resource_id)
+                .is_some_and(|reservation| reservation.scope == ResourceBindingScope::Task)
+            {
+                self.reservations.remove(resource_id);
+            }
+        }
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .expect("group validated above");
+        let execution = group
+            .task_executions
+            .get_mut(task_ref)
+            .expect("Task validated above");
+        let mut assignments = execution.assignments().to_vec();
+        assignments.remove(assignment_index);
+        *execution = execution.with_assignments(assignments);
+        group.task_unbound_roles.insert(
+            (task_ref.clone(), role_id.clone()),
+            UnboundRole {
+                previous_node_id: node_id.clone(),
+                assignment_index,
+            },
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ExecutionGroupRoleBindingReleased {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+                role_id: role_id.clone(),
+                node_id,
+                resource_ids,
+            },
+        );
+        Ok(())
+    }
+
     /// Rebinds one blocked role using resources already committed by coordination.
     pub fn rebind_role<E: EventSink>(
         &mut self,
@@ -585,7 +1021,9 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if group.task_ref != *committed.task_ref() {
+        if group.task_ref != *committed.task_ref()
+            && group.task_execution(committed.task_ref()).is_none()
+        {
             return Err(ControlError::InvalidProposal(
                 "committed recovery belongs to another task".to_string(),
             ));
@@ -594,6 +1032,13 @@ impl ControlPlane {
         let unbound_role = group
             .unbound_roles
             .get(committed.role_id())
+            .cloned()
+            .or_else(|| {
+                group
+                    .task_unbound_roles
+                    .get(&(committed.task_ref().clone(), committed.role_id().clone()))
+                    .cloned()
+            })
             .ok_or_else(|| {
                 ControlError::InvalidProposal(format!(
                     "role {} is not unbound for committed rebind",
@@ -619,14 +1064,31 @@ impl ControlPlane {
             .groups
             .get_mut(committed.group_id())
             .ok_or_else(|| ControlError::UnknownGroup(committed.group_id().clone()))?;
-        let insertion_index = assignment_index.min(group.assignments.len());
-        group
-            .assignments
-            .insert(insertion_index, replacement_assignment);
-        group.unbound_roles.remove(committed.role_id());
+        if group.task_execution(committed.task_ref()).is_some() {
+            let execution = group
+                .task_executions
+                .get_mut(committed.task_ref())
+                .expect("Task validated above");
+            let insertion_index = assignment_index.min(execution.assignments().len());
+            let mut assignments = execution.assignments().to_vec();
+            assignments.insert(insertion_index, replacement_assignment);
+            *execution = execution.with_assignments(assignments);
+            group
+                .task_unbound_roles
+                .remove(&(committed.task_ref().clone(), committed.role_id().clone()));
+        } else {
+            let insertion_index = assignment_index.min(group.assignments.len());
+            group
+                .assignments
+                .insert(insertion_index, replacement_assignment);
+            group.unbound_roles.remove(committed.role_id());
+        }
         group.lifecycle = GroupLifecycle::Adapted;
-        self.pending_recovery_commitments
-            .remove(&(committed.group_id().clone(), committed.role_id().clone()));
+        self.pending_recovery_commitments.remove(&(
+            committed.group_id().clone(),
+            committed.task_ref().clone(),
+            committed.role_id().clone(),
+        ));
         events.append(
             timestamp,
             correlation_id,
@@ -666,7 +1128,7 @@ impl ControlPlane {
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if !group.unbound_roles.is_empty() {
+        if !group.unbound_roles.is_empty() || !group.task_unbound_roles.is_empty() {
             return Err(ControlError::InvalidProposal(
                 "execution group still has unbound roles".to_string(),
             ));
@@ -779,14 +1241,30 @@ impl ControlPlane {
                 }
             }
         }
+        for execution in group.task_executions.values() {
+            for assignment in execution.assignments() {
+                for resource_id in assignment.resource_ids() {
+                    if expected_resources
+                        .insert(resource_id.clone(), assignment.role_id().clone())
+                        .is_some()
+                    {
+                        return Err(ControlError::InvalidProposal(format!(
+                            "group {group_id} has duplicate active resource {resource_id}"
+                        )));
+                    }
+                }
+            }
+        }
         let pending_keys = self
             .pending_recovery_commitments
             .iter()
-            .filter(|((pending_group_id, _), _)| pending_group_id == group_id)
+            .filter(|((pending_group_id, _, _), _)| pending_group_id == group_id)
             .map(|(key, committed)| {
                 if committed.group_id() != group_id
-                    || committed.task_ref() != &task_ref
-                    || committed.role_id() != &key.1
+                    || (committed.task_ref() != &task_ref
+                        && group.task_execution(committed.task_ref()).is_none())
+                    || committed.task_ref() != &key.1
+                    || committed.role_id() != &key.2
                 {
                     return Err(ControlError::InvalidProposal(format!(
                         "group {group_id} has inconsistent pending recovery ownership"
@@ -812,7 +1290,9 @@ impl ControlPlane {
                     "group {group_id} ownership {resource_id} has no reservation"
                 ))
             })?;
-            if reservation.task_ref != task_ref
+            let task_owned = reservation.task_ref == task_ref
+                || group.task_execution(&reservation.task_ref).is_some();
+            if !task_owned
                 || reservation.role_id != *role_id
                 || reservation.group_id.as_ref() != Some(group_id)
             {
@@ -826,8 +1306,9 @@ impl ControlPlane {
             .iter()
             .filter(|(_, reservation)| reservation.group_id.as_ref() == Some(group_id))
             .map(|(resource_id, reservation)| {
-                if reservation.task_ref != task_ref
-                    || expected_resources.get(resource_id) != Some(&reservation.role_id)
+                let task_owned = reservation.task_ref == task_ref
+                    || group.task_execution(&reservation.task_ref).is_some();
+                if !task_owned || expected_resources.get(resource_id) != Some(&reservation.role_id)
                 {
                     return Err(ControlError::InvalidProposal(format!(
                         "group {group_id} has orphan reservation {resource_id}"
@@ -849,6 +1330,7 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         group.assignments.clear();
         group.unbound_roles.clear();
+        group.task_unbound_roles.clear();
         group.lifecycle = GroupLifecycle::Released;
         events.append(
             timestamp,

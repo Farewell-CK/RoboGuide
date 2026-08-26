@@ -29,5 +29,6 @@ Released。
 - Allocation projection 必须能区分 Task-scoped 与 context-scoped ownership。
 - Runtime execution identity 至少包含 Group、Task 和 role，避免不同 Task 的同名 role 冲突。
 - v0.x 的单 Group 策略可以在未来演化为多个 Group，而无需重新定义 Task DAG。
-- Mission-level Group/TaskExecution 事件使用新的 `domain.EventPayload.json/v2` 和
-  `roboguide.controller-checkpoint/v2` 版本标记，旧投影不得静默恢复。
+- Mission-level Group/TaskExecution 事件使用新的 `domain.EventPayload.json/v2`；由于 Runtime
+  execution identity 纳入 Task，Controller checkpoint 使用 `roboguide.controller-checkpoint/v3`
+  版本标记，旧投影不得静默恢复。

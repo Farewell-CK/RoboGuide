@@ -206,7 +206,7 @@ pub struct ControlPlane {
     pub(crate) groups: BTreeMap<ExecutionGroupId, ExecutionGroup>,
     /// Committed replacement assignments awaiting Consume or Abort.
     pub(crate) pending_recovery_commitments:
-        BTreeMap<(ExecutionGroupId, RoleId), CommittedRecoveryAssignment>,
+        BTreeMap<(ExecutionGroupId, TaskRef, RoleId), CommittedRecoveryAssignment>,
     /// Maximum receive-time age accepted by Control eligibility policy.
     pub(crate) max_status_age_ms: u64,
 }
@@ -274,7 +274,11 @@ impl ControlPlane {
         }
         let mut pending_recovery_commitments = BTreeMap::new();
         for commitment in checkpoint.pending_recovery_commitments {
-            let key = (commitment.group_id().clone(), commitment.role_id().clone());
+            let key = (
+                commitment.group_id().clone(),
+                commitment.task_ref().clone(),
+                commitment.role_id().clone(),
+            );
             if pending_recovery_commitments
                 .insert(key, commitment)
                 .is_some()
@@ -358,6 +362,7 @@ mod checkpoint_tests {
                 ),
                 role_id: RoleId::new("role-a").expect("role id valid"),
                 group_id: None,
+                scope: domain::ResourceBindingScope::Task,
             },
         );
         let json = serde_json::to_string(&control.checkpoint()).expect("checkpoint serializes");
