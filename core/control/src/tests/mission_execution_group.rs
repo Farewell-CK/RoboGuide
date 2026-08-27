@@ -117,6 +117,10 @@ fn mission_group_hosts_complete_dag_without_task_completion_releasing_group() {
         .complete_task_execution(&group_id, &first, TimestampMs::new(5), &trace(), &mut events)
         .expect("first Task completes");
 
+    assert!(control
+        .complete_group(&group_id, TimestampMs::new(6), &trace(), &mut events)
+        .is_err());
+
     let group = control.group(&group_id).expect("Group remains alive");
     assert_eq!(group.lifecycle(), GroupLifecycle::Active);
     assert_eq!(group.task_executions().count(), 2);
@@ -191,6 +195,74 @@ fn mission_task_bind_uses_commit_authority_and_releases_task_scope() {
         )
         .expect("Task resources release");
     assert!(!control.reservations.contains_key(&resource));
+}
+
+/// Task release preserves a Context-scoped assignment until explicit Context release.
+#[test]
+fn task_release_preserves_context_assignment() {
+    let mut control = ControlPlane::new();
+    let mut events = TestEvents;
+    let plan = mission_plan(ResourceBindingScope::Context);
+    let task = plan.task_graph().tasks()[0].requirement().task_ref().clone();
+    let role = plan.task_graph().tasks()[0].requirement().roles()[0]
+        .role_id()
+        .clone();
+    let context = plan.task_graph().tasks()[0].continuity().context_id().clone();
+    let group = domain::ExecutionGroupId::new("group-context-retain").expect("group valid");
+    let resource = ResourceId::new("context-retained").expect("resource valid");
+    control
+        .create_mission_group(group.clone(), &plan, TimestampMs::new(1), &trace(), &mut events)
+        .expect("Group creates");
+    control.reservations.insert(
+        resource.clone(),
+        crate::coordination::Reservation {
+            task_ref: task.clone(),
+            role_id: role.clone(),
+            group_id: None,
+            scope: ResourceBindingScope::Context,
+            owner: domain::AllocationOwner::Context {
+                mission_id: task.mission_id().clone(),
+                context_id: context,
+                context_role_id: ContextRoleId::new("worker").expect("context role valid"),
+            },
+        },
+    );
+    control
+        .ready_task_execution(&group, &task, TimestampMs::new(2), &trace(), &mut events)
+        .expect("Task ready");
+    control
+        .bind_task_execution(
+            &group,
+            &CommittedPlan::new(
+                task.clone(),
+                vec![RoleAssignment::new(
+                    role,
+                    NodeId::new("node-context").expect("node valid"),
+                    vec![resource.clone()],
+                )],
+            ),
+            TimestampMs::new(3),
+            &trace(),
+            &mut events,
+        )
+        .expect("Context binding succeeds");
+    control
+        .activate_task_execution(&group, &task, TimestampMs::new(4), &trace(), &mut events)
+        .expect("Task activates");
+    control
+        .complete_task_execution(&group, &task, TimestampMs::new(5), &trace(), &mut events)
+        .expect("Task completes");
+    control
+        .release_task_bindings(&group, &task, &[], TimestampMs::new(6), &trace(), &mut events)
+        .expect("Task-scoped release accepts an empty set");
+    let execution = control
+        .group(&group)
+        .expect("Group remains alive")
+        .task_execution(&task)
+        .expect("Task remains in Group");
+    assert_eq!(execution.assignments().len(), 1);
+    assert_eq!(execution.binding_scope(&resource), ResourceBindingScope::Context);
+    assert!(control.reservations.contains_key(&resource));
 }
 
 /// Context-scoped resources survive Task release and end only with their Context.
@@ -387,4 +459,132 @@ fn omitted_role_scope_defaults_to_task() {
             &mut events,
         )
         .expect("default Task scope should bind");
+}
+
+/// Terminal Mission release clears TaskExecution assignments so the Control checkpoint is
+/// restartable after a resource-bound failure.
+#[test]
+fn released_mission_group_clears_task_bindings_for_restore() {
+    let mut control = ControlPlane::new();
+    let mut events = TestEvents;
+    let plan = mission_plan(ResourceBindingScope::Task);
+    let task = plan.task_graph().tasks()[0].requirement().task_ref().clone();
+    let role = plan.task_graph().tasks()[0].requirement().roles()[0]
+        .role_id()
+        .clone();
+    let group = domain::ExecutionGroupId::new("group-failed-restore").expect("group valid");
+    let resource = ResourceId::new("failed-task-resource").expect("resource valid");
+    control
+        .create_mission_group(group.clone(), &plan, TimestampMs::new(1), &trace(), &mut events)
+        .expect("Group creates");
+    control.reservations.insert(
+        resource.clone(),
+        crate::coordination::Reservation {
+            task_ref: task.clone(),
+            role_id: role.clone(),
+            group_id: None,
+            scope: ResourceBindingScope::Task,
+            owner: domain::AllocationOwner::Task(task.clone()),
+        },
+    );
+    control
+        .ready_task_execution(&group, &task, TimestampMs::new(2), &trace(), &mut events)
+        .expect("Task ready");
+    control
+        .bind_task_execution(
+            &group,
+            &CommittedPlan::new(
+                task.clone(),
+                vec![RoleAssignment::new(
+                    role,
+                    NodeId::new("node-failed").expect("node valid"),
+                    vec![resource.clone()],
+                )],
+            ),
+            TimestampMs::new(3),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task binds");
+    control
+        .activate_task_execution(&group, &task, TimestampMs::new(4), &trace(), &mut events)
+        .expect("Task activates");
+    control
+        .fail_task_execution(&group, &task, TimestampMs::new(5), &trace(), &mut events)
+        .expect("Task fails");
+    control
+        .block_group(&group, "failure is final", TimestampMs::new(6), &trace(), &mut events)
+        .expect("Group blocks");
+    control
+        .fail_group(&group, "failure is final", TimestampMs::new(7), &trace(), &mut events)
+        .expect("Group fails");
+    control
+        .release_group(&group, TimestampMs::new(8), &trace(), &mut events)
+        .expect("Group releases");
+
+    let released = control.group(&group).expect("released Group remains observable");
+    assert!(released
+        .task_executions()
+        .all(|execution| execution.assignments().is_empty()));
+    assert!(control
+        .allocation_snapshot(TimestampMs::new(9))
+        .expect("released allocation projects")
+        .allocations()
+        .is_empty());
+    let restored = ControlPlane::restore(control.checkpoint()).expect("released checkpoint restores");
+    assert_eq!(
+        restored.group(&group).expect("Group restores").lifecycle(),
+        GroupLifecycle::Released
+    );
+}
+
+/// An Active Task checkpoint cannot silently omit one or more committed role bindings.
+#[test]
+fn active_task_checkpoint_requires_complete_role_coverage() {
+    let mut control = ControlPlane::new();
+    let mut events = TestEvents;
+    let plan = mission_plan(ResourceBindingScope::Task);
+    let task = plan.task_graph().tasks()[0].requirement().task_ref().clone();
+    let role = plan.task_graph().tasks()[0].requirement().roles()[0]
+        .role_id()
+        .clone();
+    let group = domain::ExecutionGroupId::new("group-incomplete-checkpoint").expect("group valid");
+    control
+        .create_mission_group(group.clone(), &plan, TimestampMs::new(1), &trace(), &mut events)
+        .expect("Group creates");
+    control
+        .ready_task_execution(&group, &task, TimestampMs::new(2), &trace(), &mut events)
+        .expect("Task ready");
+    control
+        .bind_task_execution(
+            &group,
+            &CommittedPlan::new(
+                task.clone(),
+                vec![RoleAssignment::new(
+                    role,
+                    NodeId::new("node-checkpoint").expect("node valid"),
+                    Vec::new(),
+                )],
+            ),
+            TimestampMs::new(3),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task binds");
+    control
+        .activate_task_execution(&group, &task, TimestampMs::new(4), &trace(), &mut events)
+        .expect("Task activates");
+    let execution = control
+        .groups
+        .get_mut(&group)
+        .expect("Group exists")
+        .task_executions
+        .get_mut(&task)
+        .expect("Task exists");
+    *execution = execution.with_assignments(Vec::new());
+
+    assert!(matches!(
+        ControlPlane::restore(control.checkpoint()),
+        Err(ControlError::InvalidProposal(reason)) if reason.contains("assignment coverage")
+    ));
 }

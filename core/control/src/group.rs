@@ -5,8 +5,8 @@ use crate::{
 };
 use domain::{
     ActorId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId, MissionPlan,
-    NodeId, ResourceBindingScope, ResourceId, RoleAssignment, RoleId, TaskExecution,
-    TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    NodeId, ResourceBindingScope, ResourceId, RoleAssignment, RoleId, RoleRequirement,
+    TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
 use std::collections::BTreeMap;
@@ -108,6 +108,9 @@ pub struct ExecutionGroup {
     /// Task execution units retained while the Group remains alive.
     #[serde(with = "task_execution_serde")]
     pub(crate) task_executions: BTreeMap<TaskRef, TaskExecution>,
+    /// Immutable MissionPlan role metadata used by Control recovery authority checks.
+    #[serde(with = "task_role_requirement_serde")]
+    pub(crate) role_requirements: BTreeMap<(TaskRef, RoleId), RoleRequirement>,
     /// Context-scoped bindings retained independently from TaskExecution bindings.
     pub(crate) context_bindings: BTreeMap<String, ContextBinding>,
 }
@@ -135,6 +138,46 @@ mod task_execution_serde {
         for (task_ref, execution) in entries {
             if values.insert(task_ref, execution).is_some() {
                 return Err(serde::de::Error::custom("duplicate TaskExecution key"));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes authoritative Task/Role requirements as duplicate-rejecting JSON records.
+mod task_role_requirement_serde {
+    use super::{RoleId, RoleRequirement, TaskRef};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes composite requirement keys as stable TaskRef/RoleId/value tuples.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<(TaskRef, RoleId), RoleRequirement>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values
+            .iter()
+            .map(|((task_ref, role_id), requirement)| (task_ref, role_id, requirement))
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+
+    /// Restores authoritative requirements and rejects duplicate Task/Role identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<(TaskRef, RoleId), RoleRequirement>, D::Error> {
+        let entries: Vec<(TaskRef, RoleId, RoleRequirement)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (task_ref, role_id, requirement) in entries {
+            if requirement.role_id() != &role_id {
+                return Err(serde::de::Error::custom(
+                    "Task role requirement key does not match its value",
+                ));
+            }
+            if values.insert((task_ref, role_id), requirement).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate Task role requirement key",
+                ));
             }
         }
         Ok(values)
@@ -176,6 +219,7 @@ mod task_unbound_serde {
 
 impl ExecutionGroup {
     /// Creates a group from a committed plan.
+    #[cfg(test)]
     pub(crate) fn new(group_id: ExecutionGroupId, plan: &CommittedPlan) -> Self {
         Self {
             group_id,
@@ -186,6 +230,7 @@ impl ExecutionGroup {
             task_unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
             task_executions: BTreeMap::new(),
+            role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
         }
     }
@@ -205,6 +250,7 @@ impl ExecutionGroup {
             task_unbound_roles: BTreeMap::new(),
             lifecycle: GroupLifecycle::Bound,
             task_executions: BTreeMap::new(),
+            role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
         }
     }
@@ -260,6 +306,16 @@ impl ExecutionGroup {
         self.task_executions.get(task_ref)
     }
 
+    /// Returns Control's immutable role metadata captured from the accepted MissionPlan.
+    pub(crate) fn role_requirement(
+        &self,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<&RoleRequirement> {
+        self.role_requirements
+            .get(&(task_ref.clone(), role_id.clone()))
+    }
+
     /// Returns all current Context-scoped bindings in stable Context/Role order.
     pub fn context_bindings(&self) -> impl Iterator<Item = &ContextBinding> {
         self.context_bindings.values()
@@ -277,6 +333,251 @@ impl ExecutionGroup {
 }
 
 impl ControlPlane {
+    /// Validates checkpointed Group role metadata against bindings and recovery authority.
+    pub(crate) fn validate_group_checkpoint_authority(&self) -> Result<(), ControlError> {
+        for group in self.groups.values() {
+            if group.task_ref.mission_id() != &group.mission_id {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint Group task belongs to another Mission".to_string(),
+                ));
+            }
+            if !group.task_executions.is_empty() {
+                self.validate_mission_group_checkpoint(group)?;
+            } else {
+                self.validate_legacy_group_checkpoint(group)?;
+            }
+        }
+        for commitment in self.pending_recovery_commitments.values() {
+            let group = self.groups.get(commitment.group_id()).ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "checkpoint recovery commitment references an unknown Group".to_string(),
+                )
+            })?;
+            let role = group.role_requirement(commitment.task_ref(), commitment.role_id());
+            if !group.task_executions.is_empty() && role.is_none() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint recovery commitment lacks authoritative role metadata".to_string(),
+                ));
+            }
+            if let Some(actor_id) = role.and_then(RoleRequirement::actor_id)
+                && self
+                    .actor_authority_node(commitment.task_ref().mission_id(), actor_id)
+                    .is_none_or(|node_id| node_id != commitment.replacement_node_id())
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint recovery commitment violates Actor authority".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates complete Task/Role coverage and Actor assignments for one Mission-level Group.
+    fn validate_mission_group_checkpoint(
+        &self,
+        group: &ExecutionGroup,
+    ) -> Result<(), ControlError> {
+        if !group.assignments.is_empty() || !group.unbound_roles.is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "Mission-level Group checkpoint contains legacy role state".to_string(),
+            ));
+        }
+        for (task_ref, execution) in &group.task_executions {
+            if task_ref != execution.task_ref() || task_ref.mission_id() != &group.mission_id {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint TaskExecution identity differs from its Group key".to_string(),
+                ));
+            }
+            let expected_roles = execution
+                .role_scopes()
+                .keys()
+                .collect::<std::collections::BTreeSet<_>>();
+            if execution
+                .context_roles()
+                .keys()
+                .any(|role_id| !expected_roles.contains(role_id))
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint TaskExecution continuity references an unknown role".to_string(),
+                ));
+            }
+            let authoritative_roles = group
+                .role_requirements
+                .iter()
+                .filter(|((requirement_task, _), _)| requirement_task == task_ref)
+                .map(|((_, role_id), _)| role_id)
+                .collect::<std::collections::BTreeSet<_>>();
+            if expected_roles != authoritative_roles {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint TaskExecution lacks exact authoritative role metadata".to_string(),
+                ));
+            }
+            let mut represented_roles = std::collections::BTreeSet::new();
+            for assignment in execution.assignments() {
+                if !represented_roles.insert(assignment.role_id())
+                    || !authoritative_roles.contains(assignment.role_id())
+                {
+                    return Err(ControlError::InvalidProposal(
+                        "checkpoint TaskExecution contains an unknown or duplicate assignment"
+                            .to_string(),
+                    ));
+                }
+                self.validate_checkpoint_actor_assignment(
+                    group,
+                    task_ref,
+                    assignment.role_id(),
+                    assignment.node_id(),
+                )?;
+            }
+            for ((unbound_task, role_id), unbound) in &group.task_unbound_roles {
+                if unbound_task == task_ref {
+                    if !represented_roles.insert(role_id) || !authoritative_roles.contains(role_id)
+                    {
+                        return Err(ControlError::InvalidProposal(
+                            "checkpoint Task recovery contains an unknown or duplicate role"
+                                .to_string(),
+                        ));
+                    }
+                    self.validate_checkpoint_actor_assignment(
+                        group,
+                        task_ref,
+                        role_id,
+                        &unbound.previous_node_id,
+                    )?;
+                }
+            }
+            self.validate_task_checkpoint_coverage(
+                group,
+                execution,
+                &authoritative_roles,
+                &represented_roles,
+            )?;
+        }
+        for ((task_ref, role_id), requirement) in &group.role_requirements {
+            if requirement.role_id() != role_id
+                || group.task_execution(task_ref).is_none()
+                || task_ref.mission_id() != &group.mission_id
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint Group contains orphan authoritative role metadata".to_string(),
+                ));
+            }
+        }
+        for (task_ref, role_id) in group.task_unbound_roles.keys() {
+            if group.role_requirement(task_ref, role_id).is_none() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint Group contains orphan Task recovery state".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Enforces lifecycle-specific assignment coverage for one restored TaskExecution.
+    fn validate_task_checkpoint_coverage(
+        &self,
+        group: &ExecutionGroup,
+        execution: &TaskExecution,
+        authoritative_roles: &std::collections::BTreeSet<&RoleId>,
+        represented_roles: &std::collections::BTreeSet<&RoleId>,
+    ) -> Result<(), ControlError> {
+        if group.lifecycle == GroupLifecycle::Released {
+            if !represented_roles.is_empty() {
+                return Err(ControlError::InvalidProposal(
+                    "Released Mission Group retains TaskExecution bindings".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        let exact = represented_roles == authoritative_roles;
+        let empty = represented_roles.is_empty();
+        let has_task_recovery = group
+            .task_unbound_roles
+            .keys()
+            .any(|(task_ref, _)| task_ref == execution.task_ref());
+        let valid = match execution.lifecycle() {
+            TaskExecutionLifecycle::Pending => empty,
+            // A Ready Task is either waiting for its first Commit or has a complete committed
+            // binding that has not been activated yet.
+            TaskExecutionLifecycle::Ready => !has_task_recovery && (empty || exact),
+            // Active/Blocked execution must account for every role, whether bound or awaiting
+            // the externally decided recovery rebind.
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Blocked => exact,
+            // Terminal Task history may retain Context-scoped role assignments until Context or
+            // Group release, so role coverage is intentionally not required here.
+            TaskExecutionLifecycle::Completed => !has_task_recovery,
+            TaskExecutionLifecycle::Failed | TaskExecutionLifecycle::Cancelled => exact,
+        };
+        if !valid {
+            return Err(ControlError::InvalidProposal(format!(
+                "checkpoint TaskExecution {} has invalid assignment coverage for {:?}",
+                execution.task_ref(),
+                execution.lifecycle()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validates the optional metadata retained by a legacy single-Task Group.
+    fn validate_legacy_group_checkpoint(&self, group: &ExecutionGroup) -> Result<(), ControlError> {
+        for ((task_ref, role_id), requirement) in &group.role_requirements {
+            if task_ref != &group.task_ref || role_id != requirement.role_id() {
+                return Err(ControlError::InvalidProposal(
+                    "legacy Group checkpoint contains mismatched role metadata".to_string(),
+                ));
+            }
+        }
+        for assignment in &group.assignments {
+            if group.role_requirements.is_empty() {
+                continue;
+            }
+            self.validate_checkpoint_actor_assignment(
+                group,
+                &group.task_ref,
+                assignment.role_id(),
+                assignment.node_id(),
+            )?;
+        }
+        for (role_id, unbound) in &group.unbound_roles {
+            if !group.role_requirements.is_empty() {
+                self.validate_checkpoint_actor_assignment(
+                    group,
+                    &group.task_ref,
+                    role_id,
+                    &unbound.previous_node_id,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Confirms one current or released assignment remains on its authoritative Actor node.
+    fn validate_checkpoint_actor_assignment(
+        &self,
+        group: &ExecutionGroup,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+        node_id: &NodeId,
+    ) -> Result<(), ControlError> {
+        let role = group.role_requirement(task_ref, role_id).ok_or_else(|| {
+            ControlError::InvalidProposal(
+                "checkpoint assignment lacks authoritative role metadata".to_string(),
+            )
+        })?;
+        let Some(actor_id) = role.actor_id() else {
+            return Ok(());
+        };
+        if self
+            .actor_authority_node(task_ref.mission_id(), actor_id)
+            .is_none_or(|authority_node| authority_node != node_id)
+        {
+            return Err(ControlError::InvalidProposal(
+                "checkpoint assignment violates Actor binding or placement authority".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Creates the default Mission-level Group and all pending TaskExecutions from the full DAG.
     pub fn create_mission_group<E: EventSink>(
         &mut self,
@@ -304,6 +605,15 @@ impl ControlPlane {
             ExecutionGroup::new_mission(group_id.clone(), mission_id.clone(), initial_task_ref);
         for task in plan.task_graph().tasks() {
             let continuity = task.continuity();
+            for role in task.requirement().roles() {
+                group.role_requirements.insert(
+                    (
+                        task.requirement().task_ref().clone(),
+                        role.role_id().clone(),
+                    ),
+                    role.clone(),
+                );
+            }
             let role_scopes = task
                 .requirement()
                 .roles()
@@ -350,6 +660,105 @@ impl ControlPlane {
         Ok(group)
     }
 
+    /// Confirms a restored Mission Group is the exact Control projection of one accepted plan.
+    pub fn validate_mission_group_plan(
+        &self,
+        group_id: &ExecutionGroupId,
+        plan: &MissionPlan,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        if group.mission_id() != plan.goal().mission_id() || group.task_executions.is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "MissionPlan does not identify this Mission-level Group".to_string(),
+            ));
+        }
+        let planned_tasks = plan
+            .task_graph()
+            .tasks()
+            .iter()
+            .map(|task| task.requirement().task_ref())
+            .collect::<std::collections::BTreeSet<_>>();
+        let registered_tasks = group
+            .task_executions
+            .keys()
+            .collect::<std::collections::BTreeSet<_>>();
+        if planned_tasks != registered_tasks {
+            return Err(ControlError::InvalidProposal(
+                "MissionPlan Task DAG differs from the restored Execution Group".to_string(),
+            ));
+        }
+        for task in plan.task_graph().tasks() {
+            validate_group_task_requirement(group, task.requirement())?;
+            let execution = group
+                .task_execution(task.requirement().task_ref())
+                .expect("TaskRef sets were validated above");
+            let role_scopes = task
+                .requirement()
+                .roles()
+                .iter()
+                .map(|role| {
+                    (
+                        role.role_id().clone(),
+                        task.continuity().resource_scope(role.role_id()),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            if execution.context_id() != task.continuity().context_id()
+                || execution.role_scopes() != &role_scopes
+                || execution.context_roles() != task.continuity().context_roles()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "MissionPlan continuity differs from the restored TaskExecution".to_string(),
+                ));
+            }
+        }
+        for (key, binding) in &group.context_bindings {
+            let context = plan
+                .contexts()
+                .iter()
+                .find(|context| context.context_id() == binding.context_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "restored Context binding is absent from the MissionPlan".to_string(),
+                    )
+                })?;
+            let context_role = context.role(binding.context_role_id()).ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "restored ContextRole binding is absent from the MissionPlan".to_string(),
+                )
+            })?;
+            let origin = group
+                .task_execution(binding.origin_task_ref())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "restored Context binding origin Task is absent".to_string(),
+                    )
+                })?;
+            let task_role = binding.assignment().role_id();
+            let role = group
+                .role_requirement(binding.origin_task_ref(), task_role)
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "restored Context binding origin role is absent".to_string(),
+                    )
+                })?;
+            if key != &context_binding_key(binding.context_id(), binding.context_role_id())
+                || origin.context_id() != binding.context_id()
+                || origin.context_role(task_role) != Some(binding.context_role_id())
+                || origin.role_scope(task_role) != ResourceBindingScope::Context
+                || role.actor_id() != Some(context_role.actor_id())
+            {
+                return Err(ControlError::InvalidProposal(
+                    "restored Context binding differs from MissionPlan continuity".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Writes a committed plan into the existing ready TaskExecution without creating a Group.
     pub fn bind_task_execution<E: EventSink>(
         &mut self,
@@ -382,6 +791,7 @@ impl ControlPlane {
             ));
         }
         validate_task_assignments(&execution, plan.assignments())?;
+        let actor_nodes = validate_authoritative_actor_assignments(self, group, plan)?;
         if !execution.assignments().is_empty() {
             return Err(ControlError::InvalidProposal(
                 "Task execution already has committed bindings".to_string(),
@@ -486,6 +896,25 @@ impl ControlPlane {
                 task_ref: task_ref.clone(),
             },
         );
+        for (actor_id, node_id) in actor_nodes {
+            self.record_actor_binding(
+                plan.task_ref().mission_id().clone(),
+                actor_id.clone(),
+                node_id.clone(),
+            )?;
+            events.append(
+                timestamp,
+                correlation_id,
+                None,
+                EventPayload::MissionActorBound {
+                    mission_id: plan.task_ref().mission_id().clone(),
+                    actor_id,
+                    node_id,
+                    task_ref: plan.task_ref().clone(),
+                    group_id: group_id.clone(),
+                },
+            );
+        }
         Ok(execution)
     }
 
@@ -504,37 +933,12 @@ impl ControlPlane {
                 "Task requirement does not match committed plan".to_string(),
             ));
         }
-        validate_actor_assignments(self, requirement, plan)?;
-        let execution =
-            self.bind_task_execution(group_id, plan, timestamp, correlation_id, events)?;
-        for role in requirement.roles() {
-            let Some(actor_id) = role.actor_id() else {
-                continue;
-            };
-            let assignment = plan
-                .assignments()
-                .iter()
-                .find(|assignment| assignment.role_id() == role.role_id())
-                .expect("proposal validates every requirement role");
-            self.record_actor_binding(
-                requirement.mission_id().clone(),
-                actor_id.clone(),
-                assignment.node_id().clone(),
-            )?;
-            events.append(
-                timestamp,
-                correlation_id,
-                None,
-                EventPayload::MissionActorBound {
-                    mission_id: requirement.mission_id().clone(),
-                    actor_id: actor_id.clone(),
-                    node_id: assignment.node_id().clone(),
-                    task_ref: requirement.task_ref().clone(),
-                    group_id: group_id.clone(),
-                },
-            );
-        }
-        Ok(execution)
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        validate_group_task_requirement(group, requirement)?;
+        self.bind_task_execution(group_id, plan, timestamp, correlation_id, events)
     }
 
     /// Marks a registered Task ready after its DAG dependencies have been satisfied.
@@ -842,6 +1246,16 @@ impl ControlPlane {
         for resource_id in &expected_sorted {
             self.reservations.remove(resource_id);
         }
+        // Keep Context-scoped assignments visible on the TaskExecution. Their reservation
+        // belongs to the Context and must survive the Task terminal transition.
+        let remaining = execution
+            .assignments()
+            .iter()
+            .filter(|assignment| {
+                execution.role_scope(assignment.role_id()) == ResourceBindingScope::Context
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let group = self
             .groups
             .get_mut(group_id)
@@ -850,7 +1264,6 @@ impl ControlPlane {
             .task_executions
             .get(task_ref)
             .expect("Task validated above");
-        let remaining = Vec::new();
         group
             .task_executions
             .insert(task_ref.clone(), execution.with_assignments(remaining));
@@ -870,7 +1283,8 @@ impl ControlPlane {
     /// Creates a legacy single-Task Group and establishes first-use Actor bindings.
     ///
     /// New Mission execution must use [`Self::create_mission_group`] and bind TaskExecutions.
-    pub fn create_group_with_actor_bindings<E: EventSink>(
+    #[cfg(test)]
+    pub(crate) fn create_group_with_actor_bindings<E: EventSink>(
         &mut self,
         group_id: ExecutionGroupId,
         plan: &CommittedPlan,
@@ -902,6 +1316,13 @@ impl ControlPlane {
                         "mission actor is already bound to another node".to_string(),
                     ));
                 }
+            } else if let Some(constraint) =
+                self.actor_node_constraint(requirement.mission_id(), actor_id)
+                && constraint.node_id() != assignment.node_id()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "actor assignment violates deployment placement constraint".to_string(),
+                ));
             } else {
                 let previous = actor_nodes.insert(actor_id.clone(), assignment.node_id().clone());
                 if previous.is_some_and(|node| node != *assignment.node_id()) {
@@ -911,7 +1332,17 @@ impl ControlPlane {
                 }
             }
         }
-        let group = self.create_group(group_id.clone(), plan, timestamp, correlation_id, events)?;
+        self.create_group(group_id.clone(), plan, timestamp, correlation_id, events)?;
+        let group = self
+            .groups
+            .get_mut(&group_id)
+            .expect("Group was inserted by create_group");
+        for role in requirement.roles() {
+            group.role_requirements.insert(
+                (requirement.task_ref().clone(), role.role_id().clone()),
+                role.clone(),
+            );
+        }
         for (actor_id, node_id) in actor_nodes {
             self.record_actor_binding(
                 requirement.mission_id().clone(),
@@ -931,13 +1362,17 @@ impl ControlPlane {
                 },
             );
         }
-        Ok(group)
+        self.groups
+            .get(&group_id)
+            .cloned()
+            .ok_or(ControlError::UnknownGroup(group_id))
     }
 
     /// Creates and binds a legacy single-Task Execution Group from a committed plan.
     ///
     /// New Mission execution must use [`Self::create_mission_group`] and bind TaskExecutions.
-    pub fn create_group<E: EventSink>(
+    #[cfg(test)]
+    pub(crate) fn create_group<E: EventSink>(
         &mut self,
         group_id: ExecutionGroupId,
         plan: &CommittedPlan,
@@ -1006,9 +1441,21 @@ impl ControlPlane {
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if !group.unbound_roles.is_empty() {
+        if !group.unbound_roles.is_empty() || !group.task_unbound_roles.is_empty() {
             return Err(ControlError::InvalidProposal(
                 "execution group still has unbound roles".to_string(),
+            ));
+        }
+        if !group.task_executions.is_empty()
+            && !group.task_executions.values().any(|execution| {
+                matches!(
+                    execution.lifecycle(),
+                    TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Completed
+                )
+            })
+        {
+            return Err(ControlError::InvalidProposal(
+                "Mission Group requires an explicitly activated TaskExecution".to_string(),
             ));
         }
         group.lifecycle = GroupLifecycle::Active;
@@ -1293,7 +1740,7 @@ impl ControlPlane {
         })
     }
 
-    /// Marks a group complete after all required role executions succeed.
+    /// Marks a group complete after every registered TaskExecution succeeds.
     pub fn complete_group<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
@@ -1315,6 +1762,16 @@ impl ControlPlane {
             return Err(ControlError::InvalidProposal(
                 "execution group still has unbound roles".to_string(),
             ));
+        }
+        if let Some(incomplete) = group
+            .task_executions
+            .values()
+            .find(|execution| execution.lifecycle() != TaskExecutionLifecycle::Completed)
+        {
+            return Err(ControlError::InvalidProposal(format!(
+                "TaskExecution {} is not completed",
+                incomplete.task_ref()
+            )));
         }
         group.lifecycle = GroupLifecycle::Completed;
         events.append(
@@ -1532,6 +1989,11 @@ impl ControlPlane {
         group.context_bindings.clear();
         group.unbound_roles.clear();
         group.task_unbound_roles.clear();
+        for execution in group.task_executions.values_mut() {
+            // Terminal Group release removes live Task bindings from the durable projection;
+            // historical binding events remain available in the event log.
+            *execution = execution.with_assignments(Vec::new());
+        }
         group.lifecycle = GroupLifecycle::Released;
         events.append(
             timestamp,
@@ -1578,14 +2040,43 @@ fn validate_task_assignments(
     Ok(())
 }
 
-/// Validates Mission actor continuity before any Task or Group mutation occurs.
-fn validate_actor_assignments(
-    control: &ControlPlane,
+/// Rejects caller-supplied role metadata that differs from the accepted MissionPlan projection.
+fn validate_group_task_requirement(
+    group: &ExecutionGroup,
     requirement: &TaskRequirement,
-    plan: &CommittedPlan,
 ) -> Result<(), ControlError> {
+    let expected = group
+        .role_requirements
+        .iter()
+        .filter(|((task_ref, _), _)| task_ref == requirement.task_ref())
+        .map(|((_, role_id), role)| (role_id, role))
+        .collect::<BTreeMap<_, _>>();
+    let supplied = requirement
+        .roles()
+        .iter()
+        .map(|role| (role.role_id(), role))
+        .collect::<BTreeMap<_, _>>();
+    if expected.is_empty() || expected == supplied {
+        return Ok(());
+    }
+    Err(ControlError::InvalidProposal(
+        "Task requirement differs from authoritative Execution Group role metadata".to_string(),
+    ))
+}
+
+/// Validates authoritative Mission actor continuity before any Task or Group mutation occurs.
+fn validate_authoritative_actor_assignments(
+    control: &ControlPlane,
+    group: &ExecutionGroup,
+    plan: &CommittedPlan,
+) -> Result<BTreeMap<ActorId, NodeId>, ControlError> {
     let mut actor_nodes = BTreeMap::<ActorId, NodeId>::new();
-    for role in requirement.roles() {
+    let roles = group
+        .role_requirements
+        .iter()
+        .filter(|((task_ref, _), _)| task_ref == plan.task_ref())
+        .map(|(_, role)| role);
+    for role in roles {
         let Some(actor_id) = role.actor_id() else {
             continue;
         };
@@ -1596,11 +2087,19 @@ fn validate_actor_assignments(
             .ok_or_else(|| {
                 ControlError::InvalidProposal(format!("missing role {}", role.role_id()))
             })?;
-        if let Some(existing) = control.actor_binding(requirement.mission_id(), actor_id)
+        if let Some(existing) = control.actor_binding(plan.task_ref().mission_id(), actor_id)
             && existing.node_id() != assignment.node_id()
         {
             return Err(ControlError::InvalidProposal(
                 "mission actor is already bound to another node".to_string(),
+            ));
+        }
+        if let Some(constraint) =
+            control.actor_node_constraint(plan.task_ref().mission_id(), actor_id)
+            && constraint.node_id() != assignment.node_id()
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor assignment violates deployment placement constraint".to_string(),
             ));
         }
         if let Some(previous) = actor_nodes.insert(actor_id.clone(), assignment.node_id().clone())
@@ -1611,7 +2110,7 @@ fn validate_actor_assignments(
             ));
         }
     }
-    Ok(())
+    Ok(actor_nodes)
 }
 
 /// A narrow role view used by recovery adapters without exposing the task object.

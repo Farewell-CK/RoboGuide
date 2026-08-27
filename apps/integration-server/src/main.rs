@@ -4,6 +4,8 @@
 
 //! RoboGuide Integration Server process.
 
+mod artifact_http;
+
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
 use integration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, GrpcIntegrationService,
@@ -12,10 +14,36 @@ use integration::{
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::Clock;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Schema marker for the Phase 1 server checkpoint including Mission orchestration.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v5";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v6";
+
+/// Version marker for the optional deployment-owned actor placement file.
+const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
+
+/// Maximum HTTP header block accepted by the Mission/operator API.
+const MAX_CONTROL_HTTP_HEADER_BYTES: usize = 64 * 1024;
+
+/// Maximum JSON body accepted by the Mission/operator API.
+const MAX_CONTROL_HTTP_BODY_BYTES: usize = 1024 * 1024;
+
+/// Maximum wall time allowed for one complete control HTTP request.
+const CONTROL_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// One fully framed request accepted by the bounded control HTTP listener.
+#[derive(Debug)]
+struct ControlHttpRequest {
+    /// Uppercase HTTP method.
+    method: String,
+    /// Raw origin-form request target, including an optional query.
+    target: String,
+    /// Exactly the number of body bytes declared by Content-Length.
+    body: Vec<u8>,
+}
 
 /// Live process state sharing one Control authority with Mission orchestration.
 struct ControllerState {
@@ -36,6 +64,28 @@ struct ServerCheckpoint {
     orchestration_json: String,
 }
 
+/// Explicit deployment policy for constraining logical actors to physical nodes.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActorPlacementFile {
+    /// Schema marker preventing accidental interpretation of another configuration format.
+    schema: String,
+    /// Mission-scoped placement entries applied to Control before requests are accepted.
+    constraints: Vec<ActorPlacementEntry>,
+}
+
+/// One serialized mission actor placement entry.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActorPlacementEntry {
+    /// Mission namespace for the logical actor.
+    mission_id: String,
+    /// Logical actor declared by the MissionPlan.
+    actor_id: String,
+    /// Physical node permitted for first-use matching.
+    node_id: String,
+}
+
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,12 +101,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .unwrap_or_else(|| "127.0.0.1:8080".to_string())
         .parse()?;
+    let artifact_address: std::net::SocketAddr = arguments
+        .next()
+        .unwrap_or_else(|| "127.0.0.1:8090".to_string())
+        .parse()?;
+    let artifact_root = arguments
+        .next()
+        .unwrap_or_else(|| "roboguide-artifacts".to_string());
+    let actor_placement_path = arguments.next().filter(|path| !path.trim().is_empty());
+    if arguments.next().is_some() {
+        return Err(
+            "unexpected integration-server argument; expected optional actor placement JSON path"
+                .into(),
+        );
+    }
+    let actor_placement_constraints = actor_placement_path
+        .as_deref()
+        .map(|path| load_actor_placement_file(Path::new(path)))
+        .transpose()?;
+    let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
+    let event_write_gate = Arc::new(Mutex::new(()));
+    let process_clock = Arc::new(runtime::SystemMonotonicClock::new());
+    let artifact_store = adapters::artifact::FileSystemArtifactStore::new(&artifact_root)?;
+    let artifact_catalog =
+        artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
+            .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
+    let artifact_listener = tokio::net::TcpListener::bind(artifact_address).await?;
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
+    let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new(events);
-    let controller = match checkpoint {
+    let mut controller = match checkpoint {
         Some(checkpoint) => {
             if checkpoint.schema != SERVER_CHECKPOINT_SCHEMA {
                 return Err(format!(
@@ -85,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &saved.integration_json,
                     event_log.clone(),
                     router,
-                    domain::TimestampMs::new(0),
+                    process_clock.now(),
                 )?,
                 orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)?,
             }
@@ -106,21 +183,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             orchestrator: MissionOrchestrator::new(),
         },
     };
+    if let Some(constraints) = actor_placement_constraints {
+        for constraint in constraints {
+            controller.bridge.control_mut().set_actor_node_constraint(
+                constraint.mission_id().clone(),
+                constraint.actor_id().clone(),
+                constraint.node_id().clone(),
+            )?;
+        }
+    }
+    controller
+        .orchestrator
+        .validate_control_authority(controller.bridge.control())
+        .map_err(|error| format!("restored Mission authority is inconsistent: {error}"))?;
+    validate_restored_actor_placement_coverage(
+        controller.bridge.control(),
+        &controller.orchestrator,
+    )?;
+    if initialize_checkpoint || actor_placement_path.is_some() {
+        let checkpoint_json =
+            server_checkpoint_json(&controller).map_err(|error| error.to_string())?;
+        event_log.begin_batch()?;
+        if let Err(error) = event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json) {
+            let _ = event_log.rollback_batch();
+            return Err(error.into());
+        }
+        if let Err(error) = event_log.commit_batch() {
+            let _ = event_log.rollback_batch();
+            return Err(error.into());
+        }
+    }
     let controller = Arc::new(Mutex::new(controller));
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();
+    let http_event_write_gate = event_write_gate.clone();
+    let http_clock = process_clock.clone();
     let receiver_event_log = event_log.clone();
+    let receiver_event_write_gate = event_write_gate.clone();
+    let artifact_catalog_for_server = artifact_catalog.clone();
+    let artifact_store_for_server = artifact_store.clone();
     let (fatal_sender, fatal_receiver) = tokio::sync::oneshot::channel::<String>();
     tokio::spawn(async move {
-        if let Err(error) = serve_http(http_address, http_controller, http_event_log).await {
+        if let Err(error) = serve_http(
+            http_address,
+            http_controller,
+            http_event_log,
+            http_event_write_gate,
+            http_clock,
+        )
+        .await
+        {
             eprintln!("control HTTP server stopped: {error}");
+        }
+    });
+    tokio::spawn(async move {
+        if let Err(error) = artifact_http::serve_artifact_http(
+            artifact_listener,
+            artifact_store_for_server,
+            artifact_catalog_for_server,
+        )
+        .await
+        {
+            eprintln!("artifact HTTP server stopped: {error}");
         }
     });
     tokio::spawn(async move {
         let correlation = domain::CorrelationId::new("integration-server")
             .expect("static correlation id is valid");
-        let clock = runtime::SystemMonotonicClock::new();
         while let Some(event) = receiver.recv().await {
+            let _write_guard = match receiver_event_write_gate.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    let _ = fatal_sender.send("event-log write gate is poisoned".to_string());
+                    return;
+                }
+            };
             if let Err(error) = receiver_event_log.begin_batch() {
                 let _ = fatal_sender.send(format!("cannot begin durable event batch: {error}"));
                 return;
@@ -129,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut checkpoint_json = None;
             match controller.lock() {
                 Ok(mut controller) => {
-                    let now = clock.now();
+                    let now = process_clock.now();
                     if let Err(error) = controller.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
                     } else if let Err(error) = apply_runtime_events(
@@ -233,6 +370,138 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result = server => result.map_err(Into::into),
         fatal = fatal_receiver => Err(fatal.unwrap_or_else(|_| "fact consumer stopped unexpectedly".to_string()).into()),
     }
+}
+
+/// Loads and validates deployment-owned actor placement constraints from JSON.
+fn load_actor_placement_file(
+    path: &Path,
+) -> Result<Vec<control::ActorNodeConstraint>, Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path)?;
+    let file: ActorPlacementFile = serde_json::from_str(&content)?;
+    if file.schema != ACTOR_PLACEMENT_SCHEMA {
+        return Err(format!(
+            "actor placement file {} uses unsupported schema {}",
+            path.display(),
+            file.schema
+        )
+        .into());
+    }
+    file.constraints
+        .into_iter()
+        .map(|entry| {
+            Ok(control::ActorNodeConstraint::new(
+                domain::MissionId::new(entry.mission_id)?,
+                domain::ActorId::new(entry.actor_id)?,
+                domain::NodeId::new(entry.node_id)?,
+            ))
+        })
+        .collect()
+}
+
+/// Requires a configured deployment policy to cover exactly the submitted Mission actors.
+///
+/// An empty Control placement set preserves generic matching. Once a placement file has installed
+/// any constraints, strict coverage prevents a misspelled Mission or Actor from silently falling
+/// back to deterministic unconstrained matching.
+fn validate_actor_placement_coverage(
+    control: &control::ControlPlane,
+    plan: &domain::MissionPlan,
+) -> Result<(), String> {
+    let configured = control.actor_node_constraints().collect::<Vec<_>>();
+    if configured.is_empty() {
+        return Ok(());
+    }
+    let mission_id = plan.goal().mission_id();
+    let expected = plan
+        .task_graph()
+        .tasks()
+        .iter()
+        .flat_map(|task| task.requirement().roles())
+        .filter_map(domain::RoleRequirement::actor_id)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let declared = configured
+        .into_iter()
+        .filter(|constraint| constraint.mission_id() == mission_id)
+        .map(|constraint| constraint.actor_id().clone())
+        .collect::<BTreeSet<_>>();
+    if declared == expected {
+        return Ok(());
+    }
+    let missing = expected
+        .difference(&declared)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let unknown = declared
+        .difference(&expected)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    Err(format!(
+        "strict actor placement coverage failed for Mission {mission_id}; missing actors [{}], unknown actors [{}]",
+        missing.join(", "),
+        unknown.join(", ")
+    ))
+}
+
+/// Revalidates every durable Mission after checkpoint recovery and placement replacement.
+///
+/// This runs before the server accepts traffic or persists a replacement placement policy, so a
+/// typo or incomplete policy cannot silently change the Actor authority of an existing Mission.
+fn validate_restored_actor_placement_coverage(
+    control: &control::ControlPlane,
+    orchestrator: &MissionOrchestrator,
+) -> Result<(), String> {
+    for mission_id in orchestrator.mission_ids() {
+        let execution = orchestrator.execution(&mission_id).ok_or_else(|| {
+            format!("restored Mission {mission_id} disappeared during placement validation")
+        })?;
+        validate_actor_placement_coverage(control, execution.plan())
+            .map_err(|error| format!("restored Mission placement is invalid: {error}"))?;
+    }
+    Ok(())
+}
+
+/// Acquires the process-wide single-writer lease for one controller event database.
+///
+/// The returned file must remain alive for the server lifetime. A second server using the same
+/// database fails before it can replay a stale projection or append a conflicting event sequence.
+fn acquire_event_log_writer_lock(event_path: &Path) -> Result<std::fs::File, std::io::Error> {
+    let lock_path = event_log_lock_path(event_path)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    file.try_lock().map_err(|error| {
+        std::io::Error::other(format!(
+            "controller database {} is already owned by another Integration Server: {error}",
+            event_path.display()
+        ))
+    })?;
+    Ok(file)
+}
+
+/// Returns a canonical sibling lock path so relative and symlink aliases share one lease.
+fn event_log_lock_path(event_path: &Path) -> Result<PathBuf, std::io::Error> {
+    let canonical_event_path = if event_path.exists() {
+        event_path.canonicalize()?
+    } else {
+        let file_name = event_path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "controller database path must name a file",
+            )
+        })?;
+        let parent = event_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        parent.canonicalize()?.join(file_name)
+    };
+    let mut lock_path = canonical_event_path.as_os_str().to_os_string();
+    lock_path.push(".writer.lock");
+    Ok(PathBuf::from(lock_path))
 }
 
 /// Applies Runtime-owned lifecycle transitions without giving Integration Control authority.
@@ -434,6 +703,11 @@ fn deferred_dispatch(error: &OrchestrationError) -> bool {
         error,
         OrchestrationError::Mission(reason)
             if reason.contains("no feasible deterministic selection")
+    ) || matches!(
+        error,
+        OrchestrationError::Control(
+            control::ControlError::ActorPlacementConstraintUnsatisfied { .. }
+        )
     )
 }
 
@@ -442,14 +716,25 @@ async fn serve_http(
     address: std::net::SocketAddr,
     controller: Arc<Mutex<ControllerState>>,
     event_log: state::SqliteEventLog,
+    event_write_gate: Arc<Mutex<()>>,
+    clock: Arc<runtime::SystemMonotonicClock>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     loop {
         let (mut stream, _) = listener.accept().await?;
         let shared_controller = controller.clone();
         let log = event_log.clone();
+        let write_gate = event_write_gate.clone();
+        let shared_clock = clock.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_http_connection(&mut stream, &shared_controller, &log).await
+            if let Err(error) = handle_http_connection(
+                &mut stream,
+                &shared_controller,
+                &log,
+                &write_gate,
+                &shared_clock,
+            )
+            .await
             {
                 let _ = tokio::io::AsyncWriteExt::shutdown(&mut stream).await;
                 eprintln!("control HTTP request failed: {error}");
@@ -463,18 +748,46 @@ async fn handle_http_connection(
     stream: &mut tokio::net::TcpStream,
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    clock: &runtime::SystemMonotonicClock,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use tokio::io::AsyncReadExt;
-    let mut buffer = vec![0_u8; 16 * 1024];
-    let length = stream.read(&mut buffer).await?;
-    let request = std::str::from_utf8(&buffer[..length])?;
-    let request_line = request.lines().next().unwrap_or_default();
-    let request_body = request
-        .split_once("\r\n\r\n")
-        .map(|(_, body)| body)
-        .unwrap_or_default();
-    let method = request_line.split_whitespace().next().unwrap_or("GET");
-    let target = request_line.split_whitespace().nth(1).unwrap_or("/");
+    let request = match tokio::time::timeout(
+        CONTROL_HTTP_REQUEST_TIMEOUT,
+        read_control_http_request(stream),
+    )
+    .await
+    {
+        Ok(Ok(request)) => request,
+        Ok(Err(error)) => {
+            return write_http_response(
+                stream,
+                "400 Bad Request",
+                serde_json::json!({"error": error}),
+            )
+            .await;
+        }
+        Err(_) => {
+            return write_http_response(
+                stream,
+                "408 Request Timeout",
+                serde_json::json!({"error": "control HTTP request timed out"}),
+            )
+            .await;
+        }
+    };
+    let request_body = match std::str::from_utf8(&request.body) {
+        Ok(body) => body,
+        Err(_) => {
+            return write_http_response(
+                stream,
+                "400 Bad Request",
+                serde_json::json!({"error": "control HTTP body is not UTF-8"}),
+            )
+            .await;
+        }
+    };
+    let method = request.method.as_str();
+    let target = request.target.as_str();
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
@@ -520,7 +833,11 @@ async fn handle_http_connection(
             };
             let mission_id = plan.goal().mission_id().clone();
             let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
+            let _write_guard = event_write_gate
+                .lock()
+                .map_err(|_| "event-log write gate is poisoned")?;
             event_log.begin_batch()?;
+            let now = clock.now();
             let result: Result<String, String> = {
                 let mut controller = controller
                     .lock()
@@ -531,30 +848,30 @@ async fn handle_http_connection(
                         bridge,
                         orchestrator,
                     } = &mut *controller;
-                    orchestrator
-                        .submit(
-                            plan,
-                            group_id.clone(),
-                            bridge.control_mut(),
-                            domain::TimestampMs::new(0),
-                            &domain::CorrelationId::new(format!("submit-{mission_id}"))?,
-                            &mut events,
-                        )
-                        .map(|_| ())
+                    validate_actor_placement_coverage(bridge.control(), &plan).and_then(|_| {
+                        let submit_correlation =
+                            domain::CorrelationId::new(format!("submit-{mission_id}"))
+                                .map_err(|error| error.to_string())?;
+                        orchestrator
+                            .submit(
+                                plan,
+                                group_id.clone(),
+                                bridge.control_mut(),
+                                now,
+                                &submit_correlation,
+                                &mut events,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    })
                 };
                 operation
-                    .map_err(|error| error.to_string())
                     .and_then(|_| {
                         let dispatch_correlation =
                             domain::CorrelationId::new(format!("dispatch-{mission_id}"))
                                 .map_err(|error| error.to_string())?;
-                        drive_ready_tasks(
-                            &mut controller,
-                            domain::TimestampMs::new(0),
-                            &dispatch_correlation,
-                            &mut events,
-                        )
-                        .map_err(|error| error.to_string())
+                        drive_ready_tasks(&mut controller, now, &dispatch_correlation, &mut events)
+                            .map_err(|error| error.to_string())
                     })
                     .and_then(|_| {
                         server_checkpoint_json(&controller).map_err(|error| error.to_string())
@@ -628,7 +945,11 @@ async fn handle_http_connection(
                 .trim_end_matches("/cancel")
                 .trim_end_matches('/');
             let mission_id = domain::MissionId::new(mission_text)?;
+            let _write_guard = event_write_gate
+                .lock()
+                .map_err(|_| "event-log write gate is poisoned")?;
             event_log.begin_batch()?;
+            let now = clock.now();
             let result: Result<String, String> = {
                 let mut controller = controller
                     .lock()
@@ -642,7 +963,7 @@ async fn handle_http_connection(
                     orchestrator.cancel(
                         &mission_id,
                         bridge.control_mut(),
-                        domain::TimestampMs::new(0),
+                        now,
                         &domain::CorrelationId::new(format!("cancel-{mission_id}"))?,
                         &mut events,
                     )
@@ -704,6 +1025,105 @@ async fn handle_http_connection(
     write_http_response(stream, status, body).await
 }
 
+/// Reads one HTTP/1.1 request using explicit header and Content-Length boundaries.
+async fn read_control_http_request(
+    stream: &mut tokio::net::TcpStream,
+) -> Result<ControlHttpRequest, String> {
+    use tokio::io::AsyncReadExt;
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let header_end = loop {
+        let count = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("read control HTTP request: {error}"))?;
+        if count == 0 {
+            return Err("control HTTP request ended before headers".to_string());
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            let end = index + 4;
+            if end > MAX_CONTROL_HTTP_HEADER_BYTES {
+                return Err("control HTTP headers exceed limit".to_string());
+            }
+            break end;
+        }
+        if bytes.len() > MAX_CONTROL_HTTP_HEADER_BYTES {
+            return Err("control HTTP headers exceed limit".to_string());
+        }
+    };
+    let header_text = std::str::from_utf8(&bytes[..header_end])
+        .map_err(|_| "control HTTP headers are not UTF-8".to_string())?;
+    let mut lines = header_text.split("\r\n");
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "control HTTP request line is missing".to_string())?;
+    let mut fields = request_line.split_whitespace();
+    let method = fields
+        .next()
+        .ok_or_else(|| "control HTTP method is missing".to_string())?
+        .to_ascii_uppercase();
+    let target = fields
+        .next()
+        .ok_or_else(|| "control HTTP target is missing".to_string())?
+        .to_string();
+    let version = fields
+        .next()
+        .ok_or_else(|| "control HTTP version is missing".to_string())?;
+    if fields.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err("control HTTP request line is invalid".to_string());
+    }
+    let mut content_length = None;
+    for line in lines.filter(|line| !line.is_empty()) {
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| "control HTTP header is malformed".to_string())?;
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return Err("Transfer-Encoding is unsupported".to_string());
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return Err("duplicate Content-Length header".to_string());
+            }
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| "Content-Length must be an integer".to_string())?,
+            );
+        }
+    }
+    let content_length = match content_length {
+        Some(length) => length,
+        None if matches!(method.as_str(), "GET" | "HEAD" | "DELETE") => 0,
+        None => return Err("Content-Length is required".to_string()),
+    };
+    if content_length > MAX_CONTROL_HTTP_BODY_BYTES {
+        return Err("control HTTP body exceeds limit".to_string());
+    }
+    let mut body = bytes[header_end..].to_vec();
+    if body.len() > content_length {
+        return Err("control HTTP request contains bytes beyond Content-Length".to_string());
+    }
+    while body.len() < content_length {
+        let remaining = content_length - body.len();
+        let take = remaining.min(chunk.len());
+        let count = stream
+            .read(&mut chunk[..take])
+            .await
+            .map_err(|error| format!("read control HTTP body: {error}"))?;
+        if count == 0 {
+            return Err("control HTTP body ended before Content-Length".to_string());
+        }
+        body.extend_from_slice(&chunk[..count]);
+    }
+    Ok(ControlHttpRequest {
+        method,
+        target,
+        body,
+    })
+}
+
 /// Writes one bounded JSON response and closes the HTTP/1.1 connection.
 async fn write_http_response(
     stream: &mut tokio::net::TcpStream,
@@ -727,4 +1147,219 @@ fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str> {
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The control HTTP reader reconstructs a Mission request split across arbitrary TCP writes.
+    #[tokio::test]
+    async fn control_http_reader_accepts_fragmented_body() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener binds");
+        let address = listener.local_addr().expect("test listener has address");
+        let reader = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("test request connects");
+            read_control_http_request(&mut stream).await
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("test client connects");
+        let body = br#"{"schema":"roboguide.mission-plan/v0.2"}"#;
+        let header = format!(
+            "POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        client
+            .write_all(&header.as_bytes()[..19])
+            .await
+            .expect("first header fragment writes");
+        tokio::task::yield_now().await;
+        client
+            .write_all(&header.as_bytes()[19..])
+            .await
+            .expect("second header fragment writes");
+        client
+            .write_all(&body[..7])
+            .await
+            .expect("first body fragment writes");
+        tokio::task::yield_now().await;
+        client
+            .write_all(&body[7..])
+            .await
+            .expect("second body fragment writes");
+
+        let request = reader
+            .await
+            .expect("reader task joins")
+            .expect("fragmented request is valid");
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.target, "/v1/missions");
+        assert_eq!(request.body, body);
+    }
+
+    /// The control HTTP reader rejects an EOF before the declared body is complete.
+    #[tokio::test]
+    async fn control_http_reader_rejects_truncated_body() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener binds");
+        let address = listener.local_addr().expect("test listener has address");
+        let reader = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("test request connects");
+            read_control_http_request(&mut stream).await
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("test client connects");
+        client
+            .write_all(
+                b"POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n{}",
+            )
+            .await
+            .expect("truncated request writes");
+        client.shutdown().await.expect("client write side closes");
+
+        let error = reader
+            .await
+            .expect("reader task joins")
+            .expect_err("truncated body is rejected");
+        assert!(error.contains("ended before Content-Length"));
+    }
+
+    /// The controller database writer lease excludes peers and becomes available after release.
+    #[test]
+    fn event_log_writer_lock_is_process_exclusive() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let event_path = directory.path().join("controller.sqlite3");
+        let first = acquire_event_log_writer_lock(&event_path).expect("first writer acquires");
+
+        assert!(acquire_event_log_writer_lock(&event_path).is_err());
+        drop(first);
+        acquire_event_log_writer_lock(&event_path).expect("released writer lock is reacquired");
+    }
+
+    /// The versioned placement fixture decodes into typed Control constraints.
+    #[test]
+    fn actor_placement_file_loads_typed_constraints() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/distributed-spatial-memory-v0.1/actor-placement.json");
+        let constraints = load_actor_placement_file(&path).expect("placement fixture loads");
+        assert_eq!(constraints.len(), 4);
+        assert!(constraints.iter().all(|constraint| {
+            matches!(
+                (
+                    constraint.actor_id().as_str(),
+                    constraint.node_id().as_str()
+                ),
+                ("robot-dog-a", "dog-a") | ("robot-dog-b", "dog-b")
+            )
+        }));
+    }
+
+    /// Placement files with an unknown schema fail before the server starts accepting traffic.
+    #[test]
+    fn actor_placement_file_rejects_unknown_schema() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let path = directory.path().join("placement.json");
+        std::fs::write(
+            &path,
+            r#"{"schema":"roboguide.actor-placement/v9","constraints":[]}"#,
+        )
+        .expect("placement fixture writes");
+        let error = load_actor_placement_file(&path).expect_err("unknown schema is rejected");
+        assert!(error.to_string().contains("unsupported schema"));
+    }
+
+    /// The experiment placement file exactly covers every Actor in all four submitted Missions.
+    #[test]
+    fn actor_placement_fixture_has_strict_four_mission_coverage() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/distributed-spatial-memory-v0.1");
+        let constraints = load_actor_placement_file(&root.join("actor-placement.json"))
+            .expect("placement fixture loads");
+        let mut control = control::ControlPlane::new();
+        for constraint in constraints {
+            control
+                .set_actor_node_constraint(
+                    constraint.mission_id().clone(),
+                    constraint.actor_id().clone(),
+                    constraint.node_id().clone(),
+                )
+                .expect("fixture constraints are mutually consistent");
+        }
+        for file_name in [
+            "mission-a-build-publish.json",
+            "mission-a-import-verify.json",
+            "mission-b-build-publish.json",
+            "mission-b-import-verify.json",
+        ] {
+            let source = std::fs::read_to_string(root.join(file_name))
+                .expect("Mission fixture remains readable");
+            let plan = decode_mission_plan(&source).expect("Mission fixture remains valid");
+            validate_actor_placement_coverage(&control, &plan)
+                .expect("placement exactly covers Mission actors");
+        }
+    }
+
+    /// Strict placement rejects a misspelled Actor instead of falling back to generic matching.
+    #[test]
+    fn actor_placement_strict_coverage_rejects_typo() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/distributed-spatial-memory-v0.1");
+        let source = std::fs::read_to_string(root.join("mission-a-build-publish.json"))
+            .expect("Mission fixture remains readable");
+        let plan = decode_mission_plan(&source).expect("Mission fixture remains valid");
+        let mut control = control::ControlPlane::new();
+        control
+            .set_actor_node_constraint(
+                plan.goal().mission_id().clone(),
+                domain::ActorId::new("robot-dog-typo").expect("typo remains syntactically valid"),
+                domain::NodeId::new("dog-a").expect("node id is valid"),
+            )
+            .expect("syntactic configuration loads before plan validation");
+
+        let error = validate_actor_placement_coverage(&control, &plan)
+            .expect_err("unknown and missing Actors must fail closed");
+        assert!(error.contains("missing actors [robot-dog-a]"));
+        assert!(error.contains("unknown actors [robot-dog-typo]"));
+    }
+
+    /// Startup rejects a replacement placement policy that does not cover a restored Mission.
+    #[test]
+    fn restored_mission_is_revalidated_before_server_start() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/distributed-spatial-memory-v0.1");
+        let source = std::fs::read_to_string(root.join("mission-a-build-publish.json"))
+            .expect("Mission fixture remains readable");
+        let plan_value: serde_json::Value =
+            serde_json::from_str(&source).expect("Mission fixture remains JSON");
+        let orchestrator = MissionOrchestrator::restore_json(
+            &serde_json::json!([{
+                "plan": plan_value,
+                "group_id": "group-restored-map-a",
+                "lifecycle": "Accepted"
+            }])
+            .to_string(),
+        )
+        .expect("orchestration checkpoint restores");
+        let mut control = control::ControlPlane::new();
+        let mission_id = orchestrator.mission_ids()[0].clone();
+        control
+            .set_actor_node_constraint(
+                mission_id,
+                domain::ActorId::new("robot-dog-typo").expect("typo remains syntactically valid"),
+                domain::NodeId::new("dog-a").expect("node identity is valid"),
+            )
+            .expect("syntactic replacement policy loads");
+
+        let error = validate_restored_actor_placement_coverage(&control, &orchestrator)
+            .expect_err("restored Mission coverage must fail closed");
+        assert!(error.contains("restored Mission placement is invalid"));
+        assert!(error.contains("missing actors [robot-dog-a]"));
+    }
 }

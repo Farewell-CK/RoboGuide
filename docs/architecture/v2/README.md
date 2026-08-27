@@ -90,6 +90,15 @@ Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → E
 
 未提交的 Proposal 绝不能被当作已经生效的资源分配。
 
+Mission Intelligence 中的 Actor 只表达跨 Task 的逻辑参与者和语义连续性，不携带物理
+Node identity。若部署或实验必须指定某个 Actor 由某个 Node 实现，该关系作为独立的
+Control-owned placement constraint 输入：它只收窄首次 Matching 的 Candidate Set，仍需通过
+Schedule、Propose、Commit 和 Group Bind 才形成 authoritative `ActorBinding`。placement
+constraint 本身不预留资源，也不属于 MissionPlan、Runtime 或 State projection。当前 v0
+recovery 不具备 Actor 迁移 authority：已绑定或有 placement 的 Actor 只能在其权威 Node
+上恢复；该 Node 不可用时 Candidate Set 为空，Group 保持 Blocked，不能借 Rebind 静默换狗。
+未来 Actor 迁移必须增加显式 Control decision、事件与独立架构决策。
+
 ## 5. 状态、证据、信念与记忆
 
 State & Memory 是横向基础设施，包含：
@@ -101,6 +110,21 @@ State & Memory 是横向基础设施，包含：
 - Allocation / Reservation State；
 - Shared Belief；
 - Distributed Memory。
+
+### Spatial Memory Slice v0.1
+
+首个 Distributed Spatial Memory 实现把地图作为 State & Memory Plane 的不可变 Artifact：
+`MapId`/`MapRevisionId` 是逻辑引用，SHA-256 `ContentDigest` 是 bytes 身份。State 只保存
+manifest、provenance、lineage、固定物理 `SpatialAnchor` 和 Node replica 状态；地图二进制
+由独立 Artifact data plane 的 content-addressed store 持有。Producer 和 Consumer 可以属于
+不同 Mission，Consumer 通过预分配 revision 显式 pull，不发生 Task-level handoff、ownership
+transfer 或 Runtime 动态 output binding。
+
+Node Protocol v0.2 不承载地图 bytes。Integration 提供 streaming Artifact transport，Node
+Service 在受控 cache/sandbox 中完成 digest 校验和本地路径映射，再交给 Local EAIOS。当前 v0
+只覆盖 immutable publish/import/localization verification；实时同步、融合、active-map 选择、
+删除/GC 和安全策略延后。完整边界见 [`ADR-0016`](../../decisions/0016-distributed-spatial-memory.md)
+与 [`contracts/spatial/v0.1`](../../../contracts/spatial/v0.1/README.md)。
 
 ```text
 Observation → Source / Provenance → Timestamp → Freshness / Uncertainty

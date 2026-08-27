@@ -7,7 +7,9 @@
 mod allocation;
 mod event_log;
 mod node;
+mod spatial_memory;
 
 pub use allocation::InMemoryAllocationState;
 pub use event_log::{PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError};
 pub use node::InMemorySharedNodeState;
+pub use spatial_memory::MapCatalogProjection;

@@ -1,8 +1,16 @@
-schema = "roboguide.node-config/v0.2"
+schema = "roboguide.node-config/v0.3"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
 reconnect_delay_ms = 1000
+
+[artifacts]
+endpoint = "http://127.0.0.1:8090"
+cache_directory = "artifact-cache"
+max_artifact_bytes = 4294967296
+chunk_size_bytes = 1048576
+connect_timeout_ms = 5000
+read_timeout_ms = 30000
 
 [[local_systems]]
 id = "local-runtime"

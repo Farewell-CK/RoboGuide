@@ -1,0 +1,25 @@
+{
+  "schema": "roboguide.actor-placement/v0.1",
+  "constraints": [
+    {
+      "mission_id": "mission-map-a-build",
+      "actor_id": "robot-dog-a",
+      "node_id": "dog-a"
+    },
+    {
+      "mission_id": "mission-map-a-consume",
+      "actor_id": "robot-dog-a",
+      "node_id": "dog-a"
+    },
+    {
+      "mission_id": "mission-map-b-build",
+      "actor_id": "robot-dog-b",
+      "node_id": "dog-b"
+    },
+    {
+      "mission_id": "mission-map-b-consume",
+      "actor_id": "robot-dog-b",
+      "node_id": "dog-b"
+    }
+  ]
+}

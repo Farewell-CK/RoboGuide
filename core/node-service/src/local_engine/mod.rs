@@ -8,9 +8,10 @@ pub mod mapping;
 pub mod mcp_driver;
 
 use crate::{
-    CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
-    LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, ResourceConfig, SensorConfig,
-    WorkflowConfig, WorkflowStepConfig,
+    ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig,
+    HealthCheckConfig, LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, ResourceConfig,
+    SensorConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -22,6 +23,8 @@ use std::path::{Path, PathBuf};
 
 /// Only accepted schema identity for the declarative Node Service catalog.
 pub const CONFIG_SCHEMA_V0_2: &str = "roboguide.node-config/v0.2";
+/// Schema identity for the node catalog with Spatial Memory artifact bindings.
+pub const CONFIG_SCHEMA_V0_3: &str = "roboguide.node-config/v0.3";
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -52,6 +55,29 @@ pub struct CompiledLocalCatalog {
     resources: BTreeMap<String, CompiledResource>,
     /// Sensors by stable identity.
     sensors: BTreeMap<String, CompiledSensor>,
+    /// Optional independent Spatial Memory artifact data-plane configuration.
+    artifacts: Option<CompiledArtifactService>,
+}
+
+/// Startup-validated node-side configuration for the independent artifact data plane.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledArtifactService {
+    /// Absolute central artifact service endpoint.
+    endpoint: String,
+    /// Deployment-owned cache root resolved relative to the config file.
+    cache_directory: PathBuf,
+    /// Maximum accepted artifact size.
+    max_artifact_bytes: u64,
+    /// Bounded transfer chunk size.
+    chunk_size_bytes: usize,
+    /// Bounded connection establishment timeout.
+    connect_timeout_ms: u64,
+    /// Bounded read-idle timeout for response progress.
+    read_timeout_ms: u64,
+    /// Validated static input bindings.
+    input_bindings: BTreeMap<String, ArtifactInputBindingConfig>,
+    /// Validated static output bindings.
+    output_bindings: BTreeMap<String, ArtifactOutputBindingConfig>,
 }
 
 /// Immutable local runtime identity and registration metadata.
@@ -165,6 +191,8 @@ pub struct CompiledCapability {
     required_resources: BTreeSet<String>,
     /// Node-local concurrency locks.
     local_locks: BTreeSet<String>,
+    /// Optional artifact action fixed by the versioned node configuration.
+    artifact_operation: Option<ArtifactOperationConfig>,
     /// Compiled execute/status/cancel behavior.
     workflow: CompiledWorkflow,
 }
@@ -295,10 +323,14 @@ impl CompiledLocalCatalog {
         config: NodeServiceConfig,
         config_directory: &Path,
     ) -> Result<Self, CatalogError> {
+        let supports_artifacts = config.schema == CONFIG_SCHEMA_V0_3;
         require(
-            config.schema == CONFIG_SCHEMA_V0_2,
+            matches!(
+                config.schema.as_str(),
+                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3
+            ),
             "schema",
-            format!("expected `{CONFIG_SCHEMA_V0_2}`"),
+            format!("expected `{CONFIG_SCHEMA_V0_2}` or `{CONFIG_SCHEMA_V0_3}`"),
         )?;
         validate_identity(&config.node_id, "node_id")?;
         validate_server_endpoint(&config.server_endpoint)?;
@@ -335,12 +367,19 @@ impl CompiledLocalCatalog {
             &local_systems,
             &connections,
             &resources,
+            supports_artifacts,
         )?;
         require(
             !capabilities.is_empty(),
             "capabilities",
             "must contain at least one canonical capability",
         )?;
+        require(
+            supports_artifacts || config.artifacts.is_none(),
+            "artifacts",
+            format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
+        )?;
+        let artifacts = compile_artifacts(config.artifacts, config_directory)?;
 
         Ok(Self {
             node_id: config.node_id,
@@ -353,6 +392,7 @@ impl CompiledLocalCatalog {
             capabilities,
             resources,
             sensors,
+            artifacts,
         })
     }
 
@@ -404,6 +444,53 @@ impl CompiledLocalCatalog {
     /// Returns sensors in stable lexical identity order.
     pub const fn sensors(&self) -> &BTreeMap<String, CompiledSensor> {
         &self.sensors
+    }
+
+    /// Returns optional startup-validated Spatial Memory artifact configuration.
+    pub const fn artifact_service(&self) -> Option<&CompiledArtifactService> {
+        self.artifacts.as_ref()
+    }
+}
+
+impl CompiledArtifactService {
+    /// Returns the central artifact data-plane endpoint.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Returns the deployment-owned cache directory.
+    pub fn cache_directory(&self) -> &Path {
+        &self.cache_directory
+    }
+
+    /// Returns the maximum artifact size accepted by this node.
+    pub const fn max_artifact_bytes(&self) -> u64 {
+        self.max_artifact_bytes
+    }
+
+    /// Returns the bounded artifact transfer chunk size.
+    pub const fn chunk_size_bytes(&self) -> usize {
+        self.chunk_size_bytes
+    }
+
+    /// Returns the artifact data-plane connection timeout.
+    pub const fn connect_timeout_ms(&self) -> u64 {
+        self.connect_timeout_ms
+    }
+
+    /// Returns the artifact data-plane read-idle timeout.
+    pub const fn read_timeout_ms(&self) -> u64 {
+        self.read_timeout_ms
+    }
+
+    /// Returns validated static input bindings.
+    pub const fn input_bindings(&self) -> &BTreeMap<String, ArtifactInputBindingConfig> {
+        &self.input_bindings
+    }
+
+    /// Returns validated static output bindings.
+    pub const fn output_bindings(&self) -> &BTreeMap<String, ArtifactOutputBindingConfig> {
+        &self.output_bindings
     }
 }
 
@@ -600,6 +687,11 @@ impl CompiledCapability {
         &self.local_locks
     }
 
+    /// Returns the artifact action fixed for this capability, when configured.
+    pub const fn artifact_operation(&self) -> Option<ArtifactOperationConfig> {
+        self.artifact_operation
+    }
+
     /// Returns immutable local execution behavior.
     pub const fn workflow(&self) -> &CompiledWorkflow {
         &self.workflow
@@ -752,6 +844,234 @@ impl CompiledSensor {
     pub const fn metadata(&self) -> &BTreeMap<String, String> {
         &self.metadata
     }
+}
+
+/// Compiles optional artifact settings and rejects unsafe or ambiguous static bindings.
+fn compile_artifacts(
+    config: Option<ArtifactServiceConfig>,
+    config_directory: &Path,
+) -> Result<Option<CompiledArtifactService>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    validate_server_endpoint(&config.endpoint).map_err(|error| match error {
+        CatalogError::Validation { reason, .. } => validation("artifacts.endpoint", reason),
+        other => other,
+    })?;
+    require(
+        config.max_artifact_bytes > 0,
+        "artifacts.max_artifact_bytes",
+        "must be non-zero",
+    )?;
+    require(
+        config.chunk_size_bytes > 0,
+        "artifacts.chunk_size_bytes",
+        "must be non-zero",
+    )?;
+    require(
+        config.connect_timeout_ms > 0,
+        "artifacts.connect_timeout_ms",
+        "must be non-zero",
+    )?;
+    require(
+        config.read_timeout_ms > 0,
+        "artifacts.read_timeout_ms",
+        "must be non-zero",
+    )?;
+    require(
+        !config.cache_directory.as_os_str().is_empty(),
+        "artifacts.cache_directory",
+        "must not be empty",
+    )?;
+    let cache_directory = resolve_path(config_directory, &config.cache_directory);
+    let mut binding_paths = BTreeMap::new();
+    let mut input_bindings = BTreeMap::new();
+    for binding in config.input_bindings {
+        validate_artifact_binding_identity(&binding.id, "artifacts.input_bindings.id")?;
+        validate_artifact_map_identity(&binding.map_id, "artifacts.input_bindings.map_id")?;
+        validate_artifact_revision_identity(
+            &binding.revision_id,
+            "artifacts.input_bindings.revision_id",
+        )?;
+        validate_relative_artifact_path(
+            &binding.target_path,
+            "artifacts.input_bindings.target_path",
+        )?;
+        register_artifact_binding_path(
+            &mut binding_paths,
+            &binding.target_path,
+            "artifacts.input_bindings.target_path",
+        )?;
+        if let Some(digest) = &binding.content_digest {
+            validate_artifact_digest(digest, "artifacts.input_bindings.content_digest")?;
+        }
+        require(
+            input_bindings.insert(binding.id.clone(), binding).is_none(),
+            "artifacts.input_bindings.id",
+            "duplicate binding identity",
+        )?;
+    }
+    let mut output_bindings = BTreeMap::new();
+    for binding in config.output_bindings {
+        validate_artifact_binding_identity(&binding.id, "artifacts.output_bindings.id")?;
+        require(
+            !input_bindings.contains_key(&binding.id),
+            "artifacts.output_bindings.id",
+            "binding identity is already used by an input binding",
+        )?;
+        validate_artifact_map_identity(&binding.map_id, "artifacts.output_bindings.map_id")?;
+        validate_artifact_revision_identity(
+            &binding.revision_id,
+            "artifacts.output_bindings.revision_id",
+        )?;
+        validate_relative_artifact_path(
+            &binding.source_path,
+            "artifacts.output_bindings.source_path",
+        )?;
+        register_artifact_binding_path(
+            &mut binding_paths,
+            &binding.source_path,
+            "artifacts.output_bindings.source_path",
+        )?;
+        for (value, field) in [
+            (&binding.media_type, "artifacts.output_bindings.media_type"),
+            (
+                &binding.format_name,
+                "artifacts.output_bindings.format_name",
+            ),
+            (
+                &binding.format_version,
+                "artifacts.output_bindings.format_version",
+            ),
+            (&binding.root_frame, "artifacts.output_bindings.root_frame"),
+            (
+                &binding.coordinate_convention,
+                "artifacts.output_bindings.coordinate_convention",
+            ),
+            (
+                &binding.spatial_anchor_id,
+                "artifacts.output_bindings.spatial_anchor_id",
+            ),
+        ] {
+            validate_artifact_text(value, field)?;
+        }
+        if binding
+            .resolution_meters
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(validation(
+                "artifacts.output_bindings.resolution_meters",
+                "must be finite and positive",
+            ));
+        }
+        require(
+            output_bindings
+                .insert(binding.id.clone(), binding)
+                .is_none(),
+            "artifacts.output_bindings.id",
+            "duplicate binding identity",
+        )?;
+    }
+    Ok(Some(CompiledArtifactService {
+        endpoint: config.endpoint,
+        cache_directory,
+        max_artifact_bytes: config.max_artifact_bytes,
+        chunk_size_bytes: config.chunk_size_bytes,
+        connect_timeout_ms: config.connect_timeout_ms,
+        read_timeout_ms: config.read_timeout_ms,
+        input_bindings,
+        output_bindings,
+    }))
+}
+
+/// Reserves one relative artifact path and rejects aliases or file/directory overlap.
+fn register_artifact_binding_path(
+    paths: &mut BTreeMap<PathBuf, String>,
+    path: &Path,
+    field: &str,
+) -> Result<(), CatalogError> {
+    if let Some((existing, owner)) = paths
+        .iter()
+        .find(|(existing, _)| existing.starts_with(path) || path.starts_with(existing))
+    {
+        return Err(validation(
+            field,
+            format!(
+                "path {} overlaps {} owned by {owner}",
+                path.display(),
+                existing.display()
+            ),
+        ));
+    }
+    paths.insert(path.to_path_buf(), field.to_string());
+    Ok(())
+}
+
+/// Validates an artifact identity used in a URL or fixed binding.
+fn validate_artifact_binding_identity(value: &str, field: &str) -> Result<(), CatalogError> {
+    require(
+        !value.trim().is_empty() && value.trim() == value && !value.contains(['/', '\\']),
+        field,
+        "must be a nonblank path-safe identity",
+    )
+}
+
+/// Validates a logical map identity using the Domain path-safe selector invariant.
+fn validate_artifact_map_identity(value: &str, field: &str) -> Result<(), CatalogError> {
+    domain::MapId::new(value.to_string())
+        .map(|_| ())
+        .map_err(|error| validation(field, error.to_string()))
+}
+
+/// Validates an immutable map revision identity using the Domain path-safe selector invariant.
+fn validate_artifact_revision_identity(value: &str, field: &str) -> Result<(), CatalogError> {
+    domain::MapRevisionId::new(value.to_string())
+        .map(|_| ())
+        .map_err(|error| validation(field, error.to_string()))
+}
+
+/// Validates a nonblank opaque artifact metadata value without imposing an identity grammar.
+fn validate_artifact_text(value: &str, field: &str) -> Result<(), CatalogError> {
+    require(
+        !value.trim().is_empty() && value.trim() == value,
+        field,
+        "must be nonblank and have no surrounding whitespace",
+    )
+}
+
+/// Validates a deployment-owned relative artifact path.
+fn validate_relative_artifact_path(path: &Path, field: &str) -> Result<(), CatalogError> {
+    require(
+        !path.as_os_str().is_empty() && !path.is_absolute(),
+        field,
+        "must be a nonempty relative file path",
+    )?;
+    require(
+        !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir
+                    | std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }),
+        field,
+        "must not contain current-directory or parent traversal segments",
+    )
+}
+
+/// Validates a plain or `sha256:`-prefixed lowercase digest.
+fn validate_artifact_digest(value: &str, field: &str) -> Result<(), CatalogError> {
+    let digest = value.strip_prefix("sha256:").unwrap_or(value);
+    require(
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        field,
+        "must be a lowercase SHA-256 digest",
+    )
 }
 
 /// Compiles unique local systems.
@@ -1071,6 +1391,7 @@ fn compile_capabilities(
     systems: &BTreeMap<String, CompiledLocalSystem>,
     connections: &BTreeMap<String, CompiledConnection>,
     resources: &BTreeMap<String, CompiledResource>,
+    supports_artifacts: bool,
 ) -> Result<BTreeMap<String, CompiledCapability>, CatalogError> {
     let mut capabilities = BTreeMap::new();
     for config in configs {
@@ -1114,6 +1435,11 @@ fn compile_capabilities(
             config.local_locks,
             &format!("capabilities.{}.local_locks", config.contract),
         )?;
+        require(
+            supports_artifacts || config.artifact_operation.is_none(),
+            format!("capabilities.{}.artifact_operation", config.contract),
+            format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
+        )?;
         let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
         let contract = config.contract.clone();
         let capability = CompiledCapability {
@@ -1122,6 +1448,7 @@ fn compile_capabilities(
             owner: config.owner,
             required_resources,
             local_locks,
+            artifact_operation: config.artifact_operation,
             workflow,
         };
         insert_unique(
@@ -1260,6 +1587,9 @@ fn validate_expression_sources(
         crate::ValueExpressionConfig::Constant { .. } => Ok(()),
         crate::ValueExpressionConfig::Pointer { pointer } => {
             if pointer == "/invocation" || pointer.starts_with("/invocation/") {
+                return Ok(());
+            }
+            if pointer == "/artifacts" || pointer.starts_with("/artifacts/") {
                 return Ok(());
             }
             if local_handle_available
@@ -1789,6 +2119,7 @@ mod tests {
                 owner: "motion".to_string(),
                 required_resources: vec!["base".to_string()],
                 local_locks: vec!["locomotion".to_string()],
+                artifact_operation: None,
                 workflow: WorkflowConfig {
                     execute: vec![step(
                         "dispatch",
@@ -1834,6 +2165,7 @@ mod tests {
                 owner: "perception".to_string(),
                 metadata: BTreeMap::new(),
             }],
+            artifacts: None,
         }
     }
 
@@ -1853,6 +2185,203 @@ mod tests {
             catalog.capabilities()["mobility.reach_region@v1"].owner(),
             "motion"
         );
+        assert_eq!(
+            catalog.capabilities()["mobility.reach_region@v1"].artifact_operation(),
+            None
+        );
+    }
+
+    /// Artifact operations are typed in v0.3 and rejected under the v0.2 schema.
+    #[test]
+    fn gates_typed_capability_artifact_operations_by_schema() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        for operation in [
+            ArtifactOperationConfig::PrepareOutput,
+            ArtifactOperationConfig::Publish,
+            ArtifactOperationConfig::Import,
+            ArtifactOperationConfig::Verify,
+        ] {
+            let mut config = valid_config(descriptor.clone());
+            config.capabilities[0].artifact_operation = Some(operation);
+            assert!(matches!(
+                CompiledLocalCatalog::compile(config.clone(), directory.path()),
+                Err(CatalogError::Validation { field, .. })
+                    if field == "capabilities.mobility.reach_region@v1.artifact_operation"
+            ));
+
+            config.schema = CONFIG_SCHEMA_V0_3.to_string();
+            let catalog = CompiledLocalCatalog::compile(config, directory.path())
+                .expect("v0.3 artifact operation compiles");
+            assert_eq!(
+                catalog.capabilities()["mobility.reach_region@v1"].artifact_operation(),
+                Some(operation)
+            );
+        }
+    }
+
+    /// v0.3 compiles static artifact bindings without changing local workflow ownership.
+    #[test]
+    fn compiles_spatial_artifact_bindings() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.artifacts = Some(ArtifactServiceConfig {
+            endpoint: "http://127.0.0.1:8090".to_string(),
+            cache_directory: PathBuf::from("artifact-cache"),
+            max_artifact_bytes: 1024,
+            chunk_size_bytes: 64,
+            connect_timeout_ms: 1_234,
+            read_timeout_ms: 5_678,
+            input_bindings: vec![ArtifactInputBindingConfig {
+                id: "lab-map-input".to_string(),
+                map_id: "lab-map".to_string(),
+                revision_id: "r1".to_string(),
+                content_digest: Some(format!("sha256:{}", "a".repeat(64))),
+                target_path: PathBuf::from("inputs/lab.map"),
+            }],
+            output_bindings: vec![ArtifactOutputBindingConfig {
+                id: "lab-map-output".to_string(),
+                map_id: "lab-map".to_string(),
+                revision_id: "r2".to_string(),
+                source_path: PathBuf::from("outputs/lab.map"),
+                media_type: "application/octet-stream".to_string(),
+                format_name: "nav2-map-bundle".to_string(),
+                format_version: "bundle-v1".to_string(),
+                root_frame: "map".to_string(),
+                coordinate_convention: "enu".to_string(),
+                spatial_anchor_id: "lab-origin".to_string(),
+                resolution_meters: Some(0.05),
+            }],
+        });
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config.clone(), directory.path()),
+            Err(CatalogError::Validation { field, .. }) if field == "artifacts"
+        ));
+        config.schema = CONFIG_SCHEMA_V0_3.to_string();
+        let mut overlapping = config.clone();
+        overlapping
+            .artifacts
+            .as_mut()
+            .expect("artifacts are present")
+            .output_bindings[0]
+            .source_path = PathBuf::from("inputs/lab.map");
+        assert!(matches!(
+            CompiledLocalCatalog::compile(overlapping, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "artifacts.output_bindings.source_path"
+        ));
+        let mut invalid_selector = config.clone();
+        invalid_selector
+            .artifacts
+            .as_mut()
+            .expect("artifacts are present")
+            .input_bindings[0]
+            .map_id = "../lab-map".to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(invalid_selector, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "artifacts.input_bindings.map_id"
+        ));
+        let mut duplicate_binding = config.clone();
+        duplicate_binding
+            .artifacts
+            .as_mut()
+            .expect("artifacts are present")
+            .output_bindings[0]
+            .id = "lab-map-input".to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(duplicate_binding, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "artifacts.output_bindings.id"
+        ));
+        for (field, connect_timeout_ms, read_timeout_ms) in [
+            ("artifacts.connect_timeout_ms", 0, 5_678),
+            ("artifacts.read_timeout_ms", 1_234, 0),
+        ] {
+            let mut invalid = config.clone();
+            let artifacts = invalid.artifacts.as_mut().expect("artifacts are present");
+            artifacts.connect_timeout_ms = connect_timeout_ms;
+            artifacts.read_timeout_ms = read_timeout_ms;
+            assert!(matches!(
+                CompiledLocalCatalog::compile(invalid, directory.path()),
+                Err(CatalogError::Validation { field: actual, .. }) if actual == field
+            ));
+        }
+        let catalog =
+            CompiledLocalCatalog::compile(config, directory.path()).expect("v0.3 catalog compiles");
+        let artifacts = catalog.artifact_service().expect("artifacts are present");
+        assert_eq!(artifacts.input_bindings().len(), 1);
+        assert_eq!(artifacts.output_bindings().len(), 1);
+        assert!(artifacts.cache_directory().ends_with("artifact-cache"));
+        assert_eq!(artifacts.connect_timeout_ms(), 1_234);
+        assert_eq!(artifacts.read_timeout_ms(), 5_678);
+    }
+
+    /// Artifact bindings reject traversal before any local workflow can use a path.
+    #[test]
+    fn rejects_spatial_artifact_path_traversal() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.schema = CONFIG_SCHEMA_V0_3.to_string();
+        config.artifacts = Some(ArtifactServiceConfig {
+            endpoint: "http://127.0.0.1:8090".to_string(),
+            cache_directory: PathBuf::from("artifact-cache"),
+            max_artifact_bytes: 1024,
+            chunk_size_bytes: 64,
+            connect_timeout_ms: 5_000,
+            read_timeout_ms: 30_000,
+            input_bindings: vec![ArtifactInputBindingConfig {
+                id: "lab-map-input".to_string(),
+                map_id: "lab-map".to_string(),
+                revision_id: "r1".to_string(),
+                content_digest: None,
+                target_path: PathBuf::from("../escape.map"),
+            }],
+            output_bindings: Vec::new(),
+        });
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "artifacts.input_bindings.target_path"
+        ));
+    }
+
+    /// Artifact bindings reject paths that resolve to the cache root itself.
+    #[test]
+    fn rejects_empty_or_current_directory_artifact_paths() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        for invalid_path in [PathBuf::new(), PathBuf::from(".")] {
+            let mut config = valid_config(descriptor.clone());
+            config.schema = CONFIG_SCHEMA_V0_3.to_string();
+            config.artifacts = Some(ArtifactServiceConfig {
+                endpoint: "http://127.0.0.1:8090".to_string(),
+                cache_directory: PathBuf::from("artifact-cache"),
+                max_artifact_bytes: 1024,
+                chunk_size_bytes: 64,
+                connect_timeout_ms: 5_000,
+                read_timeout_ms: 30_000,
+                input_bindings: vec![ArtifactInputBindingConfig {
+                    id: "lab-map-input".to_string(),
+                    map_id: "lab-map".to_string(),
+                    revision_id: "r1".to_string(),
+                    content_digest: None,
+                    target_path: invalid_path,
+                }],
+                output_bindings: Vec::new(),
+            });
+            assert!(matches!(
+                CompiledLocalCatalog::compile(config, directory.path()),
+                Err(CatalogError::Validation { field, .. })
+                    if field == "artifacts.input_bindings.target_path"
+            ));
+        }
     }
 
     /// Duplicate capability contracts fail rather than creating ambiguous owners.

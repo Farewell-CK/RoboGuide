@@ -13,11 +13,15 @@ discard reservations while physical work may still exist.
 
 ## Decision
 
-The Integration bridge now persists a versioned `roboguide.controller-checkpoint/v4` JSON projection in
-the same SQLite transaction as each accepted fact and its lifecycle evidence. The checkpoint
-contains Control commitments, actor bindings, Groups, pending recovery commitments, Shared Node
-State registrations, and Runtime execution contexts/statuses. Its event sequence must equal the
-event-log tail before startup recovery is allowed.
+The Integration bridge persists its versioned `roboguide.controller-checkpoint/v5`
+Control/State/Runtime projection inside the current outer
+`roboguide.controller-checkpoint/v6` JSON checkpoint in the same SQLite transaction as each
+accepted fact and its lifecycle evidence. The checkpoint contains Control commitments, actor
+bindings, deployment actor placement constraints, Groups, immutable Task/Role requirements used by
+recovery authority checks, pending recovery commitments, Shared Node State registrations, and
+Runtime execution contexts/statuses. Its event sequence must equal the event-log tail before startup
+recovery is allowed. Outer v6 and embedded v5 make the newly required Group role metadata a
+fail-closed schema boundary; it is never reconstructed from a caller-supplied recovery request.
 
 Recovery is conservative across the process-local monotonic clock boundary:
 

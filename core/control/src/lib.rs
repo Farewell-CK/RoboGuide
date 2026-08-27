@@ -52,12 +52,57 @@ pub struct ControlCheckpoint {
     reservations: BTreeMap<ResourceId, Reservation>,
     /// Mission-scoped actor bindings represented as values to avoid composite JSON map keys.
     actor_bindings: Vec<ActorBinding>,
+    /// Deployment-owned actor placement constraints represented as values for stable JSON.
+    #[serde(default)]
+    actor_node_constraints: Vec<ActorNodeConstraint>,
     /// Execution Groups represented as values to avoid relying on map-key codecs.
     groups: Vec<ExecutionGroup>,
     /// Committed replacement assignments awaiting Rebind or Abort.
     pending_recovery_commitments: Vec<CommittedRecoveryAssignment>,
     /// Maximum receive-time age accepted by Control eligibility policy.
     max_status_age_ms: u64,
+}
+
+/// Control-owned deployment constraint that narrows a logical actor to one physical node.
+///
+/// This is deliberately distinct from [`ActorBinding`]: a placement constraint is supplied by
+/// deployment or an experiment before matching, while a binding becomes authoritative only after
+/// a proposal is committed and the Group is successfully bound. The constraint does not reserve
+/// resources and does not select a node by itself; matching still checks current State eligibility.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ActorNodeConstraint {
+    /// Mission namespace for the placement policy.
+    mission_id: MissionId,
+    /// Logical actor whose candidate set is constrained.
+    actor_id: ActorId,
+    /// Physical node allowed for the actor when it is first matched.
+    node_id: NodeId,
+}
+
+impl ActorNodeConstraint {
+    /// Creates one mission-scoped actor placement constraint.
+    pub const fn new(mission_id: MissionId, actor_id: ActorId, node_id: NodeId) -> Self {
+        Self {
+            mission_id,
+            actor_id,
+            node_id,
+        }
+    }
+
+    /// Returns the mission namespace.
+    pub const fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// Returns the constrained logical actor.
+    pub const fn actor_id(&self) -> &ActorId {
+        &self.actor_id
+    }
+
+    /// Returns the only node permitted by this policy.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
 }
 
 /// Evaluates freshness using RoboGuide-local receive and decision times.
@@ -81,6 +126,15 @@ pub enum ControlError {
         /// Actor whose continuity cannot currently be satisfied.
         actor_id: ActorId,
         /// Previously bound node requiring reconciliation.
+        node_id: NodeId,
+    },
+    /// A deployment actor placement constraint currently has no eligible realization.
+    ActorPlacementConstraintUnsatisfied {
+        /// Mission containing the constrained actor.
+        mission_id: MissionId,
+        /// Actor whose constrained candidate is unavailable.
+        actor_id: ActorId,
+        /// Node required by the placement policy.
         node_id: NodeId,
     },
     /// A proposal or internal invariant was invalid.
@@ -154,6 +208,14 @@ impl Display for ControlError {
                 formatter,
                 "mission actor {mission_id}/{actor_id} remains bound to unavailable node {node_id}; reconciliation required"
             ),
+            Self::ActorPlacementConstraintUnsatisfied {
+                mission_id,
+                actor_id,
+                node_id,
+            } => write!(
+                formatter,
+                "mission actor placement {mission_id}/{actor_id} requires unavailable or ineligible node {node_id}"
+            ),
             Self::InvalidProposal(reason) => write!(formatter, "invalid proposal: {reason}"),
             Self::AllocationInvariant(reason) => {
                 write!(formatter, "allocation invariant violation: {reason}")
@@ -202,6 +264,8 @@ pub struct ControlPlane {
     pub(crate) reservations: BTreeMap<ResourceId, Reservation>,
     /// Mission-scoped actor binding authority, populated only after successful binding.
     pub(crate) actor_bindings: BTreeMap<(MissionId, ActorId), ActorBinding>,
+    /// Deployment-owned actor placement constraints applied before first successful binding.
+    pub(crate) actor_node_constraints: BTreeMap<(MissionId, ActorId), ActorNodeConstraint>,
     /// Dynamic Execution Groups owned by Group Manager.
     pub(crate) groups: BTreeMap<ExecutionGroupId, ExecutionGroup>,
     /// Committed replacement assignments awaiting Consume or Abort.
@@ -230,6 +294,7 @@ impl ControlPlane {
             leases: BTreeMap::new(),
             reservations: BTreeMap::new(),
             actor_bindings: BTreeMap::new(),
+            actor_node_constraints: BTreeMap::new(),
             groups: BTreeMap::new(),
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
@@ -241,6 +306,7 @@ impl ControlPlane {
         ControlCheckpoint {
             reservations: self.reservations.clone(),
             actor_bindings: self.actor_bindings.values().cloned().collect(),
+            actor_node_constraints: self.actor_node_constraints.values().cloned().collect(),
             groups: self.groups.values().cloned().collect(),
             pending_recovery_commitments: self
                 .pending_recovery_commitments
@@ -272,6 +338,27 @@ impl ControlPlane {
                 ));
             }
         }
+        let mut actor_node_constraints = BTreeMap::new();
+        for constraint in checkpoint.actor_node_constraints {
+            let key = (
+                constraint.mission_id().clone(),
+                constraint.actor_id().clone(),
+            );
+            if actor_node_constraints.insert(key, constraint).is_some() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains duplicate actor placement constraint".to_string(),
+                ));
+            }
+        }
+        for ((mission_id, actor_id), constraint) in &actor_node_constraints {
+            if let Some(binding) = actor_bindings.get(&(mission_id.clone(), actor_id.clone()))
+                && binding.node_id() != constraint.node_id()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint actor placement conflicts with committed actor binding".to_string(),
+                ));
+            }
+        }
         let mut pending_recovery_commitments = BTreeMap::new();
         for commitment in checkpoint.pending_recovery_commitments {
             let key = (
@@ -292,10 +379,12 @@ impl ControlPlane {
             leases: BTreeMap::new(),
             reservations: checkpoint.reservations,
             actor_bindings,
+            actor_node_constraints,
             groups,
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
         };
+        restored.validate_group_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;
         Ok(restored)
     }
@@ -308,6 +397,13 @@ impl ControlPlane {
         node_id: NodeId,
     ) -> Result<(), ControlError> {
         let key = (mission_id.clone(), actor_id.clone());
+        if let Some(constraint) = self.actor_node_constraints.get(&key)
+            && constraint.node_id() != &node_id
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor binding violates deployment placement constraint".to_string(),
+            ));
+        }
         if let Some(existing) = self.actor_bindings.get(&key) {
             if existing.node_id() != &node_id {
                 return Err(ControlError::InvalidProposal(
@@ -329,6 +425,71 @@ impl ControlPlane {
     ) -> Option<&ActorBinding> {
         self.actor_bindings
             .get(&(mission_id.clone(), actor_id.clone()))
+    }
+
+    /// Installs an idempotent deployment placement constraint for one mission actor.
+    ///
+    /// The node is intentionally not required to be registered yet, because startup configuration
+    /// commonly loads before Node sessions connect. Matching will return an explicit unsatisfied
+    /// constraint until the node is registered, healthy, leased, and otherwise eligible.
+    pub fn set_actor_node_constraint(
+        &mut self,
+        mission_id: MissionId,
+        actor_id: ActorId,
+        node_id: NodeId,
+    ) -> Result<(), ControlError> {
+        let key = (mission_id.clone(), actor_id.clone());
+        if let Some(binding) = self.actor_bindings.get(&key)
+            && binding.node_id() != &node_id
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor placement conflicts with committed actor binding".to_string(),
+            ));
+        }
+        if let Some(existing) = self.actor_node_constraints.get(&key) {
+            if existing.node_id() != &node_id {
+                return Err(ControlError::InvalidProposal(
+                    "mission actor already has a different placement constraint".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        self.actor_node_constraints
+            .insert(key, ActorNodeConstraint::new(mission_id, actor_id, node_id));
+        Ok(())
+    }
+
+    /// Returns the deployment placement constraint for one mission actor, if configured.
+    pub fn actor_node_constraint(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+    ) -> Option<&ActorNodeConstraint> {
+        self.actor_node_constraints
+            .get(&(mission_id.clone(), actor_id.clone()))
+    }
+
+    /// Returns all deployment placement constraints in stable Mission/Actor order.
+    pub fn actor_node_constraints(&self) -> impl Iterator<Item = &ActorNodeConstraint> {
+        self.actor_node_constraints.values()
+    }
+
+    /// Returns the node currently authorized to realize one Mission actor.
+    ///
+    /// A committed Actor binding is authoritative after first use. Before that point, an explicit
+    /// deployment placement constraint limits initial matching and recovery without itself creating
+    /// a binding.
+    pub(crate) fn actor_authority_node(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+    ) -> Option<&NodeId> {
+        self.actor_binding(mission_id, actor_id)
+            .map(ActorBinding::node_id)
+            .or_else(|| {
+                self.actor_node_constraint(mission_id, actor_id)
+                    .map(ActorNodeConstraint::node_id)
+            })
     }
 
     /// Returns the current lease authority for one node.

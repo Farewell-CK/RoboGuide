@@ -13,8 +13,8 @@ use domain::{
     CoordinationContext, CoordinationContextId, CorrelationId, EventRecord, ExecutionCommand,
     ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
     MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth, NodeId, NodeRegistration,
-    NodeStatus, PlannedTask, Resource, ResourceId, ResourceKind, RoleId, RoleRequirement,
-    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    NodeStatus, PlannedTask, Resource, ResourceBindingScope, ResourceId, ResourceKind, RoleId,
+    RoleRequirement, TaskContinuity, TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
@@ -151,7 +151,7 @@ impl From<ResourceDocument> for ResourceKind {
 /// Runs the first deterministic normal-and-recovery vertical slice.
 fn main() {
     match run_mvp_slice() {
-        Ok(events) => println!("DEAIOS MVP slice completed with {} events", events.len()),
+        Ok(events) => println!("DEAIOS control slice produced {} events", events.len()),
         Err(error) => {
             eprintln!("DEAIOS MVP slice failed: {error}");
             std::process::exit(1);
@@ -336,7 +336,7 @@ fn require_allocation_phase(
     Ok(())
 }
 
-/// Executes registration, proposal, commit, failure, rebind, and completion.
+/// Executes registration and committed work, then fences unauthorized Actor migration on failure.
 fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     let mission_plan = load_mission_plan()?;
     let ready_tasks = mission_plan.task_graph().ready_tasks(&BTreeSet::new());
@@ -429,6 +429,25 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         )
         .map_err(|error| error.to_string())?;
 
+    control
+        .create_mission_group(
+            group_id.clone(),
+            &mission_plan,
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .ready_task_execution(
+            &group_id,
+            requirement.task_ref(),
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+
     let candidates = control
         .match_capabilities_for_mission(
             &state,
@@ -471,8 +490,8 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         None,
     )?;
     control
-        .create_group_with_actor_bindings(
-            group_id.clone(),
+        .bind_task_execution_with_requirement(
+            &group_id,
             &plan,
             &requirement,
             timestamp,
@@ -488,7 +507,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         Some(&group_id),
     )?;
     control
-        .activate_group(&group_id, timestamp, &correlation_id, &mut log)
+        .activate_task_execution(
+            &group_id,
+            requirement.task_ref(),
+            timestamp,
+            &correlation_id,
+            &mut log,
+        )
         .map_err(|error| error.to_string())?;
 
     let mut runtime = Runtime::new(VirtualClock::new(timestamp), log.clone());
@@ -601,7 +626,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         )
         .map_err(|error| error.to_string())?;
     let RecoverySchedulingOutcome::Selected(recovery_decision) = recovery_scheduling else {
-        return Err("bootstrap Scheduler found no recovery selection".to_string());
+        return Ok(log.snapshot());
     };
     let replacement_node_id = recovery_decision.replacement_node_id().clone();
     let recovery_proposal = control
@@ -666,6 +691,42 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     );
     runtime
         .execute(&replacement_command)
+        .map_err(|error| error.to_string())?;
+    let task_resources = control
+        .group(&group_id)
+        .and_then(|group| group.task_execution(requirement.task_ref()))
+        .ok_or_else(|| "Mission Task execution disappeared before completion".to_string())?
+        .assignments()
+        .iter()
+        .flat_map(|assignment| assignment.resource_ids())
+        .filter(|resource_id| {
+            control
+                .group(&group_id)
+                .and_then(|group| group.task_execution(requirement.task_ref()))
+                .is_some_and(|execution| {
+                    execution.binding_scope(resource_id) == ResourceBindingScope::Task
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    control
+        .complete_task_execution(
+            &group_id,
+            requirement.task_ref(),
+            TimestampMs::new(2),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .release_task_bindings(
+            &group_id,
+            requirement.task_ref(),
+            &task_resources,
+            TimestampMs::new(2),
+            &correlation_id,
+            &mut log,
+        )
         .map_err(|error| error.to_string())?;
     control
         .complete_group(&group_id, TimestampMs::new(2), &correlation_id, &mut log)

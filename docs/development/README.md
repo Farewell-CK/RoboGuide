@@ -27,14 +27,14 @@ core/
   ports/                   由核心拥有、与传输无关的接口
   control/                 Node、匹配、调度、提案、Mission-level Group、TaskExecution、恢复和 Allocation projection
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
-  state/                   已实现 Shared Node State 与 Allocation State v0.1
-  adapters/                已实现 generic HTTP reference adapter 与 backend mapping
+  state/                   已实现 Shared Node、Allocation 与 Spatial Memory Catalog projection
+  adapters/                已实现 generic HTTP/backend mapping 与 filesystem artifact CAS
   integration/             正式 gRPC Node Protocol v0.2 与 Runtime composition bridge
   node-service/            单一 Node Service、声明式本地引擎和 durable journal
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
   controller/              组合根和进程生命周期
-  integration-server/      多 Node gRPC session composition root
+  integration-server/      多 Node gRPC session 与独立 Artifact HTTP composition root
   roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
   real-node-smoke/         通用 Node Contract probe 与显式 intent invocation
 mission/
@@ -44,6 +44,7 @@ mission/
 simulation/                未来的仿真器集成适配器，首次实现时再创建
 contracts/mission/         版本化的跨语言 Mission Plan 合同
 contracts/node/            版本化的异构 EAIOS Node Contract wire binding
+contracts/spatial/         版本化的不可变地图 manifest 合同
 config/                    不含凭据的运行配置
 scenarios/                 版本化场景输入和预期事件轨迹
 tests/system/              仅用于黑盒跨进程测试
@@ -70,9 +71,9 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 | Ports | Clock、Event Log、Node Registry 等核心接口 | 厂商或传输类型 |
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
 | Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
-| State | 当前切片维护 Shared Node State 与非权威 Allocation View | 调度决策、Lease authority、Reservation commitment、Group lifecycle、Belief 或 Memory |
-| Adapters | Server-side reference protocol、存储和模型 binding | 核心策略决策、具体 Local EAIOS 产品分支 |
-| Integration | gRPC Node Protocol、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
+| State | Shared Node、非权威 Allocation View 与可重建 Spatial Catalog | 调度决策、Lease authority、Reservation commitment、Group lifecycle 或 artifact bytes |
+| Adapters | Server-side reference protocol、CAS、存储和模型 binding | 核心策略决策、具体 Local EAIOS 产品分支 |
+| Integration | gRPC Node Protocol、Artifact HTTP、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
 | Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide Adapter 服务 |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
@@ -171,6 +172,13 @@ Commit 和 Bind/Rebind。Scheduler 只回答 Who should；Capability Matching �
 Shared Resource Coordination 决定资源能否 Commit；Execution Group Manager 应用 committed
 collaboration。
 
+Mission Actor 的物理 placement 是独立的 Control deployment policy，不是 MissionPlan 字段。
+可选 `(MissionId, ActorId) -> NodeId` constraint 在首次 Matching 时生成 singleton candidate，
+但不会提前创建 ActorBinding 或 reservation；Group Bind 会再次校验 constraint，成功后才按
+[`ADR-0007`](../decisions/0007-mission-actor-continuity.md) 建立 continuity authority。未注册、
+不健康、无有效 lease、不可达或 capability/contract 不满足的 constrained Node 保持 Task
+Ready/deferred，不会回退选择其他 Node。
+
 v0.1 未实现 Capability × Compute × Space × Time optimization、load-aware placement、
 spatial/traffic/deadline scheduling、priority/fairness/preemption、batching、bidding/auction、
 RL/LLM policy 或 Scheduler persistence。演化这些能力前需要真实 Compute Load/Queue/GPU
@@ -189,8 +197,9 @@ State 拒绝旧 projection 覆盖更新 view，但不重新验证 Control author
 与 projection refresh 不是共同 transaction：projection 可以滞后，State write 失败不影响
 Commit，反向修改 State 也不改变 reservation。
 
-Normal Commit 投影 Committed；create_group 后投影 Bound；partial release 删除受影响 record；
-Recovery Commit 投影 RecoveryPending；Rebind 后转 Bound；Abort/Release 后 record 消失。
+Normal Commit 投影 Committed；Mission-level Group 将 committed plan 绑定到对应
+TaskExecution 后投影 Bound；partial release 删除受影响 record；Recovery Commit 投影
+RecoveryPending；Rebind 后转 Bound；Abort/Release 后 record 消失。
 orphan 或 ownership 不一致的 Group reservation 会使 projection builder 返回 invariant error。
 该 ownership 记录在
 [`ADR-0005`](../decisions/0005-allocation-state-projection-authority.md)。Scheduler v0.1
@@ -210,13 +219,22 @@ Blocked 并仅将失败 Role 置为 unbound。Reconciler 从不替 Scheduler 选
 #### Recovery Reassignment Pipeline v0.2
 
 `match_recovery_candidates` 只对失败 Role 使用共享 eligibility predicate，排除 failed
-node，并允许返回空 `RecoveryCandidateSet`。外部 bootstrap Scheduler 必须从该 Set
-显式选择 Node；`propose_role_recovery` 验证 candidate membership 与 resource declaration，
-但不创建 reservation 或修改 Group。
+node，并允许返回空 `RecoveryCandidateSet`。带 Actor 的 Role 还必须服从既有
+`ActorBinding`（首次绑定前服从 deployment placement）；v0 不隐式迁移 Actor，因此权威
+Node 就是 failed node 时返回空集合并保持 Group Blocked。外部 bootstrap Scheduler 必须从
+该 Set 显式选择 Node；`propose_role_recovery` 验证 candidate membership 与 resource
+declaration，但不创建 reservation 或修改 Group。
+
+Mission-level Group 在创建时从已接受的完整 MissionPlan 固化 Task/Role requirement
+metadata，并随 Control checkpoint 持久化。Assess、Match、Propose、Commit 均拒绝与该
+metadata 不一致的 caller-supplied `TaskRequirement`；调用方不能通过删除 Actor 或改变
+contract/capability/resource requirement 绕过 Control authority。旧的无元数据 legacy
+single-Task Group 仅保留兼容路径，新 Mission execution 不得使用该路径。
 
 `commit_role_recovery` 在 commit time 重新验证 Group/TaskRef/Role、Blocked/unbound、node
-eligibility、failed binding、resource ownership 和 conflict，完成全部检查后才原子写入
-ControlPlane 唯一的 reservation authority，返回 `CommittedRecoveryAssignment`。此时
+eligibility、Actor authority、failed binding、resource ownership 和 conflict，完成全部检查
+后才原子写入 ControlPlane 唯一的 reservation authority，返回
+`CommittedRecoveryAssignment`。此时
 Group 仍为 Blocked/unbound。`rebind_role` 只接受 committed value，并验证 reservation
 确实属于同一 TaskRef/Role/ExecutionGroupId 后更新 assignment，进入 Adapted；随后由
 `activate_group` 返回 Active。
@@ -253,6 +271,15 @@ Group lifecycle、不进入 `ExecutionGroup.assignments`，也不属于 Shared N
 Scheduler、multi-role/spatial/timeout recovery、Mission replanning、Runtime command
 replay 或自动 failure escalation。
 
+### State & Memory Plane — Distributed Spatial Memory v0.1
+
+Spatial Memory 将地图分为 immutable manifest/catalog 与独立 blob data plane。`core/state`
+只维护可从 evidence 重建的 revision/replica metadata；CAS 和 streaming transport 位于
+Adapter/Integration；Node Service 负责声明式 staging、digest 校验和受控本地路径映射。
+跨 Mission 的 Consumer 使用预分配 map/revision scalar reference，Runtime 不解析地图或驱动
+Catalog。固定物理 anchor 是 v0 的 spatial authority，导入成功不等于 localization verified。
+实现和非目标见 [`ADR-0016`](../decisions/0016-distributed-spatial-memory.md)。
+
 当前切片仍不是完整 State & Memory Plane。以下内容延后：
 
 - Execution Group State Projection；
@@ -260,17 +287,26 @@ replay 或自动 failure escalation。
 - Shared Belief；
 - Provenance / uncertainty fusion；
 - Distributed Memory；
-- Projection replay / Replication；
+- Map Catalog 之外的通用 State projection replay / replication；
 - State Authority resolution；
 - Lease ownership resolution。
+- Map fusion、实时增量同步、active-map 选择、删除/GC、动态 output binding 和认证传输安全。
+
+Spatial artifact 的本地 durability 属于 Node Service/Adapter 实现不变量：文件内容、rename、
+hard-link 或 unlink 的父目录必须在 Journal/evidence 前同步；restart finalization 必须重验
+staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 symlink/非目录并对叶子
+使用 no-follow。Catalog 的 lifecycle 顺序取自 durable append 顺序，HTTP receive timestamp
+在共享 writer gate 内按 replay high-water 单调分配，不把可回拨墙钟当 ordering authority。
 
 ### Durable Evidence Bootstrap
 
 `core/state::SqliteEventLog` 提供 SQLite WAL-backed immutable event envelope。它保存
 `event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
-和 `domain.EventPayload.json/v2` 版本化 JSON payload，供 Integration Server 的事件查询使用。该切片已验证跨进程
+和 `domain.EventPayload.json/v3` 版本化 JSON payload，供 Integration Server 的事件查询使用；
+读取路径保留 v2 兼容。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-`roboguide.controller-checkpoint/v5` projection；启动时要求 checkpoint 序号与事件末尾严格
+外层 `roboguide.controller-checkpoint/v6` 包含内层 v5 Control/State/Runtime projection；
+启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
 fail-closed。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、

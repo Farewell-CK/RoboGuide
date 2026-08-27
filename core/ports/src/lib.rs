@@ -6,9 +6,14 @@
 
 mod allocation;
 mod node_gateway;
+mod spatial_memory;
 
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
 pub use node_gateway::{NodeGateway, NodeGatewayError, NodeGatewayErrorKind};
+pub use spatial_memory::{
+    ArtifactBlobReader, ArtifactBlobStore, ArtifactBlobWriter, ArtifactStoreError, MapCatalogError,
+    MapCatalogReader, MapCatalogWriter,
+};
 
 use domain::{
     CorrelationId, EventId, EventPayload, NodeHealthObservation, NodeId, NodeLivenessObservation,

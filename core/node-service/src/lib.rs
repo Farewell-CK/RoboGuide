@@ -8,23 +8,30 @@
 //! service compiles local capability, resource, transport, and workflow declarations
 //! at startup and executes them through generic HTTP, dynamic gRPC, and MCP drivers.
 
+mod artifact;
 mod config;
 mod engine;
 mod journal;
 mod local_engine;
 mod service;
 
+pub use artifact::{
+    ArtifactClient, ArtifactError, ArtifactManifestEnvelope, ArtifactOutput, ArtifactProvenance,
+    ArtifactStager, PreparedArtifact, ReplicaEvidenceStatus, StagedArtifact,
+};
 pub use config::{
-    CapabilityBindingConfig, ConnectionConfig, CredentialSourceConfig, ExecutionStateMappingConfig,
-    HealthCheckConfig, LocalOperationConfig, LocalSystemConfig, NodeServiceConfig,
-    RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig,
+    ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, CredentialSourceConfig,
+    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+    NodeServiceConfig, RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig,
     ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, journal_path,
 };
 pub use journal::{
-    ExecutionJournal, ExecutionSpec, JournalError, JournalExecution, JournalStatus, PrepareDispatch,
+    ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, JournalError, JournalExecution,
+    JournalStatus, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifactRecord,
 };
 pub use local_engine::driver::{
     BoxDriverFuture, CompiledDriverRequest, DriverError, DriverEvent, DriverEventStream,
@@ -35,10 +42,10 @@ pub use local_engine::http_driver::HttpDriver;
 pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowContext};
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
-    CONFIG_SCHEMA_V0_2, CatalogError, CompiledCapability, CompiledConnection, CompiledHealthCheck,
-    CompiledLocalCatalog, CompiledLocalSystem, CompiledResource, CompiledSensor, CompiledWorkflow,
-    CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
-    MappedExecutionPhase,
+    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CatalogError, CompiledArtifactService,
+    CompiledCapability, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
+    CompiledLocalSystem, CompiledResource, CompiledSensor, CompiledWorkflow, CompiledWorkflowStep,
+    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
 };
 pub use service::{NodeService, NodeServiceError};
 

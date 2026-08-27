@@ -97,6 +97,23 @@ impl ControlPlane {
                 ));
                 continue;
             }
+            if let Some(actor_id) = role.actor_id()
+                && let Some(constraint) =
+                    self.actor_node_constraint(requirement.mission_id(), actor_id)
+            {
+                if !self.node_is_eligible_for_role(state, constraint.node_id(), role, timestamp) {
+                    return Err(ControlError::ActorPlacementConstraintUnsatisfied {
+                        mission_id: requirement.mission_id().clone(),
+                        actor_id: actor_id.clone(),
+                        node_id: constraint.node_id().clone(),
+                    });
+                }
+                roles.push(RoleCandidates::new(
+                    role.role_id().clone(),
+                    vec![constraint.node_id().clone()],
+                ));
+                continue;
+            }
             let node_ids = state
                 .nodes()
                 .into_iter()

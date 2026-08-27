@@ -15,6 +15,12 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
+const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
+
+/// Current JSON payload codec including Distributed Spatial Memory evidence variants.
+const EVENT_PAYLOAD_SCHEMA_V3: &str = "domain.EventPayload.json/v3";
+
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedEvent {
@@ -396,8 +402,21 @@ impl SqliteEventLog {
                             .map_err(|error| SqliteEventLogError::Codec(error.to_string()))
                     })
                     .transpose()?;
-                let payload = serde_json::from_str(&event.payload_json)
-                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
+                if !matches!(
+                    event.payload_schema.as_str(),
+                    EVENT_PAYLOAD_SCHEMA_V2 | EVENT_PAYLOAD_SCHEMA_V3
+                ) {
+                    return Err(SqliteEventLogError::Codec(format!(
+                        "unsupported event payload schema {}",
+                        event.payload_schema
+                    )));
+                }
+                let payload = serde_json::from_str(&event.payload_json).map_err(|error| {
+                    SqliteEventLogError::Codec(format!(
+                        "cannot decode {} payload: {error}",
+                        event.payload_schema
+                    ))
+                })?;
                 Ok(EventRecord::new(
                     event_id,
                     TimestampMs::new(event.timestamp_ms),
@@ -487,7 +506,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    "domain.EventPayload.json/v2",
+                    EVENT_PAYLOAD_SCHEMA_V3,
                     payload_json,
                 ],
             )
@@ -602,7 +621,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, "domain.EventPayload.json/v2");
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V3);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
@@ -610,6 +629,42 @@ mod tests {
             EventPayload::ExecutionGroupBlocked { .. }
         ));
         assert_eq!(reopened.decoded_events().expect("events decode").len(), 1);
+    }
+
+    /// The current decoder retains the previous v2 JSON path after v3 Spatial variants ship.
+    #[test]
+    fn event_decoder_retains_v2_payload_compatibility() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-v2.sqlite3");
+        let correlation = CorrelationId::new("v2-compatibility").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(10),
+            &correlation,
+            None,
+            EventPayload::ExecutionGroupBlocked {
+                group_id: domain::ExecutionGroupId::new("group-v2").expect("id valid"),
+                task_ref: domain::TaskRef::new(
+                    domain::MissionId::new("mission-v2").expect("id valid"),
+                    domain::TaskId::new("task-v2").expect("id valid"),
+                ),
+                reason: "compatibility".to_string(),
+            },
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V2],
+            )
+            .expect("fixture marker changes to v2");
+
+        let decoded = log.decoded_events().expect("v2 payload remains readable");
+        assert!(matches!(
+            decoded[0].payload(),
+            EventPayload::ExecutionGroupBlocked { reason, .. } if reason == "compatibility"
+        ));
     }
 
     /// Append sequence, rather than lexical event identity, defines stable order and paging.

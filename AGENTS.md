@@ -14,8 +14,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `docs/images/` stores diagrams.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
   composition roots.
-- `core/state/` implements only State & Memory Plane Slice v0.1: deterministic
-  Shared Node State plus Allocation State v0.1 behind transport-neutral ports.
+- `core/state/` implements deterministic Shared Node State, Allocation State v0.1, and the
+  Distributed Spatial Memory v0.1 catalog projection behind transport-neutral ports. Spatial
+  catalog metadata is rebuildable evidence; map blobs never live in State, Runtime checkpoints,
+  or the Node Protocol.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
@@ -23,6 +25,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Phase 1 uses `roboguide.mission-plan/v0.2`: Context/ContextRole continuity is
   Mission Intelligence metadata, while Task/Context resource ownership is recorded
   independently in Control and its Group projection.
+- Mission Actor is logical metadata, not a physical-node selector. Deployment-owned
+  actor placement constraints may narrow first-use Control Matching, but create no
+  reservation or ActorBinding before Proposal -> Commit -> Group Bind succeeds.
 - Runtime observation ingestion normalizes `NodeGateway.status()` into reported
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.
@@ -62,6 +67,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   executes only with explicit `--execute` plus a versioned intent fixture.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
   not interpret it, Runtime only routes it, and adapters map it to Local EAIOS How.
+- Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references
+  may be carried as opaque intent parameters, while digest verification and local staging belong
+  to Node Service/Adapter. Node Protocol v0.2 remains unchanged.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.

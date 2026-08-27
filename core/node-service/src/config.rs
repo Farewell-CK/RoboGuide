@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; must equal `roboguide.node-config/v0.2`.
+    /// Configuration schema identity; v0.2 and v0.3 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -38,6 +38,87 @@ pub struct NodeServiceConfig {
     /// Locally observable sensors registered with RoboGuide.
     #[serde(default)]
     pub sensors: Vec<SensorConfig>,
+    /// Optional Spatial Memory artifact data-plane configuration.
+    ///
+    /// The field is optional so an existing v0.2 deployment remains valid.  A v0.3
+    /// deployment may enable it to stage immutable map revisions without changing the
+    /// Node Protocol contract.
+    #[serde(default)]
+    pub artifacts: Option<ArtifactServiceConfig>,
+}
+
+/// Node-local configuration for the independent Spatial Memory artifact data plane.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactServiceConfig {
+    /// Absolute HTTP(S) endpoint of the central artifact service.
+    pub endpoint: String,
+    /// Deployment-owned root for content-addressed blobs and staged inputs.
+    pub cache_directory: std::path::PathBuf,
+    /// Maximum accepted artifact size in bytes.
+    #[serde(default = "default_artifact_max_bytes")]
+    pub max_artifact_bytes: u64,
+    /// Preferred chunk size for streaming reads and writes.
+    #[serde(default = "default_artifact_chunk_size_bytes")]
+    pub chunk_size_bytes: usize,
+    /// Maximum time allowed to establish one artifact data-plane connection.
+    #[serde(default = "default_artifact_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+    /// Maximum idle time between successful reads from the artifact data plane.
+    #[serde(default = "default_artifact_read_timeout_ms")]
+    pub read_timeout_ms: u64,
+    /// Fixed map revisions that may be downloaded for local workflows.
+    #[serde(default)]
+    pub input_bindings: Vec<ArtifactInputBindingConfig>,
+    /// Fixed local map outputs that may be published after execution succeeds.
+    #[serde(default)]
+    pub output_bindings: Vec<ArtifactOutputBindingConfig>,
+}
+
+/// Declarative input binding for one preallocated immutable map revision.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactInputBindingConfig {
+    /// Deployment-local binding identity.
+    pub id: String,
+    /// Logical map identity selected by the Mission plan.
+    pub map_id: String,
+    /// Immutable revision selected by the Mission plan.
+    pub revision_id: String,
+    /// Optional expected SHA-256 digest; the manifest digest is always verified.
+    #[serde(default)]
+    pub content_digest: Option<String>,
+    /// Relative path under `cache_directory` exposed to the local workflow.
+    pub target_path: std::path::PathBuf,
+}
+
+/// Declarative output binding for one fixed map revision and local source path.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactOutputBindingConfig {
+    /// Deployment-local binding identity.
+    pub id: String,
+    /// Logical map identity reserved for this output.
+    pub map_id: String,
+    /// Immutable revision reserved for this output.
+    pub revision_id: String,
+    /// Local source path under the deployment-owned artifact root.
+    pub source_path: std::path::PathBuf,
+    /// Opaque bundle media type sent in the manifest.
+    pub media_type: String,
+    /// Producer-declared map format family name.
+    pub format_name: String,
+    /// Producer-declared map format version.
+    pub format_version: String,
+    /// Fixed root frame in the produced bundle.
+    pub root_frame: String,
+    /// Coordinate convention used by the produced bundle.
+    pub coordinate_convention: String,
+    /// Fixed physical or semantic anchor identity.
+    pub spatial_anchor_id: String,
+    /// Optional metric resolution declared by the producer.
+    #[serde(default)]
+    pub resolution_meters: Option<f64>,
 }
 
 /// One Local EAIOS/runtime whose facts are aggregated into the Node identity.
@@ -185,8 +266,37 @@ pub struct CapabilityBindingConfig {
     /// Node-local concurrency locks, which never grant Control authority.
     #[serde(default)]
     pub local_locks: Vec<String>,
+    /// Optional node-owned artifact action fixed for every execution of this capability.
+    #[serde(default)]
+    pub artifact_operation: Option<ArtifactOperationConfig>,
     /// Declarative execute/status/cancel workflow.
     pub workflow: WorkflowConfig,
+}
+
+/// Typed artifact action owned by one configured capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactOperationConfig {
+    /// Expose the configured output path without publishing its bytes.
+    PrepareOutput,
+    /// Upload, finalize, and publish the configured immutable output.
+    Publish,
+    /// Stage a verified input and record import evidence after local completion.
+    Import,
+    /// Stage a verified input and record localization evidence after local completion.
+    Verify,
+}
+
+impl ArtifactOperationConfig {
+    /// Returns the stable configuration spelling used by TOML and JSON Schema.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepareOutput => "prepare-output",
+            Self::Publish => "publish",
+            Self::Import => "import",
+            Self::Verify => "verify",
+        }
+    }
 }
 
 /// Local execution workflow for one canonical capability.
@@ -384,7 +494,7 @@ pub struct SensorConfig {
 }
 
 impl NodeServiceConfig {
-    /// Loads one strict v0.2 TOML document without performing filesystem validation.
+    /// Loads one strict versioned TOML document without performing filesystem validation.
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
         let source = std::fs::read_to_string(path)?;
         toml::from_str(&source)
@@ -409,7 +519,56 @@ const fn default_status_poll_interval_ms() -> u64 {
     250
 }
 
+/// Returns the default maximum artifact size accepted by the node cache.
+const fn default_artifact_max_bytes() -> u64 {
+    4 * 1024 * 1024 * 1024
+}
+
+/// Returns the default bounded chunk size used by artifact transfers.
+const fn default_artifact_chunk_size_bytes() -> usize {
+    1024 * 1024
+}
+
+/// Returns the default artifact data-plane connection timeout.
+const fn default_artifact_connect_timeout_ms() -> u64 {
+    5_000
+}
+
+/// Returns the default artifact data-plane read-idle timeout.
+const fn default_artifact_read_timeout_ms() -> u64 {
+    30_000
+}
+
 /// Returns the default empty JSON request object.
 fn default_request_base() -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ArtifactOperationConfig;
+
+    /// Typed artifact operations accept only the four v0.3 schema spellings.
+    #[test]
+    fn parses_typed_artifact_operation_spellings() {
+        for (wire, expected) in [
+            ("prepare-output", ArtifactOperationConfig::PrepareOutput),
+            ("publish", ArtifactOperationConfig::Publish),
+            ("import", ArtifactOperationConfig::Import),
+            ("verify", ArtifactOperationConfig::Verify),
+        ] {
+            let decoded = serde_json::from_value::<ArtifactOperationConfig>(
+                serde_json::Value::String(wire.to_string()),
+            )
+            .expect("known artifact operation decodes");
+            assert_eq!(decoded, expected);
+            assert_eq!(decoded.as_str(), wire);
+        }
+        assert!(
+            serde_json::from_value::<ArtifactOperationConfig>(serde_json::Value::String(
+                "automatic".to_string()
+            ))
+            .is_err()
+        );
+    }
 }

@@ -114,6 +114,10 @@ impl WorkflowContext {
             value: serde_json::json!({
                 "invocation": invocation,
                 "steps": {},
+                "artifacts": {
+                    "inputs": {},
+                    "outputs": {},
+                },
             }),
         }
     }
@@ -139,6 +143,28 @@ impl WorkflowContext {
             .as_object_mut()
             .expect("workflow context is always an object");
         object.insert("local_handle".to_string(), Value::String(handle.into()));
+    }
+
+    /// Records a verified input artifact path for later declarative request mappings.
+    ///
+    /// The path is produced by the node-owned staging layer and cannot be selected by a
+    /// remote invocation.  Binding IDs are escaped as JSON Pointer segments so a deployment
+    /// may use punctuation without changing the context shape.
+    pub fn set_artifact_input_path(
+        &mut self,
+        binding_id: &str,
+        path: impl Into<String>,
+    ) -> Result<(), MappingError> {
+        set_artifact_path(&mut self.value, "inputs", binding_id, path.into())
+    }
+
+    /// Records a deployment-owned output artifact path for later workflow mappings.
+    pub fn set_artifact_output_path(
+        &mut self,
+        binding_id: &str,
+        path: impl Into<String>,
+    ) -> Result<(), MappingError> {
+        set_artifact_path(&mut self.value, "outputs", binding_id, path.into())
     }
 
     /// Exposes read-only workflow context to compiled mappings and state projections.
@@ -349,6 +375,32 @@ fn set_pointer(target: &mut Value, pointer: &str, value: Value) -> Result<(), Ma
     }
 }
 
+/// Inserts a controlled artifact path under the workflow context artifact namespace.
+fn set_artifact_path(
+    context: &mut Value,
+    direction: &str,
+    binding_id: &str,
+    path: String,
+) -> Result<(), MappingError> {
+    let escaped_binding_id = escape_pointer_segment(binding_id);
+    validate_pointer(&format!("/artifacts/{direction}/{escaped_binding_id}"))?;
+    let artifacts = context
+        .get_mut("artifacts")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| MappingError::InvalidTarget("/artifacts".to_string()))?;
+    let bindings = artifacts
+        .get_mut(direction)
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| MappingError::InvalidTarget(format!("/artifacts/{direction}")))?;
+    bindings.insert(binding_id.to_string(), Value::String(path));
+    Ok(())
+}
+
+/// Escapes one caller-independent key for use as an RFC 6901 JSON Pointer segment.
+fn escape_pointer_segment(value: &str) -> String {
+    value.replace('~', "~0").replace('/', "~1")
+}
+
 /// Decodes one RFC 6901 path token after pointer syntax has been validated.
 fn decode_token(token: &str) -> String {
     token.replace("~1", "/").replace("~0", "~")
@@ -399,6 +451,19 @@ mod tests {
                 .pointer("/goal/orientation/w")
                 .and_then(Value::as_f64),
             Some(1.0)
+        );
+    }
+
+    /// Verified artifact paths are exposed under a stable, namespaced context location.
+    #[test]
+    fn records_artifact_paths_in_context() {
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .set_artifact_input_path("map~input", "/var/lib/roboguide/map.bin")
+            .expect("artifact path records");
+        assert_eq!(
+            context.as_json().pointer("/artifacts/inputs/map~0input"),
+            Some(&Value::String("/var/lib/roboguide/map.bin".to_string()))
         );
     }
 

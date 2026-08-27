@@ -116,17 +116,13 @@ impl ControlPlane {
             .map(|execution| execution.assignments())
             .unwrap_or_else(|| group.assignments.as_slice());
         for assignment in assignments {
-            let role = requirement
-                .roles()
-                .iter()
-                .find(|role| role.role_id() == assignment.role_id())
-                .ok_or_else(|| {
-                    ControlError::InvalidProposal(format!(
-                        "task requirement has no group role {}",
-                        assignment.role_id()
-                    ))
-                })?;
-            if !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp) {
+            let role = recovery_role(
+                group,
+                requirement,
+                requirement.task_ref(),
+                assignment.role_id(),
+            )?;
+            if !self.node_is_eligible_for_role(state, assignment.node_id(), &role, timestamp) {
                 unavailable.push((assignment.role_id().clone(), assignment.node_id().clone()));
             }
         }
@@ -237,11 +233,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryCandidateSet, ControlError> {
-        let role = recovery_role(requirement, need.task_ref(), need.role_id())?;
         let group = self
             .groups
             .get(need.group_id())
             .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
+        let role = recovery_role(group, requirement, need.task_ref(), need.role_id())?;
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
@@ -265,12 +261,21 @@ impl ControlPlane {
             ));
         }
 
+        let actor_authority_node = role
+            .actor_id()
+            .and_then(|actor_id| self.actor_authority_node(requirement.mission_id(), actor_id))
+            .cloned();
         let candidate_node_ids = state
             .nodes()
             .into_iter()
             .filter(|snapshot| snapshot.node_id() != need.current_node_id())
             .filter(|snapshot| {
-                self.node_is_eligible_for_role(state, snapshot.node_id(), role, timestamp)
+                actor_authority_node
+                    .as_ref()
+                    .is_none_or(|node_id| snapshot.node_id() == node_id)
+            })
+            .filter(|snapshot| {
+                self.node_is_eligible_for_role(state, snapshot.node_id(), &role, timestamp)
             })
             .map(|snapshot| snapshot.node_id().clone())
             .collect::<Vec<_>>();
@@ -308,11 +313,16 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryAssignmentProposal, ControlError> {
-        let role = recovery_role(requirement, candidates.task_ref(), candidates.role_id())?;
         let group = self
             .groups
             .get(candidates.group_id())
             .ok_or_else(|| ControlError::UnknownGroup(candidates.group_id().clone()))?;
+        let role = recovery_role(
+            group,
+            requirement,
+            candidates.task_ref(),
+            candidates.role_id(),
+        )?;
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
@@ -335,7 +345,7 @@ impl ControlPlane {
         let node = state
             .node(&selected_node_id)
             .ok_or_else(|| ControlError::UnknownNode(selected_node_id.clone()))?;
-        validate_recovery_resources(node, role, &replacement_resource_ids)?;
+        validate_recovery_resources(node, &role, &replacement_resource_ids)?;
 
         let proposal = RecoveryAssignmentProposal::new(
             candidates.group_id().clone(),
@@ -370,11 +380,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedRecoveryAssignment, ControlError> {
-        let role = recovery_role(requirement, proposal.task_ref(), proposal.role_id())?;
         let group = self
             .groups
             .get(proposal.group_id())
             .ok_or_else(|| ControlError::UnknownGroup(proposal.group_id().clone()))?;
+        let role = recovery_role(group, requirement, proposal.task_ref(), proposal.role_id())?;
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
@@ -401,6 +411,16 @@ impl ControlPlane {
                 "recovery proposal no longer matches the blocked group role".to_string(),
             ));
         }
+        if let Some(actor_id) = role.actor_id()
+            && let Some(authority_node) =
+                self.actor_authority_node(requirement.mission_id(), actor_id)
+            && proposal.replacement_node_id() != authority_node
+        {
+            return Err(ControlError::InvalidProposal(format!(
+                "recovery replacement {} violates actor {actor_id} authority on {authority_node}; explicit Actor rebind is required",
+                proposal.replacement_node_id()
+            )));
+        }
         let commitment_key =
             recovery_commitment_key(proposal.group_id(), proposal.task_ref(), proposal.role_id());
         if self
@@ -415,14 +435,15 @@ impl ControlPlane {
         let replacement = state
             .node(proposal.replacement_node_id())
             .ok_or_else(|| ControlError::UnknownNode(proposal.replacement_node_id().clone()))?;
-        if !self.node_is_eligible_for_role(state, proposal.replacement_node_id(), role, timestamp) {
+        if !self.node_is_eligible_for_role(state, proposal.replacement_node_id(), &role, timestamp)
+        {
             return Err(ControlError::InvalidProposal(format!(
                 "replacement node {} is no longer eligible for role {}",
                 proposal.replacement_node_id(),
                 proposal.role_id()
             )));
         }
-        validate_recovery_resources(replacement, role, proposal.replacement_resource_ids())?;
+        validate_recovery_resources(replacement, &role, proposal.replacement_resource_ids())?;
         for resource_id in proposal.replacement_resource_ids() {
             if let Some(reservation) = self.reservations.get(resource_id) {
                 return Err(ControlError::ResourceConflict {
