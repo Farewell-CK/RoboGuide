@@ -180,8 +180,15 @@ impl MissionOrchestrator {
     ) -> Result<&MissionExecution, OrchestrationError> {
         let mission_id = plan.goal().mission_id().clone();
         if self.executions.contains_key(&mission_id) {
+            let existing = self
+                .executions
+                .get(&mission_id)
+                .expect("contains_key proves existing Mission authority");
+            if existing.plan() == &plan && existing.group_id() == &group_id {
+                return Ok(existing);
+            }
             return Err(OrchestrationError::Mission(format!(
-                "Mission {mission_id} already exists"
+                "Mission {mission_id} already exists with a different plan or Group"
             )));
         }
         control.create_mission_group(group_id.clone(), &plan, timestamp, correlation_id, events)?;
@@ -742,6 +749,44 @@ mod tests {
                 .resource_scope(plan.task_graph().tasks()[1].requirement().roles()[0].role_id()),
             domain::ResourceBindingScope::Context
         );
+    }
+
+    /// An exact submission retry returns existing authority without creating a second Group.
+    #[test]
+    fn exact_mission_submission_retry_is_idempotent() {
+        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
+        let group_id = ExecutionGroupId::new("group-idempotent").expect("group id valid");
+        let correlation = CorrelationId::new("idempotent-submit").expect("trace valid");
+        let mut control = ControlPlane::new();
+        let mut orchestrator = MissionOrchestrator::new();
+        let mut events = InMemoryEventLog::new();
+        orchestrator
+            .submit(
+                plan.clone(),
+                group_id.clone(),
+                &mut control,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("first submission creates authority");
+        let event_count = events.records().len();
+
+        let repeated = orchestrator
+            .submit(
+                plan,
+                group_id,
+                &mut control,
+                TimestampMs::new(2),
+                &correlation,
+                &mut events,
+            )
+            .expect("exact retry returns existing authority");
+
+        assert_eq!(repeated.lifecycle(), MissionExecutionLifecycle::Running);
+        assert_eq!(orchestrator.mission_ids().len(), 1);
+        assert_eq!(events.records().len(), event_count);
     }
 
     /// Restored orchestration rejects missing Groups, truncated DAGs, and lifecycle disagreement.

@@ -10,9 +10,14 @@ from typing import cast
 
 import pytest
 from mission.config import MissionSettings, load_settings
+from mission.controller import InventorySnapshot
 from mission.models import JSONObject
 from mission.planners import FixturePlanner
-from mission.responses import MissionProviderError, ResponsesMissionPlanner
+from mission.responses import (
+    MissionProviderError,
+    ResponsesMissionInterpreter,
+    ResponsesMissionPlanner,
+)
 
 FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
 
@@ -135,3 +140,24 @@ def test_responses_planner_rejects_failed_review() -> None:
     mission = plan_json["mission"]
     with pytest.raises(MissionProviderError, match="review rejected"):
         planner.plan(mission["id"], mission["objective"])
+
+
+def test_responses_interpreter_preserves_open_questions_before_planning() -> None:
+    """Structured interpretation exposes ambiguity without inventing a Task Graph."""
+    output: JSONObject = {
+        "objective": "让一只可建图的机器狗建立地图",
+        "constraints": [],
+        "assumptions": [],
+        "open_questions": ["需要建立哪个区域的地图？"],
+    }
+    transport = FakeTransport([_response(output)])
+    interpreter = ResponsesMissionInterpreter(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    inventory = InventorySnapshot(observed_at_ms=1, nodes=())
+
+    assessment = interpreter.interpret("一只可建图的机器狗", (), inventory)
+
+    assert assessment.open_questions == ("需要建立哪个区域的地图？",)
+    assert len(transport.requests) == 1
+    assert "inventory" in cast(str, transport.requests[0][2]["input"])

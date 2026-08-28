@@ -32,6 +32,7 @@
 - [`decisions/0015-runtime-execution-boundary.md`](decisions/0015-runtime-execution-boundary.md)：Runtime live execution authority 与 Integration 边界。
 - [`decisions/0016-distributed-spatial-memory.md`](decisions/0016-distributed-spatial-memory.md)：不可变地图 Artifact、Catalog 与双节点共享切片。
 - [`decisions/0017-canonical-capability-contract-identity.md`](decisions/0017-canonical-capability-contract-identity.md)：可逆的 canonical capability 字符串与结构化身份规则。
+- [`decisions/0018-mission-intent-loop.md`](decisions/0018-mission-intent-loop.md)：自然语言 Mission Request 的澄清、草案、风险审批与内部计划提交边界。
 
 ## 历史架构
 

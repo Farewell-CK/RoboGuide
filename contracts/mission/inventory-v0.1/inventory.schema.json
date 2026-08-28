@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/inventory-v0.1/inventory.schema.json",
+  "title": "RoboGuide Mission Inventory v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "observed_at_ms", "nodes"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "roboguide.inventory/v0.1"},
+    "observed_at_ms": {"type": "integer", "minimum": 0},
+    "nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node"}
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id", "reported_health", "source_observed_at_ms", "received_at_ms",
+        "liveness", "liveness_observed_at_ms", "capabilities", "contracts", "resources"
+      ],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "reported_health": {
+          "type": "string",
+          "enum": ["Online", "Degraded", "Offline", "SafeStopped"]
+        },
+        "source_observed_at_ms": {"type": "integer", "minimum": 0},
+        "received_at_ms": {"type": "integer", "minimum": 0},
+        "liveness": {"type": "string", "enum": ["Reachable", "Unreachable"]},
+        "liveness_observed_at_ms": {"type": "integer", "minimum": 0},
+        "capabilities": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/capability"}
+        },
+        "contracts": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "resources": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/resource"}
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "available"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["mobility", "transport", "compute", "observation"]
+        },
+        "available": {"type": "boolean"}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "kind", "capacity"],
+      "properties": {
+        "resource_id": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "enum": ["space", "compute", "time"]},
+        "capacity": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

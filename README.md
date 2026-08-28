@@ -44,7 +44,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
-- 当前 `mission/` 已提供确定性 Fixture Planner 和可配置的 Responses LLM Planner；
+- 当前 `mission/` 已提供文本 Mission Request 澄清闭环、确定性 Fixture Planner 和可配置的
+  Responses Interpreter/Planner；
 - Mission 输出使用 `contracts/mission/v0.2/` 中的版本化合同；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
@@ -79,7 +80,12 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 ### Mission Intelligence
 
-负责 Mission Understanding、Task Planning、Task Graph 和 Execution Requirements，回答 `What needs to be achieved?`。实现可以使用 LLM、VLM、符号规划器或混合方法，但不能直接进行跨节点资源绑定。
+负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
+Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；存在
+open questions 时停在 `NeedsClarification`，不会创建 Execution Group。无歧义并通过
+inventory preflight 与部署风险策略后，Mission Intelligence 才把完整 MissionPlan 交给
+Orchestration。实现可以使用 LLM、VLM、符号规划器或混合方法，但不能直接进行跨节点资源
+绑定。该边界见 [`ADR-0018`](docs/decisions/0018-mission-intent-loop.md)。
 
 ### Control Plane
 
@@ -416,9 +422,12 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── pyproject.toml
 ├── config/
 │   ├── mission.toml
+│   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
 │   ├── mission/v0.2/
+│   ├── mission/request-v0.1/
+│   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ + v0.3/
 │   └── spatial/v0.1/
 ├── mission/
@@ -445,6 +454,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
+│   ├── mission-service/
 │   └── roboguide-node/
 └── docs/
     ├── README.md
@@ -478,7 +488,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0013-mission-level-execution-group.md
     │   ├── 0014-phase1-mission-orchestration.md
     │   ├── 0015-runtime-execution-boundary.md
-    │   └── 0016-distributed-spatial-memory.md
+    │   ├── 0016-distributed-spatial-memory.md
+    │   ├── 0017-canonical-capability-contract-identity.md
+    │   └── 0018-mission-intent-loop.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
@@ -499,8 +511,18 @@ Mission 配置位于 [`config/mission.toml`](config/mission.toml)，版本化 Pr
 `OPENAI_API_KEY` 读取。默认配置使用 `gpt-5.6-luna`，但远程明文 HTTP 会被安全
 边界拒绝，生产与持续联调应使用 HTTPS 或 localhost 隧道。
 
+外部文本入口由 [`apps/mission-service/`](apps/mission-service/) 提供，部署配置位于
+[`config/mission-service.toml`](config/mission-service.toml)。默认 `127.0.0.1:8070`；
+Controller 继续在 `127.0.0.1:8080` 接受内部完整 MissionPlan，并提供只读 inventory。
+
 ```bash
 uv sync --dev
+uv run mission-service
+
+curl --fail-with-body -X POST http://127.0.0.1:8070/v1/mission-requests \
+  -H 'Content-Type: application/json' \
+  -d '{"instruction":"让一只可建图的机器狗建立指定区域地图"}'
+
 uv run mission validate \
   --input scenarios/mvp-slice-v0.1/mission-plan.json
 uv run pytest -q
