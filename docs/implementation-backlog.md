@@ -67,6 +67,8 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 | RT-G4 | Durable cancellation | Runtime 持久化 CancelRequested、ack、deadline、retry 和 completion race；Mission cancel 会覆盖所有仍在运行的 execution，且不伪造物理终态 |
 | RT-G5 | Timer and liveness driving | Runtime timer 将 heartbeat/lease/session observation 转为 execution ambiguity evidence，并触发外部 Control reconciliation，而不是让 Running 无限悬挂 |
 | RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
+| RT-G7 | Capability readiness | Node/WebUI process health 与每个 canonical capability 的 readiness 分离；ROS discovery、Router 和 vendor service 缺失必须可观察，不能仅凭进程存活进入 Matching |
+| RT-G8 | Verification evidence | localization verification 需要 active map identity、mode、pose quality 与 coordinate-frame evidence；`has_map=true` 只保留为 smoke 证据 |
 
 Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
 dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得
