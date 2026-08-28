@@ -58,6 +58,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `core/integration/` owns the formal gRPC Node Protocol v0.2 transport;
   `core/node-service/` owns node-side lifecycle, configuration, durable execution
   continuity, and the declarative Local Integration Engine.
+- `integrations/` contains deployment-owned Local EAIOS adapters (for example the
+  Robonix map adapter); these adapters own vendor calls and local file layout only,
+  and must not become a second Control, Runtime, State, or Node Protocol authority.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
@@ -95,9 +98,12 @@ uv-managed environment. New implementation paths must update this file and
 For Mission changes, run:
 
 ```bash
-uv run ruff format --check mission tools/quality
-uv run ruff check mission tools/quality
-uv run mypy --strict mission/src mission/tests tools/quality
+uv run ruff format --check mission tools/quality integrations/robonix-map-service
+uv run ruff check mission tools/quality integrations/robonix-map-service
+uv run mypy --strict mission/src mission/tests tools/quality \
+  integrations/robonix-map-service/robonix-map-service.py \
+  integrations/robonix-map-service/tests
+uv run python tools/quality/check_python_function_docs.py integrations/robonix-map-service
 uv run pytest -q
 ```
 

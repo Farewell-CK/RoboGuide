@@ -45,6 +45,7 @@ simulation/                未来的仿真器集成适配器，首次实现时�
 contracts/mission/         版本化的跨语言 Mission Plan 合同
 contracts/node/            版本化的异构 EAIOS Node Contract wire binding
 contracts/spatial/         版本化的不可变地图 manifest 合同
+integrations/              部署拥有的 Local EAIOS adapter；只负责 vendor/local How mapping
 config/                    不含凭据的运行配置
 scenarios/                 版本化场景输入和预期事件轨迹
 tests/system/              仅用于黑盒跨进程测试
@@ -75,6 +76,7 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 | Adapters | Server-side reference protocol、CAS、存储和模型 binding | 核心策略决策、具体 Local EAIOS 产品分支 |
 | Integration | gRPC Node Protocol、Artifact HTTP、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
 | Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide Adapter 服务 |
+| Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 
@@ -305,7 +307,7 @@ staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 sym
 和 `domain.EventPayload.json/v3` 版本化 JSON payload，供 Integration Server 的事件查询使用；
 读取路径保留 v2 兼容。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-外层 `roboguide.controller-checkpoint/v6` 包含内层 v5 Control/State/Runtime projection；
+外层 `roboguide.controller-checkpoint/v7` 包含内层 v6 Control/State/Runtime projection；
 启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时

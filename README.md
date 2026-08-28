@@ -304,6 +304,13 @@ Adapter 负责 canonical intent 到本地 EAIOS How 的映射。
 
 Local System 保留 Navigation、Local Planning、Perception、Motion、Hardware Control 和即时 Safety。RoboGuide 下发目标、角色、约束和资源绑定，但不把本地系统降级为 dumb slave。
 
+部署侧 Local EAIOS 适配器位于 [`integrations/`](integrations/)；例如
+[`integrations/robonix-map-service/`](integrations/robonix-map-service/) 只把 canonical
+`ExecutionIntent` 映射到本机 Robonix Mapping WebUI，并维护本地执行句柄与受控地图文件。
+它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
+生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
+配置声明的 Local EAIOS endpoint。
+
 ## 三条核心语义链
 
 ```text
@@ -433,6 +440,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── integration/         # formal gRPC Node Protocol v0.2
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
+├── integrations/
+│   └── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
