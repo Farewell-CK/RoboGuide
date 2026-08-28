@@ -14,6 +14,34 @@
 | Q6 | Temporal Assurance | 同步、时钟偏差、deadline 和时间窗口如何成为架构约束 |
 | Q7 | Resource Commitment Semantics | Commit、Lease expiry、preemption、partial release 需要何种一致性保证 |
 
+### Q2 实现切片：Distributed Spatial Memory v0
+
+Q2 的首个可验证切片已接受 [`ADR-0016`](decisions/0016-distributed-spatial-memory.md)：
+地图采用 immutable revision + SHA-256 CAS artifact，manifest/provenance/anchor/replica
+状态进入 State & Memory Catalog，bytes 走独立 streaming Artifact data plane。v0 的 Spatial
+Authority 是 manifest 中显式声明的固定物理 anchor；跨 Mission 的消费者通过预分配
+`(MapId, MapRevisionId)` pull，导入后必须单独验证 localization。该切片不解决 map fusion、
+实时同步、active-map 选择、动态 output binding、删除/GC 或认证传输安全。
+
+Spatial v0 的故障恢复仍受下述 Runtime Gate 约束：artifact publication 或 replica evidence
+在本地动作完成后若无法确认，会保持 `Unknown`/recovery-pending，不能自动重放物理动作。
+Node 已支持对完全相同 Execute 的 artifact-finalization-only resume，且不会重放 Local
+EAIOS；Node 重启看到 pending finalization marker 时会继续 fence，不会自行选择该 resume。
+`prepare-output` 也会在首次读取可变 source 前持久化 freeze fence；崩溃遗留 fence 会进入
+`ReconciliationRequired`，相同 Execute 不会再次冻结 source。Control/Orchestration 尚未根据
+recovery decision 自动触发 exact retry。稳定基线仍需 RT-G2 闭环这一决策，或由 RT-G3
+创建新的 physical attempt；在此之前只适用于有人值守、可人工停止的实验。
+
+Spatial v0 的已知后续工作：
+
+- 真机部署需要版本化的 Local EAIOS/Robonix/ROS mapping 和完整的
+  `build -> prepare-output -> publish -> stage -> import -> verify` system test；当前场景
+  只提供配置驱动的 Node fixture 和外部 HTTP workflow 假设。
+- Replica evidence v0 只有 Node/Mission 维度，下一版应补充 consumer `TaskRef`、execution
+  identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体 TaskExecution。
+- Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
+  identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
+
 ## MVP 定义待决事项
 
 当前决策状态和冻结清单由 [`mvp-definition.md`](mvp-definition.md) 统一记录：
@@ -39,6 +67,8 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 | RT-G4 | Durable cancellation | Runtime 持久化 CancelRequested、ack、deadline、retry 和 completion race；Mission cancel 会覆盖所有仍在运行的 execution，且不伪造物理终态 |
 | RT-G5 | Timer and liveness driving | Runtime timer 将 heartbeat/lease/session observation 转为 execution ambiguity evidence，并触发外部 Control reconciliation，而不是让 Running 无限悬挂 |
 | RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
+| RT-G7 | Capability readiness | Node/WebUI process health 与每个 canonical capability 的 readiness 分离；ROS discovery、Router 和 vendor service 缺失必须可观察，不能仅凭进程存活进入 Matching |
+| RT-G8 | Verification evidence | localization verification 需要 active map identity、mode、pose quality 与 coordinate-frame evidence；`has_map=true` 只保留为 smoke 证据 |
 
 Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
 dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得

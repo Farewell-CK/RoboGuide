@@ -57,6 +57,8 @@ Integration Server 使用 `SystemMonotonicClock` 为 Registration、Heartbeat、
 等事实记录统一的 process-local receive time，不以事件序号代替时间。该时钟不与 Node
 source clock 比较，也不声称分布式时钟同步。
 
-`IntegrationRuntimeBridge::execute_bound` 只从 Control-owned Execution Group 的当前
-Role assignment 派生 TaskRef 与 NodeId，然后生成现有 `ExecutionCommand` 并路由。未知、
-未绑定或 terminal Group 不得通过该入口执行；Scheduler 与 reservation authority 不变。
+`IntegrationRuntimeBridge::execute_task_bound` 从 Control-owned Execution Group 中显式指定的
+TaskExecution/Role assignment 派生 NodeId，然后生成现有 `ExecutionCommand` 并路由。未知、
+未绑定、非 Ready/Active TaskExecution、Adapted 或 terminal Group 不得通过该入口执行；旧
+`execute_bound` 仅保留给不含 TaskExecution 的 legacy single-Task Group，不能根据
+Mission-level Group 的兼容 `task_ref` 猜测任务；Scheduler 与 reservation authority 不变。

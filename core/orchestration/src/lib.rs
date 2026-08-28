@@ -209,6 +209,61 @@ impl MissionOrchestrator {
         self.executions.keys().cloned().collect()
     }
 
+    /// Validates restored Mission authority against Control before execution traffic is accepted.
+    pub fn validate_control_authority(
+        &self,
+        control: &ControlPlane,
+    ) -> Result<(), OrchestrationError> {
+        let orchestration_groups = self
+            .executions
+            .values()
+            .map(MissionExecution::group_id)
+            .collect::<BTreeSet<_>>();
+        for (mission_id, execution) in &self.executions {
+            control.validate_mission_group_plan(execution.group_id(), execution.plan())?;
+            let group = control
+                .group(execution.group_id())
+                .expect("Control plan validation requires the Group");
+            let lifecycle_is_aligned = match execution.lifecycle() {
+                MissionExecutionLifecycle::Accepted | MissionExecutionLifecycle::Running => {
+                    matches!(
+                        group.lifecycle(),
+                        GroupLifecycle::Bound
+                            | GroupLifecycle::Active
+                            | GroupLifecycle::Adapted
+                            | GroupLifecycle::Blocked
+                    )
+                }
+                MissionExecutionLifecycle::Completed => {
+                    group.lifecycle() == GroupLifecycle::Released
+                        && group
+                            .task_executions()
+                            .all(|task| task.lifecycle() == TaskExecutionLifecycle::Completed)
+                }
+                MissionExecutionLifecycle::Failed | MissionExecutionLifecycle::Cancelled => {
+                    group.lifecycle() == GroupLifecycle::Released
+                }
+            };
+            if !lifecycle_is_aligned {
+                return Err(OrchestrationError::Mission(format!(
+                    "restored Mission {mission_id} lifecycle disagrees with its Execution Group"
+                )));
+            }
+        }
+        for group_id in control.group_ids() {
+            let group = control
+                .group(&group_id)
+                .expect("Control returned its own Group identity");
+            if group.task_executions().next().is_some() && !orchestration_groups.contains(&group_id)
+            {
+                return Err(OrchestrationError::Mission(format!(
+                    "restored Mission-level Group {group_id} has no orchestration authority"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Returns all currently Ready Task identities in deterministic plan order.
     pub fn ready_tasks(&self, mission_id: &MissionId, control: &ControlPlane) -> Vec<TaskRef> {
         let Some(execution) = self.executions.get(mission_id) else {
@@ -687,6 +742,228 @@ mod tests {
                 .resource_scope(plan.task_graph().tasks()[1].requirement().roles()[0].role_id()),
             domain::ResourceBindingScope::Context
         );
+    }
+
+    /// Restored orchestration rejects missing Groups, truncated DAGs, and lifecycle disagreement.
+    #[test]
+    fn restored_orchestration_cross_checks_control_authority() {
+        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
+        let mission_id = plan.goal().mission_id().clone();
+        let group_id = ExecutionGroupId::new("group-restore-authority").expect("group id valid");
+        let correlation = CorrelationId::new("restore-authority-test").expect("trace valid");
+        let mut control = ControlPlane::new();
+        let mut events = InMemoryEventLog::new();
+        control
+            .create_mission_group(
+                group_id.clone(),
+                &plan,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("orphan fixture Group is created");
+        assert!(
+            MissionOrchestrator::new()
+                .validate_control_authority(&control)
+                .expect_err("orphan Mission Group must fail closed")
+                .to_string()
+                .contains("no orchestration authority")
+        );
+        let mut control = ControlPlane::new();
+        let mut orchestrator = MissionOrchestrator::new();
+        orchestrator
+            .submit(
+                plan,
+                group_id,
+                &mut control,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("Mission authority is created");
+        orchestrator
+            .validate_control_authority(&control)
+            .expect("matching projections validate");
+
+        let checkpoint = orchestrator
+            .checkpoint_json()
+            .expect("orchestration checkpoint serializes");
+        let mut missing_group: serde_json::Value =
+            serde_json::from_str(&checkpoint).expect("checkpoint is JSON");
+        missing_group[0]["group_id"] = serde_json::json!("group-other");
+        let restored = MissionOrchestrator::restore_json(&missing_group.to_string())
+            .expect("syntactically valid checkpoint restores before authority validation");
+        assert!(matches!(
+            restored.validate_control_authority(&control),
+            Err(OrchestrationError::Control(ControlError::UnknownGroup(_)))
+        ));
+
+        let mut truncated_dag: serde_json::Value =
+            serde_json::from_str(&checkpoint).expect("checkpoint is JSON");
+        truncated_dag[0]["plan"]["tasks"]
+            .as_array_mut()
+            .expect("tasks remain an array")
+            .pop();
+        let restored = MissionOrchestrator::restore_json(&truncated_dag.to_string())
+            .expect("shorter valid DAG restores before authority validation");
+        assert!(
+            restored
+                .validate_control_authority(&control)
+                .expect_err("Control must reject a truncated restored DAG")
+                .to_string()
+                .contains("Task DAG differs")
+        );
+
+        let mut false_terminal: serde_json::Value =
+            serde_json::from_str(&checkpoint).expect("checkpoint is JSON");
+        false_terminal[0]["lifecycle"] = serde_json::json!("Completed");
+        let restored = MissionOrchestrator::restore_json(&false_terminal.to_string())
+            .expect("known lifecycle restores before authority validation");
+        assert!(
+            restored
+                .validate_control_authority(&control)
+                .expect_err("unreleased Group must reject a completed Mission projection")
+                .to_string()
+                .contains(&mission_id.to_string())
+        );
+    }
+
+    /// Both directions of the Spatial Memory experiment remain valid MissionPlan v0.2 DAGs.
+    #[test]
+    fn distributed_spatial_memory_fixtures_decode_in_both_directions() {
+        let fixtures = [
+            include_str!(
+                "../../../scenarios/distributed-spatial-memory-v0.1/mission-a-build-publish.json"
+            ),
+            include_str!(
+                "../../../scenarios/distributed-spatial-memory-v0.1/mission-b-import-verify.json"
+            ),
+            include_str!(
+                "../../../scenarios/distributed-spatial-memory-v0.1/mission-b-build-publish.json"
+            ),
+            include_str!(
+                "../../../scenarios/distributed-spatial-memory-v0.1/mission-a-import-verify.json"
+            ),
+        ];
+        for fixture in fixtures {
+            let plan =
+                decode_mission_plan(fixture).expect("Spatial Memory fixture should validate");
+            assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_2);
+            assert_eq!(plan.contexts().len(), 1);
+            assert_eq!(plan.task_graph().tasks().len(), 2);
+        }
+    }
+
+    /// The four Spatial Memory fixtures bind to two distinct physical nodes under Control policy.
+    #[test]
+    fn distributed_spatial_memory_actor_placement_drives_two_node_assignments() {
+        let fixtures = [
+            (
+                include_str!(
+                    "../../../scenarios/distributed-spatial-memory-v0.1/mission-a-build-publish.json"
+                ),
+                "robot-dog-a",
+                "dog-a",
+            ),
+            (
+                include_str!(
+                    "../../../scenarios/distributed-spatial-memory-v0.1/mission-b-import-verify.json"
+                ),
+                "robot-dog-b",
+                "dog-b",
+            ),
+            (
+                include_str!(
+                    "../../../scenarios/distributed-spatial-memory-v0.1/mission-b-build-publish.json"
+                ),
+                "robot-dog-b",
+                "dog-b",
+            ),
+            (
+                include_str!(
+                    "../../../scenarios/distributed-spatial-memory-v0.1/mission-a-import-verify.json"
+                ),
+                "robot-dog-a",
+                "dog-a",
+            ),
+        ];
+        let contracts = [
+            CapabilityContractRef::new("spatial.map", "build", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.map", "publish", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.map", "import", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.localization", "verify", "v0")
+                .expect("contract valid"),
+        ];
+        for (fixture, actor, expected_node) in fixtures {
+            let plan = decode_mission_plan(fixture).expect("Spatial Memory fixture validates");
+            let mission_id = plan.goal().mission_id().clone();
+            let expected_node = NodeId::new(expected_node).expect("node id valid");
+            let timestamp = TimestampMs::new(1);
+            let correlation =
+                CorrelationId::new(format!("placement-{mission_id}")).expect("correlation valid");
+            let mut control = ControlPlane::new();
+            let mut state = InMemorySharedNodeState::new();
+            let mut events = InMemoryEventLog::new();
+            for (node_id, resource_id) in [("dog-a", "compute-a"), ("dog-b", "compute-b")] {
+                control
+                    .register_node(
+                        &mut state,
+                        registration(
+                            node_id,
+                            vec![
+                                Capability::new(CapabilityKind::Compute, true),
+                                Capability::new(CapabilityKind::Observation, true),
+                            ],
+                            contracts.to_vec(),
+                            vec![(
+                                ResourceId::new(resource_id).expect("resource id valid"),
+                                ResourceKind::Compute,
+                            )],
+                        ),
+                        NodeStatus::new(NodeHealth::Online, timestamp),
+                        timestamp,
+                        &correlation,
+                        &mut events,
+                    )
+                    .expect("symmetric Spatial node registers");
+            }
+            control
+                .set_actor_node_constraint(
+                    mission_id.clone(),
+                    domain::ActorId::new(actor).expect("actor id valid"),
+                    expected_node.clone(),
+                )
+                .expect("fixture placement constraint accepted");
+            let group_id =
+                ExecutionGroupId::new(format!("group-{mission_id}")).expect("group id valid");
+            let mut orchestrator = MissionOrchestrator::new();
+            orchestrator
+                .submit(
+                    plan,
+                    group_id,
+                    &mut control,
+                    timestamp,
+                    &correlation,
+                    &mut events,
+                )
+                .expect("fixture Mission accepted");
+            let ready = orchestrator.ready_tasks(&mission_id, &control);
+            assert_eq!(ready.len(), 1);
+            let task = orchestrator
+                .prepare_task(
+                    &mission_id,
+                    &ready[0],
+                    &state,
+                    &mut control,
+                    TimestampMs::new(2),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("first Spatial Task binds");
+            assert_eq!(task.assignments().len(), 1);
+            assert_eq!(task.assignments()[0].node_id(), &expected_node);
+        }
     }
 
     /// Malformed or legacy MissionPlan documents are rejected before Control receives them.

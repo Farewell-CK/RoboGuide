@@ -1,0 +1,432 @@
+schema = "roboguide.node-config/v0.3"
+node_id = "dog-b"
+server_endpoint = "http://127.0.0.1:50051"
+state_directory = "../../artifacts/distributed-spatial-memory-v0.1/dog-b/node-state"
+reconnect_delay_ms = 1000
+
+[artifacts]
+endpoint = "http://127.0.0.1:8090"
+cache_directory = "../../artifacts/distributed-spatial-memory-v0.1/dog-b/artifact-cache"
+max_artifact_bytes = 4294967296
+chunk_size_bytes = 1048576
+connect_timeout_ms = 3000
+read_timeout_ms = 30000
+
+[[artifacts.input_bindings]]
+id = "map-a-r1"
+map_id = "map-a"
+revision_id = "r1"
+target_path = "inputs/map-a-r1.bundle"
+
+[[artifacts.output_bindings]]
+id = "map-b-r1"
+map_id = "map-b"
+revision_id = "r1"
+source_path = "outputs/map-b-r1.bundle"
+media_type = "application/vnd.roboguide.spatial-map"
+format_name = "experimental-map-bundle"
+format_version = "v0.1"
+root_frame = "map"
+coordinate_convention = "enu"
+spatial_anchor_id = "anchor-lab"
+resolution_meters = 0.05
+
+[[local_systems]]
+id = "spatial-runtime"
+runtime_name = "local-spatial-eaios"
+runtime_version = "0.1.0"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "spatial-health"
+connection = "spatial-health-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "spatial-health-http"
+local_system = "spatial-runtime"
+endpoint = "http://127.0.0.1:18102"
+timeout_ms = 2000
+
+[[connections]]
+driver = "http"
+id = "spatial-http"
+local_system = "spatial-runtime"
+endpoint = "http://127.0.0.1:18102"
+timeout_ms = 30000
+
+[[resources]]
+id = "dog-b-spatial-compute"
+kind = "compute"
+capacity = 1
+owner = "spatial-runtime"
+
+[[capabilities]]
+contract = "spatial.map.build@v0"
+kind = "compute"
+owner = "spatial-runtime"
+required_resources = ["dog-b-spatial-compute"]
+local_locks = ["spatial-map-workflow"]
+artifact_operation = "prepare-output"
+
+[capabilities.workflow]
+poll_interval_ms = 250
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[capabilities.workflow.execute]]
+id = "dispatch"
+connection = "spatial-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[capabilities.workflow.execute.request]
+base = { operation = "build-map" }
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/artifact_path"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/artifacts/outputs/map-b-r1"
+
+[[capabilities.workflow.status]]
+id = "status"
+connection = "spatial-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "cancel"
+connection = "spatial-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities]]
+contract = "spatial.map.publish@v0"
+kind = "compute"
+owner = "spatial-runtime"
+required_resources = ["dog-b-spatial-compute"]
+local_locks = ["spatial-map-workflow"]
+artifact_operation = "publish"
+
+[capabilities.workflow]
+poll_interval_ms = 250
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[capabilities.workflow.execute]]
+id = "dispatch"
+connection = "spatial-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[capabilities.workflow.execute.request]
+base = { operation = "publish-map" }
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/artifact_path"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/artifacts/outputs/map-b-r1"
+
+[[capabilities.workflow.status]]
+id = "status"
+connection = "spatial-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "cancel"
+connection = "spatial-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities]]
+contract = "spatial.map.import@v0"
+kind = "compute"
+owner = "spatial-runtime"
+required_resources = ["dog-b-spatial-compute"]
+local_locks = ["spatial-map-workflow"]
+artifact_operation = "import"
+
+[capabilities.workflow]
+poll_interval_ms = 250
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[capabilities.workflow.execute]]
+id = "dispatch"
+connection = "spatial-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[capabilities.workflow.execute.request]
+base = { operation = "import-map" }
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/artifact_path"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/artifacts/inputs/map-a-r1"
+
+[[capabilities.workflow.status]]
+id = "status"
+connection = "spatial-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "cancel"
+connection = "spatial-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities]]
+contract = "spatial.localization.verify@v0"
+kind = "observation"
+owner = "spatial-runtime"
+required_resources = ["dog-b-spatial-compute"]
+local_locks = ["spatial-map-workflow"]
+artifact_operation = "verify"
+
+[capabilities.workflow]
+poll_interval_ms = 250
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[capabilities.workflow.execute]]
+id = "dispatch"
+connection = "spatial-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[capabilities.workflow.execute.request]
+base = { operation = "verify-localization" }
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/artifact_path"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/artifacts/inputs/map-a-r1"
+
+[[capabilities.workflow.status]]
+id = "status"
+connection = "spatial-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "cancel"
+connection = "spatial-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"

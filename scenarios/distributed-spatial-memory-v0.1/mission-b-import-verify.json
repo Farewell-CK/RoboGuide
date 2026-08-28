@@ -1,0 +1,57 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.2",
+  "mission": {
+    "id": "mission-map-b-consume",
+    "objective": "dog-b imports and verifies map-a revision r1"
+  },
+  "contexts": [
+    {
+      "id": "context-map-b",
+      "roles": [{"id": "dog-b", "actor": "robot-dog-b"}]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "import-map-a",
+      "description": "Import the published map-a revision r1",
+      "context_id": "context-map-b",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "import-map-role",
+          "actor": "robot-dog-b",
+          "capability": "compute",
+          "contract": {"namespace": "spatial.map", "name": "import", "version": "v0"},
+          "resource_kind": "compute",
+          "context_role": "dog-b",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "spatial.map", "name": "import", "version": "v0"},
+            "parameters": {"map_id": "map-a", "revision_id": "r1", "artifact_slot": "map-a-r1", "artifact_operation": "import", "spatial_anchor_id": "anchor-lab"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "verify-map-a",
+      "description": "Verify localization against the fixed laboratory anchor",
+      "context_id": "context-map-b",
+      "depends_on": ["import-map-a"],
+      "roles": [
+        {
+          "id": "verify-map-role",
+          "actor": "robot-dog-b",
+          "capability": "observation",
+          "contract": {"namespace": "spatial.localization", "name": "verify", "version": "v0"},
+          "resource_kind": "compute",
+          "context_role": "dog-b",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "spatial.localization", "name": "verify", "version": "v0"},
+            "parameters": {"map_id": "map-a", "revision_id": "r1", "artifact_slot": "map-a-r1", "artifact_operation": "verify", "spatial_anchor_id": "anchor-lab"}
+          }
+        }
+      ]
+    }
+  ]
+}

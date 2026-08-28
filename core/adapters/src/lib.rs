@@ -4,5 +4,6 @@
 
 //! Integration adapters that translate transport and Local EAIOS details at the core boundary.
 
+pub mod artifact;
 pub mod bridge;
 pub mod http;

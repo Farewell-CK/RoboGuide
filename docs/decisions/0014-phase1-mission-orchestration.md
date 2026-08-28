@@ -25,7 +25,11 @@ Context-scoped 资源由 `(Mission, Context, ContextRole)` 持有，并在 Group
 中独立保存。Allocation State 只是这一权威的可观测投影。
 
 Integration Server 提供 HTTP `POST/GET /v1/missions` 和 `POST /v1/missions/{id}/cancel`，
-并将 Orchestrator 与 Integration checkpoint 以 `roboguide.controller-checkpoint/v5` 原子保存。
+并将 Orchestrator 与 Integration checkpoint 以外层
+`roboguide.controller-checkpoint/v7` 原子保存（其中嵌入 Integration 的 v6 projection）。
+恢复时必须在接受流量前交叉验证 Orchestrator 的完整 MissionPlan、Mission lifecycle 与
+Control 中对应 Group 的 MissionId、TaskExecution DAG、continuity metadata 和 lifecycle；
+两个独立恢复投影只要有一处不一致就 fail-closed。
 
 ## Consequences
 

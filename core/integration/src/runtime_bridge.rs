@@ -15,11 +15,14 @@ use runtime::{
     ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
 };
 use state::InMemorySharedNodeState;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v4";
+///
+/// Version 6 records structured Node owner maps as arrays so a registered node can
+/// be checkpointed by serde_json without relying on non-string object keys.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v6";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -310,7 +313,10 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
-    /// Builds and routes a command only from a Control-owned bound Group role.
+    /// Builds and routes a command for a legacy single-Task Group role.
+    ///
+    /// Mission-level Groups must use [`Self::execute_task_bound`] so Integration never guesses a
+    /// Task identity from the compatibility `ExecutionGroup::task_ref` field.
     pub fn execute_bound(
         &mut self,
         execution_id: String,
@@ -319,13 +325,15 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         intent: domain::ExecutionIntent,
         correlation_id: CorrelationId,
     ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
-        let task_ref = self
-            .control
-            .group(group_id)
-            .map(|group| group.task_ref().clone())
-            .ok_or_else(|| {
-                IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
-            })?;
+        let group = self.control.group(group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
+        })?;
+        if group.task_executions().next().is_some() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "Mission-level Group dispatch requires an explicit TaskRef".to_string(),
+            ));
+        }
+        let task_ref = group.task_ref().clone();
         self.execute_task_bound(
             execution_id,
             group_id,
@@ -351,44 +359,70 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         })?;
         if !matches!(
             group.lifecycle(),
-            control::GroupLifecycle::Bound
-                | control::GroupLifecycle::Active
-                | control::GroupLifecycle::Adapted
+            control::GroupLifecycle::Bound | control::GroupLifecycle::Active
         ) {
             return Err(IntegrationRuntimeError::Protocol(
                 "execution group is not bound".to_string(),
             ));
         }
-        let assignment =
-            if task_ref == group.task_ref() && group.task_executions().next().is_none() {
-                group
-                    .assignments()
-                    .iter()
-                    .find(|assignment| assignment.role_id() == role_id)
-            } else {
-                group
-                    .task_execution(task_ref)
-                    .into_iter()
-                    .flat_map(|execution| execution.assignments())
-                    .find(|assignment| assignment.role_id() == role_id)
+        let (node_id, resource_ids) = if group.task_executions().next().is_none() {
+            if task_ref != group.task_ref() {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "legacy Group dispatch TaskRef does not match the Group".to_string(),
+                ));
             }
-            .ok_or_else(|| {
-                IntegrationRuntimeError::Protocol("group role is not bound".to_string())
+            let assignment = group
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == role_id)
+                .ok_or_else(|| {
+                    IntegrationRuntimeError::Protocol("group role is not bound".to_string())
+                })?;
+            (
+                assignment.node_id().clone(),
+                assignment.resource_ids().to_vec(),
+            )
+        } else {
+            let execution = group.task_execution(task_ref).ok_or_else(|| {
+                IntegrationRuntimeError::Protocol(
+                    "TaskExecution is absent from the Mission-level Group".to_string(),
+                )
             })?;
+            if !matches!(
+                execution.lifecycle(),
+                domain::TaskExecutionLifecycle::Ready | domain::TaskExecutionLifecycle::Active
+            ) {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "TaskExecution is not dispatchable".to_string(),
+                ));
+            }
+            if !task_assignments_are_complete(execution) {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "TaskExecution bindings are incomplete".to_string(),
+                ));
+            }
+            let assignment = execution
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == role_id)
+                .ok_or_else(|| {
+                    IntegrationRuntimeError::Protocol("group role is not bound".to_string())
+                })?;
+            (
+                assignment.node_id().clone(),
+                assignment.resource_ids().to_vec(),
+            )
+        };
         let command = ExecutionCommand::new(
             task_ref.mission_id().clone(),
             task_ref.task_id().clone(),
             group_id.clone(),
             role_id.clone(),
-            assignment.node_id().clone(),
+            node_id,
             intent,
             correlation_id,
         );
-        self.execute(
-            execution_id,
-            command.clone(),
-            assignment.resource_ids().to_vec(),
-        )?;
+        self.execute(execution_id, command.clone(), resource_ids)?;
         Ok(command)
     }
 
@@ -440,7 +474,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             };
             for task in group.task_executions().filter(|task| {
                 task.lifecycle() == domain::TaskExecutionLifecycle::Active
-                    && !task.assignments().is_empty()
+                    && task_assignments_are_complete(task)
             }) {
                 let role_ids = task
                     .assignments()
@@ -499,6 +533,17 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         }
         Ok(())
     }
+}
+
+/// Returns whether committed assignments exactly and uniquely cover a TaskExecution's roles.
+fn task_assignments_are_complete(execution: &domain::TaskExecution) -> bool {
+    let expected_roles = execution.role_scopes().keys().collect::<BTreeSet<_>>();
+    let assigned_roles = execution
+        .assignments()
+        .iter()
+        .map(|assignment| assignment.role_id())
+        .collect::<BTreeSet<_>>();
+    expected_roles == assigned_roles && execution.assignments().len() == assigned_roles.len()
 }
 
 /// Persists canonical Runtime facts without granting Integration lifecycle authority.
@@ -782,6 +827,39 @@ mod tests {
     use ports::SharedNodeStateReader;
     use testkit::InMemoryEventLog;
 
+    /// Builds one complete MissionPlan so integration tests use the production Group authority.
+    fn single_task_plan(
+        requirement: domain::TaskRequirement,
+        intent: domain::ExecutionIntent,
+    ) -> domain::MissionPlan {
+        let mission_id = requirement.mission_id().clone();
+        let intents = requirement
+            .roles()
+            .iter()
+            .map(|role| (role.role_id().clone(), intent.clone()))
+            .collect();
+        let context_id = domain::CoordinationContextId::new("integration-test-context")
+            .expect("context identity is valid");
+        let task = domain::PlannedTask::new(
+            "exercise integration runtime",
+            requirement,
+            intents,
+            Vec::new(),
+            domain::TaskContinuity::new(context_id.clone(), BTreeMap::new(), BTreeMap::new()),
+        )
+        .expect("test Task is valid");
+        domain::MissionPlan::new(
+            domain::MissionGoal::new(mission_id.clone(), "exercise integration runtime")
+                .expect("test Mission goal is valid"),
+            domain::TaskGraph::new(mission_id, vec![task]).expect("test Task Graph is valid"),
+            vec![
+                domain::CoordinationContext::new(context_id, Vec::new())
+                    .expect("test Context is valid"),
+            ],
+        )
+        .expect("test MissionPlan is valid")
+    }
+
     /// Registration and heartbeat facts enter existing Control lease authority and Shared State.
     #[test]
     fn integration_facts_update_control_and_shared_state() {
@@ -909,6 +987,18 @@ mod tests {
         assert_eq!(updated.reported_status_received_at(), TimestampMs::new(1));
         assert_eq!(updated.liveness().observed_at(), TimestampMs::new(1));
         assert_eq!(updated.registration().local_runtime().version(), "2");
+        bridge
+            .checkpoint_json()
+            .expect("registered node owner maps must checkpoint");
+    }
+
+    /// Parses hierarchical canonical contracts with the same last-dot rule as Node Config.
+    #[test]
+    fn canonical_contract_parser_round_trips_hierarchical_namespace() {
+        let contract = parse_contract("spatial.map.build@v0").expect("contract parses");
+        assert_eq!(contract.namespace(), "spatial.map");
+        assert_eq!(contract.name(), "build");
+        assert_eq!(contract.to_string(), "spatial.map.build@v0");
     }
 
     /// Bound Group assignments are the only source of NodeId for Runtime routing.
@@ -1287,9 +1377,9 @@ mod tests {
         ));
     }
 
-    /// Group aggregation ignores superseded execution facts for the same role.
+    /// Group aggregation and dispatch validation follow the current TaskExecution.
     #[test]
-    fn group_lifecycle_uses_current_role_execution() {
+    fn mission_dispatch_and_outcomes_use_current_task_execution() {
         let now = TimestampMs::new(0);
         let correlation = CorrelationId::new("current-execution-test").expect("correlation valid");
         let contract =
@@ -1328,6 +1418,27 @@ mod tests {
             )],
         )
         .expect("requirement valid");
+        let intent = domain::ExecutionIntent::new(contract, BTreeMap::new()).expect("intent valid");
+        let mission_plan = single_task_plan(requirement.clone(), intent.clone());
+        let group_id = domain::ExecutionGroupId::new("group-a").expect("group valid");
+        control
+            .create_mission_group(
+                group_id.clone(),
+                &mission_plan,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Mission Group registers");
+        control
+            .ready_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task becomes ready");
         let candidates = control
             .match_capabilities(&state, &requirement, now, &correlation, &mut events)
             .expect("matching succeeds");
@@ -1349,25 +1460,46 @@ mod tests {
         let committed = control
             .commit(&proposal, now, &correlation, &mut events)
             .expect("commit succeeds");
-        let group_id = domain::ExecutionGroupId::new("group-a").expect("group valid");
         control
-            .create_group(group_id.clone(), &committed, now, &correlation, &mut events)
-            .expect("group binds");
+            .bind_task_execution_with_requirement(
+                &group_id,
+                &committed,
+                &requirement,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task binds");
         control
-            .activate_group(&group_id, now, &correlation, &mut events)
-            .expect("group activates");
-        let intent = domain::ExecutionIntent::new(contract, BTreeMap::new()).expect("intent valid");
+            .activate_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task activates");
         let command = ExecutionCommand::new(
             domain::MissionId::new("mission-a").expect("mission valid"),
             domain::TaskId::new("task-a").expect("task valid"),
             group_id.clone(),
             role_id.clone(),
             NodeId::new("node-a").expect("node valid"),
-            intent,
+            intent.clone(),
             correlation.clone(),
         );
         let mut bridge =
             IntegrationRuntimeBridge::new(control, state, events, GrpcNodeRouter::default());
+        assert!(matches!(
+            bridge.execute_bound(
+                "execution-ambiguous".to_string(),
+                &group_id,
+                &role_id,
+                intent.clone(),
+                correlation.clone(),
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("explicit TaskRef")
+        ));
         bridge
             .runtime
             .record_dispatched("execution-old".to_string(), command.clone(), Vec::new())
@@ -1416,7 +1548,11 @@ mod tests {
                 "",
             )
             .expect("current completion records");
-        assert!(bridge.terminal_task_outcomes().is_empty());
+        let outcomes = bridge.terminal_task_outcomes();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].group_id(), &group_id);
+        assert_eq!(outcomes[0].task_ref(), requirement.task_ref());
+        assert_eq!(outcomes[0].result(), ObservedTaskResult::Succeeded);
         assert_eq!(
             bridge
                 .control()
@@ -1425,6 +1561,248 @@ mod tests {
                 .lifecycle(),
             control::GroupLifecycle::Active
         );
+        {
+            let (control, events) = (&mut bridge.control, &mut bridge.events);
+            control
+                .complete_task_execution(
+                    &group_id,
+                    requirement.task_ref(),
+                    now,
+                    &correlation,
+                    events,
+                )
+                .expect("Task completion records");
+        }
+        assert!(matches!(
+            bridge.execute_task_bound(
+                "execution-after-completion".to_string(),
+                &group_id,
+                requirement.task_ref(),
+                &role_id,
+                intent,
+                correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("not dispatchable")
+        ));
+    }
+
+    /// Partial recovery cannot dispatch or complete a multi-role Task from its surviving role.
+    #[test]
+    fn incomplete_multi_role_task_does_not_dispatch_or_report_terminal_outcome() {
+        let now = TimestampMs::new(0);
+        let correlation = CorrelationId::new("partial-multi-role-test").expect("correlation valid");
+        let contract =
+            CapabilityContractRef::new("mobility", "move", "v1").expect("contract valid");
+        let node_id = NodeId::new("node-a").expect("node valid");
+        let registration = domain::NodeRegistration::new_with_contracts(
+            node_id.clone(),
+            LocalRuntime::new("runtime", "1").expect("runtime valid"),
+            NodeContractVersion::v0_1(),
+            vec![Capability::new(CapabilityKind::Mobility, true)],
+            vec![contract.clone()],
+            Vec::new(),
+        );
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = InMemoryEventLog::new();
+        control
+            .register_node(
+                &mut state,
+                registration,
+                NodeStatus::new(NodeHealth::Online, now),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("node registers");
+        let retained_role = domain::RoleId::new("carrier").expect("role valid");
+        let released_role = domain::RoleId::new("observer").expect("role valid");
+        let requirement = domain::TaskRequirement::new(
+            domain::MissionId::new("mission-multi").expect("mission valid"),
+            domain::TaskId::new("task-multi").expect("task valid"),
+            vec![
+                domain::RoleRequirement::new_with_actor_and_contract(
+                    retained_role.clone(),
+                    domain::ActorId::new("carrier").expect("actor valid"),
+                    CapabilityKind::Mobility,
+                    contract.clone(),
+                    None,
+                ),
+                domain::RoleRequirement::new_with_actor_and_contract(
+                    released_role.clone(),
+                    domain::ActorId::new("observer").expect("actor valid"),
+                    CapabilityKind::Mobility,
+                    contract.clone(),
+                    None,
+                ),
+            ],
+        )
+        .expect("requirement valid");
+        let intent = domain::ExecutionIntent::new(contract, BTreeMap::new()).expect("intent valid");
+        let mission_plan = single_task_plan(requirement.clone(), intent.clone());
+        let group_id = domain::ExecutionGroupId::new("group-multi").expect("group valid");
+        control
+            .create_mission_group(
+                group_id.clone(),
+                &mission_plan,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Mission Group registers");
+        control
+            .ready_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task becomes ready");
+        let candidates = control
+            .match_capabilities(&state, &requirement, now, &correlation, &mut events)
+            .expect("matching succeeds");
+        let proposal = control
+            .propose(
+                &state,
+                &requirement,
+                &candidates,
+                vec![
+                    domain::RoleAssignment::new(retained_role.clone(), node_id.clone(), Vec::new()),
+                    domain::RoleAssignment::new(released_role.clone(), node_id.clone(), Vec::new()),
+                ],
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("proposal succeeds");
+        let committed = control
+            .commit(&proposal, now, &correlation, &mut events)
+            .expect("commit succeeds");
+        control
+            .bind_task_execution_with_requirement(
+                &group_id,
+                &committed,
+                &requirement,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task binds");
+        control
+            .activate_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Task activates");
+        control
+            .block_group(
+                &group_id,
+                "observer unavailable",
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("Group blocks for recovery");
+        control
+            .release_task_role_binding(
+                &group_id,
+                requirement.task_ref(),
+                &released_role,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .expect("failed role releases");
+        let execution = control
+            .group(&group_id)
+            .and_then(|group| group.task_execution(requirement.task_ref()))
+            .expect("Task remains registered");
+        assert_eq!(
+            execution.lifecycle(),
+            domain::TaskExecutionLifecycle::Active
+        );
+        assert!(!task_assignments_are_complete(execution));
+
+        let command = ExecutionCommand::new(
+            requirement.mission_id().clone(),
+            requirement.task_id().clone(),
+            group_id.clone(),
+            retained_role.clone(),
+            node_id.clone(),
+            intent.clone(),
+            correlation.clone(),
+        );
+        let mut bridge =
+            IntegrationRuntimeBridge::new(control, state, events, GrpcNodeRouter::default());
+        bridge
+            .runtime
+            .record_dispatched("execution-retained".to_string(), command, Vec::new())
+            .expect("retained role execution records");
+        bridge
+            .runtime
+            .observe_execution(
+                "execution-retained",
+                node_id,
+                1,
+                ExecutionStatus::Completed,
+                "",
+            )
+            .expect("retained role completion records");
+
+        assert!(bridge.terminal_task_outcomes().is_empty());
+        assert!(matches!(
+            bridge.execute_task_bound(
+                "execution-during-recovery".to_string(),
+                &group_id,
+                requirement.task_ref(),
+                &retained_role,
+                intent,
+                correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("not bound")
+        ));
+        assert_eq!(bridge.execution_status("execution-during-recovery"), None);
+    }
+
+    /// Assignment completeness requires exact role coverage without duplicate role entries.
+    #[test]
+    fn task_assignment_completeness_rejects_missing_and_duplicate_roles() {
+        let first_role = domain::RoleId::new("first").expect("role valid");
+        let second_role = domain::RoleId::new("second").expect("role valid");
+        let node_id = NodeId::new("node-a").expect("node valid");
+        let execution = domain::TaskExecution::new(
+            domain::TaskRef::new(
+                domain::MissionId::new("mission-coverage").expect("mission valid"),
+                domain::TaskId::new("task-coverage").expect("task valid"),
+            ),
+            domain::CoordinationContextId::new("context-coverage").expect("context valid"),
+            BTreeMap::new(),
+            BTreeMap::from([
+                (first_role.clone(), domain::ResourceBindingScope::Task),
+                (second_role.clone(), domain::ResourceBindingScope::Task),
+            ]),
+        );
+        let first_assignment =
+            domain::RoleAssignment::new(first_role.clone(), node_id.clone(), Vec::new());
+        let second_assignment =
+            domain::RoleAssignment::new(second_role, node_id.clone(), Vec::new());
+
+        assert!(task_assignments_are_complete(&execution.with_assignments(
+            vec![first_assignment.clone(), second_assignment]
+        )));
+        assert!(!task_assignments_are_complete(
+            &execution.with_assignments(vec![first_assignment.clone()])
+        ));
+        assert!(!task_assignments_are_complete(&execution.with_assignments(
+            vec![
+                first_assignment.clone(),
+                domain::RoleAssignment::new(first_role, node_id, Vec::new()),
+            ]
+        )));
     }
 
     /// Builds one reconnect snapshot event with a validated execution phase.

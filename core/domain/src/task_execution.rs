@@ -167,6 +167,11 @@ impl TaskExecution {
         self.context_roles.get(role_id)
     }
 
+    /// Returns every Task-role to ContextRole continuity mapping.
+    pub const fn context_roles(&self) -> &BTreeMap<RoleId, ContextRoleId> {
+        &self.context_roles
+    }
+
     /// Returns a copy with the supplied committed role bindings.
     pub fn with_assignments(&self, assignments: Vec<RoleAssignment>) -> Self {
         let mut copy = self.clone();

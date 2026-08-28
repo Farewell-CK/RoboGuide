@@ -16,6 +16,7 @@ mod context;
 mod execution;
 mod mission_plan;
 mod node_registration;
+mod spatial_memory;
 mod task_execution;
 
 pub use actor::{ActorBinding, MissionActor};
@@ -26,6 +27,11 @@ pub use allocation::{
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
+pub use spatial_memory::{
+    ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
+    MapReplicaSnapshot, MapReplicaStatus, MapRevisionId, MapRevisionSelector, MapRevisionSnapshot,
+    MapRevisionStatus, SPATIAL_MEMORY_SCHEMA_V0_1, SpatialAnchorId,
+};
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 
 /// Version identifier for the first cross-language Mission Plan contract.
@@ -66,6 +72,11 @@ pub enum DomainError {
         /// Stable diagnostic reason suitable for adapter and test evidence.
         reason: String,
     },
+    /// A Spatial Memory value or catalog transition violated an invariant.
+    InvalidSpatialMemory {
+        /// Stable diagnostic reason suitable for State and adapter evidence.
+        reason: String,
+    },
 }
 
 impl Display for DomainError {
@@ -77,6 +88,9 @@ impl Display for DomainError {
             Self::LeaseExpired { kind } => write!(formatter, "{kind} lease has expired"),
             Self::InvalidMissionPlan { reason } => {
                 write!(formatter, "invalid mission plan: {reason}")
+            }
+            Self::InvalidSpatialMemory { reason } => {
+                write!(formatter, "invalid spatial memory value: {reason}")
             }
         }
     }
@@ -528,7 +542,7 @@ pub struct TaskRequirement {
 }
 
 impl TaskRequirement {
-    /// Creates a task requirement with at least one role.
+    /// Creates a task requirement with at least one uniquely identified role.
     pub fn new(
         mission_id: MissionId,
         task_id: TaskId,
@@ -536,6 +550,16 @@ impl TaskRequirement {
     ) -> Result<Self, DomainError> {
         if roles.is_empty() {
             return Err(DomainError::EmptyValue { kind: "task roles" });
+        }
+        let mut role_ids = BTreeSet::new();
+        if let Some(duplicate) = roles
+            .iter()
+            .map(RoleRequirement::role_id)
+            .find(|role_id| !role_ids.insert((*role_id).clone()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("duplicate role id {duplicate}"),
+            });
         }
         Ok(Self {
             task_ref: TaskRef::new(mission_id, task_id),
@@ -1126,6 +1150,11 @@ impl NodeLivenessObservation {
 }
 
 /// The local runtime and resources a node exposes to DEAIOS.
+///
+/// Owner maps are encoded as arrays of typed entries instead of JSON objects.  A
+/// `CapabilityContractRef` is a structured value rather than a scalar string, so
+/// serde_json cannot use it directly as an object key during controller checkpoint
+/// serialization.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeRegistration {
     /// Logical node identity exposed to DEAIOS.
@@ -1139,13 +1168,77 @@ pub struct NodeRegistration {
     /// Canonical capability contracts executable through this node's adapter boundary.
     supported_contracts: Vec<CapabilityContractRef>,
     /// Unique local-system owner of each canonical contract.
+    #[serde(with = "capability_owner_map_serde")]
     capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
     resources: Vec<Resource>,
     /// Unique local-system owner of each node-wide resource.
+    #[serde(with = "resource_owner_map_serde")]
     resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+}
+
+/// Encodes structured capability-contract owner keys as checkpoint-safe records.
+mod capability_owner_map_serde {
+    use super::{CapabilityContractRef, LocalSystemId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each capability owner mapping as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, LocalSystemId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores capability owner mappings and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, LocalSystemId>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, LocalSystemId)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, owner) in entries {
+            if values.insert(contract, owner).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability owner contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes resource owner mappings as checkpoint-safe records.
+mod resource_owner_map_serde {
+    use super::{LocalSystemId, ResourceId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each resource owner mapping as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<ResourceId, LocalSystemId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores resource owner mappings and rejects duplicate resource identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<ResourceId, LocalSystemId>, D::Error> {
+        let entries: Vec<(ResourceId, LocalSystemId)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (resource, owner) in entries {
+            if values.insert(resource, owner).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate resource owner resource",
+                ));
+            }
+        }
+        Ok(values)
+    }
 }
 
 impl NodeRegistration {
@@ -1522,6 +1615,56 @@ impl ExecutionCommand {
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// A map revision manifest was declared before its bytes were published.
+    MapArtifactDeclared {
+        /// Immutable map manifest retained by the catalog.
+        manifest: MapArtifactManifest,
+    },
+    /// An immutable map artifact became available from the central artifact store.
+    MapArtifactPublished {
+        /// Immutable map manifest retained by the catalog.
+        manifest: MapArtifactManifest,
+    },
+    /// A node began staging an immutable map artifact locally.
+    MapArtifactStaged {
+        /// Immutable map manifest being staged.
+        manifest: MapArtifactManifest,
+        /// Node that is staging the artifact.
+        node_id: NodeId,
+        /// Mission that requested the staging operation.
+        mission_id: MissionId,
+    },
+    /// A node imported an immutable map artifact into its local cache.
+    MapArtifactImported {
+        /// Immutable map manifest imported by the node.
+        manifest: MapArtifactManifest,
+        /// Node that imported the artifact.
+        node_id: NodeId,
+        /// Mission that requested the import operation.
+        mission_id: MissionId,
+    },
+    /// A node verified an imported artifact and its declared spatial metadata.
+    MapLocalizationVerified {
+        /// Resolved immutable artifact reference that was verified.
+        artifact: MapArtifactRef,
+        /// Node that performed the verification.
+        node_id: NodeId,
+        /// Mission that requested the verification operation.
+        mission_id: MissionId,
+        /// Anchor used by the localization check.
+        anchor_id: SpatialAnchorId,
+    },
+    /// A node rejected an artifact or could not verify its spatial metadata.
+    MapArtifactRejected {
+        /// Resolved immutable artifact reference that was rejected.
+        artifact: MapArtifactRef,
+        /// Node that rejected the artifact.
+        node_id: NodeId,
+        /// Mission that requested the import or verification operation.
+        mission_id: MissionId,
+        /// Stable diagnostic retained as evidence.
+        reason: String,
+    },
     /// A node registration became visible to control.
     NodeRegistered {
         /// Registered node identity.
@@ -1881,6 +2024,30 @@ impl EventRecord {
 mod tests {
     use super::*;
 
+    /// Rejects ambiguous Task role declarations before Control persists role authority.
+    #[test]
+    fn task_requirement_rejects_duplicate_role_identity() {
+        let mission_id =
+            MissionId::new("mission-duplicate-role").expect("test mission identity must be valid");
+        let task_id = TaskId::new("task-duplicate-role").expect("test task identity must be valid");
+        let role_id = RoleId::new("mapper").expect("test role identity must be valid");
+        let error = TaskRequirement::new(
+            mission_id,
+            task_id,
+            vec![
+                RoleRequirement::new(role_id.clone(), CapabilityKind::Observation, None),
+                RoleRequirement::new(role_id, CapabilityKind::Compute, None),
+            ],
+        )
+        .expect_err("duplicate role identities must be rejected");
+
+        assert!(matches!(
+            error,
+            DomainError::InvalidMissionPlan { reason }
+                if reason == "duplicate role id mapper"
+        ));
+    }
+
     /// Builds one valid task with no dependencies for graph invariant tests.
     fn task(mission_id: &MissionId, task_id: &str, dependencies: Vec<TaskId>) -> PlannedTask {
         let task_id = TaskId::new(task_id).expect("test task id must be valid");
@@ -1983,5 +2150,40 @@ mod tests {
             ),
             Err(DomainError::InvalidMissionPlan { .. })
         ));
+    }
+
+    /// Node owner maps remain serializable when a checkpoint contains structured contract keys.
+    #[test]
+    fn node_registration_round_trips_owner_maps() {
+        let node_id = NodeId::new("node-checkpoint").expect("node id must be valid");
+        let local_system_id = LocalSystemId::new("mapping").expect("local system id is valid");
+        let contract = CapabilityContractRef::new("spatial.map", "build", "v0")
+            .expect("contract must be valid");
+        let resource_id = ResourceId::new("mapping-compute").expect("resource id is valid");
+        let registration = NodeRegistration::new_with_local_systems(
+            node_id,
+            vec![LocalSystemDescriptor::new(
+                local_system_id.clone(),
+                LocalRuntime::new("robonix", "0.1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_2(),
+            vec![Capability::new(CapabilityKind::Compute, true)],
+            BTreeMap::from([(contract.clone(), local_system_id.clone())]),
+            Vec::new(),
+            vec![
+                Resource::new(resource_id.clone(), ResourceKind::Compute, 1)
+                    .expect("resource is valid"),
+            ],
+            BTreeMap::from([(resource_id.clone(), local_system_id.clone())]),
+        )
+        .expect("registration is valid");
+
+        let encoded = serde_json::to_string(&registration).expect("registration serializes");
+        let decoded: NodeRegistration =
+            serde_json::from_str(&encoded).expect("registration deserializes");
+        assert_eq!(decoded, registration);
+        assert!(encoded.contains("\"capability_owners\":[["));
+        assert!(encoded.contains("\"resource_owners\":[["));
     }
 }

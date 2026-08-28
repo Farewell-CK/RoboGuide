@@ -5,7 +5,7 @@
 //! nodes; callers make a bootstrap scheduler choice before Control validates a
 //! proposal, commits resources, and rebinds the existing Group.
 
-use crate::ControlError;
+use crate::{ControlError, ExecutionGroup};
 use domain::{
     ExecutionGroupId, NodeId, NodeStateSnapshot, ResourceId, RoleId, RoleRequirement, TaskRef,
     TaskRequirement,
@@ -299,17 +299,18 @@ pub enum RecoveryOutcome {
 }
 
 /// Resolves one role from the task identity carried by recovery context.
-pub(super) fn recovery_role<'a>(
-    requirement: &'a TaskRequirement,
+pub(super) fn recovery_role(
+    group: &ExecutionGroup,
+    requirement: &TaskRequirement,
     task_ref: &TaskRef,
     role_id: &RoleId,
-) -> Result<&'a RoleRequirement, ControlError> {
+) -> Result<RoleRequirement, ControlError> {
     if requirement.task_ref() != task_ref {
         return Err(ControlError::InvalidProposal(
             "recovery context belongs to another task".to_string(),
         ));
     }
-    requirement
+    let supplied = requirement
         .roles()
         .iter()
         .find(|role| role.role_id() == role_id)
@@ -317,7 +318,17 @@ pub(super) fn recovery_role<'a>(
             ControlError::InvalidProposal(format!(
                 "task requirement has no recovery role {role_id}"
             ))
-        })
+        })?;
+    let Some(authoritative) = group.role_requirement(task_ref, role_id) else {
+        return Ok(supplied.clone());
+    };
+    if authoritative != supplied {
+        return Err(ControlError::InvalidProposal(
+            "recovery requirement differs from authoritative Execution Group role metadata"
+                .to_string(),
+        ));
+    }
+    Ok(authoritative.clone())
 }
 
 /// Validates proposed resources against one node and role without reserving them.

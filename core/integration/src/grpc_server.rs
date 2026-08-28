@@ -191,6 +191,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
             if let Err(status) =
                 run_grpc_session(inbound, outbound.clone(), router, events, identity).await
             {
+                eprintln!("RoboGuide gRPC node session {identity} ended: {status}");
                 let _ = outbound.send(Err(status));
             }
         });
@@ -529,7 +530,14 @@ fn valid_contract_identity(contract: &str) -> bool {
             !namespace.trim().is_empty()
                 && !name.trim().is_empty()
                 && !version.trim().is_empty()
+                && namespace
+                    .split('.')
+                    .all(|segment| !segment.is_empty() && !segment.chars().any(char::is_whitespace))
+                && !namespace.contains('@')
+                && !name.contains(['.', '@'])
+                && !name.chars().any(char::is_whitespace)
                 && !version.contains('@')
+                && !version.chars().any(char::is_whitespace)
         })
 }
 

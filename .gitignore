@@ -22,3 +22,6 @@ artifacts/
 results/
 logs/
 /config/node-state/
+/config/artifact-cache/
+/roboguide-artifacts/
+/roboguide-controller.sqlite3.writer.lock

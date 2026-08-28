@@ -25,6 +25,13 @@
 - [`decisions/0008-integration-server-node-connector.md`](decisions/0008-integration-server-node-connector.md)：Integration Server 与 Node Connector 长连接协议。
 - [`decisions/0009-node-service-grpc-protocol.md`](decisions/0009-node-service-grpc-protocol.md)：正式 gRPC Node Protocol 与节点侧 Node Service/Adapter 边界。
 - [`decisions/0010-single-node-service-local-integration-engine.md`](decisions/0010-single-node-service-local-integration-engine.md)：单一 Node Service、声明式 Local Integration Engine 与本地执行日志。
+- [`decisions/0011-event-evidence-codec.md`](decisions/0011-event-evidence-codec.md)：可持久化、可重放的结构化事件 evidence codec。
+- [`decisions/0012-controller-checkpoint-recovery.md`](decisions/0012-controller-checkpoint-recovery.md)：Controller projection checkpoint 与保守恢复。
+- [`decisions/0013-mission-level-execution-group.md`](decisions/0013-mission-level-execution-group.md)：Mission-level Group 与多 TaskExecution 生命周期。
+- [`decisions/0014-phase1-mission-orchestration.md`](decisions/0014-phase1-mission-orchestration.md)：完整 MissionPlan/DAG 编排与显式 Mission completion。
+- [`decisions/0015-runtime-execution-boundary.md`](decisions/0015-runtime-execution-boundary.md)：Runtime live execution authority 与 Integration 边界。
+- [`decisions/0016-distributed-spatial-memory.md`](decisions/0016-distributed-spatial-memory.md)：不可变地图 Artifact、Catalog 与双节点共享切片。
+- [`decisions/0017-canonical-capability-contract-identity.md`](decisions/0017-canonical-capability-contract-identity.md)：可逆的 canonical capability 字符串与结构化身份规则。
 
 ## 历史架构
 

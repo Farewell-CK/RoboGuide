@@ -62,10 +62,22 @@ class CapabilityContractRef:
         """Parse a canonical capability contract reference from contract JSON."""
         item = _object(value, path)
         _exact_keys(item, {"namespace", "name", "version"}, path)
+        namespace = _text(item["namespace"], f"{path}.namespace")
+        name = _text(item["name"], f"{path}.name")
+        version = _text(item["version"], f"{path}.version")
+        if any(
+            not segment or any(character.isspace() or character == "@" for character in segment)
+            for segment in namespace.split(".")
+        ):
+            raise MissionPlanError(f"{path}.namespace is not canonical")
+        if "." in name or "@" in name or any(character.isspace() for character in name):
+            raise MissionPlanError(f"{path}.name must be one canonical segment")
+        if "@" in version or any(character.isspace() for character in version):
+            raise MissionPlanError(f"{path}.version is not canonical")
         return cls(
-            namespace=_text(item["namespace"], f"{path}.namespace"),
-            name=_text(item["name"], f"{path}.name"),
-            version=_text(item["version"], f"{path}.version"),
+            namespace=namespace,
+            name=name,
+            version=version,
         )
 
     def to_json(self) -> JSONObject:

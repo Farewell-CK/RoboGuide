@@ -32,6 +32,41 @@ fn multi_mission_requirement(mission: &str, task: &str) -> TaskRequirement {
     .expect("test requirement should be valid")
 }
 
+/// Wraps a concurrent-test requirement in a complete one-Task MissionPlan.
+fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
+    let mission_id = requirement.mission_id().clone();
+    let intents = requirement
+        .roles()
+        .iter()
+        .map(|role| {
+            let intent = match role.capability() {
+                CapabilityKind::Compute => test_intent("compute", "infer"),
+                _ => test_intent("mobility", "move"),
+            };
+            (role.role_id().clone(), intent)
+        })
+        .collect();
+    let context_id = CoordinationContextId::new(format!("context-{mission_id}"))
+        .expect("context identifier should be valid");
+    let task = PlannedTask::new(
+        "exercise concurrent Mission isolation",
+        requirement,
+        intents,
+        Vec::new(),
+        TaskContinuity::new(context_id.clone(), BTreeMap::new(), BTreeMap::new()),
+    )
+    .expect("test Task should be valid");
+    MissionPlan::new(
+        MissionGoal::new(mission_id.clone(), "exercise concurrent Mission isolation")
+            .expect("test Mission goal should be valid"),
+        TaskGraph::new(mission_id, vec![task]).expect("test Task Graph should be valid"),
+        vec![
+            CoordinationContext::new(context_id, Vec::new()).expect("test Context should be valid"),
+        ],
+    )
+    .expect("test MissionPlan should be valid")
+}
+
 /// Extracts the mission-scoped task identity carried by a task-level event.
 fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
@@ -64,7 +99,13 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeObservation(NodeEvent::TaskCompleted { task_ref, .. })
         | EventPayload::NodeObservation(NodeEvent::TaskFailed { task_ref, .. }) => Some(task_ref),
         EventPayload::RuntimeExecutionRecoveryRequired { task_ref, .. } => task_ref.as_ref(),
-        EventPayload::NodeRegistered { .. }
+        EventPayload::MapArtifactDeclared { .. }
+        | EventPayload::MapArtifactPublished { .. }
+        | EventPayload::MapArtifactStaged { .. }
+        | EventPayload::MapArtifactImported { .. }
+        | EventPayload::MapLocalizationVerified { .. }
+        | EventPayload::MapArtifactRejected { .. }
+        | EventPayload::NodeRegistered { .. }
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
@@ -73,11 +114,11 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     }
 }
 
-/// The first vertical slice must preserve completed work and recover by rebinding.
+/// The first vertical slice preserves completed work and fences implicit Actor migration.
 #[test]
-fn mvp_slice_recovers_after_node_failure() {
+fn mvp_slice_blocks_when_actor_authority_node_fails() {
     let events = super::run_mvp_slice().expect("deterministic MVP slice should pass");
-    assert_eq!(events.len(), 25);
+    assert_eq!(events.len(), 21);
     assert!(matches!(
         events[0].payload(),
         EventPayload::NodeRegistered { .. }
@@ -92,101 +133,86 @@ fn mvp_slice_recovers_after_node_failure() {
     ));
     assert!(matches!(
         events[3].payload(),
-        EventPayload::CandidatesMatched { .. }
+        EventPayload::ExecutionGroupCreated { .. }
     ));
     assert!(matches!(
         events[4].payload(),
-        EventPayload::TaskSchedulingSelected { .. }
+        EventPayload::TaskExecutionRegistered { .. }
     ));
     assert!(matches!(
         events[5].payload(),
-        EventPayload::ProposalCreated { .. }
+        EventPayload::TaskExecutionReady { .. }
     ));
     assert!(matches!(
         events[6].payload(),
-        EventPayload::PlanCommitted { .. }
+        EventPayload::CandidatesMatched { .. }
     ));
     assert!(matches!(
         events[7].payload(),
-        EventPayload::ExecutionGroupBound { .. }
+        EventPayload::TaskSchedulingSelected { .. }
     ));
     assert!(matches!(
         events[8].payload(),
-        EventPayload::MissionActorBound { .. }
+        EventPayload::ProposalCreated { .. }
     ));
     assert!(matches!(
         events[9].payload(),
-        EventPayload::MissionActorBound { .. }
+        EventPayload::PlanCommitted { .. }
     ));
     assert!(matches!(
         events[10].payload(),
-        EventPayload::ExecutionGroupActivated { .. }
+        EventPayload::ExecutionGroupBound { .. }
     ));
     assert!(matches!(
         events[11].payload(),
-        EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+        EventPayload::MissionActorBound { .. }
     ));
     assert!(matches!(
         events[12].payload(),
+        EventPayload::MissionActorBound { .. }
+    ));
+    assert!(matches!(
+        events[13].payload(),
+        EventPayload::TaskExecutionActivated { .. }
+    ));
+    assert!(matches!(
+        events[14].payload(),
+        EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { .. })
+    ));
+    assert!(matches!(
+        events[15].payload(),
         EventPayload::NodeObservation(domain::NodeEvent::TaskFailed { node_id, .. })
             if node_id.as_str() == "node-a"
     ));
     assert!(matches!(
-        events[13].payload(),
+        events[16].payload(),
         EventPayload::ReconciliationRoleRecoveryRequired { role_id, node_id, .. }
             if role_id.as_str() == "primary-transport" && node_id.as_str() == "node-a"
     ));
     assert!(matches!(
-        events[14].payload(),
+        events[17].payload(),
         EventPayload::ExecutionGroupBlocked { .. }
     ));
     assert!(matches!(
-        events[15].payload(),
+        events[18].payload(),
         EventPayload::ExecutionGroupRoleBindingReleased { role_id, .. }
             if role_id.as_str() == "primary-transport"
     ));
     assert!(matches!(
-        events[16].payload(),
-        EventPayload::RecoveryCandidatesMatched { candidate_node_ids, .. }
-            if candidate_node_ids.iter().any(|node_id| node_id.as_str() == "node-b")
-    ));
-    assert!(matches!(
-        events[17].payload(),
-        EventPayload::RecoverySchedulingSelected { replacement_node_id, .. }
-            if replacement_node_id.as_str() == "node-b"
-    ));
-    assert!(matches!(
-        events[18].payload(),
-        EventPayload::RecoveryAssignmentProposed { replacement_node_id, .. }
-            if replacement_node_id.as_str() == "node-b"
-    ));
-    assert!(matches!(
         events[19].payload(),
-        EventPayload::RecoveryAssignmentCommitted { replacement_node_id, .. }
-            if replacement_node_id.as_str() == "node-b"
+        EventPayload::RecoveryCandidatesMatched { candidate_node_ids, .. }
+            if candidate_node_ids.is_empty()
     ));
     assert!(matches!(
         events[20].payload(),
-        EventPayload::RecoveryRebound { from_node, to_node, .. }
-            if from_node.as_str() == "node-a" && to_node.as_str() == "node-b"
+        EventPayload::RecoverySchedulingNoSelection { .. }
     ));
-    assert!(matches!(
-        events[21].payload(),
-        EventPayload::ExecutionGroupActivated { .. }
-    ));
-    assert!(matches!(
-        events[22].payload(),
-        EventPayload::NodeObservation(domain::NodeEvent::TaskCompleted { node_id, .. })
-            if node_id.as_str() == "node-b"
-    ));
-    assert!(matches!(
-        events[23].payload(),
-        EventPayload::ExecutionGroupCompleted { .. }
-    ));
-    assert!(matches!(
-        events[24].payload(),
-        EventPayload::ExecutionGroupReleased { .. }
-    ));
+    assert!(!events.iter().any(|event| matches!(
+        event.payload(),
+        EventPayload::RecoveryRebound { .. }
+            | EventPayload::ExecutionGroupCompleted { .. }
+            | EventPayload::ExecutionGroupReleased { .. }
+    )));
 }
 
 /// Runtime health ingestion immediately changes the next Control decision.
@@ -344,6 +370,8 @@ fn concurrent_missions_rebind_and_release_independently() {
     let group_b = ExecutionGroupId::new("group-b").expect("group identifier should be valid");
     let requirement_a = multi_mission_requirement("mission-a", "task-01");
     let requirement_b = multi_mission_requirement("mission-b", "task-01");
+    let mission_plan_a = single_task_mission_plan(requirement_a.clone());
+    let mission_plan_b = single_task_mission_plan(requirement_b.clone());
     let task_ref_a = requirement_a.task_ref().clone();
     let task_ref_b = requirement_b.task_ref().clone();
     let transport_role = RoleId::new("transport").expect("role identifier should be valid");
@@ -422,6 +450,23 @@ fn concurrent_missions_rebind_and_release_independently() {
             )
             .expect("node registration should succeed");
     }
+    for (group_id, mission_plan, requirement, trace) in [
+        (&group_a, &mission_plan_a, &requirement_a, &trace_a),
+        (&group_b, &mission_plan_b, &requirement_b, &trace_b),
+    ] {
+        control
+            .create_mission_group(group_id.clone(), mission_plan, started_at, trace, &mut log)
+            .expect("Mission Group creation should succeed");
+        control
+            .ready_task_execution(
+                group_id,
+                requirement.task_ref(),
+                started_at,
+                trace,
+                &mut log,
+            )
+            .expect("initial Task should become ready");
+    }
 
     let candidates_a = control
         .match_capabilities(&state, &requirement_a, started_at, &trace_a, &mut log)
@@ -452,11 +497,24 @@ fn concurrent_missions_rebind_and_release_independently() {
         .commit(&proposal_a, started_at, &trace_a, &mut log)
         .expect("Mission A commit should succeed");
     control
-        .create_group(group_a.clone(), &plan_a, started_at, &trace_a, &mut log)
-        .expect("Mission A group creation should succeed");
+        .bind_task_execution_with_requirement(
+            &group_a,
+            &plan_a,
+            &requirement_a,
+            started_at,
+            &trace_a,
+            &mut log,
+        )
+        .expect("Mission A Task bind should succeed");
     control
-        .activate_group(&group_a, started_at, &trace_a, &mut log)
-        .expect("Mission A activation should succeed");
+        .activate_task_execution(
+            &group_a,
+            requirement_a.task_ref(),
+            started_at,
+            &trace_a,
+            &mut log,
+        )
+        .expect("Mission A Task activation should succeed");
 
     let candidates_b = control
         .match_capabilities(&state, &requirement_b, started_at, &trace_b, &mut log)
@@ -487,14 +545,29 @@ fn concurrent_missions_rebind_and_release_independently() {
         .commit(&proposal_b, started_at, &trace_b, &mut log)
         .expect("Mission B commit should succeed");
     control
-        .create_group(group_b.clone(), &plan_b, started_at, &trace_b, &mut log)
-        .expect("Mission B group creation should succeed");
+        .bind_task_execution_with_requirement(
+            &group_b,
+            &plan_b,
+            &requirement_b,
+            started_at,
+            &trace_b,
+            &mut log,
+        )
+        .expect("Mission B Task bind should succeed");
     control
-        .activate_group(&group_b, started_at, &trace_b, &mut log)
-        .expect("Mission B activation should succeed");
+        .activate_task_execution(
+            &group_b,
+            requirement_b.task_ref(),
+            started_at,
+            &trace_b,
+            &mut log,
+        )
+        .expect("Mission B Task activation should succeed");
     let group_b_bindings = control
         .group(&group_b)
         .expect("Mission B group should exist")
+        .task_execution(requirement_b.task_ref())
+        .expect("Mission B Task should exist")
         .assignments()
         .to_vec();
 
@@ -662,6 +735,8 @@ fn concurrent_missions_rebind_and_release_independently() {
         control
             .group(&group_b)
             .expect("Mission B group should exist")
+            .task_execution(requirement_b.task_ref())
+            .expect("Mission B Task should exist")
             .assignments(),
         group_b_bindings.as_slice()
     );
@@ -688,6 +763,41 @@ fn concurrent_missions_rebind_and_release_independently() {
             trace_b.clone(),
         ))
         .expect("Mission B transport should complete");
+    for (group_id, task_ref, trace) in [
+        (&group_a, &task_ref_a, &trace_a),
+        (&group_b, &task_ref_b, &trace_b),
+    ] {
+        let task_resources = control
+            .group(group_id)
+            .and_then(|group| group.task_execution(task_ref))
+            .expect("TaskExecution should remain in its Mission Group")
+            .assignments()
+            .iter()
+            .flat_map(|assignment| assignment.resource_ids())
+            .filter(|resource_id| {
+                control
+                    .group(group_id)
+                    .and_then(|group| group.task_execution(task_ref))
+                    .is_some_and(|execution| {
+                        execution.binding_scope(resource_id) == domain::ResourceBindingScope::Task
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        control
+            .complete_task_execution(group_id, task_ref, TimestampMs::new(2), trace, &mut log)
+            .expect("Task should complete before its Mission Group");
+        control
+            .release_task_bindings(
+                group_id,
+                task_ref,
+                &task_resources,
+                TimestampMs::new(2),
+                trace,
+                &mut log,
+            )
+            .expect("Task-scoped bindings should release after Task completion");
+    }
     control
         .complete_group(&group_a, TimestampMs::new(2), &trace_a, &mut log)
         .expect("Mission A should complete");
@@ -807,9 +917,14 @@ fn concurrent_missions_rebind_and_release_independently() {
     )));
     assert!(events.iter().any(|event| matches!(
         event.payload(),
-        EventPayload::ExecutionGroupReleased { group_id, task_ref, resource_ids }
+        EventPayload::TaskExecutionBindingsReleased { group_id, task_ref, resource_ids }
             if group_id == &group_a && task_ref == &task_ref_a
                 && resource_ids.contains(&space_b) && resource_ids.contains(&compute_c)
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event.payload(),
+        EventPayload::ExecutionGroupReleased { group_id, task_ref, resource_ids }
+            if group_id == &group_a && task_ref == &task_ref_a && resource_ids.is_empty()
     )));
     assert!(events.iter().any(|event| matches!(
         event.payload(),

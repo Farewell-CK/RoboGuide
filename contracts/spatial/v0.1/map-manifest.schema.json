@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/spatial/v0.1/map-manifest.schema.json",
+  "title": "RoboGuide immutable spatial map manifest v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "map_id",
+    "revision_id",
+    "content_digest",
+    "byte_size",
+    "media_type",
+    "format",
+    "producer_node_id",
+    "source_mission_id",
+    "root_frame",
+    "coordinate_convention",
+    "spatial_anchor",
+    "created_at_ms"
+  ],
+  "properties": {
+    "schema": {"const": "roboguide.map-manifest/v0.1"},
+    "map_id": {"$ref": "#/$defs/mapPathId"},
+    "revision_id": {"$ref": "#/$defs/mapPathId"},
+    "content_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "byte_size": {"type": "integer", "minimum": 0},
+    "media_type": {"type": "string", "minLength": 1},
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "version": {"$ref": "#/$defs/id"}
+      }
+    },
+    "producer_node_id": {"$ref": "#/$defs/id"},
+    "producer_local_system_id": {"$ref": "#/$defs/id"},
+    "source_mission_id": {"$ref": "#/$defs/id"},
+    "source_execution_id": {"$ref": "#/$defs/id"},
+    "source_task_ref": {"$ref": "#/$defs/taskRef"},
+    "root_frame": {"$ref": "#/$defs/id"},
+    "coordinate_convention": {"$ref": "#/$defs/id"},
+    "resolution_meters": {"type": "number", "exclusiveMinimum": 0},
+    "spatial_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"const": "fixed"}
+      }
+    },
+    "parent_revision_id": {"$ref": "#/$defs/mapPathId"},
+    "created_at_ms": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "mapPathId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "not": {"pattern": "[^A-Za-z0-9._:-]"}
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "taskRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mission_id", "task_id"],
+      "properties": {
+        "mission_id": {"$ref": "#/$defs/id"},
+        "task_id": {"$ref": "#/$defs/id"}
+      }
+    }
+  }
+}

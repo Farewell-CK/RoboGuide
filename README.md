@@ -272,10 +272,23 @@ Bound/RecoveryPending 的 Group reservation。Scheduler v0.1 当前不读取 All
 未来 Scheduler v0.2 即使使用该 view，也仍须由 Commit 重新检查 authority。该边界记录在
 [`ADR-0005`](docs/decisions/0005-allocation-state-projection-authority.md)。
 
-这不是完整的 State & Memory Plane。Execution Group State Projection、Physical/Spatial
-State、Shared Belief、Provenance/uncertainty fusion、
-Distributed Memory、Persistence/Replication、State Authority resolution 和 Lease
-ownership resolution 均未实现。
+这不是完整的 State & Memory Plane。除下述地图 Artifact slice 外，Execution Group State
+Projection、通用 Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、
+Persistence/Replication、State Authority resolution 和 Lease ownership resolution 均未实现。
+
+当前新增 **State & Memory Plane — Distributed Spatial Memory v0.1**：地图以不可变
+`MapId`/`MapRevisionId` + SHA-256 digest manifest 形式记录在 Catalog projection，bytes 由
+独立 content-addressed Artifact data plane 保存。任意 Mission 可按显式 revision pull，节点
+在受控 cache 中校验后交给本地系统；A→B 与 B→A 使用同一接口。它不是 Runtime checkpoint、
+Task handoff 或 Node Protocol payload。实现边界与非目标见
+[`ADR-0016`](docs/decisions/0016-distributed-spatial-memory.md) 和
+[`contracts/spatial/v0.1`](contracts/spatial/v0.1/README.md)。
+用于 Artifact HTTP 寻址的 `MapId`/`MapRevisionId` 统一限制为 path-safe ASCII
+`[A-Za-z0-9][A-Za-z0-9._:-]*`；Domain 构造、serde 解码与 manifest schema 使用同一规则。
+Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单个 Artifact 上限
+4 GiB，空闲 15 分钟或请求体传输超过 5 分钟会 abort。调用
+`DELETE /v1/artifact-uploads/<upload-id>` 可主动释放 staging；服务启动时也会删除上次
+进程遗留、无法恢复增量 digest 状态的 `.partial` 文件。
 
 ### Distributed Embodied Runtime
 
@@ -290,6 +303,13 @@ Adapter 负责 canonical intent 到本地 EAIOS How 的映射。
 ### Local Embodied Systems & Physical World
 
 Local System 保留 Navigation、Local Planning、Perception、Motion、Hardware Control 和即时 Safety。RoboGuide 下发目标、角色、约束和资源绑定，但不把本地系统降级为 dumb slave。
+
+部署侧 Local EAIOS 适配器位于 [`integrations/`](integrations/)；例如
+[`integrations/robonix-map-service/`](integrations/robonix-map-service/) 只把 canonical
+`ExecutionIntent` 映射到本机 Robonix Mapping WebUI，并维护本地执行句柄与受控地图文件。
+它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
+生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
+配置声明的 Local EAIOS endpoint。
 
 ## 三条核心语义链
 
@@ -321,24 +341,50 @@ Server 使用正式 gRPC bidirectional streaming：
 cargo run -p integration-server -- 0.0.0.0:50051
 ```
 
-Integration Server 还接受 controller evidence SQLite 路径和只读 HTTP 诊断地址，默认分别
-为 `roboguide-controller.sqlite3` 与 `127.0.0.1:8080`：
+Integration Server 还接受 controller evidence SQLite 路径、Control HTTP 地址、Artifact
+HTTP 地址和文件 CAS 根目录；后两者默认是 `127.0.0.1:8090` 与
+`roboguide-artifacts`：
 
 ```bash
 cargo run -p integration-server -- \
-  0.0.0.0:50051 ./var/controller-events.sqlite3 127.0.0.1:8080
+  0.0.0.0:50051 ./var/controller-events.sqlite3 127.0.0.1:8080 \
+  127.0.0.1:8090 ./var/artifacts
 curl http://127.0.0.1:8080/healthz
 curl 'http://127.0.0.1:8080/v1/events?limit=100&after=0'
+curl http://127.0.0.1:8090/healthz
+curl http://127.0.0.1:8090/v1/maps
 # 查询已接收的 execution 状态；取消只会发出 Node Cancel 请求
 curl http://127.0.0.1:8080/v1/executions/<execution-id>
 curl -X POST http://127.0.0.1:8080/v1/executions/<execution-id>/cancel
 ```
 
-HTTP 面只提供 health 和 immutable evidence 查询，不绕过 Control 修改 reservation；身份
-认证与传输安全不在当前切片范围内。若 SQLite 中存在与事件末尾一致的版本化 controller
-checkpoint，Integration Server 会恢复 Control/State/Runtime projection；非终态 execution
-恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission 失败。缺少 checkpoint、
-schema 不支持或序号不一致时 fail-closed。
+实验需要把 Mission Intelligence 中的逻辑 Actor 固定到两台真实节点时，可传入第六个、
+显式的 placement JSON 路径：
+
+```bash
+cargo run -p integration-server -- \
+  0.0.0.0:50051 ./var/controller-events.sqlite3 127.0.0.1:8080 \
+  127.0.0.1:8090 ./var/artifacts \
+  scenarios/distributed-spatial-memory-v0.1/actor-placement.json
+```
+
+文件格式是 `roboguide.actor-placement/v0.1`，每条记录包含 `mission_id`、`actor_id` 和
+`node_id`。它是 Control 的部署约束，不会写入 MissionPlan，也不会提前制造
+`ActorBinding`；匹配时仍会检查注册、lease、健康度、liveness、能力和 contract。省略该参数
+则保留通用的确定性候选选择行为。只要该配置非空，Mission 提交就启用 strict coverage：
+配置必须恰好覆盖该 MissionPlan 的全部 Actor，MissionId/ActorId 拼写错误或漏配会
+fail-closed，不能悄悄退回通用 Matching。
+
+Control HTTP 不绕过 Control 修改 reservation；独立 Artifact HTTP 只写不可变 CAS bytes 和
+Spatial Memory evidence，不驱动 Task/Group lifecycle。身份认证与传输安全不在当前切片
+范围内。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
+会恢复 Control/State/Runtime projection；Spatial evidence 会在同一事务中 carry-forward 该
+checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission
+失败。缺少 checkpoint、schema 不支持或序号不一致时 fail-closed。
+
+当前 composition root 是单 writer：进程启动时会持有 controller SQLite 同目录下的
+`<database>.writer.lock`，第二个指向同一数据库的 Integration Server 会立即启动失败，避免
+形成两个不同步的 Catalog projection。这是单机一致性护栏，不是 Leader Election 或 HA。
 
 节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：
 
@@ -372,25 +418,30 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission.toml
 │   └── node.toml
 ├── contracts/
-│   ├── mission/v0/
-│   └── node/v0.2/
+│   ├── mission/v0.2/
+│   ├── node/v0.2/ + v0.3/
+│   └── spatial/v0.1/
 ├── mission/
 │   ├── src/mission/
 │   ├── prompts/v0/
 │   └── tests/
 ├── scenarios/
-│   └── mvp-slice-v0.1/
+│   ├── phase1-mission-v0.2/
+│   └── distributed-spatial-memory-v0.1/
 ├── tools/
 │   └── quality/
 ├── core/
-│   ├── domain/              # facade + allocation domain module
-│   ├── ports/               # facade + allocation ports
-│   ├── state/               # node and allocation projections
+│   ├── domain/              # core values + allocation/spatial domain modules
+│   ├── ports/               # transport-neutral core ports
+│   ├── state/               # node/allocation/spatial catalog projections
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
+│   ├── adapters/            # reference HTTP/backend bindings + filesystem artifact CAS
 │   ├── integration/         # formal gRPC Node Protocol v0.2
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
+├── integrations/
+│   └── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
@@ -424,7 +475,10 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0010-single-node-service-local-integration-engine.md
     │   ├── 0011-event-evidence-codec.md
     │   ├── 0012-controller-checkpoint-recovery.md
-    │   └── 0013-mission-level-execution-group.md
+    │   ├── 0013-mission-level-execution-group.md
+    │   ├── 0014-phase1-mission-orchestration.md
+    │   ├── 0015-runtime-execution-boundary.md
+    │   └── 0016-distributed-spatial-memory.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png

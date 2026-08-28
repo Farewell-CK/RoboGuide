@@ -1,0 +1,57 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.2",
+  "mission": {
+    "id": "mission-map-a-build",
+    "objective": "dog-a builds and publishes an immutable spatial map revision"
+  },
+  "contexts": [
+    {
+      "id": "context-map-a",
+      "roles": [{"id": "dog-a", "actor": "robot-dog-a"}]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "build-map-a",
+      "description": "Build map-a revision r1 at the shared laboratory anchor",
+      "context_id": "context-map-a",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "build-map-role",
+          "actor": "robot-dog-a",
+          "capability": "compute",
+          "contract": {"namespace": "spatial.map", "name": "build", "version": "v0"},
+          "resource_kind": "compute",
+          "context_role": "dog-a",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "spatial.map", "name": "build", "version": "v0"},
+            "parameters": {"map_id": "map-a", "revision_id": "r1", "artifact_slot": "map-a-r1", "artifact_operation": "prepare-output", "spatial_anchor_id": "anchor-lab"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "publish-map-a",
+      "description": "Finalize and publish map-a revision r1",
+      "context_id": "context-map-a",
+      "depends_on": ["build-map-a"],
+      "roles": [
+        {
+          "id": "publish-map-role",
+          "actor": "robot-dog-a",
+          "capability": "compute",
+          "contract": {"namespace": "spatial.map", "name": "publish", "version": "v0"},
+          "resource_kind": "compute",
+          "context_role": "dog-a",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "spatial.map", "name": "publish", "version": "v0"},
+            "parameters": {"map_id": "map-a", "revision_id": "r1", "artifact_slot": "map-a-r1", "artifact_operation": "publish", "spatial_anchor_id": "anchor-lab"}
+          }
+        }
+      ]
+    }
+  ]
+}
