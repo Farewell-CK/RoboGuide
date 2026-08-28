@@ -31,6 +31,7 @@
 - [`decisions/0014-phase1-mission-orchestration.md`](decisions/0014-phase1-mission-orchestration.md)：完整 MissionPlan/DAG 编排与显式 Mission completion。
 - [`decisions/0015-runtime-execution-boundary.md`](decisions/0015-runtime-execution-boundary.md)：Runtime live execution authority 与 Integration 边界。
 - [`decisions/0016-distributed-spatial-memory.md`](decisions/0016-distributed-spatial-memory.md)：不可变地图 Artifact、Catalog 与双节点共享切片。
+- [`decisions/0017-canonical-capability-contract-identity.md`](decisions/0017-canonical-capability-contract-identity.md)：可逆的 canonical capability 字符串与结构化身份规则。
 
 ## 历史架构
 

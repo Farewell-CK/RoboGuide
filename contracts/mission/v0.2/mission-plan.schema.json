@@ -76,9 +76,9 @@
       "additionalProperties": false,
       "required": ["namespace", "name", "version"],
       "properties": {
-        "namespace": {"type": "string", "minLength": 1},
-        "name": {"type": "string", "minLength": 1},
-        "version": {"type": "string", "minLength": 1}
+        "namespace": {"type": "string", "pattern": "^[^\\s.@]+(?:\\.[^\\s.@]+)*$"},
+        "name": {"type": "string", "pattern": "^[^\\s.@]+$"},
+        "version": {"type": "string", "pattern": "^[^\\s@]+$"}
       }
     },
     "role": {

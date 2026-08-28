@@ -1150,6 +1150,11 @@ impl NodeLivenessObservation {
 }
 
 /// The local runtime and resources a node exposes to DEAIOS.
+///
+/// Owner maps are encoded as arrays of typed entries instead of JSON objects.  A
+/// `CapabilityContractRef` is a structured value rather than a scalar string, so
+/// serde_json cannot use it directly as an object key during controller checkpoint
+/// serialization.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeRegistration {
     /// Logical node identity exposed to DEAIOS.
@@ -1163,13 +1168,77 @@ pub struct NodeRegistration {
     /// Canonical capability contracts executable through this node's adapter boundary.
     supported_contracts: Vec<CapabilityContractRef>,
     /// Unique local-system owner of each canonical contract.
+    #[serde(with = "capability_owner_map_serde")]
     capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
     resources: Vec<Resource>,
     /// Unique local-system owner of each node-wide resource.
+    #[serde(with = "resource_owner_map_serde")]
     resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+}
+
+/// Encodes structured capability-contract owner keys as checkpoint-safe records.
+mod capability_owner_map_serde {
+    use super::{CapabilityContractRef, LocalSystemId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each capability owner mapping as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, LocalSystemId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores capability owner mappings and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, LocalSystemId>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, LocalSystemId)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, owner) in entries {
+            if values.insert(contract, owner).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability owner contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes resource owner mappings as checkpoint-safe records.
+mod resource_owner_map_serde {
+    use super::{LocalSystemId, ResourceId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each resource owner mapping as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<ResourceId, LocalSystemId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores resource owner mappings and rejects duplicate resource identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<ResourceId, LocalSystemId>, D::Error> {
+        let entries: Vec<(ResourceId, LocalSystemId)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (resource, owner) in entries {
+            if values.insert(resource, owner).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate resource owner resource",
+                ));
+            }
+        }
+        Ok(values)
+    }
 }
 
 impl NodeRegistration {
@@ -2081,5 +2150,40 @@ mod tests {
             ),
             Err(DomainError::InvalidMissionPlan { .. })
         ));
+    }
+
+    /// Node owner maps remain serializable when a checkpoint contains structured contract keys.
+    #[test]
+    fn node_registration_round_trips_owner_maps() {
+        let node_id = NodeId::new("node-checkpoint").expect("node id must be valid");
+        let local_system_id = LocalSystemId::new("mapping").expect("local system id is valid");
+        let contract = CapabilityContractRef::new("spatial.map", "build", "v0")
+            .expect("contract must be valid");
+        let resource_id = ResourceId::new("mapping-compute").expect("resource id is valid");
+        let registration = NodeRegistration::new_with_local_systems(
+            node_id,
+            vec![LocalSystemDescriptor::new(
+                local_system_id.clone(),
+                LocalRuntime::new("robonix", "0.1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_2(),
+            vec![Capability::new(CapabilityKind::Compute, true)],
+            BTreeMap::from([(contract.clone(), local_system_id.clone())]),
+            Vec::new(),
+            vec![
+                Resource::new(resource_id.clone(), ResourceKind::Compute, 1)
+                    .expect("resource is valid"),
+            ],
+            BTreeMap::from([(resource_id.clone(), local_system_id.clone())]),
+        )
+        .expect("registration is valid");
+
+        let encoded = serde_json::to_string(&registration).expect("registration serializes");
+        let decoded: NodeRegistration =
+            serde_json::from_str(&encoded).expect("registration deserializes");
+        assert_eq!(decoded, registration);
+        assert!(encoded.contains("\"capability_owners\":[["));
+        assert!(encoded.contains("\"resource_owners\":[["));
     }
 }

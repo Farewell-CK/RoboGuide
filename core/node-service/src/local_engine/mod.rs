@@ -1917,6 +1917,12 @@ fn validate_contract(contract: &str) -> Result<(), CatalogError> {
         !namespace.trim().is_empty()
             && !name.trim().is_empty()
             && !version.trim().is_empty()
+            && namespace
+                .split('.')
+                .all(|segment| !segment.is_empty() && !segment.chars().any(char::is_whitespace))
+            && !namespace.contains('@')
+            && !name.contains(['.', '@'])
+            && !name.chars().any(char::is_whitespace)
             && !version.contains('@'),
         "capabilities.contract",
         "must contain non-empty namespace, name, and version",

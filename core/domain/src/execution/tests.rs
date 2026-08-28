@@ -12,6 +12,20 @@ fn operation_ref_rejects_blank_components() {
     assert!(CapabilityContractRef::new("mobility", "move", "").is_err());
 }
 
+/// Canonical contract text has exactly one reversible structured representation.
+#[test]
+fn capability_contract_rejects_ambiguous_components() {
+    let contract = CapabilityContractRef::new("spatial.map", "build", "v0")
+        .expect("hierarchical namespace is canonical");
+    assert_eq!(contract.to_string(), "spatial.map.build@v0");
+    assert!(CapabilityContractRef::new("spatial", "map.build", "v0").is_err());
+    assert!(CapabilityContractRef::new("spatial..map", "build", "v0").is_err());
+    assert!(CapabilityContractRef::new("spatial.map", "build", "v0@draft").is_err());
+
+    let invalid = r#"{"namespace":"spatial","name":"map.build","version":"v0"}"#;
+    assert!(serde_json::from_str::<CapabilityContractRef>(invalid).is_err());
+}
+
 /// Intent parameters retain scalar values in deterministic key order.
 #[test]
 fn execution_intent_orders_transport_neutral_parameters() {

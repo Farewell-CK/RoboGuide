@@ -13,9 +13,9 @@ discard reservations while physical work may still exist.
 
 ## Decision
 
-The Integration bridge persists its versioned `roboguide.controller-checkpoint/v5`
+The Integration bridge persists its versioned `roboguide.controller-checkpoint/v6`
 Control/State/Runtime projection inside the current outer
-`roboguide.controller-checkpoint/v6` JSON checkpoint in the same SQLite transaction as each
+`roboguide.controller-checkpoint/v7` JSON checkpoint in the same SQLite transaction as each
 accepted fact and its lifecycle evidence. The checkpoint contains Control commitments, actor
 bindings, deployment actor placement constraints, Groups, immutable Task/Role requirements used by
 recovery authority checks, pending recovery commitments, Shared Node State registrations, and

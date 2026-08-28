@@ -29,7 +29,9 @@ impl NodeService {
     pub async fn run(&self) -> Result<(), NodeServiceError> {
         self.engine.recover()?;
         loop {
-            let _ = self.run_session().await;
+            if let Err(error) = self.run_session().await {
+                eprintln!("roboguide-node session ended: {error}");
+            }
             tokio::time::sleep(std::time::Duration::from_millis(
                 self.engine.catalog().reconnect_delay_ms(),
             ))

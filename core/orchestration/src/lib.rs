@@ -889,10 +889,10 @@ mod tests {
             ),
         ];
         let contracts = [
-            CapabilityContractRef::new("spatial", "map.build", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial", "map.publish", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial", "map.import", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial", "localization.verify", "v0")
+            CapabilityContractRef::new("spatial.map", "build", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.map", "publish", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.map", "import", "v0").expect("contract valid"),
+            CapabilityContractRef::new("spatial.localization", "verify", "v0")
                 .expect("contract valid"),
         ];
         for (fixture, actor, expected_node) in fixtures {

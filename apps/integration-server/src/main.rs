@@ -20,7 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Schema marker for the Phase 1 server checkpoint including Mission orchestration.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v6";
+///
+/// The outer version advances with the inner Integration checkpoint so old
+/// checkpoints are rejected instead of being decoded with a different shape.
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v7";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -708,6 +711,11 @@ fn deferred_dispatch(error: &OrchestrationError) -> bool {
         OrchestrationError::Control(
             control::ControlError::ActorPlacementConstraintUnsatisfied { .. }
         )
+    ) || matches!(
+        error,
+        OrchestrationError::Control(
+            control::ControlError::ActorBindingRequiresReconciliation { .. }
+        )
     )
 }
 
@@ -1327,6 +1335,19 @@ mod tests {
             .expect_err("unknown and missing Actors must fail closed");
         assert!(error.contains("missing actors [robot-dog-a]"));
         assert!(error.contains("unknown actors [robot-dog-typo]"));
+    }
+
+    /// A temporarily unavailable bound Actor leaves dispatch pending for a later heartbeat.
+    #[test]
+    fn unavailable_bound_actor_is_deferred_without_failing_server() {
+        let error = orchestration::OrchestrationError::Control(
+            control::ControlError::ActorBindingRequiresReconciliation {
+                mission_id: domain::MissionId::new("mission").expect("mission id is valid"),
+                actor_id: domain::ActorId::new("actor").expect("actor id is valid"),
+                node_id: domain::NodeId::new("node").expect("node id is valid"),
+            },
+        );
+        assert!(deferred_dispatch(&error));
     }
 
     /// Startup rejects a replacement placement policy that does not cover a restored Mission.

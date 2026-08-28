@@ -99,6 +99,10 @@ recovery 不具备 Actor 迁移 authority：已绑定或有 placement 的 Actor 
 上恢复；该 Node 不可用时 Candidate Set 为空，Group 保持 Blocked，不能借 Rebind 静默换狗。
 未来 Actor 迁移必须增加显式 Control decision、事件与独立架构决策。
 
+Canonical capability identity 使用 `namespace.name@version`；按最后一个 `.` 分隔 name，
+因此 namespace 可以分层而 name 必须是单 segment。Node Config、Node Protocol 与结构化
+MissionPlan 必须遵守同一可逆规则，详见 ADR-0017。
+
 ## 5. 状态、证据、信念与记忆
 
 State & Memory 是横向基础设施，包含：

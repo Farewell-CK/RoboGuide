@@ -19,7 +19,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v5";
+///
+/// Version 6 records structured Node owner maps as arrays so a registered node can
+/// be checkpointed by serde_json without relying on non-string object keys.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v6";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -984,6 +987,18 @@ mod tests {
         assert_eq!(updated.reported_status_received_at(), TimestampMs::new(1));
         assert_eq!(updated.liveness().observed_at(), TimestampMs::new(1));
         assert_eq!(updated.registration().local_runtime().version(), "2");
+        bridge
+            .checkpoint_json()
+            .expect("registered node owner maps must checkpoint");
+    }
+
+    /// Parses hierarchical canonical contracts with the same last-dot rule as Node Config.
+    #[test]
+    fn canonical_contract_parser_round_trips_hierarchical_namespace() {
+        let contract = parse_contract("spatial.map.build@v0").expect("contract parses");
+        assert_eq!(contract.namespace(), "spatial.map");
+        assert_eq!(contract.name(), "build");
+        assert_eq!(contract.to_string(), "spatial.map.build@v0");
     }
 
     /// Bound Group assignments are the only source of NodeId for Runtime routing.

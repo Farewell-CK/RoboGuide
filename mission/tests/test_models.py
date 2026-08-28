@@ -97,3 +97,24 @@ def test_role_contract_must_match_execution_contract() -> None:
     roles[0]["contract"] = {"namespace": "camera", "name": "capture", "version": "v1"}
     with pytest.raises(MissionPlanError, match="differs"):
         MissionPlan.from_json(raw)
+
+
+@pytest.mark.parametrize(
+    ("namespace", "name", "version"),
+    [
+        ("spatial", "map.build", "v0"),
+        ("spatial..map", "build", "v0"),
+        ("spatial.map", "build", "v0@draft"),
+    ],
+)
+def test_ambiguous_contract_identity_is_rejected(namespace: str, name: str, version: str) -> None:
+    """Structured contracts must round-trip through the configured canonical string."""
+    raw = _fixture_json()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    contract: JSONObject = {"namespace": namespace, "name": name, "version": version}
+    roles[0]["contract"] = contract
+    execution = cast(JSONObject, roles[0]["execution"])
+    execution["capability_contract"] = contract
+    with pytest.raises(MissionPlanError, match="canonical"):
+        MissionPlan.from_json(raw)
