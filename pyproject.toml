@@ -6,6 +6,7 @@ dependencies = []
 
 [project.scripts]
 mission = "mission.cli:main"
+mission-service = "mission.api:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -41,4 +42,10 @@ testpaths = ["mission/tests", "integrations/robonix-map-service/tests"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["mission/src", "mission/tests", "tools/quality"]
+files = [
+    "mission/src",
+    "mission/tests",
+    "apps/mission-service",
+    "tools/quality",
+    "integrations/robonix-map-service",
+]

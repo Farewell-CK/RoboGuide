@@ -63,9 +63,10 @@ class LlmSettings:
 
 @dataclass(frozen=True, slots=True)
 class PromptSettings:
-    """Select versioned planner and reviewer prompt assets independently of code."""
+    """Select versioned interpreter, planner, and reviewer prompt assets independently of code."""
 
     version: str
+    interpreter_path: Path
     planner_path: Path
     reviewer_path: Path
 
@@ -142,6 +143,7 @@ def load_settings(
         review_enabled=_boolean(mission, "review_enabled", "mission"),
         prompts=PromptSettings(
             version=_string(prompts, "version", "mission.prompts"),
+            interpreter_path=root / _string(prompts, "interpreter_path", "mission.prompts"),
             planner_path=root / _string(prompts, "planner_path", "mission.prompts"),
             reviewer_path=root / _string(prompts, "reviewer_path", "mission.prompts"),
         ),

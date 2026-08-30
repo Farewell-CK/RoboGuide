@@ -799,6 +799,15 @@ async fn handle_http_connection(
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
+        ("GET", "/v1/inventory") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                inventory_json(controller.bridge.state(), clock.now()),
+            )
+        }
         ("GET", "/v1/events") => {
             let query = parse_query(query);
             let after_sequence = query
@@ -1033,6 +1042,47 @@ async fn handle_http_connection(
     write_http_response(stream, status, body).await
 }
 
+/// Projects current Shared Node State for Mission Intelligence without adding decision authority.
+fn inventory_json(
+    state: &state::InMemorySharedNodeState,
+    observed_at: domain::TimestampMs,
+) -> serde_json::Value {
+    let nodes = state
+        .snapshots()
+        .into_iter()
+        .map(|snapshot| {
+            let registration = snapshot.registration();
+            serde_json::json!({
+                "node_id": snapshot.node_id().as_str(),
+                "reported_health": format!("{:?}", snapshot.reported_status().health()),
+                "source_observed_at_ms": snapshot.reported_status().observed_at().as_millis(),
+                "received_at_ms": snapshot.reported_status_received_at().as_millis(),
+                "liveness": format!("{:?}", snapshot.liveness().liveness()),
+                "liveness_observed_at_ms": snapshot.liveness().observed_at().as_millis(),
+                "capabilities": registration.capabilities().iter().map(|capability| {
+                    serde_json::json!({
+                        "kind": format!("{:?}", capability.kind()).to_ascii_lowercase(),
+                        "available": capability.is_available(),
+                    })
+                }).collect::<Vec<_>>(),
+                "contracts": registration.supported_contracts().iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "resources": registration.resources().iter().map(|resource| {
+                    serde_json::json!({
+                        "resource_id": resource.id().as_str(),
+                        "kind": format!("{:?}", resource.kind()).to_ascii_lowercase(),
+                        "capacity": resource.capacity(),
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schema_version": "roboguide.inventory/v0.1",
+        "observed_at_ms": observed_at.as_millis(),
+        "nodes": nodes,
+    })
+}
+
 /// Reads one HTTP/1.1 request using explicit header and Content-Length boundaries.
 async fn read_control_http_request(
     stream: &mut tokio::net::TcpStream,
@@ -1160,6 +1210,67 @@ fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Empty inventory still carries a versioned advisory snapshot rather than an error.
+    #[test]
+    fn inventory_snapshot_is_versioned_and_empty_before_registration() {
+        let value = inventory_json(
+            &state::InMemorySharedNodeState::new(),
+            domain::TimestampMs::new(42),
+        );
+        assert_eq!(value["schema_version"], "roboguide.inventory/v0.1");
+        assert_eq!(value["observed_at_ms"], 42);
+        assert_eq!(value["nodes"], serde_json::json!([]));
+    }
+
+    /// Nonempty inventory preserves observation times and normalizes capability/resource kinds.
+    #[test]
+    fn inventory_snapshot_projects_registered_planning_facts() {
+        let registration = domain::NodeRegistration::new_with_contracts(
+            domain::NodeId::new("dog-a").expect("node id is valid"),
+            domain::LocalRuntime::new("local-runtime", "1").expect("runtime is valid"),
+            domain::NodeContractVersion::v0_2(),
+            vec![domain::Capability::new(
+                domain::CapabilityKind::Transport,
+                true,
+            )],
+            vec![
+                domain::CapabilityContractRef::new("mobility", "move", "v1")
+                    .expect("contract is valid"),
+            ],
+            vec![
+                domain::Resource::new(
+                    domain::ResourceId::new("space-a").expect("resource id is valid"),
+                    domain::ResourceKind::Space,
+                    2,
+                )
+                .expect("resource is valid"),
+            ],
+        );
+        let snapshot = domain::NodeStateSnapshot::new(
+            registration,
+            domain::NodeStatus::new(domain::NodeHealth::Degraded, domain::TimestampMs::new(7)),
+            domain::TimestampMs::new(8),
+            domain::NodeLivenessObservation::new(
+                domain::NodeLiveness::Reachable,
+                domain::TimestampMs::new(9),
+            ),
+        );
+        let mut shared_state = state::InMemorySharedNodeState::new();
+        ports::SharedNodeStateWriter::record_node(&mut shared_state, snapshot)
+            .expect("snapshot is accepted");
+
+        let value = inventory_json(&shared_state, domain::TimestampMs::new(10));
+
+        assert_eq!(value["nodes"][0]["reported_health"], "Degraded");
+        assert_eq!(value["nodes"][0]["source_observed_at_ms"], 7);
+        assert_eq!(value["nodes"][0]["received_at_ms"], 8);
+        assert_eq!(value["nodes"][0]["liveness_observed_at_ms"], 9);
+        assert_eq!(value["nodes"][0]["capabilities"][0]["kind"], "transport");
+        assert_eq!(value["nodes"][0]["contracts"][0], "mobility.move@v1");
+        assert_eq!(value["nodes"][0]["resources"][0]["kind"], "space");
+        assert_eq!(value["nodes"][0]["resources"][0]["capacity"], 2);
+    }
 
     /// The control HTTP reader reconstructs a Mission request split across arbitrary TCP writes.
     #[tokio::test]

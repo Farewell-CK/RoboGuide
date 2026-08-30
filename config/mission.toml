@@ -6,6 +6,7 @@ review_enabled = true
 
 [mission.prompts]
 version = "v0"
+interpreter_path = "mission/prompts/v0/interpreter.md"
 planner_path = "mission/prompts/v0/planner.md"
 reviewer_path = "mission/prompts/v0/reviewer.md"
 

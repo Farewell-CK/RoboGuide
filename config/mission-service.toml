@@ -1,0 +1,12 @@
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "artifacts/mission-service/requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+max_request_bytes = 1048576
+approval_required_contracts = [
+  "mobility.move@v1",
+  "spatial.map.build@v0",
+  "spatial.map.import@v0",
+]

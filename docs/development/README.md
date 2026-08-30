@@ -35,11 +35,12 @@ core/
 apps/
   controller/              组合根和进程生命周期
   integration-server/      多 Node gRPC session 与独立 Artifact HTTP composition root
+  mission-service/         文本 Mission Request、澄清/审批与内部 plan submission 组合根
   roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
   real-node-smoke/         通用 Node Contract probe 与显式 intent invocation
 mission/
-  src/mission/             Mission 规划、合同校验和模型适配器
-  prompts/v0/              可版本化、可评审的 Planner 与 Reviewer Prompt
+  src/mission/             Mission Request 状态机、规划、合同校验和模型/Controller 适配器
+  prompts/v0/              可版本化、可评审的 Interpreter、Planner 与 Reviewer Prompt
   tests/                   Mission 合同与 Adapter 的离线测试
 simulation/                未来的仿真器集成适配器，首次实现时再创建
 contracts/mission/         版本化的跨语言 Mission Plan 合同
@@ -55,7 +56,7 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
 `core/orchestration`、
 `core/runtime`、`core/adapters`、`core/integration`、`core/node-service`、`core/testkit`、
-`apps/controller`、`apps/integration-server`、`apps/roboguide-node`、
+`apps/controller`、`apps/integration-server`、`apps/mission-service`、`apps/roboguide-node`、
 `apps/real-node-smoke` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
 不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State 与非权威
@@ -77,6 +78,7 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 | Integration | gRPC Node Protocol、Artifact HTTP、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
 | Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide Adapter 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
+| Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | Node assignment、Commit、Group/Runtime execution lifecycle |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 

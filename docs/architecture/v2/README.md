@@ -17,7 +17,7 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |
-| Mission Intelligence | 生成带 Context/ContextRole 的完整 MissionPlan、Task Graph 和 Execution Requirements |
+| Mission Intelligence | 持有文本指令的解释/澄清闭环，生成带 Context/ContextRole 的完整 MissionPlan、Task Graph 和 Execution Requirements |
 | Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Group 内 TaskExecution 绑定和恢复决策 |
 | Mission Orchestration | 持有完整 MissionPlan，推进 DAG readiness，并根据 Runtime execution facts 明确驱动 Mission/Group 终态 |
 | State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
@@ -28,6 +28,12 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | Physical World | 被执行过程改变，并持续向系统反馈 Observation |
 
 逻辑组件可以共址，也可以分布部署。部署拓扑不得改变组件的职责和权威语义。
+
+外部用户入口是 Mission Request，而不是完整 MissionPlan。Mission Intelligence 在 instruction
+仍有 open questions 时停留在 `NeedsClarification`，不得创建 Group；只有无歧义并通过计划
+审查与部署风险策略后，才把内部 MissionPlan 提交给 Orchestration。Request/dialogue 的持久化
+属于 Mission Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见
+ADR-0018。
 
 ## 3. 核心抽象
 

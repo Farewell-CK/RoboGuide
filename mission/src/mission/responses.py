@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mission.config import MissionSettings
+from mission.controller import InventorySnapshot
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.requests import IntentAssessment
 
 
 class MissionProviderError(RuntimeError):
@@ -235,3 +237,52 @@ class ResponsesMissionPlanner:
         if not all(isinstance(issue, str) for issue in issues_value):
             raise MissionProviderError("review issues must contain only text")
         return ReviewResult(approved=approved, issues=tuple(cast(list[str], issues_value)))
+
+
+class ResponsesMissionInterpreter:
+    """Ground text instructions through the same bounded Responses provider boundary."""
+
+    def __init__(
+        self,
+        settings: MissionSettings,
+        environment: Mapping[str, str],
+        transport: JsonTransport | None = None,
+    ) -> None:
+        """Create a provider adapter while reusing strict request and response handling."""
+        self._client = ResponsesMissionPlanner(settings, environment, transport)
+        self._settings = settings
+
+    def interpret(
+        self,
+        instruction: str,
+        messages: tuple[str, ...],
+        inventory: InventorySnapshot,
+    ) -> IntentAssessment:
+        """Return grounded intent or explicit questions without decomposing or executing Tasks."""
+        schema: JSONObject = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["objective", "constraints", "assumptions", "open_questions"],
+            "properties": {
+                "objective": {"type": "string"},
+                "constraints": {"type": "array", "items": {"type": "string"}},
+                "assumptions": {"type": "array", "items": {"type": "string"}},
+                "open_questions": {"type": "array", "items": {"type": "string"}},
+            },
+        }
+        response = self._client._request(
+            model=self._settings.llm.model,
+            instructions=self._client._load_prompt(self._settings.prompts.interpreter_path),
+            input_text=json.dumps(
+                {
+                    "instruction": instruction,
+                    "messages": list(messages),
+                    "inventory": inventory.to_json(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            schema_name="mission_intent_v0",
+            schema=schema,
+        )
+        return IntentAssessment.from_json(self._client._extract_output_json(response))

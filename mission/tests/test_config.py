@@ -16,6 +16,7 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.llm.model == "gpt-5.6-luna"
     assert settings.llm.review_model == "gpt-5.6-luna"
     assert settings.prompts.version == "v0"
+    assert settings.prompts.interpreter_path.is_file()
     assert settings.prompts.planner_path.is_file()
     assert settings.prompts.reviewer_path.is_file()
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
@@ -47,7 +48,9 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     """Versioned prompts must demand executable tasks without stealing Control authority."""
     settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
     planner_prompt = settings.prompts.planner_path.read_text(encoding="utf-8")
+    interpreter_prompt = settings.prompts.interpreter_path.read_text(encoding="utf-8")
     reviewer_prompt = settings.prompts.reviewer_path.read_text(encoding="utf-8")
     assert "Do not emit meta-tasks" in planner_prompt
+    assert "Do not create Tasks" in interpreter_prompt
     assert "must not select concrete nodes" in planner_prompt
     assert "Reject meta-tasks" in reviewer_prompt

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/request-v0.1/mission-request.schema.json",
+  "title": "RoboGuide Mission Request v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "request_id", "mission_id", "instruction", "messages", "lifecycle",
+    "assessment", "plan", "draft_revision", "draft_digest", "approval_required", "issues",
+    "created_at_ms", "updated_at_ms"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "roboguide.mission-request/v0.1"},
+    "request_id": {"type": "string", "pattern": "^request-[a-f0-9]{32}$"},
+    "mission_id": {"type": "string", "pattern": "^mission-[a-f0-9]{32}$"},
+    "instruction": {"type": "string", "minLength": 1},
+    "messages": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "lifecycle": {
+      "enum": [
+        "Received", "Interpreting", "NeedsClarification", "Drafted", "Reviewing",
+        "AwaitingApproval", "Submitting", "Accepted", "Blocked", "Failed", "Cancelled"
+      ]
+    },
+    "assessment": {
+      "oneOf": [
+        {"$ref": "#/$defs/assessment"},
+        {"type": "null"}
+      ]
+    },
+    "plan": {
+      "oneOf": [
+        {"$ref": "../v0.2/mission-plan.schema.json"},
+        {"type": "null"}
+      ]
+    },
+    "draft_revision": {"type": "integer", "minimum": 0},
+    "draft_digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+    "approval_required": {"type": "boolean"},
+    "issues": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "created_at_ms": {"type": "integer", "minimum": 0},
+    "updated_at_ms": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "constraints", "assumptions", "open_questions"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1},
+        "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "assumptions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "open_questions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

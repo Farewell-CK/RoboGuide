@@ -74,6 +74,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   may be carried as opaque intent parameters, while digest verification and local staging belong
   to Node Service/Adapter. Node Protocol v0.2 remains unchanged.
 - `mission/` contains the Python Mission Intelligence package and its tests.
+- `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
+  ingress and durable deliberation state, then submits accepted complete plans to the existing
+  Controller API; it must not mirror execution lifecycle or choose physical nodes.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
 
@@ -98,12 +101,13 @@ uv-managed environment. New implementation paths must update this file and
 For Mission changes, run:
 
 ```bash
-uv run ruff format --check mission tools/quality integrations/robonix-map-service
-uv run ruff check mission tools/quality integrations/robonix-map-service
-uv run mypy --strict mission/src mission/tests tools/quality \
+uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service
+uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service
+uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality \
   integrations/robonix-map-service/robonix-map-service.py \
   integrations/robonix-map-service/tests
-uv run python tools/quality/check_python_function_docs.py integrations/robonix-map-service
+uv run python tools/quality/check_python_function_docs.py \
+  mission apps/mission-service integrations/robonix-map-service
 uv run pytest -q
 ```
 
