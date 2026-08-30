@@ -1,7 +1,7 @@
 # MVP 定义
 
 > 状态：Draft（完整 MVP 尚未冻结）
-> 最后更新：2026-08-19
+> 最后更新：2026-08-30
 > 权威规则：只有经过项目负责人明确审阅，并将状态改为 `Frozen` 后，本文档才对实现具有约束力。
 
 ## 1. 目的
@@ -35,6 +35,17 @@
 
 该切片刻意与仿真器和真实硬件无关。它不意味着任意两个机器人之间都能进行物理
 载荷交接，也不将 Drone 或 Arm 设为核心 MVP 的前置条件。
+
+### 真机验收候选切片：双机器狗 Spatial Memory Phase 1
+
+双机器狗双向地图共享已经形成第一份现场证据，但尚未满足稳定 Runtime Gate，因此当前
+状态为 `In Review`，不改变完整 MVP 的 `Draft` 状态，也不替代上面的已批准 Fake Node
+恢复切片。完整 Mission、拓扑、正常流、故障矩阵、证据、指标、Non-goals 和退出条件见
+[`scenarios/distributed-spatial-memory-v0.1/acceptance.md`](../scenarios/distributed-spatial-memory-v0.1/acceptance.md)。
+
+该候选切片只有在全新 A 到 B、B 到 A 正式运行均成功，并且 capability readiness 与
+localization verification evidence 不再依赖 process health/`has_map=true` 时，才可由项目
+负责人明确改为 `Accepted`。
 
 ### 仍在评审的工程方向
 

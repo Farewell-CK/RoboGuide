@@ -10,8 +10,9 @@ use crate::{
 };
 use bytes::Bytes;
 use domain::{
-    ContentDigest, MapArtifactManifest, MapArtifactRef, MapId, MapRevisionId, MapRevisionSelector,
-    MapRevisionStatus, MissionId, NodeId, SpatialAnchorId, TaskId, TaskRef, TimestampMs,
+    ContentDigest, LocalizationVerificationEvidence, MapArtifactManifest, MapArtifactRef, MapId,
+    MapRevisionId, MapRevisionSelector, MapRevisionStatus, MissionId, NodeId, SpatialAnchorId,
+    TaskId, TaskRef, TimestampMs,
 };
 use reqwest::{Client, StatusCode, Url};
 use serde_json::Value;
@@ -385,6 +386,32 @@ impl ArtifactClient {
             .send()
             .await
             .map_err(|error| ArtifactError::remote_outcome_unknown("replica evidence", error))?;
+        ensure_success(&response, &endpoint)
+    }
+
+    /// Records one complete strong localization evidence envelope.
+    pub async fn record_localization_evidence(
+        &self,
+        evidence: &LocalizationVerificationEvidence,
+    ) -> Result<(), ArtifactError> {
+        let selector = evidence.artifact().selector();
+        let endpoint = self.path(&[
+            "v1",
+            "maps",
+            selector.map_id().as_str(),
+            "revisions",
+            selector.revision_id().as_str(),
+            "localization-evidence",
+        ])?;
+        let response = self
+            .client
+            .post(endpoint.clone())
+            .json(evidence)
+            .send()
+            .await
+            .map_err(|error| {
+                ArtifactError::remote_outcome_unknown("localization evidence", error)
+            })?;
         ensure_success(&response, &endpoint)
     }
 
@@ -967,6 +994,14 @@ impl ArtifactStager {
         self.client
             .record_replica(manifest, node_id, mission_id, status)
             .await
+    }
+
+    /// Reports one complete strong localization result for an already validated artifact.
+    pub async fn record_localization_evidence(
+        &self,
+        evidence: &LocalizationVerificationEvidence,
+    ) -> Result<(), ArtifactError> {
+        self.client.record_localization_evidence(evidence).await
     }
 
     /// Fetches and validates the exact published manifest selected by one input binding.

@@ -14,6 +14,7 @@ mod actor;
 mod allocation;
 mod context;
 mod execution;
+mod localization_evidence;
 mod mission_plan;
 mod node_registration;
 mod spatial_memory;
@@ -26,6 +27,10 @@ pub use allocation::{
 };
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
+pub use localization_evidence::{
+    LOCALIZATION_EVIDENCE_SCHEMA_V0_1, LocalizationFrames, LocalizationVerificationEvidence,
+    PoseQualityComparison, PoseQualityEvidence,
+};
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
@@ -1170,6 +1175,12 @@ pub struct NodeRegistration {
     /// Unique local-system owner of each canonical contract.
     #[serde(with = "capability_owner_map_serde")]
     capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+    /// Exact coarse capability category associated with each canonical contract.
+    #[serde(default, with = "capability_kind_map_serde")]
+    capability_kinds: BTreeMap<CapabilityContractRef, CapabilityKind>,
+    /// Latest observed readiness of each canonical contract.
+    #[serde(default, with = "capability_readiness_map_serde")]
+    capability_readiness: BTreeMap<CapabilityContractRef, bool>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
@@ -1203,6 +1214,68 @@ mod capability_owner_map_serde {
             if values.insert(contract, owner).is_some() {
                 return Err(serde::de::Error::custom(
                     "duplicate capability owner contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes structured capability-contract readiness keys as checkpoint-safe records.
+mod capability_readiness_map_serde {
+    use super::CapabilityContractRef;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each contract readiness fact as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, bool>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores readiness facts and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, bool>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, bool)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, available) in entries {
+            if values.insert(contract, available).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability readiness contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes structured capability-contract category keys as checkpoint-safe records.
+mod capability_kind_map_serde {
+    use super::{CapabilityContractRef, CapabilityKind};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each exact contract/category pair as a typed record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, CapabilityKind>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores category facts and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, CapabilityKind>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, CapabilityKind)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, kind) in entries {
+            if values.insert(contract, kind).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability kind contract",
                 ));
             }
         }
@@ -1269,6 +1342,7 @@ impl NodeRegistration {
         supported_contracts: Vec<CapabilityContractRef>,
         resources: Vec<Resource>,
     ) -> Self {
+        let exact_kind = (capabilities.len() == 1).then(|| capabilities[0].kind());
         Self {
             node_id,
             local_systems: vec![LocalSystemDescriptor::new(
@@ -1283,6 +1357,20 @@ impl NodeRegistration {
                 .cloned()
                 .map(|contract| (contract, LocalSystemId("default".to_string())))
                 .collect(),
+            capability_readiness: supported_contracts
+                .iter()
+                .cloned()
+                .map(|contract| (contract, true))
+                .collect(),
+            capability_kinds: exact_kind
+                .map(|kind| {
+                    supported_contracts
+                        .iter()
+                        .cloned()
+                        .map(|contract| (contract, kind))
+                        .collect()
+                })
+                .unwrap_or_default(),
             supported_contracts,
             sensors: Vec::new(),
             resource_owners: resources
@@ -1305,6 +1393,49 @@ impl NodeRegistration {
         resources: Vec<Resource>,
         resource_owners: BTreeMap<ResourceId, LocalSystemId>,
     ) -> Result<Self, DomainError> {
+        let capability_readiness = capability_owners
+            .keys()
+            .cloned()
+            .map(|contract| (contract, true))
+            .collect();
+        let capability_kinds = (capabilities.len() == 1)
+            .then(|| capabilities[0].kind())
+            .map(|kind| {
+                capability_owners
+                    .keys()
+                    .cloned()
+                    .map(|contract| (contract, kind))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self::new_with_local_systems_and_readiness(
+            node_id,
+            local_systems,
+            contract_version,
+            capabilities,
+            capability_owners,
+            capability_kinds,
+            capability_readiness,
+            sensors,
+            resources,
+            resource_owners,
+        )
+    }
+
+    /// Creates an aggregate registration with explicit ownership and exact readiness facts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_local_systems_and_readiness(
+        node_id: NodeId,
+        local_systems: Vec<LocalSystemDescriptor>,
+        contract_version: NodeContractVersion,
+        capabilities: Vec<Capability>,
+        capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+        capability_kinds: BTreeMap<CapabilityContractRef, CapabilityKind>,
+        capability_readiness: BTreeMap<CapabilityContractRef, bool>,
+        sensors: Vec<SensorDescriptor>,
+        resources: Vec<Resource>,
+        resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+    ) -> Result<Self, DomainError> {
         let owners = local_systems
             .iter()
             .map(LocalSystemDescriptor::id)
@@ -1314,14 +1445,32 @@ impl NodeRegistration {
             .map(SensorDescriptor::id)
             .collect::<BTreeSet<_>>();
         let resource_ids = resources.iter().map(Resource::id).collect::<BTreeSet<_>>();
+        let advertised_capability_kinds = capabilities
+            .iter()
+            .map(Capability::kind)
+            .collect::<BTreeSet<_>>();
         if local_systems.is_empty() || owners.len() != local_systems.len() {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "node local systems must be nonempty and unique".to_string(),
             });
         }
+        if capability_readiness.keys().collect::<BTreeSet<_>>()
+            != capability_owners.keys().collect::<BTreeSet<_>>()
+            || (!capability_kinds.is_empty()
+                && capability_kinds.keys().collect::<BTreeSet<_>>()
+                    != capability_owners.keys().collect::<BTreeSet<_>>())
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "capability readiness and any supplied capability-kind map must cover every configured contract exactly"
+                    .to_string(),
+            });
+        }
         if capability_owners
             .values()
             .any(|owner| !owners.contains(owner))
+            || capability_kinds
+                .values()
+                .any(|kind| !advertised_capability_kinds.contains(kind))
             || sensors
                 .iter()
                 .any(|sensor| !owners.contains(sensor.local_system_id()))
@@ -1349,6 +1498,8 @@ impl NodeRegistration {
             capabilities,
             supported_contracts,
             capability_owners,
+            capability_kinds,
+            capability_readiness,
             sensors,
             resources,
             resource_owners,
@@ -1392,6 +1543,37 @@ impl NodeRegistration {
         self.capability_owners.get(contract)
     }
 
+    /// Returns whether one configured canonical contract is currently ready to execute.
+    ///
+    /// A missing fact can only come from a legacy checkpoint, whose former static-ready
+    /// semantics remain in force until a complete registration observation replaces it.
+    pub fn contract_is_available(&self, contract: &CapabilityContractRef) -> bool {
+        self.capability_owners.contains_key(contract)
+            && self
+                .capability_readiness
+                .get(contract)
+                .copied()
+                .unwrap_or(true)
+    }
+
+    /// Returns whether an exact canonical contract is ready under the requested capability kind.
+    pub fn contract_is_available_for_kind(
+        &self,
+        contract: &CapabilityContractRef,
+        kind: CapabilityKind,
+    ) -> bool {
+        self.contract_is_available(contract)
+            && self
+                .capability_kinds
+                .get(contract)
+                .is_none_or(|configured| *configured == kind)
+    }
+
+    /// Returns exact readiness facts in deterministic contract order.
+    pub const fn capability_readiness(&self) -> &BTreeMap<CapabilityContractRef, bool> {
+        &self.capability_readiness
+    }
+
     /// Returns all node sensors in stable declaration order.
     pub fn sensors(&self) -> &[SensorDescriptor] {
         &self.sensors
@@ -1413,9 +1595,7 @@ impl NodeRegistration {
             capability.kind() == requirement.capability() && capability.is_available()
         });
         let has_contract = requirement.required_contract().is_none_or(|contract| {
-            self.supported_contracts
-                .iter()
-                .any(|supported| supported == contract)
+            self.contract_is_available_for_kind(contract, requirement.capability())
         });
         let has_resource = requirement.resource_kind().is_none_or(|kind| {
             self.resources
@@ -1653,6 +1833,11 @@ pub enum EventPayload {
         mission_id: MissionId,
         /// Anchor used by the localization check.
         anchor_id: SpatialAnchorId,
+    },
+    /// A node produced complete strong localization verification evidence.
+    MapLocalizationEvidenceRecorded {
+        /// Canonical evidence bound to artifact and execution identity.
+        evidence: LocalizationVerificationEvidence,
     },
     /// A node rejected an artifact or could not verify its spatial metadata.
     MapArtifactRejected {
@@ -2184,6 +2369,59 @@ mod tests {
             serde_json::from_str(&encoded).expect("registration deserializes");
         assert_eq!(decoded, registration);
         assert!(encoded.contains("\"capability_owners\":[["));
+        assert!(encoded.contains("\"capability_kinds\":[["));
+        assert!(encoded.contains("\"capability_readiness\":[["));
         assert!(encoded.contains("\"resource_owners\":[["));
+
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(&encoded).expect("registration JSON parses");
+        legacy
+            .as_object_mut()
+            .expect("registration is an object")
+            .remove("capability_readiness");
+        legacy
+            .as_object_mut()
+            .expect("registration is an object")
+            .remove("capability_kinds");
+        let restored: NodeRegistration =
+            serde_json::from_value(legacy).expect("legacy registration restores");
+        assert!(restored.contract_is_available(&contract));
+    }
+
+    /// Legacy aggregate registration remains valid when several capability kinds prevent exact inference.
+    #[test]
+    fn legacy_registration_accepts_multiple_capability_kinds() {
+        let node_id = NodeId::new("node-legacy-mixed").expect("node id must be valid");
+        let local_system_id = LocalSystemId::new("mixed").expect("local system id is valid");
+        let compute = CapabilityContractRef::new("spatial.map", "build", "v0")
+            .expect("compute contract is valid");
+        let observation = CapabilityContractRef::new("spatial.map", "observe", "v0")
+            .expect("observation contract is valid");
+        let registration = NodeRegistration::new_with_local_systems(
+            node_id,
+            vec![LocalSystemDescriptor::new(
+                local_system_id.clone(),
+                LocalRuntime::new("mixed-runtime", "0.1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_2(),
+            vec![
+                Capability::new(CapabilityKind::Compute, true),
+                Capability::new(CapabilityKind::Observation, true),
+            ],
+            BTreeMap::from([
+                (compute.clone(), local_system_id.clone()),
+                (observation.clone(), local_system_id),
+            ]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("legacy mixed registration remains valid");
+
+        assert!(registration.contract_is_available_for_kind(&compute, CapabilityKind::Compute));
+        assert!(
+            registration.contract_is_available_for_kind(&observation, CapabilityKind::Observation)
+        );
     }
 }

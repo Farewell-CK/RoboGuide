@@ -7,8 +7,9 @@ use integration::grpc::v0_2::server_message::Message as ServerPayload;
 use integration::grpc::v0_2::{
     Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
     NODE_CONTRACT_VERSION, NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError,
-    Register, Resource, Sensor, ServerMessage,
+    Register, RegistrationUpdate, Resource, Sensor, ServerMessage,
 };
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -72,10 +73,15 @@ impl NodeService {
                 "server selected an unsupported protocol or contract".to_string(),
             ));
         }
+        let initial_observation = self.engine.observe().await;
+        let initial_readiness = readiness_snapshot(&initial_observation);
         outbound
             .send(NodeMessage {
                 message: Some(NodePayload::Register(Register {
-                    registration: Some(registration_from_catalog(catalog)),
+                    registration: Some(registration_from_observation(
+                        catalog,
+                        &initial_observation,
+                    )),
                 })),
             })
             .map_err(|_| NodeServiceError::Closed)?;
@@ -92,6 +98,7 @@ impl NodeService {
             registered.lease_id.clone(),
             welcome.heartbeat_interval_ms.max(1),
             outbound.clone(),
+            initial_readiness,
         );
         let session_result: Result<(), NodeServiceError> = async {
             loop {
@@ -127,6 +134,7 @@ impl NodeService {
         lease_id: String,
         interval_ms: u64,
         outbound: mpsc::UnboundedSender<NodeMessage>,
+        mut previous_readiness: BTreeMap<String, bool>,
     ) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
@@ -135,20 +143,18 @@ impl NodeService {
             let mut sequence = 0_u64;
             loop {
                 heartbeat.tick().await;
-                sequence = sequence.saturating_add(1);
-                let status = engine.status().await;
-                if outbound
-                    .send(NodeMessage {
-                        message: Some(NodePayload::Heartbeat(Heartbeat {
-                            session_id: session_id.clone(),
-                            lease_id: lease_id.clone(),
-                            sequence,
-                            status: Some(status),
-                        })),
-                    })
-                    .is_err()
-                {
-                    break;
+                let observation = engine.observe().await;
+                for message in management_messages(
+                    &session_id,
+                    &lease_id,
+                    &mut sequence,
+                    engine.catalog(),
+                    &observation,
+                    &mut previous_readiness,
+                ) {
+                    if outbound.send(message).is_err() {
+                        return;
+                    }
                 }
             }
         })
@@ -250,8 +256,74 @@ fn send_local_rejection(
         .map_err(|_| NodeServiceError::Closed)
 }
 
-/// Builds a complete v0.2 registration from the immutable compiled catalog.
+/// Builds a legacy complete registration with static-ready capability facts.
+#[cfg(test)]
 fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegistration {
+    let readiness = catalog
+        .capabilities()
+        .keys()
+        .cloned()
+        .map(|contract| (contract, true))
+        .collect();
+    registration_from_readiness(catalog, &readiness)
+}
+
+/// Builds a complete registration from one current health/readiness observation.
+fn registration_from_observation(
+    catalog: &crate::CompiledLocalCatalog,
+    observation: &crate::NodeObservation,
+) -> NodeRegistration {
+    registration_from_readiness(catalog, &readiness_snapshot(observation))
+}
+
+/// Extracts the comparable exact-contract availability snapshot from one observation.
+fn readiness_snapshot(observation: &crate::NodeObservation) -> BTreeMap<String, bool> {
+    observation
+        .capabilities()
+        .iter()
+        .map(|(contract, fact)| (contract.clone(), fact.available))
+        .collect()
+}
+
+/// Builds an ordered management batch with one monotonic sequence shared by updates and heartbeats.
+fn management_messages(
+    session_id: &str,
+    lease_id: &str,
+    sequence: &mut u64,
+    catalog: &crate::CompiledLocalCatalog,
+    observation: &crate::NodeObservation,
+    previous_readiness: &mut BTreeMap<String, bool>,
+) -> Vec<NodeMessage> {
+    let readiness = readiness_snapshot(observation);
+    let mut messages = Vec::with_capacity(2);
+    if readiness != *previous_readiness {
+        *sequence = sequence.saturating_add(1);
+        messages.push(NodeMessage {
+            message: Some(NodePayload::RegistrationUpdate(RegistrationUpdate {
+                session_id: session_id.to_string(),
+                sequence: *sequence,
+                registration: Some(registration_from_observation(catalog, observation)),
+            })),
+        });
+        *previous_readiness = readiness;
+    }
+    *sequence = sequence.saturating_add(1);
+    messages.push(NodeMessage {
+        message: Some(NodePayload::Heartbeat(Heartbeat {
+            session_id: session_id.to_string(),
+            lease_id: lease_id.to_string(),
+            sequence: *sequence,
+            status: Some(observation.status().clone()),
+        })),
+    });
+    messages
+}
+
+/// Builds one wire registration from a complete exact-contract availability snapshot.
+fn registration_from_readiness(
+    catalog: &crate::CompiledLocalCatalog,
+    readiness: &BTreeMap<String, bool>,
+) -> NodeRegistration {
     let local_systems = catalog
         .local_systems()
         .values()
@@ -269,7 +341,10 @@ fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegis
         .values()
         .map(|capability| Capability {
             kind: capability.kind().to_string(),
-            available: true,
+            available: readiness
+                .get(capability.contract())
+                .copied()
+                .unwrap_or_else(|| capability.readiness().is_none()),
             contracts: vec![capability.contract().to_string()],
             local_system_id: capability.owner().to_string(),
         })
@@ -362,9 +437,10 @@ mod tests {
     };
     use crate::{
         ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactServiceConfig,
-        CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
-        LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, RequestMappingConfig,
-        ResourceConfig, ValueExpressionConfig, WorkflowConfig, WorkflowStepConfig,
+        CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+        ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+        NodeServiceConfig, RequestMappingConfig, ResourceConfig, ValueExpressionConfig,
+        WorkflowConfig, WorkflowStepConfig,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -700,6 +776,13 @@ mod tests {
                         serde_json::json!({ "state": "RUNNING", "detail": "moving" })
                     }
                     "/cancel" => serde_json::json!({ "accepted": true }),
+                    "/readiness" if self.completed.load(Ordering::SeqCst) => {
+                        serde_json::json!({ "state": "READY", "detail": "service available" })
+                    }
+                    "/readiness" => serde_json::json!({
+                        "state": "UNAVAILABLE",
+                        "detail": "service unavailable"
+                    }),
                     _ => return Err(DriverError::InvalidResponse("unknown mock path".into())),
                 };
                 let (sender, receiver) = tokio::sync::mpsc::channel(1);
@@ -720,7 +803,7 @@ mod tests {
         endpoint: String,
         state_directory: std::path::PathBuf,
     ) -> crate::CompiledLocalCatalog {
-        gated_catalog_with_artifacts(endpoint, state_directory, None)
+        gated_catalog_with_artifacts(endpoint, state_directory, None, false)
     }
 
     /// Builds the generic test catalog with one optional immutable map-input binding.
@@ -728,6 +811,7 @@ mod tests {
         endpoint: String,
         state_directory: std::path::PathBuf,
         artifact_endpoint: Option<String>,
+        readiness: bool,
     ) -> crate::CompiledLocalCatalog {
         let step = |id: &str, path: &str, request: RequestMappingConfig| WorkflowStepConfig {
             id: id.to_string(),
@@ -766,7 +850,9 @@ mod tests {
         let artifact_operation = artifacts.as_ref().map(|_| ArtifactOperationConfig::Import);
         crate::CompiledLocalCatalog::compile(
             NodeServiceConfig {
-                schema: if artifacts.is_some() {
+                schema: if readiness {
+                    crate::CONFIG_SCHEMA_V0_4.to_string()
+                } else if artifacts.is_some() {
                     crate::CONFIG_SCHEMA_V0_3.to_string()
                 } else {
                     crate::CONFIG_SCHEMA_V0_2.to_string()
@@ -804,6 +890,14 @@ mod tests {
                     required_resources: vec!["base".to_string()],
                     local_locks: vec!["locomotion".to_string()],
                     artifact_operation,
+                    readiness: readiness.then(|| CapabilityReadinessConfig {
+                        step: step("readiness", "/readiness", RequestMappingConfig::default()),
+                        state_pointer: "/state".to_string(),
+                        detail_pointer: Some("/detail".to_string()),
+                        ready: vec!["READY".to_string()],
+                        unavailable: vec!["UNAVAILABLE".to_string()],
+                        case_sensitive: false,
+                    }),
                     workflow: WorkflowConfig {
                         execute: vec![step(
                             "dispatch",
@@ -867,6 +961,74 @@ mod tests {
         let status = engine.status().await;
         assert_eq!(status.health, "offline");
         assert!(status.detail.contains("local runtime is unavailable"));
+    }
+
+    /// Exact readiness changes registration availability without changing healthy process state.
+    #[tokio::test]
+    async fn capability_readiness_is_observed_independently_from_health() {
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let ready = Arc::new(AtomicBool::new(false));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog_with_artifacts(
+                "http://127.0.0.1:50051".to_string(),
+                state_dir.path().to_path_buf(),
+                None,
+                true,
+            ),
+            vec![Arc::new(GatedDriver {
+                completed: ready.clone(),
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+
+        let unavailable = engine.observe().await;
+        assert_eq!(unavailable.status().health, "online");
+        let unavailable_registration =
+            registration_from_observation(engine.catalog(), &unavailable);
+        assert!(!unavailable_registration.capabilities[0].available);
+
+        ready.store(true, Ordering::SeqCst);
+        let available = engine.observe().await;
+        assert_eq!(available.status().health, "online");
+        let available_registration = registration_from_observation(engine.catalog(), &available);
+        assert!(available_registration.capabilities[0].available);
+
+        let mut sequence = 0;
+        let mut previous = readiness_snapshot(&unavailable);
+        let changed = management_messages(
+            "session-a",
+            "lease-a",
+            &mut sequence,
+            engine.catalog(),
+            &available,
+            &mut previous,
+        );
+        assert_eq!(changed.len(), 2);
+        assert!(matches!(
+            changed[0].message,
+            Some(NodePayload::RegistrationUpdate(RegistrationUpdate {
+                sequence: 1,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            changed[1].message,
+            Some(NodePayload::Heartbeat(Heartbeat { sequence: 2, .. }))
+        ));
+        let unchanged = management_messages(
+            "session-a",
+            "lease-a",
+            &mut sequence,
+            engine.catalog(),
+            &available,
+            &mut previous,
+        );
+        assert!(matches!(
+            unchanged.as_slice(),
+            [NodeMessage {
+                message: Some(NodePayload::Heartbeat(Heartbeat { sequence: 3, .. }))
+            }]
+        ));
     }
 
     /// Resource IDs are an unordered semantic set for execution identity.
@@ -1586,6 +1748,7 @@ mod tests {
             "http://127.0.0.1:50051".to_string(),
             state_dir.path().to_path_buf(),
             Some(format!("http://{address}")),
+            false,
         );
         let parameters = HashMap::from([
             (

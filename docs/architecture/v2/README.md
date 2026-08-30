@@ -196,6 +196,13 @@ Detect → Reconcile → Adapt
 
 ## 9. 开放架构问题
 
+Phase 1 真机 observation 必须区分 local-system/process health 与 exact canonical capability
+readiness。Node 负责本地 probe，State 保存最新事实，Control 的共享 eligibility predicate
+消费事实；Integration 不推断 readiness。Spatial localization 的强验证证据属于横向 State &
+Memory evidence，必须关联 execution 与 artifact identity，不能由 Runtime 或 `has_map=true`
+自行推断。渐进方案见
+[`ADR-0019`](../../decisions/0019-capability-readiness-and-localization-evidence.md)。
+
 V2 有意保留七个问题：State Authority、Spatial Authority、Control Topology、
 Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance
 和 Resource Commitment Semantics。跟踪列表以及 MVP 决策见

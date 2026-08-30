@@ -21,13 +21,15 @@ pub use artifact::{
 };
 pub use config::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, CredentialSourceConfig,
-    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    NodeServiceConfig, RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig,
-    ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+    CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
+    LocalSystemConfig, NodeServiceConfig, RequestBindingConfig, RequestMappingConfig,
+    ResourceConfig, SensorConfig, ValueExpressionConfig, ValueFunction, WorkflowConfig,
+    WorkflowStepConfig,
 };
 pub use engine::{
-    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, journal_path,
+    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,
+    journal_path,
 };
 pub use journal::{
     ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, JournalError, JournalExecution,
@@ -42,10 +44,11 @@ pub use local_engine::http_driver::HttpDriver;
 pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowContext};
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
-    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CatalogError, CompiledArtifactService,
-    CompiledCapability, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
-    CompiledLocalSystem, CompiledResource, CompiledSensor, CompiledWorkflow, CompiledWorkflowStep,
-    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
+    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CapabilityReadinessFact,
+    CatalogError, CompiledArtifactService, CompiledCapability, CompiledCapabilityReadiness,
+    CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem,
+    CompiledResource, CompiledSensor, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact,
+    LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
 };
 pub use service::{NodeService, NodeServiceError};
 

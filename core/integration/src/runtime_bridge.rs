@@ -20,9 +20,9 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 6 records structured Node owner maps as arrays so a registered node can
-/// be checkpointed by serde_json without relying on non-string object keys.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v6";
+/// Version 7 records exact-contract readiness and prevents older binaries from restoring a
+/// checkpoint while silently reverting to legacy static-ready behavior.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v7";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -621,6 +621,8 @@ fn registration_from_wire(
         .collect::<Result<Vec<_>, IntegrationRuntimeError>>()?;
     let mut capability_kinds = BTreeMap::<CapabilityKind, bool>::new();
     let mut capability_owners = BTreeMap::new();
+    let mut contract_kinds = BTreeMap::new();
+    let mut capability_readiness = BTreeMap::new();
     for capability in wire.capabilities {
         let kind = capability_kind(&capability.kind)?;
         capability_kinds
@@ -629,14 +631,17 @@ fn registration_from_wire(
             .or_insert(capability.available);
         let owner = LocalSystemId::new(capability.local_system_id)?;
         for contract in capability.contracts {
+            let contract = parse_contract(&contract)?;
             if capability_owners
-                .insert(parse_contract(&contract)?, owner.clone())
+                .insert(contract.clone(), owner.clone())
                 .is_some()
             {
                 return Err(IntegrationRuntimeError::Protocol(
                     "canonical capability has multiple owners".to_string(),
                 ));
             }
+            contract_kinds.insert(contract.clone(), kind);
+            capability_readiness.insert(contract, capability.available);
         }
     }
     let capabilities = capability_kinds
@@ -667,16 +672,20 @@ fn registration_from_wire(
         )?);
         resource_owners.insert(resource_id, owner);
     }
-    Ok(domain::NodeRegistration::new_with_local_systems(
-        NodeId::new(wire.node_id)?,
-        local_systems,
-        NodeContractVersion::new(wire.node_contract_version)?,
-        capabilities,
-        capability_owners,
-        sensors,
-        resources,
-        resource_owners,
-    )?)
+    Ok(
+        domain::NodeRegistration::new_with_local_systems_and_readiness(
+            NodeId::new(wire.node_id)?,
+            local_systems,
+            NodeContractVersion::new(wire.node_contract_version)?,
+            capabilities,
+            capability_owners,
+            contract_kinds,
+            capability_readiness,
+            sensors,
+            resources,
+            resource_owners,
+        )?,
+    )
 }
 
 /// Converts current protocol health into Domain health.
@@ -999,6 +1008,182 @@ mod tests {
         assert_eq!(contract.namespace(), "spatial.map");
         assert_eq!(contract.name(), "build");
         assert_eq!(contract.to_string(), "spatial.map.build@v0");
+    }
+
+    /// Conversion preserves exact readiness when sibling contracts share a coarse kind.
+    #[test]
+    fn registration_conversion_preserves_per_contract_readiness() {
+        let registration = registration_from_wire(NodeRegistration {
+            node_id: "dog-a".to_string(),
+            local_systems: vec![LocalSystemDescriptor {
+                id: "mapping".to_string(),
+                runtime: Some(WireRuntime {
+                    name: "mapping-runtime".to_string(),
+                    version: "1".to_string(),
+                }),
+                metadata: Default::default(),
+            }],
+            capabilities: vec![
+                WireCapability {
+                    kind: "compute".to_string(),
+                    available: true,
+                    contracts: vec!["spatial.map.build@v0".to_string()],
+                    local_system_id: "mapping".to_string(),
+                },
+                WireCapability {
+                    kind: "compute".to_string(),
+                    available: false,
+                    contracts: vec!["spatial.map.localize@v0".to_string()],
+                    local_system_id: "mapping".to_string(),
+                },
+                WireCapability {
+                    kind: "observation".to_string(),
+                    available: true,
+                    contracts: vec!["spatial.localization.observe@v0".to_string()],
+                    local_system_id: "mapping".to_string(),
+                },
+            ],
+            sensors: Vec::new(),
+            resources: Vec::new(),
+            metadata: Default::default(),
+            node_contract_version: "roboguide.node.v0.2".to_string(),
+        })
+        .expect("registration converts");
+        let build = parse_contract("spatial.map.build@v0").expect("build contract parses");
+        let localize = parse_contract("spatial.map.localize@v0").expect("localize contract parses");
+        let observe =
+            parse_contract("spatial.localization.observe@v0").expect("observation contract parses");
+
+        assert!(registration.contract_is_available(&build));
+        assert!(!registration.contract_is_available(&localize));
+        assert!(registration.contract_is_available_for_kind(&observe, CapabilityKind::Observation));
+        assert!(!registration.contract_is_available_for_kind(&observe, CapabilityKind::Compute));
+        assert!(
+            registration
+                .capabilities()
+                .iter()
+                .any(|capability| capability.kind() == CapabilityKind::Compute
+                    && capability.is_available())
+        );
+    }
+
+    /// A RegistrationUpdate changes only later matching decisions for the exact contract.
+    #[test]
+    fn readiness_update_changes_later_control_matching() {
+        let wire_registration = |available: bool| NodeRegistration {
+            node_id: "dog-a".to_string(),
+            local_systems: vec![LocalSystemDescriptor {
+                id: "mapping".to_string(),
+                runtime: Some(WireRuntime {
+                    name: "mapping-runtime".to_string(),
+                    version: "1".to_string(),
+                }),
+                metadata: Default::default(),
+            }],
+            capabilities: vec![WireCapability {
+                kind: "observation".to_string(),
+                available,
+                contracts: vec!["spatial.localization.verify@v0".to_string()],
+                local_system_id: "mapping".to_string(),
+            }],
+            sensors: Vec::new(),
+            resources: Vec::new(),
+            metadata: Default::default(),
+            node_contract_version: "roboguide.node.v0.2".to_string(),
+        };
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("readiness-update").expect("correlation is valid");
+        bridge
+            .consume(
+                GrpcNodeEvent::Registered {
+                    session_id: "session-a".to_string(),
+                    lease_id: "lease-a".to_string(),
+                    registration: wire_registration(false),
+                },
+                TimestampMs::new(0),
+                &correlation,
+            )
+            .expect("registration is consumed");
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-a".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(crate::grpc::v0_2::Heartbeat {
+                            session_id: "session-a".to_string(),
+                            lease_id: "lease-a".to_string(),
+                            sequence: 1,
+                            status: Some(crate::grpc::v0_2::NodeStatus {
+                                health: "online".to_string(),
+                                detail: String::new(),
+                            }),
+                        })),
+                    },
+                },
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("heartbeat is consumed");
+        let requirement = domain::TaskRequirement::new(
+            domain::MissionId::new("mission-readiness").expect("mission id is valid"),
+            domain::TaskId::new("verify-map").expect("task id is valid"),
+            vec![domain::RoleRequirement::new_with_actor_and_contract(
+                domain::RoleId::new("localizer").expect("role id is valid"),
+                domain::ActorId::new("robot").expect("actor id is valid"),
+                CapabilityKind::Observation,
+                parse_contract("spatial.localization.verify@v0").expect("contract is valid"),
+                None,
+            )],
+        )
+        .expect("requirement is valid");
+        let mut decision_events = InMemoryEventLog::new();
+        assert!(matches!(
+            bridge.control().match_capabilities(
+                bridge.state(),
+                &requirement,
+                TimestampMs::new(1),
+                &correlation,
+                &mut decision_events,
+            ),
+            Err(control::ControlError::NoCandidate(_))
+        ));
+
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-a".to_string(),
+                    message: crate::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::RegistrationUpdate(
+                            crate::grpc::v0_2::RegistrationUpdate {
+                                session_id: "session-a".to_string(),
+                                sequence: 2,
+                                registration: Some(wire_registration(true)),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("readiness update is consumed");
+        let candidates = bridge
+            .control()
+            .match_capabilities(
+                bridge.state(),
+                &requirement,
+                TimestampMs::new(2),
+                &correlation,
+                &mut decision_events,
+            )
+            .expect("ready contract matches");
+        assert_eq!(candidates.roles()[0].node_ids().len(), 1);
     }
 
     /// Bound Group assignments are the only source of NodeId for Runtime routing.

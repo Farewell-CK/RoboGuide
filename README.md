@@ -189,7 +189,10 @@ Sensor 和 Resource 都保留唯一 owner；Execute 携带 Control 已 Commit �
 查找本地预配置 fixed argv，不接受网络 executable，也不拼 shell。HTTP 不是 Node Contract；
 该旧 HTTP probe 不是正式 Node Protocol。异步 lifecycle、配置驱动执行、SQLite journal、
 heartbeat/lease 与 session fencing 由 `roboguide-node`/Integration Server 实现。合同见
-[`contracts/node/v0.2/`](contracts/node/v0.2/)。
+[`contracts/node/v0.2/`](contracts/node/v0.2/)。Node config v0.4 为每个 exact canonical
+contract 增加固定 readiness observation，并通过现有 RegistrationUpdate 更新后续 Matching；
+v0.2/v0.3 的静态 ready 兼容行为不满足真机稳定门槛。配置合同见
+[`contracts/node/v0.4/`](contracts/node/v0.4/README.md)。
 
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081
@@ -289,6 +292,9 @@ Persistence/Replication、State Authority resolution 和 Lease ownership resolut
 Task handoff 或 Node Protocol payload。实现边界与非目标见
 [`ADR-0016`](docs/decisions/0016-distributed-spatial-memory.md) 和
 [`contracts/spatial/v0.1`](contracts/spatial/v0.1/README.md)。
+强 localization verification 使用独立 evidence 合同，State 明确区分带完整 evidence 的
+strong verification 与旧 `has_map=true` smoke fact；合同见
+[`localization-evidence-v0.1`](contracts/spatial/localization-evidence-v0.1/README.md)。
 用于 Artifact HTTP 寻址的 `MapId`/`MapRevisionId` 统一限制为 path-safe ASCII
 `[A-Za-z0-9][A-Za-z0-9._:-]*`；Domain 构造、serde 解码与 manifest schema 使用同一规则。
 Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单个 Artifact 上限
@@ -428,8 +434,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission/v0.2/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
-│   ├── node/v0.2/ + v0.3/
-│   └── spatial/v0.1/
+│   ├── node/v0.2/ + v0.3/ + v0.4/
+│   ├── spatial/v0.1/
+│   └── spatial/localization-evidence-v0.1/
 ├── mission/
 │   ├── src/mission/
 │   ├── prompts/v0/
@@ -490,7 +497,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0015-runtime-execution-boundary.md
     │   ├── 0016-distributed-spatial-memory.md
     │   ├── 0017-canonical-capability-contract-identity.md
-    │   └── 0018-mission-intent-loop.md
+    │   ├── 0018-mission-intent-loop.md
+    │   └── 0019-capability-readiness-and-localization-evidence.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png
@@ -502,6 +510,11 @@ Allocation State v0.1、Node terminal execution 到 Group lifecycle 推进、SQL
 envelope 和 controller projection checkpoint restore 已实现，但完整 State & Memory Plane
 （event-sourced replay、Task/Group 历史 projection、复制）和 MVP Definition 均未完成；
 完整 MVP 的测试、适配器和仿真环境尚未完成。
+
+双机器狗 Spatial Memory 的 Phase 1 真机验收定义现处于 `In Review`，见
+[`scenarios/distributed-spatial-memory-v0.1/acceptance.md`](scenarios/distributed-spatial-memory-v0.1/acceptance.md)。
+它要求 per-capability readiness 与强 localization evidence，不把旧的 process health 或
+`has_map=true` 当作稳定成功证据。
 
 ## Mission Intelligence 开发
 

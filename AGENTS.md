@@ -58,6 +58,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `core/integration/` owns the formal gRPC Node Protocol v0.2 transport;
   `core/node-service/` owns node-side lifecycle, configuration, durable execution
   continuity, and the declarative Local Integration Engine.
+- Node config v0.4 requires one fixed readiness observation per exact canonical
+  capability. Node Service observes before Register and emits complete RegistrationUpdate
+  snapshots on change; Integration preserves exact readiness, State stores it, and Control
+  consumes it only for later eligibility decisions. v0.2/v0.3 static readiness is legacy.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
   Robonix map adapter); these adapters own vendor calls and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.
@@ -73,6 +77,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references
   may be carried as opaque intent parameters, while digest verification and local staging belong
   to Node Service/Adapter. Node Protocol v0.2 remains unchanged.
+- Strong localization verification uses
+  `roboguide.localization-verification-evidence/v0.1`. Node journal persistence precedes remote
+  delivery, Artifact HTTP records the evidence transition, and State distinguishes strong
+  evidence from legacy `has_map=true` smoke verification. Real adapter field mapping remains a
+  hardware-validated deployment responsibility.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing

@@ -23,7 +23,7 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v7";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -1065,7 +1065,10 @@ fn inventory_json(
                         "available": capability.is_available(),
                     })
                 }).collect::<Vec<_>>(),
-                "contracts": registration.supported_contracts().iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "contracts": registration.supported_contracts().iter()
+                    .filter(|contract| registration.contract_is_available(contract))
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
                 "resources": registration.resources().iter().map(|resource| {
                     serde_json::json!({
                         "resource_id": resource.id().as_str(),
@@ -1270,6 +1273,51 @@ mod tests {
         assert_eq!(value["nodes"][0]["contracts"][0], "mobility.move@v1");
         assert_eq!(value["nodes"][0]["resources"][0]["kind"], "space");
         assert_eq!(value["nodes"][0]["resources"][0]["capacity"], 2);
+    }
+
+    /// Advisory inventory excludes an exact contract whose latest readiness fact is false.
+    #[test]
+    fn inventory_snapshot_excludes_unavailable_exact_contracts() {
+        let system_id = domain::LocalSystemId::new("mapping").expect("system id is valid");
+        let contract = domain::CapabilityContractRef::new("spatial.map", "localize", "v0")
+            .expect("contract is valid");
+        let registration = domain::NodeRegistration::new_with_local_systems_and_readiness(
+            domain::NodeId::new("dog-b").expect("node id is valid"),
+            vec![domain::LocalSystemDescriptor::new(
+                system_id.clone(),
+                domain::LocalRuntime::new("mapping", "1").expect("runtime is valid"),
+                std::collections::BTreeMap::new(),
+            )],
+            domain::NodeContractVersion::v0_2(),
+            vec![domain::Capability::new(
+                domain::CapabilityKind::Compute,
+                false,
+            )],
+            std::collections::BTreeMap::from([(contract.clone(), system_id)]),
+            std::collections::BTreeMap::from([(contract.clone(), domain::CapabilityKind::Compute)]),
+            std::collections::BTreeMap::from([(contract, false)]),
+            Vec::new(),
+            Vec::new(),
+            std::collections::BTreeMap::new(),
+        )
+        .expect("registration is valid");
+        let snapshot = domain::NodeStateSnapshot::new(
+            registration,
+            domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(1)),
+            domain::TimestampMs::new(2),
+            domain::NodeLivenessObservation::new(
+                domain::NodeLiveness::Reachable,
+                domain::TimestampMs::new(2),
+            ),
+        );
+        let mut shared_state = state::InMemorySharedNodeState::new();
+        ports::SharedNodeStateWriter::record_node(&mut shared_state, snapshot)
+            .expect("snapshot is accepted");
+
+        let value = inventory_json(&shared_state, domain::TimestampMs::new(3));
+
+        assert_eq!(value["nodes"][0]["reported_health"], "Online");
+        assert_eq!(value["nodes"][0]["contracts"], serde_json::json!([]));
     }
 
     /// The control HTTP reader reconstructs a Mission request split across arbitrary TCP writes.

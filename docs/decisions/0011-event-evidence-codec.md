@@ -19,6 +19,8 @@ correlation/causation identity 和 payload schema marker。`SqliteEventLog::deco
 Mission-level Group/TaskExecution evidence 最初使用 `domain.EventPayload.json/v2`。加入
 Distributed Spatial Memory manifest/replica evidence variant 后，新事件升级为
 `domain.EventPayload.json/v3`；读取路径继续接受 v2，不能把新增 variant 伪装成旧 marker。
+ADR-0019 加入 strong localization evidence variant 后，新写入升级为 v4；读取路径继续接受
+v2/v3，旧 marker 仍不得承载新 variant。
 
 JSON codec 版本升级必须使用新的 schema marker，并保留旧版本读取路径，直到已有数据库完成
 迁移。完整 event-sourced projection replay 必须额外定义 event ordering、idempotency 和

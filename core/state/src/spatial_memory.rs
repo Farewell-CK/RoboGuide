@@ -20,6 +20,20 @@ pub struct MapCatalogProjection {
     replicas: BTreeMap<MapRevisionSelector, BTreeMap<NodeId, MapReplicaSnapshot>>,
 }
 
+/// One node-local replica projection update applied at a RoboGuide receive time.
+struct ReplicaUpdate<'a> {
+    /// Incoming replica lifecycle.
+    status: MapReplicaStatus,
+    /// Mission associated with the evidence.
+    mission_id: &'a domain::MissionId,
+    /// RoboGuide-local receive time used for projection ordering.
+    observed_at: TimestampMs,
+    /// Optional terminal rejection diagnostic.
+    rejection_reason: Option<String>,
+    /// Optional complete strong localization evidence.
+    localization_evidence: Option<domain::LocalizationVerificationEvidence>,
+}
+
 impl MapCatalogProjection {
     /// Creates an empty catalog projection.
     pub const fn new() -> Self {
@@ -132,48 +146,65 @@ impl MapCatalogProjection {
         &mut self,
         selector: &MapRevisionSelector,
         node_id: &NodeId,
-        status: MapReplicaStatus,
-        mission_id: &domain::MissionId,
-        observed_at: TimestampMs,
-        rejection_reason: Option<String>,
+        update: ReplicaUpdate<'_>,
     ) -> Result<(), MapCatalogError> {
         if let Some(existing) = self
             .replicas
             .get(selector)
             .and_then(|replicas| replicas.get(node_id))
         {
-            if observed_at < existing.observed_at() {
+            if let (Some(current), Some(incoming)) = (
+                existing.localization_evidence(),
+                update.localization_evidence.as_ref(),
+            ) && current.execution_id() == incoming.execution_id()
+                && current != incoming
+            {
+                return Err(MapCatalogError::InvalidReplicaTransition(format!(
+                    "execution {} reported conflicting localization evidence",
+                    incoming.execution_id()
+                )));
+            }
+            if update.observed_at < existing.observed_at() {
                 return Err(MapCatalogError::InvalidReplicaTransition(format!(
                     "older observation for node {node_id}"
                 )));
             }
-            if is_redundant_lower_replica_evidence(existing.status(), status) {
+            if is_redundant_lower_replica_evidence(existing.status(), update.status) {
                 return Ok(());
             }
-            if !is_valid_replica_transition(existing.status(), status) {
+            if !is_valid_replica_transition(existing.status(), update.status) {
                 return Err(MapCatalogError::InvalidReplicaTransition(format!(
                     "cannot move node {node_id} from {:?} to {:?}",
                     existing.status(),
-                    status
+                    update.status
                 )));
             }
         } else if !matches!(
-            status,
+            update.status,
             MapReplicaStatus::Staged | MapReplicaStatus::Rejected
         ) {
             return Err(MapCatalogError::InvalidReplicaTransition(format!(
-                "node {node_id} must stage map revision {selector} before reporting {status:?}"
+                "node {node_id} must stage map revision {selector} before reporting {:?}",
+                update.status
             )));
         }
+        let localization_evidence = update.localization_evidence.or_else(|| {
+            self.replicas
+                .get(selector)
+                .and_then(|replicas| replicas.get(node_id))
+                .and_then(MapReplicaSnapshot::localization_evidence)
+                .cloned()
+        });
         self.replicas.entry(selector.clone()).or_default().insert(
             node_id.clone(),
             MapReplicaSnapshot::new(
                 selector.clone(),
                 node_id.clone(),
-                status,
-                mission_id.clone(),
-                observed_at,
-                rejection_reason,
+                update.status,
+                update.mission_id.clone(),
+                update.observed_at,
+                update.rejection_reason,
+                localization_evidence,
             ),
         );
         Ok(())
@@ -201,10 +232,13 @@ impl MapCatalogProjection {
                 self.set_replica(
                     manifest.selector(),
                     node_id,
-                    MapReplicaStatus::Staged,
-                    mission_id,
-                    timestamp,
-                    None,
+                    ReplicaUpdate {
+                        status: MapReplicaStatus::Staged,
+                        mission_id,
+                        observed_at: timestamp,
+                        rejection_reason: None,
+                        localization_evidence: None,
+                    },
                 )
             }
             EventPayload::MapArtifactImported {
@@ -216,10 +250,13 @@ impl MapCatalogProjection {
                 self.set_replica(
                     manifest.selector(),
                     node_id,
-                    MapReplicaStatus::Imported,
-                    mission_id,
-                    timestamp,
-                    None,
+                    ReplicaUpdate {
+                        status: MapReplicaStatus::Imported,
+                        mission_id,
+                        observed_at: timestamp,
+                        rejection_reason: None,
+                        localization_evidence: None,
+                    },
                 )
             }
             EventPayload::MapLocalizationVerified {
@@ -247,10 +284,44 @@ impl MapCatalogProjection {
                 self.set_replica(
                     artifact.selector(),
                     node_id,
-                    MapReplicaStatus::Verified,
-                    mission_id,
-                    timestamp,
-                    None,
+                    ReplicaUpdate {
+                        status: MapReplicaStatus::Verified,
+                        mission_id,
+                        observed_at: timestamp,
+                        rejection_reason: None,
+                        localization_evidence: None,
+                    },
+                )
+            }
+            EventPayload::MapLocalizationEvidenceRecorded { evidence } => {
+                let revision = self
+                    .revisions
+                    .get(evidence.artifact().selector())
+                    .ok_or_else(|| {
+                        MapCatalogError::UnknownRevision(evidence.artifact().selector().clone())
+                    })?;
+                if revision.manifest().artifact() != evidence.artifact() {
+                    return Err(MapCatalogError::RevisionConflict(format!(
+                        "localization evidence for {} carries a conflicting artifact reference",
+                        evidence.artifact().selector()
+                    )));
+                }
+                if revision.manifest().anchor_id() != evidence.anchor_id() {
+                    return Err(MapCatalogError::InvalidReplicaTransition(format!(
+                        "localization evidence anchor for {} does not match the manifest",
+                        evidence.artifact().selector()
+                    )));
+                }
+                self.set_replica(
+                    evidence.artifact().selector(),
+                    evidence.node_id(),
+                    ReplicaUpdate {
+                        status: MapReplicaStatus::Verified,
+                        mission_id: evidence.mission_id(),
+                        observed_at: timestamp,
+                        rejection_reason: None,
+                        localization_evidence: Some(evidence.clone()),
+                    },
                 )
             }
             EventPayload::MapArtifactRejected {
@@ -272,10 +343,13 @@ impl MapCatalogProjection {
                 self.set_replica(
                     artifact.selector(),
                     node_id,
-                    MapReplicaStatus::Rejected,
-                    mission_id,
-                    timestamp,
-                    Some(reason.clone()),
+                    ReplicaUpdate {
+                        status: MapReplicaStatus::Rejected,
+                        mission_id,
+                        observed_at: timestamp,
+                        rejection_reason: Some(reason.clone()),
+                        localization_evidence: None,
+                    },
                 )
             }
             // A catalog projection is replayed from the shared evidence log. Unrelated control,
@@ -356,8 +430,10 @@ fn is_redundant_lower_replica_evidence(
 mod tests {
     use super::*;
     use domain::{
-        ContentDigest, EventId, EventPayload, MapArtifactRef, MapId, MapRevisionId,
-        MapRevisionSelector, MissionId, NodeId, SpatialAnchorId,
+        ContentDigest, EventId, EventPayload, ExecutionGroupId, LocalizationFrames,
+        LocalizationVerificationEvidence, MapArtifactRef, MapId, MapRevisionId,
+        MapRevisionSelector, MissionId, NodeId, PoseQualityComparison, PoseQualityEvidence, RoleId,
+        SpatialAnchorId, TaskId, TaskRef,
     };
 
     /// Builds one valid manifest used by projection transition tests.
@@ -457,8 +533,8 @@ mod tests {
             .apply_event(&event(
                 EventPayload::MapLocalizationVerified {
                     artifact: manifest.artifact().clone(),
-                    node_id: node,
-                    mission_id: mission,
+                    node_id: node.clone(),
+                    mission_id: mission.clone(),
                     anchor_id: manifest.anchor_id().clone(),
                 },
                 5,
@@ -475,6 +551,69 @@ mod tests {
             projection.replicas(&selector)[0].status(),
             MapReplicaStatus::Verified
         );
+        assert!(!projection.replicas(&selector)[0].is_strongly_verified());
+
+        let evidence = LocalizationVerificationEvidence::new(
+            manifest.artifact().clone(),
+            mission.clone(),
+            TaskRef::new(
+                mission,
+                TaskId::new("verify-map").expect("task id is valid"),
+            ),
+            ExecutionGroupId::new("group-import").expect("group id is valid"),
+            RoleId::new("localizer").expect("role id is valid"),
+            node,
+            "execution-verify",
+            "local-attempt-verify",
+            "warehouse-local",
+            "localization",
+            PoseQualityEvidence::new(
+                "translation_stddev",
+                "0.05",
+                "0.10",
+                "m",
+                PoseQualityComparison::AtMost,
+            )
+            .expect("quality is valid"),
+            LocalizationFrames::new("map", "odom", "base_link").expect("frames are valid"),
+            manifest.anchor_id().clone(),
+            TimestampMs::new(50),
+        )
+        .expect("strong evidence is valid");
+        projection
+            .apply_event(&event(
+                EventPayload::MapLocalizationEvidenceRecorded {
+                    evidence: evidence.clone(),
+                },
+                6,
+            ))
+            .expect("strong verification evidence applies");
+        let replica = &projection.replicas(&selector)[0];
+        assert!(replica.is_strongly_verified());
+        assert_eq!(replica.localization_evidence(), Some(&evidence));
+        projection
+            .apply_event(&event(
+                EventPayload::MapLocalizationEvidenceRecorded {
+                    evidence: evidence.clone(),
+                },
+                7,
+            ))
+            .expect("exact evidence retry is idempotent");
+        let mut conflicting_json =
+            serde_json::to_value(&evidence).expect("evidence serializes for conflict fixture");
+        conflicting_json["active_local_map_id"] =
+            serde_json::Value::String("different-local-map".to_string());
+        let conflicting = serde_json::from_value(conflicting_json)
+            .expect("conflicting evidence remains structurally valid");
+        assert!(matches!(
+            projection.apply_event(&event(
+                EventPayload::MapLocalizationEvidenceRecorded {
+                    evidence: conflicting,
+                },
+                8,
+            )),
+            Err(MapCatalogError::InvalidReplicaTransition(_))
+        ));
     }
 
     /// Conflicting immutable manifests are rejected for one map/revision selector.

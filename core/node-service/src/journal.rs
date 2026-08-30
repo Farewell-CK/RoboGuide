@@ -1,6 +1,6 @@
 //! Durable execution identity and lifecycle journal for the generic Node Service.
 
-use domain::MapArtifactManifest;
+use domain::{LocalizationVerificationEvidence, MapArtifactManifest};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -723,6 +723,81 @@ impl ExecutionJournal {
             .transpose()
     }
 
+    /// Persists the exact strong localization evidence before any remote delivery attempt.
+    ///
+    /// Evidence must belong to this stable execution and its durable local handle, and the
+    /// execution must already be fenced for Verify finalization. Exact repetition is idempotent;
+    /// different evidence for the same execution is an identity conflict.
+    pub fn prepare_localization_evidence(
+        &self,
+        execution_id: &str,
+        evidence: &LocalizationVerificationEvidence,
+    ) -> Result<(), JournalError> {
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let execution = required_execution(&transaction, execution_id)?;
+        if evidence.execution_id() != execution_id
+            || execution.local_handle.as_deref() != Some(evidence.local_attempt_id())
+        {
+            return Err(JournalError::LocalizationEvidenceConflict(
+                execution_id.to_string(),
+            ));
+        }
+        let finalization = transaction
+            .query_row(
+                "SELECT kind FROM artifact_finalizations WHERE execution_id = ?1",
+                [execution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if finalization.as_deref() != Some(ArtifactFinalizationKind::Verify.as_str()) {
+            return Err(JournalError::InvalidTransition(
+                execution_id.to_string(),
+                "strong localization evidence requires pending Verify finalization".to_string(),
+            ));
+        }
+        let encoded = serde_json::to_string(evidence)?;
+        let existing = transaction
+            .query_row(
+                "SELECT evidence_json FROM localization_evidence WHERE execution_id = ?1",
+                [execution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing == encoded {
+                transaction.commit()?;
+                return Ok(());
+            }
+            return Err(JournalError::LocalizationEvidenceConflict(
+                execution_id.to_string(),
+            ));
+        }
+        transaction.execute(
+            "INSERT INTO localization_evidence (execution_id, evidence_json) VALUES (?1, ?2)",
+            params![execution_id, encoded],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Loads durable strong localization evidence for exact finalization retry.
+    pub fn localization_evidence(
+        &self,
+        execution_id: &str,
+    ) -> Result<Option<LocalizationVerificationEvidence>, JournalError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "SELECT evidence_json FROM localization_evidence WHERE execution_id = ?1",
+                [execution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|encoded| serde_json::from_str(&encoded).map_err(JournalError::from))
+            .transpose()
+    }
+
     /// Clears a completed or deterministically failed artifact finalization marker.
     pub fn clear_artifact_finalization(&self, execution_id: &str) -> Result<(), JournalError> {
         let connection = self.lock_connection()?;
@@ -825,6 +900,11 @@ fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
              binding_id TEXT UNIQUE NOT NULL,
              FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
          );
+         CREATE TABLE IF NOT EXISTS localization_evidence (
+             execution_id TEXT PRIMARY KEY NOT NULL,
+             evidence_json TEXT NOT NULL,
+             FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+         );
          CREATE TABLE IF NOT EXISTS local_dispatch_authorizations (
              execution_id TEXT PRIMARY KEY NOT NULL,
              FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
@@ -839,7 +919,7 @@ fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
             [],
         )?;
     }
-    transaction.pragma_update(None, "user_version", 3_i64)?;
+    transaction.pragma_update(None, "user_version", 4_i64)?;
     transaction.commit()?;
     Ok(())
 }
@@ -1107,6 +1187,9 @@ pub enum JournalError {
     /// One execution was assigned two different artifact-only finalization actions.
     #[error("execution {0} has a conflicting artifact finalization action")]
     ArtifactFinalizationConflict(String),
+    /// One execution was bound to different strong localization evidence or attempt identity.
+    #[error("execution {0} has conflicting localization verification evidence")]
+    LocalizationEvidenceConflict(String),
     /// The execution ID was empty.
     #[error("execution ID must not be empty")]
     InvalidExecutionId,
@@ -1147,8 +1230,10 @@ pub enum JournalError {
 mod tests {
     use super::*;
     use domain::{
-        ContentDigest, MapArtifactRef, MapId, MapRevisionId, MapRevisionSelector, MissionId,
-        NodeId, SpatialAnchorId, TaskId, TaskRef, TimestampMs,
+        ContentDigest, ExecutionGroupId, LocalizationFrames, LocalizationVerificationEvidence,
+        MapArtifactRef, MapId, MapRevisionId, MapRevisionSelector, MissionId, NodeId,
+        PoseQualityComparison, PoseQualityEvidence, RoleId, SpatialAnchorId, TaskId, TaskRef,
+        TimestampMs,
     };
     use tempfile::TempDir;
 
@@ -1202,6 +1287,38 @@ mod tests {
             None,
         )
         .expect("manifest")
+    }
+
+    /// Builds one complete strong localization evidence fixture for a durable local handle.
+    fn localization_evidence(active_local_map_id: &str) -> LocalizationVerificationEvidence {
+        let mission = MissionId::new("mission-localize").expect("mission id");
+        LocalizationVerificationEvidence::new(
+            prepared_manifest("build-execution").artifact().clone(),
+            mission.clone(),
+            TaskRef::new(
+                mission,
+                TaskId::new("verify-map").expect("task id is valid"),
+            ),
+            ExecutionGroupId::new("group-localize").expect("group id is valid"),
+            RoleId::new("localizer").expect("role id is valid"),
+            NodeId::new("dog-b").expect("node id is valid"),
+            "verify-execution",
+            "local-verify",
+            active_local_map_id,
+            "localization",
+            PoseQualityEvidence::new(
+                "translation_stddev",
+                "0.08",
+                "0.10",
+                "m",
+                PoseQualityComparison::AtMost,
+            )
+            .expect("quality is valid"),
+            LocalizationFrames::new("map", "odom", "base_link").expect("frames are valid"),
+            SpatialAnchorId::new("anchor-lab").expect("anchor is valid"),
+            TimestampMs::new(50),
+        )
+        .expect("localization evidence is valid")
     }
 
     /// New identities are durably prepared before a caller may dispatch locally.
@@ -1516,6 +1633,53 @@ mod tests {
                 ArtifactFinalizationKind::Verify
             ),
             Err(JournalError::ArtifactFinalizationConflict(_))
+        ));
+    }
+
+    /// Strong evidence is immutable, attempt-bound, and durable before remote finalization.
+    #[test]
+    fn localization_evidence_is_durable_and_conflict_checked() {
+        let (_directory, path, journal) = journal();
+        let identity = spec("{\"task\":\"verify\"}", "workflow-verify", &[]);
+        journal
+            .prepare_dispatch("verify-execution", &identity)
+            .expect("verify execution prepares");
+        journal
+            .record_local_handle("verify-execution", "local-verify")
+            .expect("local handle persists");
+        journal
+            .record_status(
+                "verify-execution",
+                1,
+                JournalStatus::Running,
+                "local verification completed",
+            )
+            .expect("verify execution is active");
+        journal
+            .prepare_artifact_finalization("verify-execution", ArtifactFinalizationKind::Verify)
+            .expect("verify finalization is fenced");
+        let evidence = localization_evidence("lab-local");
+        journal
+            .prepare_localization_evidence("verify-execution", &evidence)
+            .expect("evidence persists before delivery");
+        journal
+            .prepare_localization_evidence("verify-execution", &evidence)
+            .expect("exact evidence is idempotent");
+        drop(journal);
+
+        let reopened = ExecutionJournal::open(path).expect("journal reopens");
+        assert_eq!(
+            reopened
+                .localization_evidence("verify-execution")
+                .expect("evidence reads"),
+            Some(evidence)
+        );
+        assert!(matches!(
+            reopened.prepare_localization_evidence(
+                "verify-execution",
+                &localization_evidence("different-local-map"),
+            ),
+            Err(JournalError::LocalizationEvidenceConflict(_))
         ));
     }
 

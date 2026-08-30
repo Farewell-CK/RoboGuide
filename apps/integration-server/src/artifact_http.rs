@@ -525,6 +525,12 @@ async fn handle_connection(
         ("DELETE", path) if path.starts_with("/v1/artifact-uploads/") => {
             abort_upload(path, uploads)?
         }
+        ("POST", path)
+            if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
+        {
+            let request = head.read_json(stream).await?;
+            record_localization_evidence(catalog, &request, path)?
+        }
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
             record_replica(catalog, &request, path)?
@@ -536,6 +542,36 @@ async fn handle_connection(
         _ => return Err(HttpError::not_found("artifact endpoint not found")),
     };
     response.write(stream).await
+}
+
+/// Records one complete strong localization evidence event after path identity validation.
+fn record_localization_evidence(
+    catalog: &ArtifactCatalog,
+    request: &Request,
+    path: &str,
+) -> Result<Response, HttpError> {
+    let parts = path
+        .trim_start_matches("/v1/maps/")
+        .split('/')
+        .collect::<Vec<_>>();
+    if parts.len() != 4 || parts[1] != "revisions" || parts[3] != "localization-evidence" {
+        return Err(HttpError::not_found(
+            "localization evidence path is invalid",
+        ));
+    }
+    let evidence: domain::LocalizationVerificationEvidence = parse_json(&request.body)?;
+    if evidence.artifact().selector().map_id().as_str() != parts[0]
+        || evidence.artifact().selector().revision_id().as_str() != parts[2]
+    {
+        return Err(HttpError::bad_request(
+            "localization evidence selector does not match path",
+        ));
+    }
+    catalog.append(EventPayload::MapLocalizationEvidenceRecorded { evidence })?;
+    Ok(Response::Json(
+        "201 Created",
+        serde_json::json!({"status": "strongly-verified"}),
+    ))
 }
 
 /// Starts one path-safe temporary upload and returns its opaque upload identity.
@@ -1927,6 +1963,43 @@ mod tests {
             &request_once(&store, &catalog, &uploads, imported).await,
             "202 Accepted",
         );
+        let evidence_body = serde_json::to_vec(&serde_json::json!({
+            "schema": "roboguide.localization-verification-evidence/v0.1",
+            "map_id": "map-a",
+            "revision_id": "r1",
+            "content_digest": digest,
+            "byte_size": bytes.len(),
+            "mission_id": "mission-b",
+            "task_id": "verify-map",
+            "group_id": "group-b",
+            "role_id": "localizer",
+            "node_id": "dog-b",
+            "execution_id": "execution-verify",
+            "local_attempt_id": "local-verify-1",
+            "active_local_map_id": "map-a-local",
+            "mode": "localization",
+            "pose_quality": {
+                "metric": "translation_stddev",
+                "value": "0.08",
+                "threshold": "0.10",
+                "unit": "m",
+                "comparison": "at_most"
+            },
+            "frames": {"map": "map", "odom": "odom", "base": "base_link"},
+            "anchor_id": "anchor-lab",
+            "source_observed_at_ms": 50
+        }))
+        .expect("localization evidence serializes");
+        let evidence = raw_request(
+            "POST",
+            "/v1/maps/map-a/revisions/r1/localization-evidence",
+            &evidence_body,
+            true,
+        );
+        response_body(
+            &request_once(&store, &catalog, &uploads, evidence).await,
+            "201 Created",
+        );
         let selector = MapRevisionSelector::new(
             MapId::new("map-a").expect("map id"),
             MapRevisionId::new("r1").expect("revision id"),
@@ -1936,14 +2009,15 @@ mod tests {
                 .expect("catalog projection rebuilds");
         assert_eq!(
             projection.replicas(&selector)[0].status(),
-            MapReplicaStatus::Imported
+            MapReplicaStatus::Verified
         );
+        assert!(projection.replicas(&selector)[0].is_strongly_verified());
         let reopened = SqliteEventLog::open(&event_path).expect("event log reopens");
         let checkpoint = reopened
             .load_checkpoint()
             .expect("checkpoint reads")
             .expect("checkpoint remains present");
-        assert_eq!(checkpoint.event_sequence, 3);
+        assert_eq!(checkpoint.event_sequence, 4);
         assert_eq!(
             checkpoint.event_sequence,
             reopened.latest_sequence().expect("log head reads")

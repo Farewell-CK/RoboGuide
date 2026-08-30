@@ -3,10 +3,11 @@
 use crate::local_engine::driver::{DriverKind, LocalDriver};
 use crate::{
     ArtifactError, ArtifactFinalizationKind, ArtifactOperationConfig, ArtifactProvenance,
-    ArtifactStager, CompiledCapability, CompiledLocalCatalog, ExecutionJournal, ExecutionSpec,
-    JournalError, JournalExecution, JournalStatus, LocalHealthState, MappedExecutionFact,
-    MappedExecutionPhase, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact,
-    PreparedArtifactRecord, ReplicaEvidenceStatus, WorkflowContext,
+    ArtifactStager, CapabilityReadinessFact, CompiledCapability, CompiledLocalCatalog,
+    ExecutionJournal, ExecutionSpec, JournalError, JournalExecution, JournalStatus,
+    LocalHealthState, MappedExecutionFact, MappedExecutionPhase, PrepareArtifactFreeze,
+    PrepareDispatch, PreparedArtifact, PreparedArtifactRecord, ReplicaEvidenceStatus,
+    WorkflowContext,
 };
 use domain::{LocalSystemId, MapArtifactManifest, MissionId, NodeId, TaskId, TaskRef, TimestampMs};
 use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
@@ -29,6 +30,27 @@ pub struct LocalExecutionEvent {
     pub phase: ExecutionPhase,
     /// Local diagnostic detail.
     pub reason: String,
+}
+
+/// One complete node observation used for registration readiness and heartbeat health.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeObservation {
+    /// Process/local-system health, kept independent from exact capability readiness.
+    status: integration::grpc::v0_2::NodeStatus,
+    /// Exact canonical contract readiness in deterministic contract order.
+    capabilities: BTreeMap<String, CapabilityReadinessFact>,
+}
+
+impl NodeObservation {
+    /// Returns the current process/local-system health observation.
+    pub const fn status(&self) -> &integration::grpc::v0_2::NodeStatus {
+        &self.status
+    }
+
+    /// Returns readiness facts keyed by exact canonical contract.
+    pub const fn capabilities(&self) -> &BTreeMap<String, CapabilityReadinessFact> {
+        &self.capabilities
+    }
 }
 
 /// Result of accepting a remote Execute command.
@@ -212,6 +234,79 @@ impl LocalIntegrationEngine {
         integration::grpc::v0_2::NodeStatus {
             health: state.to_string(),
             detail,
+        }
+    }
+
+    /// Observes health and exact capability readiness without changing execution lifecycle.
+    ///
+    /// Readiness probe failures fence only the affected contract. Legacy v0.2/v0.3
+    /// capabilities retain their historical static-ready behavior until migrated to v0.4.
+    pub async fn observe(&self) -> NodeObservation {
+        let mut status = self.status().await;
+        let mut tasks = tokio::task::JoinSet::new();
+        for (contract, capability) in self.inner.catalog.capabilities() {
+            let contract = contract.clone();
+            let readiness = capability.readiness().cloned();
+            let engine = self.clone();
+            tasks.spawn(async move {
+                let fact = if let Some(readiness) = readiness {
+                    let mut context = WorkflowContext::new(serde_json::json!({}));
+                    match engine
+                        .run_steps(std::slice::from_ref(readiness.step()), &mut context)
+                        .await
+                    {
+                        Ok(()) => readiness.map(&context).unwrap_or_else(|error| {
+                            CapabilityReadinessFact {
+                                available: false,
+                                detail: error.to_string(),
+                            }
+                        }),
+                        Err(error) => CapabilityReadinessFact {
+                            available: false,
+                            detail: error.to_string(),
+                        },
+                    }
+                } else {
+                    CapabilityReadinessFact {
+                        available: true,
+                        detail: "legacy static readiness".to_string(),
+                    }
+                };
+                (contract, fact)
+            });
+        }
+        let mut capabilities = BTreeMap::new();
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok((contract, fact)) => {
+                    capabilities.insert(contract, fact);
+                }
+                Err(error) => {
+                    capabilities.insert(
+                        "readiness-task".to_string(),
+                        CapabilityReadinessFact {
+                            available: false,
+                            detail: error.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        let readiness_detail = capabilities
+            .iter()
+            .filter(|(_, fact)| !fact.available)
+            .map(|(contract, fact)| format!("{contract}=Unavailable:{}", fact.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !readiness_detail.is_empty() {
+            if !status.detail.is_empty() {
+                status.detail.push_str("; ");
+            }
+            status.detail.push_str(&readiness_detail);
+        }
+        NodeObservation {
+            status,
+            capabilities,
         }
     }
 

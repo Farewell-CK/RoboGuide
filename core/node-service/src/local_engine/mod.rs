@@ -9,9 +9,9 @@ pub mod mcp_driver;
 
 use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig,
-    HealthCheckConfig, LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, ResourceConfig,
-    SensorConfig, WorkflowConfig, WorkflowStepConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+    NodeServiceConfig, ResourceConfig, SensorConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_SCHEMA_V0_2: &str = "roboguide.node-config/v0.2";
 /// Schema identity for the node catalog with Spatial Memory artifact bindings.
 pub const CONFIG_SCHEMA_V0_3: &str = "roboguide.node-config/v0.3";
+/// Schema identity requiring an exact readiness observation for every capability.
+pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -130,6 +132,30 @@ pub struct LocalHealthFact {
     pub detail: String,
 }
 
+/// Immutable exact-capability readiness check and state projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledCapabilityReadiness {
+    /// Fixed local driver operation.
+    step: CompiledWorkflowStep,
+    /// Response-relative state pointer.
+    state_pointer: String,
+    /// Optional response-relative detail pointer.
+    detail_pointer: Option<String>,
+    /// Normalized local readiness lookup.
+    states: BTreeMap<String, bool>,
+    /// Whether lookup is case-sensitive.
+    case_sensitive: bool,
+}
+
+/// One exact-capability readiness fact and descriptive detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityReadinessFact {
+    /// Whether the exact canonical contract can execute now.
+    pub available: bool,
+    /// Local descriptive detail or observation failure.
+    pub detail: String,
+}
+
 /// Immutable validated connection details for one local driver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledConnection {
@@ -193,6 +219,8 @@ pub struct CompiledCapability {
     local_locks: BTreeSet<String>,
     /// Optional artifact action fixed by the versioned node configuration.
     artifact_operation: Option<ArtifactOperationConfig>,
+    /// Optional exact-contract readiness observation; required by schema v0.4.
+    readiness: Option<CompiledCapabilityReadiness>,
     /// Compiled execute/status/cancel behavior.
     workflow: CompiledWorkflow,
 }
@@ -323,14 +351,20 @@ impl CompiledLocalCatalog {
         config: NodeServiceConfig,
         config_directory: &Path,
     ) -> Result<Self, CatalogError> {
-        let supports_artifacts = config.schema == CONFIG_SCHEMA_V0_3;
+        let supports_artifacts = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4
+        );
+        let requires_readiness = config.schema == CONFIG_SCHEMA_V0_4;
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3
+                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4
             ),
             "schema",
-            format!("expected `{CONFIG_SCHEMA_V0_2}` or `{CONFIG_SCHEMA_V0_3}`"),
+            format!(
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, or `{CONFIG_SCHEMA_V0_4}`"
+            ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
         validate_server_endpoint(&config.server_endpoint)?;
@@ -368,6 +402,7 @@ impl CompiledLocalCatalog {
             &connections,
             &resources,
             supports_artifacts,
+            requires_readiness,
         )?;
         require(
             !capabilities.is_empty(),
@@ -557,6 +592,41 @@ impl CompiledHealthCheck {
     }
 }
 
+impl CompiledCapabilityReadiness {
+    /// Returns the fixed local observation step.
+    pub const fn step(&self) -> &CompiledWorkflowStep {
+        &self.step
+    }
+
+    /// Maps one completed observation response into an exact readiness fact.
+    pub fn map(&self, context: &WorkflowContext) -> Result<CapabilityReadinessFact, MappingError> {
+        let response_pointer = format!("/steps/{}", escape_pointer_segment(self.step.id()));
+        let response = context
+            .as_json()
+            .pointer(&response_pointer)
+            .ok_or_else(|| MappingError::MissingSource(response_pointer.clone()))?;
+        let state = response
+            .pointer(&self.state_pointer)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| MappingError::MissingSource(self.state_pointer.clone()))?;
+        let key = if self.case_sensitive {
+            state.to_string()
+        } else {
+            state.to_ascii_lowercase()
+        };
+        let available = self.states.get(&key).copied().ok_or_else(|| {
+            MappingError::MissingSource(format!("unmapped capability readiness state {key}"))
+        })?;
+        let detail = self
+            .detail_pointer
+            .as_ref()
+            .and_then(|pointer| response.pointer(pointer))
+            .map(value_to_reason)
+            .unwrap_or_default();
+        Ok(CapabilityReadinessFact { available, detail })
+    }
+}
+
 impl CompiledConnection {
     /// Returns the stable connection identity.
     pub fn id(&self) -> &str {
@@ -690,6 +760,11 @@ impl CompiledCapability {
     /// Returns the artifact action fixed for this capability, when configured.
     pub const fn artifact_operation(&self) -> Option<ArtifactOperationConfig> {
         self.artifact_operation
+    }
+
+    /// Returns the exact-contract readiness observation when configured.
+    pub const fn readiness(&self) -> Option<&CompiledCapabilityReadiness> {
+        self.readiness.as_ref()
     }
 
     /// Returns immutable local execution behavior.
@@ -1385,6 +1460,77 @@ fn compile_sensors(
     Ok(sensors)
 }
 
+/// Compiles one fixed exact-capability readiness observation.
+fn compile_capability_readiness(
+    config: CapabilityReadinessConfig,
+    contract: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<CompiledCapabilityReadiness, CatalogError> {
+    let field = format!("capabilities.{contract}.readiness");
+    validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
+    if config
+        .step
+        .request
+        .bindings
+        .iter()
+        .any(|binding| contains_pointer_expression(&binding.value))
+    {
+        return Err(validation(
+            format!("{field}.step"),
+            "readiness request mappings must use deployment constants only",
+        ));
+    }
+    let mut step_ids = BTreeSet::new();
+    let mut steps = compile_steps(vec![config.step], owner, connections, &mut step_ids)?;
+    let step = steps
+        .pop()
+        .expect("one readiness step compiles into one step");
+    validate_pointer(&config.state_pointer).map_err(|source| CatalogError::Mapping {
+        step: field.clone(),
+        source,
+    })?;
+    if let Some(pointer) = &config.detail_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: field.clone(),
+            source,
+        })?;
+    }
+    require(!config.ready.is_empty(), &field, "ready must be nonempty")?;
+    require(
+        !config.unavailable.is_empty(),
+        &field,
+        "unavailable must be nonempty",
+    )?;
+    let mut states = BTreeMap::new();
+    for (values, available) in [(config.ready, true), (config.unavailable, false)] {
+        for value in values {
+            require(
+                !value.trim().is_empty(),
+                &field,
+                "state values must be nonblank",
+            )?;
+            let key = if config.case_sensitive {
+                value
+            } else {
+                value.to_ascii_lowercase()
+            };
+            require(
+                states.insert(key.clone(), available).is_none(),
+                &field,
+                format!("duplicate readiness state `{key}`"),
+            )?;
+        }
+    }
+    Ok(CompiledCapabilityReadiness {
+        step,
+        state_pointer: config.state_pointer,
+        detail_pointer: config.detail_pointer,
+        states,
+        case_sensitive: config.case_sensitive,
+    })
+}
+
 /// Compiles canonical capability owners and their local workflows.
 fn compile_capabilities(
     configs: Vec<CapabilityBindingConfig>,
@@ -1392,6 +1538,7 @@ fn compile_capabilities(
     connections: &BTreeMap<String, CompiledConnection>,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
+    requires_readiness: bool,
 ) -> Result<BTreeMap<String, CompiledCapability>, CatalogError> {
     let mut capabilities = BTreeMap::new();
     for config in configs {
@@ -1440,6 +1587,27 @@ fn compile_capabilities(
             format!("capabilities.{}.artifact_operation", config.contract),
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
+        require(
+            !requires_readiness || config.readiness.is_some(),
+            format!("capabilities.{}.readiness", config.contract),
+            format!("is required by schema `{CONFIG_SCHEMA_V0_4}`"),
+        )?;
+        require(
+            requires_readiness || config.readiness.is_none(),
+            format!("capabilities.{}.readiness", config.contract),
+            format!("requires schema `{CONFIG_SCHEMA_V0_4}`"),
+        )?;
+        let readiness = config
+            .readiness
+            .map(|readiness| {
+                compile_capability_readiness(
+                    readiness,
+                    &config.contract,
+                    &config.owner,
+                    connections,
+                )
+            })
+            .transpose()?;
         let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
         let contract = config.contract.clone();
         let capability = CompiledCapability {
@@ -1449,6 +1617,7 @@ fn compile_capabilities(
             required_resources,
             local_locks,
             artifact_operation: config.artifact_operation,
+            readiness,
             workflow,
         };
         insert_unique(
@@ -2126,6 +2295,7 @@ mod tests {
                 required_resources: vec!["base".to_string()],
                 local_locks: vec!["locomotion".to_string()],
                 artifact_operation: None,
+                readiness: None,
                 workflow: WorkflowConfig {
                     execute: vec![step(
                         "dispatch",
@@ -2194,6 +2364,53 @@ mod tests {
         assert_eq!(
             catalog.capabilities()["mobility.reach_region@v1"].artifact_operation(),
             None
+        );
+    }
+
+    /// v0.4 requires and compiles one fixed readiness observation per exact contract.
+    #[test]
+    fn requires_exact_capability_readiness_in_v0_4() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.schema = CONFIG_SCHEMA_V0_4.to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config.clone(), directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "capabilities.mobility.reach_region@v1.readiness"
+        ));
+        config.capabilities[0].readiness = Some(CapabilityReadinessConfig {
+            step: WorkflowStepConfig {
+                id: "read-readiness".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".to_string(),
+                    path: "/capabilities/reach-region".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            state_pointer: "/state".to_string(),
+            detail_pointer: Some("/detail".to_string()),
+            ready: vec!["READY".to_string()],
+            unavailable: vec!["UNAVAILABLE".to_string()],
+            case_sensitive: false,
+        });
+
+        let mut legacy = config.clone();
+        legacy.schema = CONFIG_SCHEMA_V0_3.to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(legacy, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "capabilities.mobility.reach_region@v1.readiness"
+        ));
+
+        let catalog = CompiledLocalCatalog::compile(config, directory.path())
+            .expect("v0.4 readiness observation compiles");
+        assert!(
+            catalog.capabilities()["mobility.reach_region@v1"]
+                .readiness()
+                .is_some()
         );
     }
 

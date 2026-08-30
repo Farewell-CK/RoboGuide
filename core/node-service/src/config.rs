@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 and v0.3 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.4 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -159,6 +159,25 @@ pub struct HealthCheckConfig {
     pub case_sensitive: bool,
 }
 
+/// One fixed exact-capability readiness observation.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityReadinessConfig {
+    /// Fixed driver operation used to observe whether the capability can execute now.
+    pub step: WorkflowStepConfig,
+    /// JSON Pointer locating the local readiness state in the step response.
+    pub state_pointer: String,
+    /// Optional JSON Pointer locating descriptive readiness detail.
+    pub detail_pointer: Option<String>,
+    /// Local values mapped to ready.
+    pub ready: Vec<String>,
+    /// Local values mapped to unavailable.
+    pub unavailable: Vec<String>,
+    /// Whether readiness values are compared case-sensitively.
+    #[serde(default)]
+    pub case_sensitive: bool,
+}
+
 /// A secret-bearing value that may only be sourced from the process environment.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -269,6 +288,9 @@ pub struct CapabilityBindingConfig {
     /// Optional node-owned artifact action fixed for every execution of this capability.
     #[serde(default)]
     pub artifact_operation: Option<ArtifactOperationConfig>,
+    /// Fixed observation proving whether this exact contract can execute now.
+    #[serde(default)]
+    pub readiness: Option<CapabilityReadinessConfig>,
     /// Declarative execute/status/cancel workflow.
     pub workflow: WorkflowConfig,
 }

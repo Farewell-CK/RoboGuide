@@ -21,6 +21,9 @@ const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
 /// Current JSON payload codec including Distributed Spatial Memory evidence variants.
 const EVENT_PAYLOAD_SCHEMA_V3: &str = "domain.EventPayload.json/v3";
 
+/// Current JSON payload codec including strong localization verification evidence.
+const EVENT_PAYLOAD_SCHEMA_V4: &str = "domain.EventPayload.json/v4";
+
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedEvent {
@@ -404,7 +407,7 @@ impl SqliteEventLog {
                     .transpose()?;
                 if !matches!(
                     event.payload_schema.as_str(),
-                    EVENT_PAYLOAD_SCHEMA_V2 | EVENT_PAYLOAD_SCHEMA_V3
+                    EVENT_PAYLOAD_SCHEMA_V2 | EVENT_PAYLOAD_SCHEMA_V3 | EVENT_PAYLOAD_SCHEMA_V4
                 ) {
                     return Err(SqliteEventLogError::Codec(format!(
                         "unsupported event payload schema {}",
@@ -506,7 +509,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V3,
+                    EVENT_PAYLOAD_SCHEMA_V4,
                     payload_json,
                 ],
             )
@@ -621,7 +624,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V3);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V4);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
