@@ -1,0 +1,5 @@
+# Preserve upstream whitespace in vendored and reference-source imports.
+third_party/** -whitespace
+app/src/main/assets/source_port/** -whitespace
+app/src/main/cpp/vins_android/ros_compat/** -whitespace
+librealsense/** -whitespace

@@ -1,0 +1,28 @@
+# Android Studio and Gradle state
+.gradle/
+.idea/
+*.iml
+local.properties
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+captures/
+
+# Local toolchains and generated dependency trees
+tools/jdk17/
+tools/__pycache__/
+third_party/vins_android_deps/
+
+# Large runtime assets are provisioned outside regular Git.
+app/src/*/assets/models/*.onnx
+librealsense/src/main/jniLibs/**/*.so
+*.a
+*.apk
+*.aab
+
+# Signing material and local configuration
+*.jks
+*.keystore
+*.p12
+.env
+.env.*

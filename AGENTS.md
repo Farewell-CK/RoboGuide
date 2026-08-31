@@ -63,6 +63,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   and must not become a second Control, Runtime, State, or Node Protocol authority.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
+- `apps/mobile-navigation/` is an experimental Android Local System for phone-side
+  perception, positioning, semantic mapping, route planning, and local navigation.
+  It retains Immediate How and final safety, is not a Control/Runtime/State authority,
+  and currently has no Node Protocol integration. Large models, generated VINS
+  dependencies, local toolchains, and RealSense native binaries remain outside Git.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.

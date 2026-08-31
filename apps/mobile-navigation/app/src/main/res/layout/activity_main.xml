@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/nav_background"
+    android:fillViewport="true">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Mobile Navigation"
+        android:textColor="@color/nav_text"
+        android:textSize="26sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/cameraStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="等待深度相机"
+        android:textColor="@color/nav_muted"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/vinsStatusPanel"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_marginTop="10dp"
+        android:background="@color/nav_surface"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp"
+        android:text="VINS：等待深度相机\n尚未收到图像和 IMU"
+        android:textColor="@color/nav_muted"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <ImageView
+        android:id="@+id/depthPreview"
+        android:layout_width="match_parent"
+        android:layout_height="240dp"
+        android:layout_marginTop="16dp"
+        android:background="#000000"
+        android:contentDescription="Depth preview"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/guidanceText"
+        android:layout_width="match_parent"
+        android:layout_height="96dp"
+        android:layout_marginTop="16dp"
+        android:background="@color/nav_surface"
+        android:gravity="center"
+        android:padding="16dp"
+        android:text="--"
+        android:textColor="@color/nav_text"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="3">
+
+        <TextView
+            android:id="@+id/leftDistanceText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:text="左侧\n-- m"
+            android:textColor="@color/nav_text"
+            android:textSize="19sp" />
+
+        <TextView
+            android:id="@+id/centerDistanceText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginHorizontal="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:text="前方\n-- m"
+            android:textColor="@color/nav_text"
+            android:textSize="19sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/rightDistanceText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:text="右侧\n-- m"
+            android:textColor="@color/nav_text"
+            android:textSize="19sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/frameStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="尚未收到深度帧"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/semanticStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="语义预检：等待彩色流"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+
+    <com.elabrador.mobilenavigation.LocalPlanView
+        android:id="@+id/localPlanView"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:layout_marginTop="12dp"
+        android:background="@color/nav_surface"
+        android:contentDescription="局部代价图和 A 星路径" />
+
+    <TextView
+        android:id="@+id/localPlanMetricsText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@color/nav_surface"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="10dp"
+        android:text="A*诊断：等待开始导航"
+        android:textColor="@color/nav_muted"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="112dp"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="2">
+
+        <TextView
+            android:id="@+id/headingText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:text="朝向\n--°"
+            android:textColor="@color/nav_text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/locationText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="位置\n--"
+            android:textColor="@color/nav_text"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/locationStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:text="等待手机定位"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/calibrateHeadingButton"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="6dp"
+        android:text="开始动态方向标定"
+        android:textAllCaps="false" />
+
+    <Button
+        android:id="@+id/calibrateAlignedButton"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="6dp"
+        android:text="室内同向标定"
+        android:textAllCaps="false" />
+
+    <TextView
+        android:id="@+id/calibrationStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@color/nav_surface"
+        android:padding="10dp"
+        android:text="方向未标定：可室外动态标定，或室内将手机顶部与 D455 镜头同向后标定"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/amapKeyInput"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="8dp"
+        android:background="@color/nav_surface"
+        android:hint="高德 Web 服务 Key"
+        android:inputType="textPassword"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:textColor="@color/nav_text"
+        android:textColorHint="@color/nav_muted" />
+
+    <EditText
+        android:id="@+id/destinationInput"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="10dp"
+        android:background="@color/nav_surface"
+        android:hint="目的地，例如：北京市中关村地铁站"
+        android:imeOptions="actionDone"
+        android:inputType="textPostalAddress"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:textColor="@color/nav_text"
+        android:textColorHint="@color/nav_muted" />
+
+    <TextView
+        android:id="@+id/suggestionStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="@color/nav_muted"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/destinationSuggestions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/planRouteButton"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="10dp"
+        android:text="规划步行路线"
+        android:textAllCaps="false" />
+
+    <TextView
+        android:id="@+id/routeStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp"
+        android:background="@color/nav_surface"
+        android:minHeight="72dp"
+        android:padding="12dp"
+        android:text="尚未规划路线"
+        android:textColor="@color/nav_text"
+        android:textSize="15sp" />
+
+    <Button
+        android:id="@+id/toggleNavigationButton"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="开始导航"
+        android:textAllCaps="false"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/navigationStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="20dp"
+        android:background="@color/nav_surface"
+        android:minHeight="120dp"
+        android:padding="14dp"
+        android:text="路线已就绪"
+        android:textColor="@color/nav_text"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+</LinearLayout>
+</ScrollView>

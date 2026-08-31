@@ -55,6 +55,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   `apps/controller/` 和 `apps/integration-server/`；
 - `core/adapters` 已提供第一份 backend-neutral HTTP reference adapter，
   `apps/real-node-smoke` 默认只 probe registration/status，显式 `--execute` 才发送 intent；
+- `apps/mobile-navigation/` 收录实验性的 Android 手机侧 Local System，负责本地感知、
+  定位、语义建图、路径规划与导航，保留 `Immediate How` 和最终安全；当前导入尚未接入
+  Node Protocol，也不拥有 Control、Runtime、State 或 Mission 权限；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
   [`docs/development/README.md`](docs/development/README.md)；

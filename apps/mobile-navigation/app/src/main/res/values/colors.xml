@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nav_background">#F4F6F8</color>
+    <color name="nav_surface">#FFFFFF</color>
+    <color name="nav_text">#17212B</color>
+    <color name="nav_muted">#5E6B78</color>
+    <color name="nav_safe">#16794A</color>
+    <color name="nav_warning">#B45100</color>
+    <color name="nav_danger">#B3261E</color>
+</resources>
