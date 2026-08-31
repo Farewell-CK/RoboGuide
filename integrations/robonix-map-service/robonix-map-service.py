@@ -23,7 +23,9 @@ import json
 import logging
 import os
 import re
+import shlex
 import sqlite3
+import subprocess
 import tarfile
 import threading
 import time
@@ -48,9 +50,13 @@ DEFAULT_MAP_ROOT = Path(
 DEFAULT_ROBONIX_ENDPOINT = "http://127.0.0.1:8092"
 DEFAULT_ARTIFACT_ROOT = Path("/home/nvidia/roboguide/artifact-cache")
 DEFAULT_STATE_DB = Path("/home/nvidia/roboguide/map-adapter.sqlite3")
+DEFAULT_ROS_SERVICE_LIST_COMMAND = "docker exec robonix_mapping ros2 service list"
 MAX_REQUEST_BYTES = 1 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 CHUNK_SIZE = 1024 * 1024
+READINESS_CACHE_TTL_S = 1.0
+MAPPING_MODE_SERVICE = "/rtabmap/set_mode_mapping"
+LOCALIZATION_MODE_SERVICE = "/rtabmap/set_mode_localization"
 
 
 class AdapterError(RuntimeError):
@@ -67,6 +73,8 @@ class AdapterConfig:
     robonix_endpoint: str
     request_timeout_s: float
     max_archive_bytes: int
+    ros_service_list_command: tuple[str, ...]
+    ros_discovery_timeout_s: float
 
 
 class ExecutionStore:
@@ -308,6 +316,8 @@ class LocalAdapter:
         self._futures: dict[str, Future[None]] = {}
         self._future_lock = threading.Lock()
         self._map_lock = threading.RLock()
+        self._readiness_lock = threading.Lock()
+        self._readiness_cache: tuple[float, set[str], str] | None = None
 
     def close(self) -> None:
         """Stop accepting local work and wait for already submitted operations to finish."""
@@ -321,6 +331,28 @@ class LocalAdapter:
             return {"state": "ONLINE", "detail": f"Robonix mapping reachable; mode={mode}"}
         except AdapterError as error:
             return {"state": "OFFLINE", "detail": str(error)}
+
+    def readiness(self) -> dict[str, Any]:
+        """Observe exact local capabilities without changing Robonix execution state."""
+        services, discovery_detail = self._ros_discovery_snapshot()
+        mapping_service = self._service_readiness(services, MAPPING_MODE_SERVICE, discovery_detail)
+        localization_service = self._service_readiness(
+            services, LOCALIZATION_MODE_SERVICE, discovery_detail
+        )
+        map_storage = self._storage_readiness("map", self._config.map_root)
+        artifact_storage = self._storage_readiness("artifact", self._config.artifact_root)
+        return {
+            "capabilities": {
+                "spatial.map.build@v0": self._combined_readiness(
+                    mapping_service, map_storage, artifact_storage
+                ),
+                "spatial.map.publish@v0": self._combined_readiness(artifact_storage),
+                "spatial.map.import@v0": self._combined_readiness(artifact_storage, map_storage),
+                "spatial.localization.verify@v0": self._combined_readiness(
+                    localization_service, map_storage
+                ),
+            }
+        }
 
     def submit(self, body: Mapping[str, Any]) -> dict[str, Any]:
         """Validate one canonical operation and enqueue it exactly once."""
@@ -476,6 +508,73 @@ class LocalAdapter:
         if state.get("has_map") is not True:
             raise AdapterError("Robonix loaded the map but reports no active map")
         return f"localization verified for local map {target_id}"
+
+    def _ros_services(self) -> set[str]:
+        """Return exact services visible through the deployment's fixed ROS discovery command."""
+        if not self._config.ros_service_list_command:
+            raise AdapterError("ROS service discovery command is not configured")
+        try:
+            result = subprocess.run(
+                self._config.ros_service_list_command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self._config.ros_discovery_timeout_s,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise AdapterError(f"ROS service discovery failed: {error}") from error
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+            raise AdapterError(
+                f"ROS service discovery exited with {result.returncode}: {detail[:500]}"
+            )
+        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+    def _ros_discovery_snapshot(self) -> tuple[set[str], str]:
+        """Share one bounded discovery result across a burst of exact-contract probes."""
+        with self._readiness_lock:
+            now = time.monotonic()
+            if self._readiness_cache is not None:
+                observed_at, services, detail = self._readiness_cache
+                if now - observed_at <= READINESS_CACHE_TTL_S:
+                    return set(services), detail
+            try:
+                services = self._ros_services()
+                detail = f"discovered {len(services)} ROS services"
+            except AdapterError as error:
+                services = set()
+                detail = str(error)
+            self._readiness_cache = (time.monotonic(), services, detail)
+            return set(services), detail
+
+    @staticmethod
+    def _storage_readiness(kind: str, path: Path) -> tuple[bool, str]:
+        """Check one adapter-owned root without creating or changing probe artifacts."""
+        if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
+            return False, f"adapter {kind} storage is not accessible: {path}"
+        return True, f"adapter {kind} storage is accessible"
+
+    @staticmethod
+    def _readiness_fact(ready: bool, detail: str) -> dict[str, str]:
+        """Map one observed deployment fact into the fixed adapter readiness vocabulary."""
+        return {"state": "READY" if ready else "UNAVAILABLE", "detail": detail}
+
+    @staticmethod
+    def _service_readiness(
+        services: set[str], required: str, discovery_detail: str
+    ) -> tuple[bool, str]:
+        """Require one exact ROS service discovered through the configured middleware context."""
+        if required in services:
+            return True, f"discovered required ROS service {required}"
+        return False, f"required ROS service {required} is unavailable; {discovery_detail}"
+
+    @classmethod
+    def _combined_readiness(cls, *facts: tuple[bool, str]) -> dict[str, str]:
+        """Require every local dependency fact and retain their diagnostics in order."""
+        return cls._readiness_fact(
+            all(ready for ready, _detail in facts),
+            "; ".join(detail for _ready, detail in facts),
+        )
 
     def _pack_map(self, source_dir: Path, destination: Path) -> None:
         """Create a gzip tar archive from regular files using an atomic rename."""
@@ -693,11 +792,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         LOG.info("%s - %s", self.address_string(), format % args)
 
     def do_GET(self) -> None:
-        """Handle the loopback health endpoint."""
-        if self.path != "/v1/health":
+        """Handle loopback-only health and exact-capability readiness observations."""
+        if self.path == "/v1/health":
+            self._send_json(HTTPStatus.OK, self.server.adapter.health())
+        elif self.path == "/v1/readiness":
+            self._send_json(HTTPStatus.OK, self.server.adapter.readiness())
+        else:
             self._send_json(HTTPStatus.NOT_FOUND, {"detail": "not found"})
-            return
-        self._send_json(HTTPStatus.OK, self.server.adapter.health())
 
     def do_POST(self) -> None:
         """Handle execute, status, and cancellation workflow calls."""
@@ -783,6 +884,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state-db", type=Path, default=DEFAULT_STATE_DB)
     parser.add_argument("--robonix-endpoint", default=DEFAULT_ROBONIX_ENDPOINT)
     parser.add_argument("--request-timeout-s", type=float, default=30.0)
+    parser.add_argument(
+        "--ros-service-list-command",
+        default=DEFAULT_ROS_SERVICE_LIST_COMMAND,
+        help="fixed argv string used only for read-only ROS service discovery",
+    )
+    parser.add_argument("--ros-discovery-timeout-s", type=float, default=5.0)
     parser.add_argument("--max-archive-bytes", type=int, default=4 * 1024 * 1024 * 1024)
     return parser.parse_args(argv)
 
@@ -792,7 +899,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if not 1 <= args.port <= 65_535:
         raise SystemExit("--port must be between 1 and 65535")
-    if args.request_timeout_s <= 0 or args.max_archive_bytes <= 0:
+    if (
+        args.request_timeout_s <= 0
+        or args.ros_discovery_timeout_s <= 0
+        or args.max_archive_bytes <= 0
+    ):
         raise SystemExit("timeouts and archive limits must be positive")
     logging.basicConfig(
         level=logging.INFO,
@@ -805,6 +916,8 @@ def main(argv: list[str] | None = None) -> None:
         robonix_endpoint=args.robonix_endpoint,
         request_timeout_s=args.request_timeout_s,
         max_archive_bytes=args.max_archive_bytes,
+        ros_service_list_command=tuple(shlex.split(args.ros_service_list_command)),
+        ros_discovery_timeout_s=args.ros_discovery_timeout_s,
     )
     adapter = LocalAdapter(config)
     server = AdapterHTTPServer((args.host, args.port), adapter)
