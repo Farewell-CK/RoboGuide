@@ -44,8 +44,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
-- 当前 `mission/` 已提供文本 Mission Request 澄清闭环、确定性 Fixture Planner 和可配置的
-  Responses Interpreter/Planner；
+- 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
+  确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
+  显式消费 objective、confirmed constraints 和 assumptions；
 - Mission 输出使用 `contracts/mission/v0.2/` 中的版本化合同；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
@@ -295,6 +296,9 @@ Task handoff 或 Node Protocol payload。实现边界与非目标见
 强 localization verification 使用独立 evidence 合同，State 明确区分带完整 evidence 的
 strong verification 与旧 `has_map=true` smoke fact；合同见
 [`localization-evidence-v0.1`](contracts/spatial/localization-evidence-v0.1/README.md)。
+双狗 Node Config 已迁移到 v0.4，Robonix deployment adapter 通过固定、只读 ROS service
+discovery command 分别观测 mapping/localization exact-contract readiness；这不等价于强
+localization evidence，也不能替代全新真机故障注入。
 用于 Artifact HTTP 寻址的 `MapId`/`MapRevisionId` 统一限制为 path-safe ASCII
 `[A-Za-z0-9][A-Za-z0-9._:-]*`；Domain 构造、serde 解码与 manifest schema 使用同一规则。
 Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单个 Artifact 上限

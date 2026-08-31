@@ -51,10 +51,13 @@ localization mode、pose quality 或 coordinate-frame 关系，不能作为稳�
 ## Consequences
 
 - RT-G7 可以复用现有 RegistrationUpdate、Shared Node State 和 Matching 逻辑，不建立第二套
-  readiness authority，也不把 probe 放入 Controller。
+  readiness authority，也不把 probe 放入 Controller。Robonix deployment adapter 现用固定、
+  只读的 ROS service discovery command 精确检查 mapping/localization mode service；Router
+  缺失会表现为相关 contract unavailable，但仍需用全新真机故障注入完成 Gate。
 - RT-G8 需要 Spatial evidence contract、Node journal 和 Catalog projection 的版本化演进；
   当前已加入严格 evidence v0.1 合同、Node journal 持久化接口、Artifact HTTP transition 与
-  Catalog strong-evidence projection。设备离线且真实 Robonix 字段未知时，不伪造 vendor
-  mapping 或宣布真机通过；Node completion extraction 与 Robonix mapping 留待硬件验证。
+  Catalog strong-evidence projection。真实 Robonix active-map、pose-quality 和 frame 来源仍
+  未取得时，不伪造 vendor mapping 或宣布真机通过；Node completion extraction 与 Robonix
+  mapping 留待硬件验证。
 - Readiness 变化只影响后续 Control decisions；它不自动取消 Active execution，也不替代
   Runtime ambiguity detection 和 Recovery Decision。

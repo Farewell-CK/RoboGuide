@@ -73,9 +73,10 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7
 复用 Node Protocol v0.2 的 `RegistrationUpdate`，其 v0.4 config、精确 contract readiness 和
-后续 Matching 传播已实现；真机 probe mapping 仍待验证。RT-G8 已建立独立结构化合同、Node
-journal 持久化接口、Artifact transition 与 State projection，Node completion extraction 和真实
-adapter mapping 仍未闭环。双狗验收条件见
+后续 Matching 传播已实现。双狗配置和 Robonix adapter 已按历史现场证据接入 exact ROS
+service discovery probe，但仍需全新真机故障注入。RT-G8 已建立独立结构化合同、Node journal
+持久化接口、Artifact transition 与 State projection；Node completion extraction 和真实 adapter
+mapping 仍未闭环。双狗验收条件见
 [`scenarios/distributed-spatial-memory-v0.1/acceptance.md`](../scenarios/distributed-spatial-memory-v0.1/acceptance.md)。
 
 Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller

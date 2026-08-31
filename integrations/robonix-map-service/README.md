@@ -8,6 +8,7 @@ The adapter implements the workflow already declared by
 `scenarios/distributed-spatial-memory-v0.1/*.toml`:
 
 - `GET /v1/health`
+- `GET /v1/readiness`
 - `POST /v1/executions` with `operation` set to `build-map`, `publish-map`,
   `import-map`, or `verify-localization`
 - `POST /v1/executions/status`
@@ -18,10 +19,13 @@ needed. Local execution status is durable in SQLite so a Node Service restart
 can continue status reconciliation without replaying a Robonix request.
 
 `GET /v1/health` proves only that the Mapping WebUI `/api/state` endpoint is
-reachable. It does not prove that every ROS 2 mapping/localization service is
-discoverable. RoboGuide must not treat this process-level probe as future
-per-capability readiness; that observation requires a separate Node/State
-contract.
+reachable. `GET /v1/readiness` separately runs one startup-fixed, read-only ROS
+service-list command and reports exact readiness for all four canonical
+contracts. Build requires `/rtabmap/set_mode_mapping` plus map and artifact
+storage; localization verify requires `/rtabmap/set_mode_localization` plus map
+storage; publish requires artifact storage; import requires both storage roots.
+Failure to discover a required service, including a broken Zenoh discovery path,
+fails only the dependent contract closed.
 
 The adapter calls Robonix Mapping WebUI on loopback (`/api/save`, `/api/load`,
 and `/api/state`). It never publishes a catalog record or chooses a map
@@ -35,11 +39,16 @@ python3 robonix-map-service.py \
   --port 18101 \
   --map-root /home/nvidia/Desktop/robot-deeprobotics-lite3/rbnx-boot/cache/service-map-rbnx/maps \
   --artifact-root /home/nvidia/roboguide/dog-a/artifact-cache \
-  --state-db /home/nvidia/roboguide/dog-a/map-adapter.sqlite3
+  --state-db /home/nvidia/roboguide/dog-a/map-adapter.sqlite3 \
+  --ros-service-list-command 'docker exec robonix_mapping ros2 service list'
 ```
 
 Dog 2 uses port `18102`, its own artifact/state root, and the same Robonix map
 root layout. Bind the service to loopback; the Node Service is the only caller.
+The command is split into argv and invoked without a shell. If the deployed ROS
+environment needs setup beyond this known container command, provide a
+deployment-owned wrapper executable; never accept a command from an execution
+request.
 
 ## Controlled existing-map package
 
@@ -69,4 +78,5 @@ outside this experimental adapter.
 The current localization verification calls `/api/load`, requires a successful
 response, and then checks `has_map=true`. This is a smoke-level execution fact,
 not evidence of active-map identity, localization mode, pose quality, or shared
-coordinate-frame alignment.
+coordinate-frame alignment. Readiness discovery does not close that evidence
+gap.

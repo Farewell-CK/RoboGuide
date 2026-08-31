@@ -75,7 +75,7 @@ Node selector，placement 不创建 reservation 或 binding。
 
 | 注入/现象 | 必须观察到的行为 | 当前状态 |
 | --- | --- | --- |
-| Zenoh Router 或所需 ROS service 缺失 | 对应 contract readiness=false，后续 Matching 不选择该节点 | v0.4 链路已实现，真机 probe mapping 待验证 |
+| Zenoh Router 或所需 ROS service 缺失 | 对应 contract readiness=false，后续 Matching 不选择该节点 | v0.4 配置和 adapter exact-service probe 已实现，待全新真机故障注入 |
 | Artifact digest/size 不匹配 | Node 拒绝 staging/import，不产生 Imported/Verified evidence | 已有离线覆盖 |
 | 相同 artifact 重复导入 | 以持久化 digest 证明幂等，不重复改变本地地图 | 已实现，待真机复验 |
 | 同名地图无 provenance 或 digest 不同 | fail-closed，不覆盖本地地图 | 已实现 |

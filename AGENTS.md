@@ -65,6 +65,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
   Robonix map adapter); these adapters own vendor calls and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.
+- The Robonix map adapter exposes process health separately from exact capability
+  readiness. Its startup-fixed ROS service discovery command is read-only and
+  deployment-owned; execution requests must never supply commands or service names.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
