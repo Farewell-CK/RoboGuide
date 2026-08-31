@@ -1566,7 +1566,16 @@ impl NodeRegistration {
             && self
                 .capability_kinds
                 .get(contract)
-                .is_none_or(|configured| *configured == kind)
+                .copied()
+                .or_else(|| self.inferred_legacy_capability_kind())
+                == Some(kind)
+    }
+
+    /// Infers a missing legacy contract category only when every coarse declaration agrees.
+    fn inferred_legacy_capability_kind(&self) -> Option<CapabilityKind> {
+        let mut kinds = self.capabilities.iter().map(Capability::kind);
+        let first = kinds.next()?;
+        kinds.all(|kind| kind == first).then_some(first)
     }
 
     /// Returns exact readiness facts in deterministic contract order.
@@ -2388,9 +2397,9 @@ mod tests {
         assert!(restored.contract_is_available(&contract));
     }
 
-    /// Legacy aggregate registration remains valid when several capability kinds prevent exact inference.
+    /// Legacy aggregate registration fails closed when several kinds prevent exact inference.
     #[test]
-    fn legacy_registration_accepts_multiple_capability_kinds() {
+    fn legacy_registration_rejects_ambiguous_contract_kinds() {
         let node_id = NodeId::new("node-legacy-mixed").expect("node id must be valid");
         let local_system_id = LocalSystemId::new("mixed").expect("local system id is valid");
         let compute = CapabilityContractRef::new("spatial.map", "build", "v0")
@@ -2417,11 +2426,17 @@ mod tests {
             Vec::new(),
             BTreeMap::new(),
         )
-        .expect("legacy mixed registration remains valid");
+        .expect("legacy mixed registration remains structurally valid");
 
-        assert!(registration.contract_is_available_for_kind(&compute, CapabilityKind::Compute));
+        assert!(!registration.contract_is_available_for_kind(&compute, CapabilityKind::Compute));
         assert!(
-            registration.contract_is_available_for_kind(&observation, CapabilityKind::Observation)
+            !registration.contract_is_available_for_kind(&compute, CapabilityKind::Observation)
+        );
+        assert!(
+            !registration.contract_is_available_for_kind(&observation, CapabilityKind::Observation)
+        );
+        assert!(
+            !registration.contract_is_available_for_kind(&observation, CapabilityKind::Compute)
         );
     }
 }

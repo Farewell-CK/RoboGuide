@@ -729,8 +729,8 @@ mod tests {
     use super::*;
     use domain::{
         Capability, CapabilityContractRef, CapabilityKind, CoordinationContextId, LocalRuntime,
-        NodeContractVersion, NodeHealth, NodeId, NodeRegistration, NodeStatus, Resource,
-        ResourceId, ResourceKind,
+        LocalSystemDescriptor, LocalSystemId, NodeContractVersion, NodeHealth, NodeId,
+        NodeRegistration, NodeStatus, Resource, ResourceId, ResourceKind,
     };
     use state::InMemorySharedNodeState;
     use testkit::InMemoryEventLog;
@@ -934,11 +934,23 @@ mod tests {
             ),
         ];
         let contracts = [
-            CapabilityContractRef::new("spatial.map", "build", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial.map", "publish", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial.map", "import", "v0").expect("contract valid"),
-            CapabilityContractRef::new("spatial.localization", "verify", "v0")
-                .expect("contract valid"),
+            (
+                CapabilityContractRef::new("spatial.map", "build", "v0").expect("contract valid"),
+                CapabilityKind::Compute,
+            ),
+            (
+                CapabilityContractRef::new("spatial.map", "publish", "v0").expect("contract valid"),
+                CapabilityKind::Compute,
+            ),
+            (
+                CapabilityContractRef::new("spatial.map", "import", "v0").expect("contract valid"),
+                CapabilityKind::Compute,
+            ),
+            (
+                CapabilityContractRef::new("spatial.localization", "verify", "v0")
+                    .expect("contract valid"),
+                CapabilityKind::Observation,
+            ),
         ];
         for (fixture, actor, expected_node) in fixtures {
             let plan = decode_mission_plan(fixture).expect("Spatial Memory fixture validates");
@@ -1025,22 +1037,44 @@ mod tests {
     fn registration(
         node_id: &str,
         capabilities: Vec<Capability>,
-        contracts: Vec<CapabilityContractRef>,
+        contracts: Vec<(CapabilityContractRef, CapabilityKind)>,
         resources: Vec<(ResourceId, ResourceKind)>,
     ) -> NodeRegistration {
-        NodeRegistration::new_with_contracts(
+        let local_system_id = LocalSystemId::new("test-system").expect("system id valid");
+        let capability_owners = contracts
+            .iter()
+            .map(|(contract, _)| (contract.clone(), local_system_id.clone()))
+            .collect();
+        let capability_kinds = contracts.iter().cloned().collect();
+        let capability_readiness = contracts
+            .iter()
+            .map(|(contract, _)| (contract.clone(), true))
+            .collect();
+        let resources = resources
+            .into_iter()
+            .map(|(resource_id, kind)| Resource::new(resource_id, kind, 1).expect("resource valid"))
+            .collect::<Vec<_>>();
+        let resource_owners = resources
+            .iter()
+            .map(|resource| (resource.id().clone(), local_system_id.clone()))
+            .collect();
+        NodeRegistration::new_with_local_systems_and_readiness(
             NodeId::new(node_id).expect("node id valid"),
-            LocalRuntime::new("phase1-test", "0.1.0").expect("runtime valid"),
+            vec![LocalSystemDescriptor::new(
+                local_system_id,
+                LocalRuntime::new("phase1-test", "0.1.0").expect("runtime valid"),
+                BTreeMap::new(),
+            )],
             NodeContractVersion::v0_1(),
             capabilities,
-            contracts,
-            resources
-                .into_iter()
-                .map(|(resource_id, kind)| {
-                    Resource::new(resource_id, kind, 1).expect("resource valid")
-                })
-                .collect(),
+            capability_owners,
+            capability_kinds,
+            capability_readiness,
+            Vec::new(),
+            resources,
+            resource_owners,
         )
+        .expect("exact test registration is valid")
     }
 
     /// Verifies the complete Phase 1 DAG, Context continuity, and explicit Group completion.
@@ -1068,7 +1102,10 @@ mod tests {
                     Capability::new(CapabilityKind::Compute, true),
                     Capability::new(CapabilityKind::Observation, true),
                 ],
-                vec![compute_prepare.clone(), compute_verify.clone()],
+                vec![
+                    (compute_prepare.clone(), CapabilityKind::Compute),
+                    (compute_verify.clone(), CapabilityKind::Observation),
+                ],
                 vec![(
                     ResourceId::new("edge-compute").expect("resource id valid"),
                     ResourceKind::Compute,
@@ -1077,7 +1114,7 @@ mod tests {
             registration(
                 "carrier",
                 vec![Capability::new(CapabilityKind::Transport, true)],
-                vec![move_contract.clone()],
+                vec![(move_contract.clone(), CapabilityKind::Transport)],
                 vec![(
                     ResourceId::new("carrier-space").expect("resource id valid"),
                     ResourceKind::Space,

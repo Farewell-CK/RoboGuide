@@ -405,21 +405,15 @@ impl SqliteEventLog {
                             .map_err(|error| SqliteEventLogError::Codec(error.to_string()))
                     })
                     .transpose()?;
-                if !matches!(
-                    event.payload_schema.as_str(),
-                    EVENT_PAYLOAD_SCHEMA_V2 | EVENT_PAYLOAD_SCHEMA_V3 | EVENT_PAYLOAD_SCHEMA_V4
-                ) {
-                    return Err(SqliteEventLogError::Codec(format!(
-                        "unsupported event payload schema {}",
-                        event.payload_schema
-                    )));
-                }
-                let payload = serde_json::from_str(&event.payload_json).map_err(|error| {
-                    SqliteEventLogError::Codec(format!(
-                        "cannot decode {} payload: {error}",
-                        event.payload_schema
-                    ))
-                })?;
+                payload_schema_version(&event.payload_schema)?;
+                let payload: EventPayload =
+                    serde_json::from_str(&event.payload_json).map_err(|error| {
+                        SqliteEventLogError::Codec(format!(
+                            "cannot decode {} payload: {error}",
+                            event.payload_schema
+                        ))
+                    })?;
+                validate_payload_schema(&event.payload_schema, &payload)?;
                 Ok(EventRecord::new(
                     event_id,
                     TimestampMs::new(event.timestamp_ms),
@@ -444,6 +438,42 @@ impl SqliteEventLog {
         }
         Ok(())
     }
+}
+
+/// Parses one supported event payload codec marker before inspecting its JSON body.
+fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
+    match schema {
+        EVENT_PAYLOAD_SCHEMA_V2 => Ok(2),
+        EVENT_PAYLOAD_SCHEMA_V3 => Ok(3),
+        EVENT_PAYLOAD_SCHEMA_V4 => Ok(4),
+        _ => Err(SqliteEventLogError::Codec(format!(
+            "unsupported event payload schema {schema}"
+        ))),
+    }
+}
+
+/// Rejects payload variants introduced after the persisted codec marker.
+fn validate_payload_schema(
+    schema: &str,
+    payload: &EventPayload,
+) -> Result<(), SqliteEventLogError> {
+    let version = payload_schema_version(schema)?;
+    let minimum_version = match payload {
+        EventPayload::MapLocalizationEvidenceRecorded { .. } => 4,
+        EventPayload::MapArtifactDeclared { .. }
+        | EventPayload::MapArtifactPublished { .. }
+        | EventPayload::MapArtifactStaged { .. }
+        | EventPayload::MapArtifactImported { .. }
+        | EventPayload::MapLocalizationVerified { .. }
+        | EventPayload::MapArtifactRejected { .. } => 3,
+        _ => 2,
+    };
+    if version < minimum_version {
+        return Err(SqliteEventLogError::Codec(format!(
+            "event payload requires schema v{minimum_version}, but row is marked v{version}"
+        )));
+    }
+    Ok(())
 }
 
 impl EventSink for SqliteEventLog {
@@ -595,8 +625,75 @@ fn table_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{CorrelationId, EventPayload, TimestampMs};
+    use domain::{
+        ContentDigest, CorrelationId, EventPayload, ExecutionGroupId, LocalizationFrames,
+        LocalizationVerificationEvidence, MapArtifactManifest, MapArtifactRef, MapId,
+        MapRevisionId, MapRevisionSelector, MissionId, NodeId, PoseQualityComparison,
+        PoseQualityEvidence, RoleId, SpatialAnchorId, TaskId, TaskRef, TimestampMs,
+    };
     use tempfile::tempdir;
+
+    /// Builds one valid map manifest shared by payload-version compatibility tests.
+    fn manifest() -> MapArtifactManifest {
+        MapArtifactManifest::new(
+            MapArtifactRef::new(
+                MapRevisionSelector::new(
+                    MapId::new("warehouse").expect("map id is valid"),
+                    MapRevisionId::new("r1").expect("revision id is valid"),
+                ),
+                ContentDigest::new(format!("sha256:{}", "a".repeat(64))).expect("digest is valid"),
+                10,
+            ),
+            "application/octet-stream",
+            "grid-v1",
+            NodeId::new("dog-a").expect("node id is valid"),
+            None,
+            MissionId::new("mission-build").expect("mission id is valid"),
+            Some("execution-build".to_string()),
+            None,
+            "map",
+            "enu",
+            SpatialAnchorId::new("warehouse-origin").expect("anchor is valid"),
+            Some(0.05),
+            TimestampMs::new(10),
+            None,
+        )
+        .expect("manifest is valid")
+    }
+
+    /// Builds one valid v4-only localization evidence payload.
+    fn localization_evidence_payload() -> EventPayload {
+        let manifest = manifest();
+        let mission_id = MissionId::new("mission-localize").expect("mission id is valid");
+        let evidence = LocalizationVerificationEvidence::new(
+            manifest.artifact().clone(),
+            mission_id.clone(),
+            TaskRef::new(
+                mission_id,
+                TaskId::new("verify-map").expect("task id is valid"),
+            ),
+            ExecutionGroupId::new("group-localize").expect("group id is valid"),
+            RoleId::new("localizer").expect("role id is valid"),
+            NodeId::new("dog-b").expect("node id is valid"),
+            "execution-verify",
+            "attempt-verify",
+            "warehouse-local",
+            "localization",
+            PoseQualityEvidence::new(
+                "translation_stddev",
+                "0.08",
+                "0.10",
+                "m",
+                PoseQualityComparison::AtMost,
+            )
+            .expect("pose quality is valid"),
+            LocalizationFrames::new("map", "odom", "base_link").expect("frames are valid"),
+            manifest.anchor_id().clone(),
+            TimestampMs::new(20),
+        )
+        .expect("localization evidence is valid");
+        EventPayload::MapLocalizationEvidenceRecorded { evidence }
+    }
 
     /// WAL storage survives reopening and preserves causal envelope fields.
     #[test]
@@ -667,6 +764,64 @@ mod tests {
         assert!(matches!(
             decoded[0].payload(),
             EventPayload::ExecutionGroupBlocked { reason, .. } if reason == "compatibility"
+        ));
+    }
+
+    /// A v2 marker cannot masquerade a Spatial Memory variant introduced by codec v3.
+    #[test]
+    fn event_decoder_rejects_spatial_payload_under_v2_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-spatial-v2.sqlite3");
+        let correlation = CorrelationId::new("spatial-version").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(10),
+            &correlation,
+            None,
+            EventPayload::MapArtifactDeclared {
+                manifest: manifest(),
+            },
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V2],
+            )
+            .expect("fixture marker changes to v2");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v3")
+        ));
+    }
+
+    /// A v3 marker cannot masquerade strong localization evidence introduced by codec v4.
+    #[test]
+    fn event_decoder_rejects_strong_evidence_under_v3_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-evidence-v3.sqlite3");
+        let correlation = CorrelationId::new("evidence-version").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(20),
+            &correlation,
+            None,
+            localization_evidence_payload(),
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V3],
+            )
+            .expect("fixture marker changes to v3");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v4")
         ));
     }
 

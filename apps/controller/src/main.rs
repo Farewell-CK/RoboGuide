@@ -11,10 +11,11 @@ use control::{
 use domain::{
     ActorId, AllocationPhase, Capability, CapabilityContractRef, CapabilityKind,
     CoordinationContext, CoordinationContextId, CorrelationId, EventRecord, ExecutionCommand,
-    ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MISSION_PLAN_SCHEMA_V0_1,
-    MissionGoal, MissionId, MissionPlan, NodeContractVersion, NodeHealth, NodeId, NodeRegistration,
-    NodeStatus, PlannedTask, Resource, ResourceBindingScope, ResourceId, ResourceKind, RoleId,
-    RoleRequirement, TaskContinuity, TaskGraph, TaskId, TaskRequirement, TimestampMs,
+    ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, LocalSystemDescriptor,
+    LocalSystemId, MISSION_PLAN_SCHEMA_V0_1, MissionGoal, MissionId, MissionPlan,
+    NodeContractVersion, NodeHealth, NodeId, NodeRegistration, NodeStatus, PlannedTask, Resource,
+    ResourceBindingScope, ResourceId, ResourceKind, RoleId, RoleRequirement, TaskContinuity,
+    TaskGraph, TaskId, TaskRequirement, TimestampMs,
 };
 use ports::{AllocationStateReader, AllocationStateWriter};
 use runtime::Runtime;
@@ -168,25 +169,59 @@ fn build_registration(
 ) -> Result<NodeRegistration, String> {
     let node_id = NodeId::new(node_name).map_err(|error| error.to_string())?;
     let runtime = LocalRuntime::new(runtime_name, "0.1.0").map_err(|error| error.to_string())?;
-    let supported_contracts = capabilities
+    let local_system_id = LocalSystemId::new("default").map_err(|error| error.to_string())?;
+    let contracts = capabilities
         .iter()
-        .filter_map(|capability| {
+        .map(|capability| {
             let (namespace, name) = match capability.kind() {
                 CapabilityKind::Mobility | CapabilityKind::Transport => ("mobility", "move"),
                 CapabilityKind::Compute => ("compute", "infer"),
                 CapabilityKind::Observation => ("observation", "capture"),
             };
-            CapabilityContractRef::new(namespace, name, "v1").ok()
+            CapabilityContractRef::new(namespace, name, "v1")
+                .map(|contract| (contract, capability.kind()))
+                .map_err(|error| error.to_string())
         })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut capability_kinds = BTreeMap::new();
+    for (contract, kind) in contracts {
+        if capability_kinds.insert(contract.clone(), kind).is_some() {
+            return Err(format!(
+                "capability contract {contract} is declared more than once"
+            ));
+        }
+    }
+    let capability_owners = capability_kinds
+        .keys()
+        .cloned()
+        .map(|contract| (contract, local_system_id.clone()))
         .collect();
-    Ok(NodeRegistration::new_with_contracts(
+    let capability_readiness = capability_kinds
+        .keys()
+        .cloned()
+        .map(|contract| (contract, true))
+        .collect();
+    let resource_owners = resources
+        .iter()
+        .map(|resource| (resource.id().clone(), local_system_id.clone()))
+        .collect();
+    NodeRegistration::new_with_local_systems_and_readiness(
         node_id,
-        runtime,
+        vec![LocalSystemDescriptor::new(
+            local_system_id,
+            runtime,
+            BTreeMap::new(),
+        )],
         NodeContractVersion::v0_1(),
         capabilities,
-        supported_contracts,
+        capability_owners,
+        capability_kinds,
+        capability_readiness,
+        Vec::new(),
         resources,
-    ))
+        resource_owners,
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Converts one wire execution document into transport-neutral domain values.

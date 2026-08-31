@@ -1,6 +1,6 @@
 //! Durable execution identity and lifecycle journal for the generic Node Service.
 
-use domain::{LocalizationVerificationEvidence, MapArtifactManifest};
+use domain::{LocalizationVerificationEvidence, MapArtifactManifest, NodeId};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -19,6 +19,8 @@ const INTERRUPTED_PRE_DISPATCH_REASON: &str =
 /// Explanation persisted when a restart interrupted the output freeze commit window.
 const INTERRUPTED_ARTIFACT_PREPARATION_REASON: &str =
     "artifact output freeze was interrupted before its immutable record committed";
+/// Canonical contract that may produce localization verification evidence v0.1.
+const LOCALIZATION_VERIFY_CONTRACT: &str = "spatial.localization.verify@v0";
 
 /// Immutable identity inputs bound to one execution ID for its full lifetime.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -725,24 +727,20 @@ impl ExecutionJournal {
 
     /// Persists the exact strong localization evidence before any remote delivery attempt.
     ///
-    /// Evidence must belong to this stable execution and its durable local handle, and the
-    /// execution must already be fenced for Verify finalization. Exact repetition is idempotent;
-    /// different evidence for the same execution is an identity conflict.
+    /// Evidence must match the durable canonical invocation, local node and attempt, and staged
+    /// artifact manifest. The execution must already be fenced for Verify finalization. Exact
+    /// repetition is idempotent; different evidence for the same execution is an identity conflict.
     pub fn prepare_localization_evidence(
         &self,
         execution_id: &str,
+        local_node_id: &NodeId,
+        manifest: &MapArtifactManifest,
         evidence: &LocalizationVerificationEvidence,
     ) -> Result<(), JournalError> {
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let execution = required_execution(&transaction, execution_id)?;
-        if evidence.execution_id() != execution_id
-            || execution.local_handle.as_deref() != Some(evidence.local_attempt_id())
-        {
-            return Err(JournalError::LocalizationEvidenceConflict(
-                execution_id.to_string(),
-            ));
-        }
+        validate_localization_evidence_binding(&execution, local_node_id, manifest, evidence)?;
         let finalization = transaction
             .query_row(
                 "SELECT kind FROM artifact_finalizations WHERE execution_id = ?1",
@@ -989,6 +987,56 @@ fn required_execution(
 ) -> Result<JournalExecution, JournalError> {
     load_execution(connection, execution_id)?
         .ok_or_else(|| JournalError::UnknownExecution(execution_id.to_string()))
+}
+
+/// Binds adapter evidence to the exact durable invocation, local node, and staged manifest.
+fn validate_localization_evidence_binding(
+    execution: &JournalExecution,
+    local_node_id: &NodeId,
+    manifest: &MapArtifactManifest,
+    evidence: &LocalizationVerificationEvidence,
+) -> Result<(), JournalError> {
+    let invocation: serde_json::Value =
+        serde_json::from_slice(execution.spec().invocation_content())?;
+    let invocation_text = |pointer: &str| {
+        invocation
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+    };
+    let matches_invocation = [
+        ("/mission_id", evidence.mission_id().as_str()),
+        ("/task_id", evidence.task_ref().task_id().as_str()),
+        ("/group_id", evidence.group_id().as_str()),
+        ("/role_id", evidence.role_id().as_str()),
+        ("/capability_contract", LOCALIZATION_VERIFY_CONTRACT),
+        (
+            "/parameters/map_id",
+            evidence.artifact().selector().map_id().as_str(),
+        ),
+        (
+            "/parameters/revision_id",
+            evidence.artifact().selector().revision_id().as_str(),
+        ),
+        (
+            "/parameters/spatial_anchor_id",
+            evidence.anchor_id().as_str(),
+        ),
+        ("/parameters/artifact_operation", "verify"),
+    ]
+    .into_iter()
+    .all(|(pointer, expected)| invocation_text(pointer) == Some(expected));
+    if evidence.execution_id() != execution.execution_id()
+        || execution.local_handle() != Some(evidence.local_attempt_id())
+        || evidence.node_id() != local_node_id
+        || manifest.artifact() != evidence.artifact()
+        || manifest.anchor_id() != evidence.anchor_id()
+        || !matches_invocation
+    {
+        return Err(JournalError::LocalizationEvidenceConflict(
+            execution.execution_id().to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Loads one prepared artifact by static binding identity.
@@ -1321,6 +1369,46 @@ mod tests {
         .expect("localization evidence is valid")
     }
 
+    /// Returns the complete canonical Verify invocation bound by strong evidence tests.
+    fn localization_invocation() -> &'static str {
+        r#"{
+            "mission_id":"mission-localize",
+            "task_id":"verify-map",
+            "group_id":"group-localize",
+            "role_id":"localizer",
+            "capability_contract":"spatial.localization.verify@v0",
+            "parameters":{
+                "artifact_operation":"verify",
+                "map_id":"lab",
+                "revision_id":"r1",
+                "spatial_anchor_id":"anchor-lab"
+            },
+            "resource_ids":[]
+        }"#
+    }
+
+    /// Prepares one nonterminal Verify execution with a durable local attempt and finalization fence.
+    fn prepare_localization_execution(journal: &ExecutionJournal, execution_id: &str) {
+        let identity = spec(localization_invocation(), "workflow-verify", &[]);
+        journal
+            .prepare_dispatch(execution_id, &identity)
+            .expect("verify execution prepares");
+        journal
+            .record_local_handle(execution_id, "local-verify")
+            .expect("local handle persists");
+        journal
+            .record_status(
+                execution_id,
+                1,
+                JournalStatus::Running,
+                "local verification completed",
+            )
+            .expect("verify execution is active");
+        journal
+            .prepare_artifact_finalization(execution_id, ArtifactFinalizationKind::Verify)
+            .expect("verify finalization is fenced");
+    }
+
     /// New identities are durably prepared before a caller may dispatch locally.
     #[test]
     fn prepare_dispatch_uses_wal_and_persists_dispatching() {
@@ -1640,30 +1728,15 @@ mod tests {
     #[test]
     fn localization_evidence_is_durable_and_conflict_checked() {
         let (_directory, path, journal) = journal();
-        let identity = spec("{\"task\":\"verify\"}", "workflow-verify", &[]);
-        journal
-            .prepare_dispatch("verify-execution", &identity)
-            .expect("verify execution prepares");
-        journal
-            .record_local_handle("verify-execution", "local-verify")
-            .expect("local handle persists");
-        journal
-            .record_status(
-                "verify-execution",
-                1,
-                JournalStatus::Running,
-                "local verification completed",
-            )
-            .expect("verify execution is active");
-        journal
-            .prepare_artifact_finalization("verify-execution", ArtifactFinalizationKind::Verify)
-            .expect("verify finalization is fenced");
+        prepare_localization_execution(&journal, "verify-execution");
+        let node_id = NodeId::new("dog-b").expect("node id is valid");
+        let manifest = prepared_manifest("build-execution");
         let evidence = localization_evidence("lab-local");
         journal
-            .prepare_localization_evidence("verify-execution", &evidence)
+            .prepare_localization_evidence("verify-execution", &node_id, &manifest, &evidence)
             .expect("evidence persists before delivery");
         journal
-            .prepare_localization_evidence("verify-execution", &evidence)
+            .prepare_localization_evidence("verify-execution", &node_id, &manifest, &evidence)
             .expect("exact evidence is idempotent");
         drop(journal);
 
@@ -1677,10 +1750,57 @@ mod tests {
         assert!(matches!(
             reopened.prepare_localization_evidence(
                 "verify-execution",
+                &node_id,
+                &manifest,
                 &localization_evidence("different-local-map"),
             ),
             Err(JournalError::LocalizationEvidenceConflict(_))
         ));
+    }
+
+    /// Strong evidence rejects every authority-bearing identity that differs from its invocation.
+    #[test]
+    fn localization_evidence_rejects_mismatched_execution_context() {
+        let (_directory, _path, journal) = journal();
+        prepare_localization_execution(&journal, "verify-execution");
+        let node_id = NodeId::new("dog-b").expect("node id is valid");
+        let manifest = prepared_manifest("build-execution");
+        let evidence = localization_evidence("lab-local");
+        let mutations = [
+            ("mission_id", "mission-other".to_string()),
+            ("task_id", "verify-other".to_string()),
+            ("group_id", "group-other".to_string()),
+            ("role_id", "observer".to_string()),
+            ("node_id", "dog-a".to_string()),
+            ("execution_id", "execution-other".to_string()),
+            ("local_attempt_id", "attempt-other".to_string()),
+            ("map_id", "other-map".to_string()),
+            ("revision_id", "r2".to_string()),
+            ("anchor_id", "anchor-other".to_string()),
+            ("content_digest", format!("sha256:{}", "b".repeat(64))),
+        ];
+        for (field, value) in mutations {
+            let mut encoded = serde_json::to_value(&evidence).expect("evidence serializes");
+            encoded[field] = serde_json::Value::String(value);
+            let mismatched: LocalizationVerificationEvidence =
+                serde_json::from_value(encoded).expect("mismatch remains structurally valid");
+            assert!(matches!(
+                journal.prepare_localization_evidence(
+                    "verify-execution",
+                    &node_id,
+                    &manifest,
+                    &mismatched,
+                ),
+                Err(JournalError::LocalizationEvidenceConflict(_))
+            ));
+        }
+        assert_eq!(
+            journal
+                .localization_evidence("verify-execution")
+                .expect("evidence lookup succeeds"),
+            None,
+            "a rejected mismatch must not become durable"
+        );
     }
 
     /// A crash after freezing bytes never grants the same execution another mutable-source read.
