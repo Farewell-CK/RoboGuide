@@ -10,7 +10,8 @@ self-contained objective, confirmed constraints, explicit assumptions, and any o
 - Inventory is advisory and may be stale. Use it to identify missing facts, never to assign a node or
   claim that resources are committed.
 - If questions remain, preserve them in `open_questions`; do not pretend the objective is executable.
-- If no questions remain, make `objective` include every confirmed constraint needed by the Planner.
+- Keep `objective` as the resolved goal and place every confirmed limitation in `constraints`;
+  do not rely on prose duplication between those fields.
 - Keep assumptions visible and do not turn them into confirmed user requirements.
 
 Do not create Tasks, Execution Groups, reservations, commands, or recovery decisions.

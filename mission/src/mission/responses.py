@@ -12,6 +12,7 @@ from typing import Protocol, cast
 
 from mission.config import MissionSettings
 from mission.controller import InventorySnapshot
+from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.requests import IntentAssessment
 
@@ -91,14 +92,18 @@ class ResponsesMissionPlanner:
         self._endpoint = settings.provider.endpoint(environment)
         self._api_key = settings.provider.api_key(environment)
 
-    def plan(self, mission_id: str, objective: str) -> MissionPlan:
-        """Generate a strict MissionPlan v0 and reject plans that fail contract or review."""
+    def plan(self, mission_id: str, grounded_intent: GroundedIntent) -> MissionPlan:
+        """Generate a strict MissionPlan from the complete resolved Mission intent."""
         schema = self._load_schema()
         response = self._request(
             model=self._settings.llm.model,
             instructions=self._load_prompt(self._settings.prompts.planner_path),
             input_text=json.dumps(
-                {"mission_id": mission_id, "objective": objective}, ensure_ascii=False
+                {
+                    "mission_id": mission_id,
+                    "grounded_intent": grounded_intent.to_json(),
+                },
+                ensure_ascii=False,
             ),
             schema_name="mission_plan_v0",
             schema=cast(JSONObject, self._provider_schema(schema)),
@@ -106,10 +111,10 @@ class ResponsesMissionPlanner:
         plan = MissionPlan.from_json(self._extract_output_json(response))
         if plan.mission.mission_id != mission_id:
             raise MissionProviderError("model changed the requested mission id")
-        if plan.mission.objective != objective:
+        if plan.mission.objective != grounded_intent.objective:
             raise MissionProviderError("model changed the requested mission objective")
         if self._settings.review_enabled:
-            review = self._review(plan)
+            review = self._review(grounded_intent, plan)
             if not review.approved:
                 raise MissionProviderError(f"mission plan review rejected: {list(review.issues)}")
         return plan
@@ -211,8 +216,8 @@ class ResponsesMissionPlanner:
                 raise MissionProviderError("provider output_text must decode to a JSON object")
         raise MissionProviderError("provider response contains no output_text")
 
-    def _review(self, plan: MissionPlan) -> ReviewResult:
-        """Ask the configured review model to detect contract and authority-boundary defects."""
+    def _review(self, grounded_intent: GroundedIntent, plan: MissionPlan) -> ReviewResult:
+        """Review the plan against its exact grounded input and authority boundaries."""
         review_schema: JSONObject = {
             "type": "object",
             "additionalProperties": False,
@@ -225,7 +230,14 @@ class ResponsesMissionPlanner:
         response = self._request(
             model=self._settings.llm.review_model,
             instructions=self._load_prompt(self._settings.prompts.reviewer_path),
-            input_text=json.dumps(plan.to_json(), ensure_ascii=False, sort_keys=True),
+            input_text=json.dumps(
+                {
+                    "grounded_intent": grounded_intent.to_json(),
+                    "mission_plan": plan.to_json(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
             schema_name="mission_review_v0",
             schema=review_schema,
         )

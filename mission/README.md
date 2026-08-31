@@ -6,8 +6,8 @@ Execution Group 或本地设备控制。
 
 ## 目录
 
-- `src/mission/`：Mission Request 状态机、SQLite store、Controller client、合同值、Responses
-  Interpreter/Planner、HTTP API 和 CLI；
+- `src/mission/`：Mission Request 状态机、resolved GroundedIntent handoff、SQLite store、
+  Controller client、合同值、Responses Interpreter/Planner、HTTP API 和 CLI；
 - `prompts/v0/`：独立版本化的 Interpreter、Planner 与 Reviewer Prompt；
 - `tests/`：合同、配置、安全边界和 Fake Responses 的离线测试；
 - `../contracts/mission/v0.2/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role

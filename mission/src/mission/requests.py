@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mission.controller import InventorySnapshot, MissionController
+from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan, RoleRequirement
 from mission.planners import MissionPlanner
 
@@ -83,6 +84,12 @@ class IntentAssessment:
             "assumptions": list(self.assumptions),
             "open_questions": list(self.open_questions),
         }
+
+    def grounded_intent(self) -> GroundedIntent:
+        """Return a resolved Planner handoff or reject an assessment with open questions."""
+        if self.open_questions:
+            raise MissionRequestError("intent with open questions cannot enter planning")
+        return GroundedIntent(self.objective, self.constraints, self.assumptions)
 
 
 class MissionInterpreter(Protocol):
@@ -467,7 +474,10 @@ class MissionRequestEngine:
                     approval_required=False,
                     issues=(),
                 )
-            plan = self._planner.plan(record.mission_id, assessment.objective)
+            plan = self._planner.plan(
+                mission_id=record.mission_id,
+                grounded_intent=assessment.grounded_intent(),
+            )
             revision = record.draft_revision + 1
             digest = _plan_digest(plan)
             record = self._update(
