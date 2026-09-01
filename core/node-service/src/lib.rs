@@ -31,8 +31,9 @@ pub use config::{
 pub use conformance::{
     CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
     ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
-    LifecycleConformanceInvariant, SHARED_LIFECYCLE_CONFORMANCE, StepConformance,
-    WorkflowConformance, compile_extension_config, compile_extension_config_json,
+    LifecycleConformanceInvariant, NODE_SERVICE_IMPLEMENTATION_GUARANTEES,
+    SHARED_LIFECYCLE_CONFORMANCE, StepConformance, WorkflowConformance, compile_extension_config,
+    compile_extension_config_json,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,

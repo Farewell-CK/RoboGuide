@@ -30,6 +30,9 @@ cargo run -p roboguide-node -- --validate scenarios/extension-conformance-v0.1/n
 cargo test -p node-service conformance --locked
 ```
 
-The report proves only static configuration and lifecycle invariants. Endpoint reachability,
-reflection compatibility, vendor field semantics, safety interlocks, and physical actuation still
-require a deployment-owned local-system or hardware test.
+The report proves only static configuration. Node Service lifecycle rules are reported separately
+as implementation guarantees, while `runtime_probes_executed` and `hardware_probes_executed` remain
+false. Endpoint reachability, reflection compatibility, vendor field semantics, safety interlocks,
+and physical actuation still require a deployment-owned local-system or hardware test. The v0.1
+report retains `lifecycle` as a compatibility alias for `implementation_guarantees`; neither field
+is runtime-probe evidence.

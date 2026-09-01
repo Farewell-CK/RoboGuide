@@ -201,14 +201,20 @@ How 与 Local Safety 属于 deployment-owned `integrations/` facade。
 
 Extension Conformance v0.1 复用 Node Service 的配置编译器，要求 Node Config v0.4 为每个
 exact capability 声明 readiness，并离线验证唯一 owner、固定 endpoint/method/service/tool、
-受限 request mapping、execution state mapping、required resources 与共享
-execute/status/cancel lifecycle。验证不联系 Controller 或 Local EAIOS；未知、timeout、重复
-execution identity 和 restart ambiguity 只形成 reconciliation fence，绝不危险自动重放。
+受限 request mapping、execution state mapping 与 required resources。验证不联系 Controller
+或 Local EAIOS，并显式声明没有执行 runtime/hardware probe。未知、timeout、重复 execution
+identity 和 restart ambiguity 的 fencing 是 Node Service implementation guarantee，由独立的
+engine/journal tests 覆盖，不冒充当前 deployment 的动态认证结果。
 开发者路径与真实三-driver 配置样例见
 [`docs/extensions/device-extension-conformance-v0.1.md`](../../extensions/device-extension-conformance-v0.1.md)，
 ownership 决策见 [`ADR-0021`](../../decisions/0021-device-extension-boundary-conformance.md)，
 旧 HTTP adapter 退役与 Artifact Store 隔离见
 [`ADR-0022`](../../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。
+
+Node Protocol 的 `Registered` 与 sequence `Ack` 不是 transport receipt。Integration 通过
+completion envelope 等待 Controller composition 使用既有 authority 接受并持久化 fact，
+只有成功后才回复 Node；Integration 本身不解释或产生该 decision。语义见
+[`ADR-0023`](../../decisions/0023-application-accepted-node-protocol-facts.md)。
 
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、

@@ -6,8 +6,8 @@
 
 mod artifact_http;
 
-use integration::GrpcIntegrationService;
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+use integration::{GrpcIntegrationService, GrpcNodeEvent};
 use orchestration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
     ObservedTaskResult,
@@ -266,25 +266,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let correlation = domain::CorrelationId::new("integration-server")
             .expect("static correlation id is valid");
-        while let Some(event) = receiver.recv().await {
+        while let Some(delivery) = receiver.recv().await {
+            let (event, completion) = delivery.into_parts();
+            let registration_fact = matches!(&event, GrpcNodeEvent::Registered { .. });
             let _write_guard = match receiver_event_write_gate.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
-                    let _ = fatal_sender.send("event-log write gate is poisoned".to_string());
+                    let reason = "event-log write gate is poisoned".to_string();
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             };
             if let Err(error) = receiver_event_log.begin_batch() {
-                let _ = fatal_sender.send(format!("cannot begin durable event batch: {error}"));
+                let reason = format!("cannot begin durable event batch: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
             }
             let mut accepted = false;
             let mut checkpoint_json = None;
+            let mut rejection = None;
             match controller.lock() {
                 Ok(mut controller) => {
                     let now = process_clock.now();
                     if let Err(error) = controller.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
+                        rejection = Some(error.to_string());
                     } else if let Err(error) = apply_runtime_events(
                         &mut controller,
                         now,
@@ -293,9 +301,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ) {
                         drop(controller);
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
+                        let reason = format!(
                             "Runtime lifecycle transition failed after fact acceptance: {error}"
-                        ));
+                        );
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
                     } else if let Err(error) = apply_runtime_outcomes(
                         &mut controller,
@@ -305,21 +315,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ) {
                         drop(controller);
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
-                            "Mission orchestration failed after fact acceptance: {error}"
-                        ));
+                        let reason =
+                            format!("Mission orchestration failed after fact acceptance: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
-                    } else if let Err(error) = drive_ready_tasks(
-                        &mut controller,
-                        now,
-                        &correlation,
-                        &mut receiver_event_log.clone(),
-                    ) {
+                    } else if !registration_fact
+                        && let Err(error) = drive_ready_tasks(
+                            &mut controller,
+                            now,
+                            &correlation,
+                            &mut receiver_event_log.clone(),
+                        )
+                    {
                         drop(controller);
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
-                            "Mission Task dispatch failed after fact acceptance: {error}"
-                        ));
+                        let reason =
+                            format!("Mission Task dispatch failed after fact acceptance: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
                     } else {
                         match server_checkpoint_json(&controller) {
@@ -330,9 +344,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(error) => {
                                 drop(controller);
                                 let _ = receiver_event_log.rollback_batch();
-                                let _ = fatal_sender.send(format!(
-                                    "controller checkpoint serialization failed: {error}"
-                                ));
+                                let reason =
+                                    format!("controller checkpoint serialization failed: {error}");
+                                completion.unavailable(reason.clone());
+                                let _ = fatal_sender.send(reason);
                                 return;
                             }
                         }
@@ -340,21 +355,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(_) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender.send("integration bridge lock is poisoned".to_string());
+                    let reason = "integration bridge lock is poisoned".to_string();
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             }
             match receiver_event_log.take_error() {
                 Ok(Some(error)) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender.send(format!("durable event sink failed: {error}"));
+                    let reason = format!("durable event sink failed: {error}");
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
                 Ok(None) => {}
                 Err(error) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender
-                        .send(format!("durable event sink health is unavailable: {error}"));
+                    let reason = format!("durable event sink health is unavailable: {error}");
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             }
@@ -363,9 +383,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     receiver_event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
             {
                 let _ = receiver_event_log.rollback_batch();
-                let _ = fatal_sender.send(format!(
-                    "cannot persist controller checkpoint with accepted fact: {error}"
-                ));
+                let reason =
+                    format!("cannot persist controller checkpoint with accepted fact: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
             }
             let batch_result = if accepted {
@@ -374,8 +395,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 receiver_event_log.rollback_batch()
             };
             if let Err(error) = batch_result {
-                let _ = fatal_sender.send(format!("cannot finalize durable event batch: {error}"));
+                let reason = format!("cannot finalize durable event batch: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
+            }
+            if accepted {
+                completion.accept();
+            } else {
+                completion.reject(
+                    rejection.unwrap_or_else(|| {
+                        "Controller rejected the Node Protocol fact".to_string()
+                    }),
+                );
             }
         }
     });

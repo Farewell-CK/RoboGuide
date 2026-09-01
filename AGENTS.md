@@ -64,6 +64,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   continuity, and the declarative Local Integration Engine.
 - `core/integration/` contains only formal Node Protocol wire/session/router code;
   Controller composition and the Runtime bridge belong to `core/orchestration/`.
+- Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
+  checkpoint acceptance, not transport receipt. Integration waits on an application completion
+  envelope but never makes the Control/State/Runtime decision itself.
 - Node config v0.4 requires one fixed readiness observation per exact canonical
   capability. Node Service observes before Register and emits complete RegistrationUpdate
   snapshots on change; Integration preserves exact readiness, State stores it, and Control
@@ -79,8 +82,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.
-- `apps/real-node-smoke/` probes the formal Node Protocol v0.2 handshake by default; its
-  explicit `--simulate-execute` mode emits synthetic lifecycle facts and never performs hardware I/O.
+- `apps/real-node-smoke/` probes the formal Node Protocol v0.2 handshake by default; its explicit
+  `--simulate-execute` mode submits a synthetic Mission through the Controller HTTP API, emits only
+  synthetic lifecycle facts after formal dispatch, uses a session-unique capability contract so it
+  cannot select an existing Node, and never performs hardware I/O.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
   not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references

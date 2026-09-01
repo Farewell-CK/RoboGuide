@@ -1383,6 +1383,8 @@ name = "real-node-smoke"
 version = "0.1.0"
 dependencies = [
  "integration",
+ "reqwest",
+ "serde_json",
  "tokio",
  "tokio-stream",
  "tonic",

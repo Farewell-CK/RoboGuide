@@ -56,7 +56,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
-  默认 probe formal Node Protocol v0.2，显式 `--simulate-execute` 只发送合成生命周期事实；
+  默认 probe formal Node Protocol v0.2，显式 `--simulate-execute` 经 Controller synthetic
+  Mission 触发正式 dispatch 后只发送合成生命周期事实；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
   [`docs/development/README.md`](docs/development/README.md)；
@@ -74,6 +75,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   [`ADR-0021`](docs/decisions/0021-device-extension-boundary-conformance.md) 记录；旧 HTTP
   adapter 退役和 Artifact Store 隔离由
   [`ADR-0022`](docs/decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 记录。
+- Node Protocol `Registered`/`Ack` 只在 Controller authority 与 durable checkpoint 接受事实后
+  返回，见 [`ADR-0023`](docs/decisions/0023-application-accepted-node-protocol-facts.md)。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -213,11 +216,13 @@ cargo run -p roboguide-node -- --validate \
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \
-  --simulate-execute
+  --simulate-execute --control-endpoint http://127.0.0.1:8080
 ```
 
 该 smoke 工具注册合成 Node、验证 Welcome/Registered/Heartbeat/Ack，并可在显式模拟模式
-下验证服务器下发的 Execute 生命周期；它不调用 Local EAIOS，也不能替代真实设备测试。
+下向 Controller 提交 synthetic Mission，经真实 Match/Commit/Dispatch 验证服务器下发的
+Execute 生命周期。模拟使用会话唯一的 capability contract，不会匹配已有同类 Node；它不调用
+Local EAIOS，也不能替代真实设备测试。
 
 ### Embodied Execution Group
 
@@ -533,7 +538,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0019-capability-readiness-and-localization-evidence.md
     │   ├── 0020-execution-coordination-relations.md
     │   ├── 0021-device-extension-boundary-conformance.md
-    │   └── 0022-retire-legacy-adapters-and-isolate-artifact-store.md
+    │   ├── 0022-retire-legacy-adapters-and-isolate-artifact-store.md
+    │   └── 0023-application-accepted-node-protocol-facts.md
     ├── extensions/
     │   └── device-extension-conformance-v0.1.md
     └── images/

@@ -11,12 +11,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status};
 
 /// Current Integration Server implementation version.
 const SERVER_VERSION: &str = "roboguide.server/v0.2";
+/// Maximum time transport waits for Controller composition to durably accept one fact.
+const APPLICATION_ACCEPTANCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Events received from all formal gRPC Node sessions.
 #[derive(Debug)]
@@ -48,6 +50,91 @@ pub enum GrpcNodeEvent {
     },
 }
 
+/// One validated transport fact plus an optional application-acceptance response channel.
+///
+/// Integration does not interpret the decision. The Controller composition completes the
+/// response only after its existing authorities and durable checkpoint accept the fact.
+#[derive(Debug)]
+pub struct GrpcNodeEventDelivery {
+    /// Validated Node Protocol fact for Controller composition.
+    event: GrpcNodeEvent,
+    /// Response required before transport emits `Registered` or `Ack`.
+    response: Option<oneshot::Sender<Result<(), ApplicationAcceptanceFailure>>>,
+}
+
+/// Application-level failure category preserved until it becomes a gRPC session status.
+#[derive(Debug)]
+enum ApplicationAcceptanceFailure {
+    /// Existing application authority conclusively rejected the supplied fact.
+    Rejected(String),
+    /// Application acceptance could not be completed because its service became unavailable.
+    Unavailable(String),
+}
+
+impl GrpcNodeEventDelivery {
+    /// Splits the validated fact from the application-owned completion handle.
+    pub fn into_parts(self) -> (GrpcNodeEvent, GrpcNodeEventCompletion) {
+        (
+            self.event,
+            GrpcNodeEventCompletion {
+                response: self.response,
+            },
+        )
+    }
+
+    /// Builds a fact whose remote peer is waiting for application acceptance.
+    fn requiring_acceptance(
+        event: GrpcNodeEvent,
+        response: oneshot::Sender<Result<(), ApplicationAcceptanceFailure>>,
+    ) -> Self {
+        Self {
+            event,
+            response: Some(response),
+        }
+    }
+
+    /// Builds a transport observation that has no remote acknowledgement.
+    fn observation(event: GrpcNodeEvent) -> Self {
+        Self {
+            event,
+            response: None,
+        }
+    }
+}
+
+/// Application-owned completion handle for one delivered Node Protocol fact.
+#[derive(Debug)]
+pub struct GrpcNodeEventCompletion {
+    /// Pending transport response, absent for local unavailability observations.
+    response: Option<oneshot::Sender<Result<(), ApplicationAcceptanceFailure>>>,
+}
+
+impl GrpcNodeEventCompletion {
+    /// Confirms transport acceptance after application processing and persistence finish.
+    pub fn accept(self) {
+        self.complete(Ok(()));
+    }
+
+    /// Reports a conclusive application-authority rejection to the remote Node.
+    pub fn reject(self, reason: impl Into<String>) {
+        self.complete(Err(ApplicationAcceptanceFailure::Rejected(reason.into())));
+    }
+
+    /// Reports that application acceptance could not be completed reliably.
+    pub fn unavailable(self, reason: impl Into<String>) {
+        self.complete(Err(ApplicationAcceptanceFailure::Unavailable(
+            reason.into(),
+        )));
+    }
+
+    /// Sends one typed application decision when the remote session is still waiting.
+    fn complete(mut self, result: Result<(), ApplicationAcceptanceFailure>) {
+        if let Some(response) = self.response.take() {
+            let _ = response.send(result);
+        }
+    }
+}
+
 /// Cloneable command router for currently connected Node sessions.
 #[derive(Clone, Default)]
 pub struct GrpcNodeRouter {
@@ -69,6 +156,8 @@ struct RoutedSession {
     lease_duration: std::time::Duration,
     /// Last accepted management sequence for heartbeat/registration updates.
     management_sequence: u64,
+    /// Whether Controller composition accepted registration and `Registered` was emitted.
+    active: bool,
 }
 
 impl GrpcNodeRouter {
@@ -108,6 +197,9 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        if !route.active {
+            return Err(Status::unavailable("node registration is pending"));
+        }
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
@@ -133,6 +225,9 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        if !route.active {
+            return Err(Status::unavailable("node registration is pending"));
+        }
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
@@ -153,14 +248,14 @@ pub struct GrpcIntegrationService {
     /// Current session command routes.
     router: GrpcNodeRouter,
     /// Cross-session event sink for Runtime composition.
-    events: mpsc::UnboundedSender<GrpcNodeEvent>,
+    events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     /// Process-local unique session/lease source.
     next_session: Arc<AtomicU64>,
 }
 
 impl GrpcIntegrationService {
     /// Creates a service and returns its command router.
-    pub fn new(events: mpsc::UnboundedSender<GrpcNodeEvent>) -> (Self, GrpcNodeRouter) {
+    pub fn new(events: mpsc::UnboundedSender<GrpcNodeEventDelivery>) -> (Self, GrpcNodeRouter) {
         let router = GrpcNodeRouter::default();
         (
             Self {
@@ -206,7 +301,7 @@ async fn run_grpc_session(
     mut inbound: tonic::Streaming<NodeMessage>,
     outbound: mpsc::UnboundedSender<Result<ServerMessage, Status>>,
     router: GrpcNodeRouter,
-    events: mpsc::UnboundedSender<GrpcNodeEvent>,
+    events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     identity: u64,
 ) -> Result<(), Status> {
     let first = inbound
@@ -261,14 +356,6 @@ async fn run_grpc_session(
     validate_registration(&registration)?;
     let session_id = format!("grpc-session-{identity}");
     let lease_id = format!("grpc-lease-{identity}");
-    outbound
-        .send(Ok(ServerMessage {
-            message: Some(ServerPayload::Registered(Registered {
-                session_id: session_id.clone(),
-                lease_id: lease_id.clone(),
-            })),
-        }))
-        .map_err(|_| Status::unavailable("response stream closed"))?;
     let previous = router
         .sessions
         .lock()
@@ -282,6 +369,7 @@ async fn run_grpc_session(
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_millis(15_000),
                 management_sequence: 0,
+                active: false,
             },
         );
     if let Some(previous) = previous {
@@ -290,16 +378,28 @@ async fn run_grpc_session(
             .send(Err(Status::aborted("session superseded by reconnect")));
     }
     let node_id = registration.node_id.clone();
-    if events
-        .send(GrpcNodeEvent::Registered {
+    let registration_result = deliver_for_acceptance(
+        &events,
+        GrpcNodeEvent::Registered {
             session_id: session_id.clone(),
-            lease_id,
+            lease_id: lease_id.clone(),
             registration,
-        })
-        .is_err()
-    {
-        remove_current_route(&router, &node_id, &session_id)?;
-        return Err(Status::unavailable("Runtime event sink is closed"));
+        },
+    )
+    .await;
+    if let Err(status) = registration_result {
+        let removed = remove_current_route(&router, &node_id, &session_id)?;
+        if removed && status.code() != tonic::Code::FailedPrecondition {
+            emit_unavailable(&events, node_id.clone(), session_id.clone());
+        }
+        return Err(status);
+    }
+    if let Err(status) = activate_current_route(&router, &node_id, &session_id, &lease_id) {
+        let removed = remove_current_route(&router, &node_id, &session_id)?;
+        if removed {
+            emit_unavailable(&events, node_id.clone(), session_id.clone());
+        }
+        return Err(status);
     }
     let mut lease_check = tokio::time::interval(std::time::Duration::from_millis(250));
     let session_result: Result<(), Status> = async {
@@ -321,13 +421,15 @@ async fn run_grpc_session(
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
             };
-            events
-                .send(GrpcNodeEvent::NodeMessage {
+            deliver_for_acceptance(
+                &events,
+                GrpcNodeEvent::NodeMessage {
                     node_id: node_id.clone(),
                     session_id: session_id.clone(),
                     message,
-                })
-                .map_err(|_| Status::unavailable("Runtime event sink is closed"))?;
+                },
+            )
+            .await?;
             if sequence > 0 {
                 let _ = outbound.send(Ok(ServerMessage {
                     message: Some(ServerPayload::Ack(Ack { sequence })),
@@ -339,12 +441,75 @@ async fn run_grpc_session(
     .await;
     let removed = remove_current_route(&router, &node_id, &session_id)?;
     if removed {
-        let _ = events.send(GrpcNodeEvent::Unavailable {
-            node_id,
-            session_id,
-        });
+        emit_unavailable(&events, node_id, session_id);
     }
     session_result
+}
+
+/// Emits one local route-loss observation without requiring a remote acknowledgement.
+fn emit_unavailable(
+    events: &mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+    node_id: String,
+    session_id: String,
+) {
+    let _ = events.send(GrpcNodeEventDelivery::observation(
+        GrpcNodeEvent::Unavailable {
+            node_id,
+            session_id,
+        },
+    ));
+}
+
+/// Delivers one validated fact and waits for application authority plus persistence acceptance.
+async fn deliver_for_acceptance(
+    events: &mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+    event: GrpcNodeEvent,
+) -> Result<(), Status> {
+    let (response, decision) = oneshot::channel();
+    events
+        .send(GrpcNodeEventDelivery::requiring_acceptance(event, response))
+        .map_err(|_| Status::unavailable("Controller fact consumer is closed"))?;
+    let decision = tokio::time::timeout(APPLICATION_ACCEPTANCE_TIMEOUT, decision)
+        .await
+        .map_err(|_| Status::deadline_exceeded("Controller fact acceptance timed out"))?
+        .map_err(|_| Status::unavailable("Controller fact response was dropped"))?;
+    decision.map_err(|failure| match failure {
+        ApplicationAcceptanceFailure::Rejected(reason) => {
+            Status::failed_precondition(format!("Controller rejected fact: {reason}"))
+        }
+        ApplicationAcceptanceFailure::Unavailable(reason) => {
+            Status::unavailable(format!("Controller fact acceptance unavailable: {reason}"))
+        }
+    })
+}
+
+/// Activates one accepted session and emits `Registered` before commands can be routed.
+fn activate_current_route(
+    router: &GrpcNodeRouter,
+    node_id: &str,
+    session_id: &str,
+    lease_id: &str,
+) -> Result<(), Status> {
+    let mut sessions = router
+        .sessions
+        .lock()
+        .map_err(|_| Status::internal("session registry unavailable"))?;
+    let route = sessions
+        .get_mut(node_id)
+        .filter(|route| route.session_id == session_id)
+        .ok_or_else(|| Status::aborted("registration session was superseded"))?;
+    route
+        .sender
+        .send(Ok(ServerMessage {
+            message: Some(ServerPayload::Registered(Registered {
+                session_id: session_id.to_string(),
+                lease_id: lease_id.to_string(),
+            })),
+        }))
+        .map_err(|_| Status::unavailable("response stream closed"))?;
+    route.last_heartbeat = std::time::Instant::now();
+    route.active = true;
+    Ok(())
 }
 
 /// Removes a route only when it is still owned by the supplied session.
@@ -555,6 +720,116 @@ fn require_known_owner(owner: &str, known: &BTreeSet<&str>) -> Result<(), Status
 mod tests {
     use super::*;
 
+    /// Transport emits success only after application authority explicitly accepts the fact.
+    #[tokio::test]
+    async fn fact_delivery_waits_for_application_acceptance() {
+        let (events, mut receiver) = mpsc::unbounded_channel();
+        let delivery = tokio::spawn(async move {
+            deliver_for_acceptance(
+                &events,
+                GrpcNodeEvent::Unavailable {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-a".to_string(),
+                },
+            )
+            .await
+        });
+        let event = receiver.recv().await.expect("fact delivery exists");
+        assert!(!delivery.is_finished());
+        let (_event, completion) = event.into_parts();
+        completion.accept();
+        delivery
+            .await
+            .expect("delivery task joins")
+            .expect("application acceptance reaches transport");
+    }
+
+    /// Application rejection is returned as a protocol failure instead of a false acknowledgement.
+    #[tokio::test]
+    async fn fact_delivery_preserves_application_rejection() {
+        let (events, mut receiver) = mpsc::unbounded_channel();
+        let delivery = tokio::spawn(async move {
+            deliver_for_acceptance(
+                &events,
+                GrpcNodeEvent::Unavailable {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-a".to_string(),
+                },
+            )
+            .await
+        });
+        let event = receiver.recv().await.expect("fact delivery exists");
+        let (_event, completion) = event.into_parts();
+        completion.reject("resource conflict");
+        let error = delivery
+            .await
+            .expect("delivery task joins")
+            .expect_err("application rejection reaches transport");
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+        assert!(error.message().contains("resource conflict"));
+    }
+
+    /// Application infrastructure failure stays retryable instead of becoming a fact rejection.
+    #[tokio::test]
+    async fn fact_delivery_preserves_application_unavailability() {
+        let (events, mut receiver) = mpsc::unbounded_channel();
+        let delivery = tokio::spawn(async move {
+            deliver_for_acceptance(
+                &events,
+                GrpcNodeEvent::Unavailable {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-a".to_string(),
+                },
+            )
+            .await
+        });
+        let event = receiver.recv().await.expect("fact delivery exists");
+        let (_event, completion) = event.into_parts();
+        completion.unavailable("checkpoint store is offline");
+        let error = delivery
+            .await
+            .expect("delivery task joins")
+            .expect_err("application unavailability reaches transport");
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        assert!(error.message().contains("checkpoint store is offline"));
+    }
+
+    /// A session cannot receive commands before Controller application registration acceptance.
+    #[test]
+    fn pending_registration_cannot_route_commands() {
+        let router = GrpcNodeRouter::default();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        router.sessions.lock().expect("registry lock").insert(
+            "dog-a".to_string(),
+            RoutedSession {
+                session_id: "session-pending".to_string(),
+                sender,
+                lease_id: "lease-pending".to_string(),
+                last_heartbeat: std::time::Instant::now(),
+                lease_duration: std::time::Duration::from_secs(15),
+                management_sequence: 0,
+                active: false,
+            },
+        );
+        let error = router
+            .execute(
+                "dog-a",
+                "execution-1".to_string(),
+                crate::grpc::v0_2::CanonicalInvocation {
+                    mission_id: "m".to_string(),
+                    task_id: "t".to_string(),
+                    group_id: "g".to_string(),
+                    role_id: "r".to_string(),
+                    capability_contract: "compute.noop@v1".to_string(),
+                    parameters: Default::default(),
+                },
+                Vec::new(),
+            )
+            .expect_err("pending route rejects commands");
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        assert!(error.message().contains("pending"));
+    }
+
     /// Expired leases cannot route Execute or Cancel.
     #[test]
     fn expired_lease_rejects_new_commands() {
@@ -569,6 +844,7 @@ mod tests {
                 last_heartbeat: std::time::Instant::now() - std::time::Duration::from_secs(2),
                 lease_duration: std::time::Duration::from_secs(1),
                 management_sequence: 0,
+                active: true,
             },
         );
         assert_eq!(
@@ -606,6 +882,7 @@ mod tests {
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_secs(15),
                 management_sequence: 0,
+                active: true,
             },
         );
         let message = NodeMessage {

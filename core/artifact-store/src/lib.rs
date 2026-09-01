@@ -1,3 +1,7 @@
+#![deny(clippy::missing_docs_in_private_items)]
+#![deny(missing_docs)]
+#![forbid(unsafe_code)]
+
 //! Filesystem content-addressed storage for immutable execution artifacts.
 //!
 //! This crate is the concrete infrastructure implementation of the

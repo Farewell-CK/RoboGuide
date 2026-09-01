@@ -32,7 +32,7 @@ checkpoint schema；`core/orchestration` 只把 transport fact 接到既有 auth
 `roboguide.node-config/v0.4` 是 Extension Conformance 的最低版本；v0.2/v0.3 仍可用于
 legacy smoke，但静态 `available=true` 不满足 conformance。
 
-成功编译证明以下部署不变量：
+成功编译只证明以下静态部署不变量：
 
 - 每个 canonical `namespace.name@version` 只有一个 local-system owner；
 - v0.4 每个 exact capability 都有独立 readiness probe，未知值、超时或 probe failure
@@ -41,19 +41,21 @@ legacy smoke，但静态 `available=true` 不满足 conformance。
   由配置固定，网络 `ExecutionIntent` 不能改写；
 - execute、status、cancel 都是非空、有序 workflow，local handle 只能来自 execute
   response，execution state 映射不允许同一值映射多个 phase；
-- status 才能确认 terminal physical outcome；cancel acknowledgement 只表示请求已提交，
-  不能合成 `Cancelled`；
 - request mapping 只能使用 JSON Pointer、常量和白名单转换函数，不能执行 shell 或
   远程传入 executable；
 - required resources 必须存在、容量非零且属于 capability owner；local lock 只保护本机，
-  不创建或撤销 Control reservation；
-- journal 将 execution identity 与 invocation/workflow/resource tuple 绑定；重复 identity
-  只能返回已有 snapshot 或 conflict；timeout/unknown 进入 reconciliation fence；重启只允许
-  对已知 handle 做 status reconciliation，禁止危险自动重放 execute。
+  不创建或撤销 Control reservation。
 
 这些检查不执行 HTTP、gRPC、MCP 请求，也不访问远端 Controller。诊断包含
 `connection`、`capabilities.<contract>`、`workflow` 和 `workflow.step.<id>` 路径，且报告不
-包含 credential 值。
+包含 credential 值。报告显式输出 `runtime_probes_executed=false` 和
+`hardware_probes_executed=false`。
+
+报告的 `implementation_guarantees` 单独列出当前 Node Service 代码由 engine/journal 测试覆盖的
+不变量，例如 status 才能确认 terminal outcome、cancel acknowledgement 不合成 `Cancelled`、
+timeout/unknown fencing、identity conflict 和 restart no-replay。它们不是当前配置、facade 或
+物理设备已经通过动态认证的结果。v0.1 为现有机器消费者保留内容相同的 `lifecycle` 兼容字段；
+该字段同样不表示执行过 runtime 或 hardware probe。
 
 ## 开发者路径
 
@@ -71,7 +73,8 @@ legacy smoke，但静态 `available=true` 不满足 conformance。
      scenarios/extension-conformance-v0.1/node.toml
    ```
 
-   命令输出 `roboguide.extension-conformance/v0.1` JSON。失败时按诊断路径修正配置，
+   命令输出 `roboguide.extension-conformance/v0.1` JSON。失败诊断会删除 TOML 原始 source
+   line，避免 credential 值进入终端或 CI 日志。按诊断路径修正配置，
    例如 `connections.demo-grpc.descriptor_set`、
    `capabilities.demo.http_action@v1.readiness` 或 `workflow.step.http-status`。
 4. 运行离线合同测试：

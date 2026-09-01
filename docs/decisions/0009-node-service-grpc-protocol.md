@@ -5,6 +5,8 @@
 > `core/orchestration`；formal transport 仅保留在 `core/integration`，详见 ADR-0021。
 > 2026-09-01 follow-up：旧 HTTP/reference adapter 已退役；当前节点侧扩展由 Node Service
 > 的声明式 Local Integration Engine 和部署侧 facade 提供，详见 ADR-0022。
+> 2026-09-01 follow-up：`Registered`/`Ack` 仅在 Controller durable acceptance 后发送，
+> transport receipt 不构成成功，详见 ADR-0023。
 
 ## 状态
 

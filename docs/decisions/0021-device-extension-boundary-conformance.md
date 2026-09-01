@@ -2,6 +2,8 @@
 
 > 后续清理见 ADR-0022：旧 HTTP/reference adapter 已退役，Artifact CAS 已迁移至
 > `core/artifact-store`；本 ADR 的 Node Protocol、Node Service 和 deployment facade 边界继续有效。
+> Node Protocol application acceptance 语义由 ADR-0023 收紧：transport 只等待 decision，
+> `Registered`/`Ack` 必须在 Controller durable acceptance 后发送。
 
 - 状态：Accepted
 - 日期：2026-09-01
@@ -49,9 +51,9 @@ Integration Engine 组成，但目录历史留下了容易混淆的边界：
 `roboguide.extension-conformance/v0.1` 复用 Node Service 的生产 catalog compiler，并提供
 离线 `--validate` 报告。Conformance 最低要求 `roboguide.node-config/v0.4`，每个 exact
 canonical capability 必须有唯一 owner 和 readiness workflow。报告验证固定 connection、
-operation、request mapping、execution-state mapping、required resources，以及共同的
-execute/status/cancel lifecycle contract；它不会打开 endpoint、访问 Controller 或执行物理
-动作。
+operation、request mapping、execution-state mapping 与 required resources；它不会打开
+endpoint、访问 Controller 或执行物理动作。Node Service 的共享 lifecycle guarantee 在报告中
+与静态 checks 分开呈现，且明确标记没有执行 runtime 或 hardware probe。
 
 所有 driver 共用以下安全不变量：
 
@@ -70,6 +72,7 @@ Node Protocol v0.2、Runtime/Controller checkpoint、Artifact data plane 和 Dom
 Extension Conformance 或 Phase 1 hardware-readiness evidence。真实认证/TLS、descriptor 与
 vendor 状态映射、取消和幂等、物理安全、Local Safety、map/localization frame 以及断电重启
 演练必须由部署方在真实 facade/硬件上验证；离线报告不得宣称这些能力完成。
+失败诊断不得回显 TOML source line 或 credential 值。
 
 ## Consequences
 

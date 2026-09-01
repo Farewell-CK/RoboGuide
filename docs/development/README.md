@@ -124,6 +124,8 @@ request mapping、状态映射和 required resources；不得在 RoboGuide core 
 [`ADR-0021`](../decisions/0021-device-extension-boundary-conformance.md)；旧 HTTP adapter
 退役与 Artifact Store 隔离见
 [`ADR-0022`](../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。
+Node Protocol application acceptance 语义见
+[`ADR-0023`](../decisions/0023-application-accepted-node-protocol-facts.md)。
 
 离线命令不会打开 endpoint 或访问 Controller：
 
@@ -132,15 +134,18 @@ cargo run -p roboguide-node -- --validate \
   scenarios/extension-conformance-v0.1/node.toml
 ```
 
-成功报告只证明配置和共享生命周期不变量；认证、真实状态值、物理副作用、Local Safety、
-取消和重启语义仍需在 deployment-owned facade/硬件上单独验证。
+成功报告只证明静态配置；共享生命周期规则作为 Node Service implementation guarantee
+单独列出，并不表示当前 facade 已执行 runtime probe。认证、真实状态值、物理副作用、
+Local Safety、取消和重启语义仍需在 deployment-owned facade/硬件上单独验证。
 
 每个 canonical capability 在 Node 配置内只有一个 local-system owner；endpoint、method、
 tool 和 descriptor 都由本地配置固定，网络输入只能进入受限 JSON Pointer/白名单函数映射。
 SQLite WAL journal 在本地 dispatch 前持久化 execution identity，Unknown 不自动重放。
 
-`apps/real-node-smoke` 默认仅 probe formal Node Protocol；`--simulate-execute` 只发送合成
-execution facts，不触发真实 action，也不构成 real-device verification。
+`apps/real-node-smoke` 默认仅 probe formal Node Protocol；`--simulate-execute` 配合显式
+Controller HTTP endpoint 提交一个 synthetic Mission，经真实 Match/Commit/Dispatch 后只发送
+合成 execution facts。每次 probe 使用唯一 capability contract，只能匹配本次 synthetic Node，
+不触发真实 action，也不构成 real-device verification。
 
 ### State & Memory Plane — Slice v0.1: Shared Node State
 

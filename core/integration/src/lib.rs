@@ -12,4 +12,7 @@
 pub mod grpc;
 mod grpc_server;
 
-pub use grpc_server::{GrpcIntegrationService, GrpcNodeEvent, GrpcNodeRouter};
+pub use grpc_server::{
+    GrpcIntegrationService, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
+    GrpcNodeRouter,
+};

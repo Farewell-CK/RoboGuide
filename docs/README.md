@@ -38,6 +38,7 @@
 - [`decisions/0020-execution-coordination-relations.md`](decisions/0020-execution-coordination-relations.md)：并发 logical executions 之间持续约束的 specification、Runtime state、evidence 与 recovery 边界。
 - [`decisions/0021-device-extension-boundary-conformance.md`](decisions/0021-device-extension-boundary-conformance.md)：Node Protocol transport、Controller composition、Local Integration Engine 与 device-extension conformance ownership。
 - [`decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)：退役旧 HTTP adapter，迁移 smoke 到 Node Protocol，并隔离 Artifact Store 基础设施。
+- [`decisions/0023-application-accepted-node-protocol-facts.md`](decisions/0023-application-accepted-node-protocol-facts.md)：由 Controller durable acceptance 决定 Node Protocol `Registered`/`Ack`。
 
 ## 历史架构
 

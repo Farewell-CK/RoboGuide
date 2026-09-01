@@ -117,17 +117,20 @@ pub struct CapabilityConformance {
     pub workflow: WorkflowConformance,
 }
 
-/// One lifecycle invariant shared by every supported local driver family.
+/// One Node Service implementation guarantee shared by every supported local driver family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct LifecycleConformanceInvariant {
-    /// Stable invariant identifier for CI and deployment reports.
+    /// Stable guarantee identifier for CI and deployment reports.
     pub id: &'static str,
-    /// Safety/lifecycle property proved by the production engine and journal tests.
+    /// Safety/lifecycle property covered by production engine and journal tests.
     pub description: &'static str,
 }
 
-/// Shared lifecycle contract applied equally to HTTP, dynamic gRPC, and MCP workflows.
-pub const SHARED_LIFECYCLE_CONFORMANCE: &[LifecycleConformanceInvariant] = &[
+/// Implementation-level guarantees applied equally to HTTP, dynamic gRPC, and MCP workflows.
+///
+/// The offline compiler reports these separately from per-configuration static checks. Their
+/// presence is not evidence that a deployment facade or physical device passed a runtime probe.
+pub const NODE_SERVICE_IMPLEMENTATION_GUARANTEES: &[LifecycleConformanceInvariant] = &[
     LifecycleConformanceInvariant {
         id: "execute-status-cancel",
         description: "execute dispatches once; status is the only source of terminal physical outcome; cancel is a request",
@@ -158,6 +161,12 @@ pub const SHARED_LIFECYCLE_CONFORMANCE: &[LifecycleConformanceInvariant] = &[
     },
 ];
 
+/// Compatibility alias retained for Extension Conformance v0.1 report consumers.
+///
+/// These entries are implementation guarantees, not per-device runtime conformance evidence.
+pub const SHARED_LIFECYCLE_CONFORMANCE: &[LifecycleConformanceInvariant] =
+    NODE_SERVICE_IMPLEMENTATION_GUARANTEES;
+
 /// Complete machine-readable offline conformance result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExtensionConformanceReport {
@@ -171,6 +180,10 @@ pub struct ExtensionConformanceReport {
     pub offline_compile: bool,
     /// Always false because Controller connectivity is outside this command.
     pub controller_contacted: bool,
+    /// Always false because offline compilation does not invoke a Local EAIOS workflow.
+    pub runtime_probes_executed: bool,
+    /// Always false because offline compilation never actuates physical hardware.
+    pub hardware_probes_executed: bool,
     /// Local systems included in the compiled catalog.
     pub local_systems: Vec<String>,
     /// Fixed connections included in the compiled catalog.
@@ -179,8 +192,15 @@ pub struct ExtensionConformanceReport {
     pub capabilities: Vec<CapabilityConformance>,
     /// Static checks guaranteed by successful production compilation.
     pub checks: ConformanceChecks,
-    /// Driver-independent lifecycle obligations.
+    /// Extension Conformance v0.1 compatibility alias for implementation guarantees.
+    ///
+    /// This field does not mean that a runtime or hardware probe was executed. New consumers
+    /// should use `implementation_guarantees` together with the explicit probe flags.
     pub lifecycle: Vec<LifecycleConformanceInvariant>,
+    /// Driver-independent guarantees of this Node Service implementation.
+    ///
+    /// These are not per-device runtime-probe results.
+    pub implementation_guarantees: Vec<LifecycleConformanceInvariant>,
 }
 
 /// Boolean summary of the invariants checked before a node can start.
@@ -249,7 +269,7 @@ fn catalog_error(error: CatalogError) -> ConformanceError {
         CatalogError::Load(error) => ConformanceDiagnostic {
             location: "config".to_string(),
             code: "config-load".to_string(),
-            message: error.to_string(),
+            message: redacted_load_error(&error),
         },
         CatalogError::Validation { field, reason } => ConformanceDiagnostic {
             location: field,
@@ -263,6 +283,15 @@ fn catalog_error(error: CatalogError) -> ConformanceError {
         },
     };
     ConformanceError::Diagnostic(diagnostic)
+}
+
+/// Formats configuration loading failures without echoing secret-bearing TOML source lines.
+fn redacted_load_error(error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::InvalidData {
+        "configuration syntax or shape is invalid; source text is redacted".to_string()
+    } else {
+        format!("configuration file could not be read: {}", error.kind())
+    }
 }
 
 /// Builds the report from an already compiled, immutable catalog.
@@ -289,6 +318,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
         node_id: catalog.node_id().to_string(),
         offline_compile: true,
         controller_contacted: false,
+        runtime_probes_executed: false,
+        hardware_probes_executed: false,
         local_systems: catalog.local_systems().keys().cloned().collect(),
         connections,
         capabilities,
@@ -300,7 +331,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
             execution_state_mapping,
             required_resources: true,
         },
-        lifecycle: SHARED_LIFECYCLE_CONFORMANCE.to_vec(),
+        lifecycle: NODE_SERVICE_IMPLEMENTATION_GUARANTEES.to_vec(),
+        implementation_guarantees: NODE_SERVICE_IMPLEMENTATION_GUARANTEES.to_vec(),
     }
 }
 
@@ -414,7 +446,13 @@ mod tests {
         assert!(!report.connections.is_empty());
         assert!(!report.capabilities.is_empty());
         assert!(report.checks.unique_capability_owner);
-        assert_eq!(report.lifecycle.len(), SHARED_LIFECYCLE_CONFORMANCE.len());
+        assert!(!report.runtime_probes_executed);
+        assert!(!report.hardware_probes_executed);
+        assert_eq!(report.lifecycle, report.implementation_guarantees);
+        assert_eq!(
+            report.implementation_guarantees.len(),
+            NODE_SERVICE_IMPLEMENTATION_GUARANTEES.len()
+        );
     }
 
     /// The conformance fixture exercises the shared lifecycle contract for all three drivers.
@@ -526,5 +564,25 @@ cancel = []
         assert!(json.contains("roboguide.extension-conformance/v0.1"));
         assert!(!json.contains("Authorization"));
         assert!(!json.contains("controller_password"));
+    }
+
+    /// Invalid TOML diagnostics never echo a secret-bearing source line into local or CI logs.
+    #[test]
+    fn invalid_config_diagnostic_redacts_source_text() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let path = directory.path().join("secret.toml");
+        std::fs::write(
+            &path,
+            concat!(
+                "schema = \"roboguide.node-config/v0.4\"\n",
+                "controller_password = \"TOP_SECRET_VALUE\"\n",
+            ),
+        )
+        .expect("invalid secret fixture writes");
+        let error = compile_extension_config(&path).expect_err("invalid config is rejected");
+        let rendered = error.to_string();
+        assert!(!rendered.contains("TOP_SECRET_VALUE"));
+        assert!(!rendered.contains("controller_password"));
+        assert!(rendered.contains("source text is redacted"));
     }
 }

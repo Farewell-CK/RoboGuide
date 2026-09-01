@@ -20,8 +20,10 @@ HTTP 数据平面。将两者继续放在同一泛化目录下，会让开发者
    残留和相关旧依赖。它们不再拥有生产调用方。
 2. 保留 smoke 能力，但将 `apps/real-node-smoke` 改为正式 Node Protocol v0.2 的合成节点：
    默认验证 Hello、Welcome、Register、Registered、Heartbeat 和 Ack；显式
-   `--simulate-execute` 只发送合成 Accepted/Started/Completed facts，绝不调用 Local EAIOS
-   或执行物理动作。
+   `--simulate-execute` 通过 Controller HTTP API 提交 synthetic Mission，经正式
+   Match/Commit/Dispatch 后只发送合成 Accepted/Started/Completed facts，绝不调用 Local
+   EAIOS 或执行物理动作。每次 session 使用唯一 capability contract，避免在共享 Controller
+   上匹配或驱动已有 Node。
 3. 将仍在使用的 `FileSystemArtifactStore` 迁移到 `core/artifact-store` crate。该 crate
    是 `ports::ArtifactBlobStore` 的具体 infrastructure 实现，只负责 opaque bytes、digest、
    path safety、staging/upload 和 durability；不拥有 Map/Task/Group lifecycle 或 Control

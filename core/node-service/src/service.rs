@@ -1168,6 +1168,70 @@ mod tests {
         );
     }
 
+    /// Controller rejection prevents `Registered` and removes the pending command route.
+    #[tokio::test]
+    async fn controller_registration_rejection_is_visible_to_node() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let (events, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (grpc_service, router) = integration::GrpcIntegrationService::new(events);
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(
+                    integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
+                        grpc_service,
+                    ),
+                )
+                .serve_with_incoming(incoming)
+                .await
+        });
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let terminal = Arc::new(AtomicBool::new(false));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog(format!("http://{address}"), state_dir.path().to_path_buf()),
+            vec![Arc::new(GatedDriver {
+                completed: terminal,
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+        let node_task = tokio::spawn(async move { NodeService::new(engine).run_session().await });
+
+        let delivery =
+            tokio::time::timeout(std::time::Duration::from_secs(2), event_receiver.recv())
+                .await
+                .expect("registration arrives")
+                .expect("registration delivery exists");
+        let (event, completion) = delivery.into_parts();
+        assert!(matches!(
+            event,
+            integration::GrpcNodeEvent::Registered { .. }
+        ));
+        completion.reject("global resource conflict");
+
+        let error = tokio::time::timeout(std::time::Duration::from_secs(2), node_task)
+            .await
+            .expect("Node observes rejection")
+            .expect("Node task joins")
+            .expect_err("registration does not succeed");
+        assert!(matches!(
+            error,
+            NodeServiceError::Status(status)
+                if status.code() == tonic::Code::FailedPrecondition
+                    && status.message().contains("global resource conflict")
+        ));
+        assert_eq!(
+            router
+                .cancel("dog-a", "execution-rejected".to_string())
+                .expect_err("rejected registration has no route")
+                .code(),
+            tonic::Code::Unavailable
+        );
+        server.abort();
+    }
+
     /// Control-bound command reaches the local engine and terminates only on a local terminal fact.
     #[tokio::test]
     async fn control_bound_command_round_trips_through_generic_engine() {
@@ -1332,9 +1396,21 @@ mod tests {
                 .await
                 .expect("registration arrives")
                 .expect("registration exists");
+        let (registered, registration_completion) = registered.into_parts();
         bridge
             .consume(registered, TimestampMs::new(1), &correlation)
             .expect("registration consumed");
+        registration_completion.accept();
+        let heartbeat =
+            tokio::time::timeout(std::time::Duration::from_secs(2), event_receiver.recv())
+                .await
+                .expect("post-registration heartbeat arrives")
+                .expect("heartbeat exists");
+        let (heartbeat, heartbeat_completion) = heartbeat.into_parts();
+        bridge
+            .consume(heartbeat, TimestampMs::new(2), &correlation)
+            .expect("heartbeat consumed after route activation");
+        heartbeat_completion.accept();
         let command = bridge
             .execute_task_bound(
                 "execution-e2e".to_string(),
@@ -1352,9 +1428,11 @@ mod tests {
                     .await
                     .expect("running event arrives")
                     .expect("running event exists");
+            let (event, completion) = event.into_parts();
             bridge
-                .consume(event, TimestampMs::new(2), &correlation)
+                .consume(event, TimestampMs::new(3), &correlation)
                 .expect("running event consumed");
+            completion.accept();
         }
         assert_ne!(
             bridge.execution_status("execution-e2e"),
@@ -1383,9 +1461,11 @@ mod tests {
                     .await
                     .expect("terminal event arrives")
                     .expect("terminal event exists");
+            let (event, completion) = event.into_parts();
             bridge
-                .consume(event, TimestampMs::new(3), &correlation)
+                .consume(event, TimestampMs::new(4), &correlation)
                 .expect("terminal event consumed");
+            completion.accept();
         }
         assert_eq!(
             engine
