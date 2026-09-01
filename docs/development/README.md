@@ -10,7 +10,7 @@
    才创建模块。
 2. 从模块化单体开始。代码中必须能够约束逻辑边界，但 MVP 不先拆成微服务集合。
 3. 核心必须与仿真器和硬件无关。Isaac Sim、ROS 2、厂商 SDK 和真实机器人都通过
-   Adapter 接入。
+   deployment-owned facade 接入。
 4. 第一份可执行证据使用确定性的 Fake Nodes。仿真和真实硬件是并行验证轨道，
    不是核心开发的前置条件。
 5. 已冻结的 V2 语义优先于实现便利。边界变化需要 ADR；如果改变架构语义，
@@ -28,8 +28,9 @@ core/
   control/                 Node、匹配、调度、提案、Mission-level Group、TaskExecution、恢复和 Allocation projection
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
   state/                   已实现 Shared Node、Allocation 与 Spatial Memory Catalog projection
-  adapters/                已实现 generic HTTP/backend mapping 与 filesystem artifact CAS
-  integration/             正式 gRPC Node Protocol v0.2 与 Runtime composition bridge
+  artifact-store/          filesystem ArtifactBlobStore implementation
+  integration/             正式 gRPC Node Protocol v0.2 wire、session 和 router
+  orchestration/           Mission orchestration 与 Controller integration-fact composition
   node-service/            单一 Node Service、声明式本地引擎和 durable journal
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
@@ -37,7 +38,7 @@ apps/
   integration-server/      多 Node gRPC session 与独立 Artifact HTTP composition root
   mission-service/         文本 Mission Request、澄清/审批与内部 plan submission 组合根
   roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
-  real-node-smoke/         通用 Node Contract probe 与显式 intent invocation
+  real-node-smoke/         formal Node Protocol v0.2 probe 与合成 Execute simulation
 mission/
   src/mission/             Mission Request 状态机、规划、合同校验和模型/Controller 适配器
   prompts/v0/              可版本化、可评审的 Interpreter、Planner 与 Reviewer Prompt
@@ -55,13 +56,16 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
 `core/orchestration`、
-`core/runtime`、`core/adapters`、`core/integration`、`core/node-service`、`core/testkit`、
+`core/runtime`、`core/artifact-store`、`core/integration`、`core/node-service`、`core/testkit`、
 `apps/controller`、`apps/integration-server`、`apps/mission-service`、`apps/roboguide-node`、
 `apps/real-node-smoke` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
 不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State 与非权威
-Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP reference transport
-和 configured reference backend，不代表真实 EAIOS backend 已完成。
+Allocation View 的真实内存实现；旧 HTTP reference transport 和 configured command bridge 已
+退役，Artifact CAS 独立位于 `core/artifact-store`。正式 Local EAIOS 扩展由
+`core/node-service` 的 Local Integration Engine 承担，deployment-owned facade 位于
+`integrations/`，不代表真实 EAIOS backend 或硬件已经完成。Controller 组合 bridge 位于
+`core/orchestration`，使 `core/integration` 能独立于 Control/State/Runtime 编译。
 没有维护实现前，不得创建未来的 `simulation` 或系统测试路径。禁止提交
 空目录。
 
@@ -74,9 +78,10 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
 | Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
 | State | Shared Node、非权威 Allocation View 与可重建 Spatial Catalog | 调度决策、Lease authority、Reservation commitment、Group lifecycle 或 artifact bytes |
-| Adapters | Server-side reference protocol、CAS、存储和模型 binding | 核心策略决策、具体 Local EAIOS 产品分支 |
-| Integration | gRPC Node Protocol、Artifact HTTP、session/lease fencing 和 Runtime composition | Local How 与调度选择 |
-| Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide Adapter 服务 |
+| Artifact Store | filesystem CAS、digest/path safety、分块上传和端口实现 | Map/Task/Group 状态、Control commitment、设备 workflow |
+| Integration | formal gRPC Node Protocol、session/lease fencing、Node router 和 wire conversion | Control/State/Runtime composition、Local How 与调度选择 |
+| Controller composition | `core/orchestration` 中把 Node Protocol facts 接到 Control/State/Runtime 的 bridge | transport framing、Local EAIOS endpoint 或 reservation policy |
+| Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
 | Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | Node assignment、Commit、Group/Runtime execution lifecycle |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
@@ -85,8 +90,9 @@ Allocation View 的真实内存实现；`core/adapters` 当前只实现 HTTP ref
 允许的 Rust 依赖方向：
 
 ```text
-apps -> node-service -> integration -> control/state -> ports -> domain
-apps -> runtime/adapters -> ports -> domain
+apps -> node-service -> integration -> ports -> domain
+apps -> orchestration -> integration/control/runtime/state -> ports -> domain
+apps -> artifact-store -> ports -> domain
 ```
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
@@ -99,17 +105,42 @@ Domain `ExecutionIntent` 将 canonical `OperationRef` 与 scalar parameters 绑�
 Matching/Scheduler 不解析 intent，Runtime 不翻译 intent。单一 `roboguide-node` 内的声明式
 Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP workflow 完成本地映射。
 
-`NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含 HTTP
-类型。`core/adapters/http` 独占 reqwest、serde 和 JSON DTO；registration/status/execute wire
-conversion 分模块实现。status 失败时 Runtime 只更新 liveness `Unreachable`，不会覆盖本地
-系统最后上报的 health。`SystemMonotonicClock` 为真实进程提供 RoboGuide-local receive time。
+`NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含具体
+传输类型。该同步 port 仍由 Runtime/testkit 的 legacy 测试合同使用，但旧 HTTP 实现已退役。
+正式 registration/status/execute wire 属于 `core/integration` 的 Node Protocol v0.2。status
+失败时 Runtime 只更新 liveness `Unreachable`，不会覆盖本地系统最后上报的 health。
+`SystemMonotonicClock` 为真实进程提供 RoboGuide-local receive time。
+
+### Device Extension Conformance v0.1
+
+设备扩展的唯一正式机制是 `core/node-service` 内的 Local Integration Engine。新 Local EAIOS
+只需部署自己的 HTTP、dynamic gRPC 或 MCP facade，并在 Node Config v0.4 中声明固定
+connection、唯一 capability owner、exact readiness、execute/status/cancel workflow、受限
+request mapping、状态映射和 required resources；不得在 RoboGuide core 增加厂商分支。
+`core/integration` 只负责 formal Node Protocol wire/session/router，Controller 的
+`IntegrationRuntimeBridge` 位于 `core/orchestration`。完整可验证路径和真实配置样例见
+[`docs/extensions/device-extension-conformance-v0.1.md`](../extensions/device-extension-conformance-v0.1.md)，
+对应 ownership 与 conformance 决策见
+[`ADR-0021`](../decisions/0021-device-extension-boundary-conformance.md)；旧 HTTP adapter
+退役与 Artifact Store 隔离见
+[`ADR-0022`](../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。
+
+离线命令不会打开 endpoint 或访问 Controller：
+
+```bash
+cargo run -p roboguide-node -- --validate \
+  scenarios/extension-conformance-v0.1/node.toml
+```
+
+成功报告只证明配置和共享生命周期不变量；认证、真实状态值、物理副作用、Local Safety、
+取消和重启语义仍需在 deployment-owned facade/硬件上单独验证。
 
 每个 canonical capability 在 Node 配置内只有一个 local-system owner；endpoint、method、
 tool 和 descriptor 都由本地配置固定，网络输入只能进入受限 JSON Pointer/白名单函数映射。
 SQLite WAL journal 在本地 dispatch 前持久化 execution identity，Unknown 不自动重放。
 
-`apps/real-node-smoke` 默认仅 probe；真实 action 必须显式提供 `--execute --intent FILE`。
-同步 HTTP reference probe 仍不是 real-device verification，也不构成 v0.2 Node Protocol。
+`apps/real-node-smoke` 默认仅 probe formal Node Protocol；`--simulate-execute` 只发送合成
+execution facts，不触发真实 action，也不构成 real-device verification。
 
 ### State & Memory Plane — Slice v0.1: Shared Node State
 
@@ -126,7 +157,7 @@ TTL、lease validity 和 requirement eligibility 仍由 Control 判定。
 
 ### State & Runtime Integration — Slice v0.1: Node Observation Ingestion
 
-Runtime 通过 `NodeGateway.status()` 从 Local EAIOS / Vendor Adapter 获取 health，形成
+Runtime 通过 `NodeGateway.status()` 从 Local EAIOS / Vendor facade 获取 health，形成
 transport-neutral `NodeHealthObservation`，并仅依赖 `SharedNodeStateWriter` 写入 State。
 Runtime 不依赖 `core/state` concrete crate，也不保存跨 Mission 的 shared snapshot。
 
@@ -137,7 +168,7 @@ Control 暂时仍在 lease expiry 时写入 `Unreachable`，但不再把 reporte
 capability，State 本身不输出 `schedulable`。
 
 本切片没有 Reconciliation loop，也不会根据 State 变化自动 Block、partial release 或
-rebind。Runtime networking、真实 Adapter 和 Lease/Heartbeat 最终 ownership 仍未解决。
+rebind。Runtime networking、真实 Local EAIOS facade 和 Lease/Heartbeat 最终 ownership 仍未解决。
 
 ### State & Runtime Integration — Slice v0.2: Observation Time Semantics
 
@@ -279,7 +310,7 @@ replay 或自动 failure escalation。
 
 Spatial Memory 将地图分为 immutable manifest/catalog 与独立 blob data plane。`core/state`
 只维护可从 evidence 重建的 revision/replica metadata；CAS 和 streaming transport 位于
-Adapter/Integration；Node Service 负责声明式 staging、digest 校验和受控本地路径映射。
+Artifact Store/Integration；Node Service 负责声明式 staging、digest 校验和受控本地路径映射。
 跨 Mission 的 Consumer 使用预分配 map/revision scalar reference，Runtime 不解析地图或驱动
 Catalog。固定物理 anchor 是 v0 的 spatial authority，导入成功不等于 localization verified。
 实现和非目标见 [`ADR-0016`](../decisions/0016-distributed-spatial-memory.md)。
@@ -296,7 +327,7 @@ Catalog。固定物理 anchor 是 v0 的 spatial authority，导入成功不等�
 - Lease ownership resolution。
 - Map fusion、实时增量同步、active-map 选择、删除/GC、动态 output binding 和认证传输安全。
 
-Spatial artifact 的本地 durability 属于 Node Service/Adapter 实现不变量：文件内容、rename、
+Spatial artifact 的本地 durability 属于 Node Service/Artifact Store 实现不变量：文件内容、rename、
 hard-link 或 unlink 的父目录必须在 Journal/evidence 前同步；restart finalization 必须重验
 staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 symlink/非目录并对叶子
 使用 no-follow。Catalog 的 lifecycle 顺序取自 durable append 顺序，HTTP receive timestamp

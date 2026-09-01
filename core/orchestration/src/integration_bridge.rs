@@ -1,8 +1,5 @@
 //! Composition bridge from formal Node Protocol facts into Runtime/Control/State semantics.
 
-use crate::grpc::v0_2::node_message::Message as NodePayload;
-use crate::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
-use crate::{GrpcNodeEvent, GrpcNodeRouter};
 use control::ControlPlane;
 use domain::{
     Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
@@ -10,6 +7,9 @@ use domain::{
     NodeContractVersion, NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus,
     Resource, ResourceId, ResourceKind, SensorDescriptor, SensorId, TimestampMs,
 };
+use integration::grpc::v0_2::node_message::Message as NodePayload;
+use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
+use integration::{GrpcNodeEvent, GrpcNodeRouter};
 use ports::{EventSink, SharedNodeStateWriter};
 use runtime::{
     ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
@@ -803,7 +803,7 @@ fn registration_from_wire(
 
 /// Converts current protocol health into Domain health.
 fn status_from_wire(
-    status: Option<&crate::grpc::v0_2::NodeStatus>,
+    status: Option<&integration::grpc::v0_2::NodeStatus>,
     observed_at: TimestampMs,
 ) -> Result<NodeStatus, IntegrationRuntimeError> {
     let status = status.ok_or_else(|| {
@@ -873,7 +873,7 @@ fn invocation_from_command(command: &ExecutionCommand) -> CanonicalInvocation {
 }
 /// Converts one transport-neutral scalar.
 fn scalar(value: &ExecutionValue) -> ScalarValue {
-    use crate::grpc::v0_2::scalar_value::Value;
+    use integration::grpc::v0_2::scalar_value::Value;
     ScalarValue {
         value: Some(match value {
             ExecutionValue::Bool(value) => Value::BoolValue(*value),
@@ -943,7 +943,7 @@ impl From<tonic::Status> for IntegrationRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grpc::v0_2::{
+    use integration::grpc::v0_2::{
         Capability as WireCapability, LocalRuntime as WireRuntime, LocalSystemDescriptor,
     };
     use ports::SharedNodeStateReader;
@@ -1173,12 +1173,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(crate::grpc::v0_2::Heartbeat {
+                    message: integration::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_2::Heartbeat {
                             session_id: "session-1".to_string(),
                             lease_id: "lease-1".to_string(),
                             sequence: 1,
-                            status: Some(crate::grpc::v0_2::NodeStatus {
+                            status: Some(integration::grpc::v0_2::NodeStatus {
                                 health: "degraded".to_string(),
                                 detail: String::new(),
                             }),
@@ -1203,9 +1203,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_2::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            crate::grpc::v0_2::RegistrationUpdate {
+                            integration::grpc::v0_2::RegistrationUpdate {
                                 session_id: "session-1".to_string(),
                                 sequence: 2,
                                 registration: Some(NodeRegistration {
@@ -1360,12 +1360,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(crate::grpc::v0_2::Heartbeat {
+                    message: integration::grpc::v0_2::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_2::Heartbeat {
                             session_id: "session-a".to_string(),
                             lease_id: "lease-a".to_string(),
                             sequence: 1,
-                            status: Some(crate::grpc::v0_2::NodeStatus {
+                            status: Some(integration::grpc::v0_2::NodeStatus {
                                 health: "online".to_string(),
                                 detail: String::new(),
                             }),
@@ -1405,9 +1405,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_2::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            crate::grpc::v0_2::RegistrationUpdate {
+                            integration::grpc::v0_2::RegistrationUpdate {
                                 session_id: "session-a".to_string(),
                                 sequence: 2,
                                 registration: Some(wire_registration(true)),
@@ -1467,9 +1467,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_2::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            crate::grpc::v0_2::ExecutionSnapshot {
+                            integration::grpc::v0_2::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 3,
@@ -1488,9 +1488,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_2::NodeMessage {
                         message: Some(NodePayload::ExecutionEvent(
-                            crate::grpc::v0_2::ExecutionEvent {
+                            integration::grpc::v0_2::ExecutionEvent {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 sequence: 2,
@@ -1681,9 +1681,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: crate::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_2::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            crate::grpc::v0_2::ExecutionSnapshot {
+                            integration::grpc::v0_2::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 1,
@@ -2256,9 +2256,9 @@ mod tests {
         GrpcNodeEvent::NodeMessage {
             node_id: node_id.to_string(),
             session_id: "session-test".to_string(),
-            message: crate::grpc::v0_2::NodeMessage {
+            message: integration::grpc::v0_2::NodeMessage {
                 message: Some(NodePayload::ExecutionSnapshot(
-                    crate::grpc::v0_2::ExecutionSnapshot {
+                    integration::grpc::v0_2::ExecutionSnapshot {
                         session_id: "session-test".to_string(),
                         execution_id: execution_id.to_string(),
                         last_sequence: sequence,

@@ -26,7 +26,7 @@ Spatial Memory v0 采用“不可变 Map Artifact + State Catalog Projection + N
    metadata projection，不保存 blob，不选择 active map，也不主动驱动 execution。
 4. Integration 提供独立的 streaming HTTP Artifact data plane；Node Protocol v0.2
    仍只承载 canonical execution intent 和 lifecycle facts，地图 bytes 不进入 gRPC。
-5. Node Service / Adapter 声明式地把已 Commit 的 map input 下载到受控 execution sandbox，
+5. Node Service 声明式地把已 Commit 的 map input 下载到受控 execution sandbox，
    校验 digest 后再交给 Local EAIOS；`prepare-output` execution 在完成前把固定 output path
    冻结为不可变本地副本，后续独立的 `publish` execution 只有在上传、finalize 和 Catalog
    publication 均成功后才完成。`artifact_slot` 必须配合显式 `artifact_operation`，不能由

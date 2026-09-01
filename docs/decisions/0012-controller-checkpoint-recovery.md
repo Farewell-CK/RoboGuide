@@ -3,6 +3,9 @@
 - 状态：Accepted for the Integration Server bootstrap
 - 日期：2026-08-25
 
+> 当前 `IntegrationRuntimeBridge` 的代码归属是 `core/orchestration`；本 ADR 中的
+> “Integration bridge” 指 Controller composition 角色，transport 边界见 ADR-0021。
+
 ## Context
 
 The SQLite event envelope is durable evidence, but the current `EventPayload` values do not carry

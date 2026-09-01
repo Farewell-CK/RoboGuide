@@ -20,14 +20,17 @@ Adapter 或协议转换层。
 - Runtime 持有 live `ExecutionContext`、稳定 execution identity、Node ownership、事件序列、
   Task runtime lifecycle、取消和 checkpoint/resume 状态。
 - Integration 持有 Node Protocol、transport、session、router 和 wire/domain conversion，
-  并将 execution facts 交给 Runtime 归约。
+  并将 execution facts 交给 Controller composition 层的 Runtime bridge 归约。Bridge 位于
+  `core/orchestration`，不再作为 `core/integration` transport crate 的依赖扩展。
 - State & Memory 保存 observation、execution fact、evidence 和 projection，不主动推进执行。
-- Node Service / Adapter 持有节点侧 durable execution continuity，并把 canonical intent 映射为
-  Local EAIOS How；它不拥有 Mission/Group lifecycle 或 replacement decision。
+- Node Service 持有节点侧 durable execution continuity，并把 canonical intent 映射为
+  Local EAIOS How；部署侧 facade 保留 vendor 调用和安全语义。两者不拥有 Mission/Group
+  lifecycle 或 replacement decision。
 
 Phase 1 采用渐进迁移：`ExecutionGroup` 和 `TaskExecution` 的 Control projection 暂时保留，
-新增 Runtime-owned live execution registry。Integration bridge 作为 transport facade 委托
-Runtime，并且不保留第二套 live execution maps。Runtime 产生 Task activation/terminal outcome，Control 仅验证并更新 committed
+新增 Runtime-owned live execution registry。`core/orchestration::IntegrationRuntimeBridge` 作为
+Controller composition facade 委托 Runtime，并且不保留第二套 live execution maps。Runtime 产生
+Task activation/terminal outcome，Control 仅验证并更新 committed
 projection，Mission Orchestration 继续根据完整 DAG 判断 Mission completion。
 
 `CoordinationContext` 继续属于 Mission Intelligence。Runtime `ExecutionContext` 是另一种对象，
@@ -41,7 +44,8 @@ proposal、commit 和 rebind。Runtime 不选择 replacement，State 不触发 r
 
 - `core/runtime` 可以在不依赖 Control 或具体 transport 的情况下测试 execution lifecycle、
   identity conflict、event ordering 和 checkpoint invariants。
-- `core/integration` 不再直接拥有 live execution maps，但保留现有 transport facade API。
+- `core/integration` 不再直接拥有 live execution maps，也不再包含 Controller bridge；它只保留
+  formal Node Protocol transport/session/router API。
 - Control projection 与 Runtime live state 在 Phase 1 会并存；其同步通过显式 transition 完成，
   后续可再拆分 `TaskExecutionSpec` 与 `TaskExecutionRuntime`。
 - 本 ADR 不授权 Runtime 执行 Matching、Scheduling、Reservation、Commit、Rebind 或 Mission

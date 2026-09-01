@@ -21,3 +21,15 @@ Configurations v0.2 and v0.3 remain loadable and preserve their legacy static-re
 do not satisfy the Phase 1 hardware-readiness acceptance gate. A deployment must migrate to v0.4
 and validate every probe against the actual Local EAIOS before it is treated as a stable hardware
 baseline.
+
+For the complete device-extension acceptance path, run the offline compiler and conformance report
+from the repository root:
+
+```bash
+cargo run -p roboguide-node -- --validate scenarios/extension-conformance-v0.1/node.toml
+cargo test -p node-service conformance --locked
+```
+
+The report proves only static configuration and lifecycle invariants. Endpoint reachability,
+reflection compatibility, vendor field semantics, safety interlocks, and physical actuation still
+require a deployment-owned local-system or hardware test.

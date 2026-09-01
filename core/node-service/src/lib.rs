@@ -10,6 +10,7 @@
 
 mod artifact;
 mod config;
+mod conformance;
 mod engine;
 mod journal;
 mod local_engine;
@@ -26,6 +27,12 @@ pub use config::{
     LocalSystemConfig, NodeServiceConfig, RequestBindingConfig, RequestMappingConfig,
     ResourceConfig, SensorConfig, ValueExpressionConfig, ValueFunction, WorkflowConfig,
     WorkflowStepConfig,
+};
+pub use conformance::{
+    CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
+    ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
+    LifecycleConformanceInvariant, SHARED_LIFECYCLE_CONFORMANCE, StepConformance,
+    WorkflowConformance, compile_extension_config, compile_extension_config_json,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,

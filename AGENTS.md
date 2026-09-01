@@ -11,6 +11,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `docs/mvp-definition.md` records the Draft MVP and its freeze gate.
 - `docs/development/` proposes module layout and defines engineering rules.
 - `docs/decisions/` stores numbered Architecture Decision Records (ADRs).
+- `docs/extensions/` contains executable developer paths and offline extension-conformance evidence.
 - `docs/images/` stores diagrams.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
   composition roots.
@@ -36,8 +37,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   reconciliation or automatic recovery.
 - `core/runtime` owns the transport-neutral live execution registry, stable execution
   identity, ordered fact reduction, recovery-required fencing, and its checkpoint.
-  `core/integration/runtime_bridge.rs` is a transport/composition facade and must not
-  keep a second authoritative execution map or directly mutate Task lifecycle.
+  `core/orchestration::IntegrationRuntimeBridge` is the Controller composition facade
+  and must not keep a second authoritative execution map or directly mutate Task lifecycle.
 - Runtime `Unknown` means recovery-pending physical ambiguity, never terminal Task or
   Mission failure. Integration persists the evidence; application orchestration applies
   Runtime lifecycle transitions, while Control retains recovery decisions.
@@ -56,11 +57,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `core/control/src/scheduler.rs` implements a stateless deterministic bootstrap
   `Who should` policy over supplied Candidate Sets; it does not re-run eligibility,
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
-- `core/adapters/` contains transport/backend adapters; its HTTP implementation is
-  only a reference NodeGateway binding and must not leak HTTP/serde into Domain or Ports.
+- `core/artifact-store/` contains the filesystem implementation of the transport-neutral
+  ArtifactBlobStore port; it stores opaque bytes and does not own map, task, or execution policy.
 - `core/integration/` owns the formal gRPC Node Protocol v0.2 transport;
   `core/node-service/` owns node-side lifecycle, configuration, durable execution
   continuity, and the declarative Local Integration Engine.
+- `core/integration/` contains only formal Node Protocol wire/session/router code;
+  Controller composition and the Runtime bridge belong to `core/orchestration/`.
 - Node config v0.4 requires one fixed readiness observation per exact canonical
   capability. Node Service observes before Register and emits complete RegistrationUpdate
   snapshots on change; Integration preserves exact readiness, State stores it, and Control
@@ -76,17 +79,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.
-- `apps/real-node-smoke/` probes generic Node Contract endpoints by default and
-  executes only with explicit `--execute` plus a versioned intent fixture.
+- `apps/real-node-smoke/` probes the formal Node Protocol v0.2 handshake by default; its
+  explicit `--simulate-execute` mode emits synthetic lifecycle facts and never performs hardware I/O.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
-  not interpret it, Runtime only routes it, and adapters map it to Local EAIOS How.
+  not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references
   may be carried as opaque intent parameters, while digest verification and local staging belong
-  to Node Service/Adapter. Node Protocol v0.2 remains unchanged.
+  to Node Service and the independent Artifact data plane. Node Protocol v0.2 remains unchanged.
 - Strong localization verification uses
   `roboguide.localization-verification-evidence/v0.1`. Node journal persistence precedes remote
   delivery, Artifact HTTP records the evidence transition, and State distinguishes strong
-  evidence from legacy `has_map=true` smoke verification. Real adapter field mapping remains a
+  evidence from legacy `has_map=true` smoke verification. Real facade field mapping remains a
   hardware-validated deployment responsibility.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction

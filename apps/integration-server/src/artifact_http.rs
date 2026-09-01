@@ -1,10 +1,10 @@
 //! Independent streaming HTTP data plane for immutable Spatial Memory artifacts.
 //!
-//! This module owns HTTP parsing and transport only.  The CAS adapter owns bytes, while the
+//! This module owns HTTP parsing and transport only.  The Artifact Store owns bytes, while the
 //! `MapCatalogProjection` owns rebuildable manifest/replica metadata.  No endpoint starts a
 //! mission, mutates a TaskExecution, or selects an active map.
 
-use adapters::artifact::{ArtifactStoreError as CasError, ArtifactUpload, FileSystemArtifactStore};
+use artifact_store::{ArtifactStoreError as CasError, ArtifactUpload, FileSystemArtifactStore};
 use domain::{
     EventPayload, MapArtifactManifest, MapRevisionSelector, MissionId, NodeId, SpatialAnchorId,
     TimestampMs,
@@ -1312,7 +1312,7 @@ impl HttpError {
     }
 }
 
-/// Maps CAS adapter failures into stable HTTP statuses without leaking local paths.
+/// Maps Artifact Store failures into stable HTTP statuses without leaking local paths.
 fn map_cas_error(error: CasError) -> HttpError {
     match error {
         CasError::InvalidDigest { .. }
@@ -1332,7 +1332,7 @@ fn map_cas_error(error: CasError) -> HttpError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use adapters::artifact::digest_bytes;
+    use artifact_store::digest_bytes;
     use domain::{
         ContentDigest, MapArtifactRef, MapId, MapReplicaStatus, MapRevisionId, MissionId,
         SpatialAnchorId,

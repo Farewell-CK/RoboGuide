@@ -444,7 +444,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// Builds one complete MissionPlan for the Node Service end-to-end authority path.
     fn single_task_plan(
@@ -667,7 +667,7 @@ mod tests {
             registration_from_catalog(dog_a.catalog()),
             registration_from_catalog(dog_b.catalog()),
         ];
-        let mut bridge = integration::IntegrationRuntimeBridge::new(
+        let mut bridge = orchestration::IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
             testkit::InMemoryEventLog::new(),
@@ -794,6 +794,30 @@ mod tests {
                     }))
                     .await;
                 Ok(DriverResponse { events: receiver })
+            })
+        }
+    }
+
+    /// Driver that models a request timeout without revealing whether the local call started.
+    struct TimeoutDriver {
+        /// Number of local dispatch attempts observed by the test facade.
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl LocalDriver for TimeoutDriver {
+        /// This mock uses the configured HTTP workflow family.
+        fn kind(&self) -> DriverKind {
+            DriverKind::Http
+        }
+
+        /// Returns an ambiguous transport timeout after counting one dispatch attempt.
+        fn invoke<'a>(&'a self, _request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
+            let calls = Arc::clone(&self.calls);
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(DriverError::Transport(
+                    "local request timed out".to_string(),
+                ))
             })
         }
     }
@@ -1075,6 +1099,75 @@ mod tests {
         ));
     }
 
+    /// A transport timeout fences physical ambiguity and never dispatches the same identity twice.
+    #[tokio::test]
+    async fn transport_timeout_requires_reconciliation_without_replay() {
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog(
+                "http://127.0.0.1:50051".to_string(),
+                state_dir.path().to_path_buf(),
+            ),
+            vec![Arc::new(TimeoutDriver {
+                calls: Arc::clone(&calls),
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+            mission_id: "mission-a".to_string(),
+            task_id: "task-timeout".to_string(),
+            group_id: "group-a".to_string(),
+            role_id: "carrier".to_string(),
+            capability_contract: "mobility.reach_region@v1".to_string(),
+            ..Default::default()
+        };
+        let mut events = engine.subscribe();
+        assert_eq!(
+            engine
+                .execute(
+                    "timeout-execution".to_string(),
+                    invocation.clone(),
+                    vec!["base".to_string()],
+                )
+                .expect("timeout dispatch starts"),
+            crate::ExecuteDisposition::Started
+        );
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+            .await
+            .expect("timeout evidence arrives")
+            .expect("timeout evidence exists");
+        assert_eq!(
+            event.phase,
+            integration::grpc::v0_2::ExecutionPhase::Unknown
+        );
+        let journal =
+            crate::ExecutionJournal::open(crate::journal_path(engine.catalog().state_directory()))
+                .expect("journal opens");
+        assert_eq!(
+            journal
+                .get("timeout-execution")
+                .expect("record reads")
+                .expect("record exists")
+                .status(),
+            crate::JournalStatus::ReconciliationRequired
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            engine.execute(
+                "timeout-execution".to_string(),
+                invocation,
+                vec!["base".to_string()],
+            ),
+            Ok(crate::ExecuteDisposition::Existing(_))
+        ));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "repeating an ambiguous identity must not redispatch"
+        );
+    }
+
     /// Control-bound command reaches the local engine and terminates only on a local terminal fact.
     #[tokio::test]
     async fn control_bound_command_round_trips_through_generic_engine() {
@@ -1086,11 +1179,10 @@ mod tests {
             NodeStatus as DomainStatus, Resource as DomainResource, ResourceId, ResourceKind,
             RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
         };
+        use integration::GrpcIntegrationService;
         use integration::grpc::v0_2::CanonicalInvocation;
         use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
-        use integration::{
-            GrpcIntegrationService, IntegrationRuntimeBridge, RemoteExecutionStatus,
-        };
+        use orchestration::{IntegrationRuntimeBridge, RemoteExecutionStatus};
         use state::InMemorySharedNodeState;
         use testkit::InMemoryEventLog;
 

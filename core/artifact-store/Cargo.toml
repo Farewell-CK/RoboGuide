@@ -1,0 +1,14 @@
+[package]
+name = "artifact-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+libc = "0.2"
+ports = { path = "../ports" }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

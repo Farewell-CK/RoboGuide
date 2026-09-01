@@ -18,6 +18,7 @@ use mapping::{
     CompiledRequestMapping, MappingError, WorkflowContext, evaluate, validate_expression,
     validate_pointer,
 };
+use prost_reflect::DescriptorPool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -810,6 +811,24 @@ impl CompiledWorkflow {
     ) -> Result<MappedExecutionFact, MappingError> {
         self.execution_state.map(context)
     }
+
+    /// Returns whether the compiled state map covers every non-ambiguous lifecycle phase.
+    pub fn execution_state_mapped(&self) -> bool {
+        [
+            MappedExecutionPhase::Accepted,
+            MappedExecutionPhase::Running,
+            MappedExecutionPhase::Completed,
+            MappedExecutionPhase::Failed,
+            MappedExecutionPhase::Cancelled,
+        ]
+        .iter()
+        .all(|phase| {
+            self.execution_state
+                .states
+                .values()
+                .any(|mapped| mapped == phase)
+        })
+    }
 }
 
 impl CompiledWorkflowStep {
@@ -821,6 +840,11 @@ impl CompiledWorkflowStep {
     /// Returns the fixed connection identity.
     pub fn connection(&self) -> &str {
         &self.connection
+    }
+
+    /// Returns the fixed local operation selected by this workflow step.
+    pub const fn operation(&self) -> &LocalOperationConfig {
+        &self.operation
     }
 
     /// Renders one driver request while preserving compiled route and operation authority.
@@ -1306,7 +1330,10 @@ fn compile_connections(
             format!("connections.{}.local_system", config.id()),
             format!("unknown local system `{}`", config.local_system()),
         )?;
-        validate_local_endpoint(config.endpoint(), "connections.endpoint")?;
+        validate_local_endpoint(
+            config.endpoint(),
+            &format!("connections.{}.endpoint", config.id()),
+        )?;
         let (id, connection) = match config {
             ConnectionConfig::Http {
                 id,
@@ -1315,8 +1342,12 @@ fn compile_connections(
                 timeout_ms,
                 headers,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
-                let headers = compile_credentials(headers, "connections.headers")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
+                let headers = compile_credentials(headers, &format!("connections.{id}.headers"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1338,7 +1369,11 @@ fn compile_connections(
                 timeout_ms,
                 metadata,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
                 require(
                     descriptor_set.is_some() ^ reflection,
                     format!("connections.{id}.descriptor_set"),
@@ -1352,10 +1387,15 @@ fn compile_connections(
                             format!("connections.{id}.descriptor_set"),
                             format!("file `{}` does not exist", path.display()),
                         )?;
+                        validate_descriptor_set(
+                            &path,
+                            &format!("connections.{id}.descriptor_set"),
+                        )?;
                         Ok::<_, CatalogError>(path)
                     })
                     .transpose()?;
-                let metadata = compile_credentials(metadata, "connections.metadata")?;
+                let metadata =
+                    compile_credentials(metadata, &format!("connections.{id}.metadata"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1377,8 +1417,12 @@ fn compile_connections(
                 timeout_ms,
                 headers,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
-                let headers = compile_credentials(headers, "connections.headers")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
+                let headers = compile_credentials(headers, &format!("connections.{id}.headers"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1893,7 +1937,21 @@ fn validate_operation(
             | LocalOperationConfig::GrpcServerStream { service, method },
         ) => {
             validate_fixed_symbol(service, &field, true)?;
-            validate_fixed_symbol(method, &field, false)
+            validate_fixed_symbol(method, &field, false)?;
+            if let CompiledConnection::Grpc {
+                descriptor_set: Some(path),
+                ..
+            } = connection
+            {
+                validate_grpc_method_descriptor(
+                    path,
+                    service,
+                    method,
+                    matches!(operation, LocalOperationConfig::GrpcServerStream { .. }),
+                    &field,
+                )?;
+            }
+            Ok(())
         }
         (DriverKind::Mcp, LocalOperationConfig::McpTool { tool }) => {
             validate_fixed_symbol(tool, &field, true)
@@ -1903,6 +1961,72 @@ fn validate_operation(
             "operation kind does not match connection driver",
         )),
     }
+}
+
+/// Decodes one configured descriptor set before the node opens any local connection.
+fn validate_descriptor_set(path: &Path, field: &str) -> Result<(), CatalogError> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
+    DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+        validation(
+            field,
+            format!(
+                "cannot decode gRPC descriptor set `{}`: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    Ok(())
+}
+
+/// Confirms that one descriptor-backed gRPC workflow step names an exact method shape.
+fn validate_grpc_method_descriptor(
+    path: &Path,
+    service_name: &str,
+    method_name: &str,
+    configured_server_streaming: bool,
+    field: &str,
+) -> Result<(), CatalogError> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
+    let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+        validation(
+            field,
+            format!(
+                "cannot decode gRPC descriptor set `{}`: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let service = pool.get_service_by_name(service_name).ok_or_else(|| {
+        validation(
+            field,
+            format!("gRPC service `{service_name}` is absent from the descriptor set"),
+        )
+    })?;
+    let method = service
+        .methods()
+        .find(|descriptor| descriptor.name() == method_name)
+        .ok_or_else(|| {
+            validation(
+                field,
+                format!(
+                    "gRPC method `{service_name}.{method_name}` is absent from the descriptor set"
+                ),
+            )
+        })?;
+    require(
+        !method.is_client_streaming(),
+        field,
+        format!("gRPC method `{service_name}.{method_name}` uses unsupported client streaming"),
+    )?;
+    require(
+        method.is_server_streaming() == configured_server_streaming,
+        field,
+        format!(
+            "configured streaming mode does not match gRPC method `{service_name}.{method_name}`"
+        ),
+    )
 }
 
 /// Compiles a disjoint local-state lookup table.
@@ -2194,7 +2318,7 @@ mod tests {
     use crate::{RequestBindingConfig, RequestMappingConfig, ValueExpressionConfig};
 
     /// Returns a valid multi-system catalog fixture with all supported drivers.
-    fn valid_config(descriptor_set: PathBuf) -> NodeServiceConfig {
+    fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
         let state_mapping = ExecutionStateMappingConfig {
             state_pointer: "/steps/read-state/state".to_string(),
             reason_pointer: Some("/steps/read-state/detail".to_string()),
@@ -2275,8 +2399,8 @@ mod tests {
                     id: "motion-grpc".to_string(),
                     local_system: "motion".to_string(),
                     endpoint: "http://[::1]:8200".to_string(),
-                    descriptor_set: Some(descriptor_set),
-                    reflection: false,
+                    descriptor_set: None,
+                    reflection: true,
                     timeout_ms: 1_000,
                     metadata: BTreeMap::new(),
                 },
@@ -2634,11 +2758,89 @@ mod tests {
         }
         assert!(matches!(
             CompiledLocalCatalog::compile(remote, directory.path()),
-            Err(CatalogError::Validation { field, .. }) if field == "connections.endpoint"
+            Err(CatalogError::Validation { field, .. })
+                if field == "connections.motion-http.endpoint"
         ));
+        let mut missing_descriptor = valid_config(missing.clone());
+        if let ConnectionConfig::Grpc {
+            descriptor_set,
+            reflection,
+            ..
+        } = &mut missing_descriptor.connections[1]
+        {
+            *descriptor_set = Some(missing.clone());
+            *reflection = false;
+        }
         assert!(matches!(
-            CompiledLocalCatalog::compile(valid_config(missing), directory.path()),
+            CompiledLocalCatalog::compile(missing_descriptor, directory.path()),
             Err(CatalogError::Validation { field, .. }) if field.contains("descriptor_set")
+        ));
+    }
+
+    /// Descriptor-backed gRPC routes are checked offline for service, method, and stream shape.
+    #[test]
+    fn validates_descriptor_backed_grpc_routes_offline() {
+        use prost::Message;
+        use prost_types::{
+            DescriptorProto, FileDescriptorProto, FileDescriptorSet, MethodDescriptorProto,
+            ServiceDescriptorProto,
+        };
+
+        let descriptor_set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("navigation.proto".to_string()),
+                package: Some("local".to_string()),
+                syntax: Some("proto3".to_string()),
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("Request".to_string()),
+                        ..DescriptorProto::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Response".to_string()),
+                        ..DescriptorProto::default()
+                    },
+                ],
+                service: vec![ServiceDescriptorProto {
+                    name: Some("Navigation".to_string()),
+                    method: vec![MethodDescriptorProto {
+                        name: Some("GetStatus".to_string()),
+                        input_type: Some(".local.Request".to_string()),
+                        output_type: Some(".local.Response".to_string()),
+                        ..MethodDescriptorProto::default()
+                    }],
+                    ..ServiceDescriptorProto::default()
+                }],
+                ..FileDescriptorProto::default()
+            }],
+        }
+        .encode_to_vec();
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor_path = directory.path().join("navigation.pb");
+        std::fs::write(&descriptor_path, descriptor_set).expect("descriptor writes");
+        let mut config = valid_config(descriptor_path.clone());
+        if let ConnectionConfig::Grpc {
+            descriptor_set,
+            reflection,
+            ..
+        } = &mut config.connections[1]
+        {
+            *descriptor_set = Some(descriptor_path.clone());
+            *reflection = false;
+        }
+        CompiledLocalCatalog::compile(config.clone(), directory.path())
+            .expect("descriptor-backed route compiles");
+
+        if let LocalOperationConfig::GrpcUnary { method, .. } =
+            &mut config.capabilities[0].workflow.status[0].operation
+        {
+            *method = "Missing".to_string();
+        }
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, reason })
+                if field == "workflow.read-state.operation"
+                    && reason.contains("absent from the descriptor set")
         ));
     }
 
@@ -2714,6 +2916,29 @@ mod tests {
                 reason: Some("stopped".to_string()),
             }
         );
+    }
+
+    /// Unknown local status values fail closed instead of being treated as terminal success.
+    #[test]
+    fn rejects_unknown_execution_state_mapping() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let catalog = CompiledLocalCatalog::compile(valid_config(descriptor), directory.path())
+            .expect("catalog compiles");
+        let workflow = catalog.capabilities()["mobility.reach_region@v1"].workflow();
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step(
+                "read-state",
+                serde_json::json!({ "state": "VENDOR_UNKNOWN" }),
+            )
+            .expect("status records");
+        assert!(matches!(
+            workflow.map_execution_state(&context),
+            Err(MappingError::MissingSource(reason))
+                if reason.contains("unmapped state")
+        ));
     }
 
     /// Startup validation rejects handles and requests that depend on unavailable facts.

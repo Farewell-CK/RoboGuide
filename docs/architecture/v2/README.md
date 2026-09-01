@@ -45,8 +45,9 @@ Perception、Interaction、Compute 和 Infrastructure Node。Node 不等同于 R
 
 每台参与节点机器运行一个通用 `roboguide-node`，作为 RoboGuide Runtime 在该机器上的
 接入端。它通过 Node Protocol 主动连接 RoboGuide Server，并在进程内部使用声明式
-Local Integration Engine 连接一个或多个 Local Embodied Systems。Adapter 是该引擎的
-配置与驱动职责，不是每种 EAIOS 各自部署的 RoboGuide 服务或编译期插件。
+Local Integration Engine 连接一个或多个 Local Embodied Systems。配置与通用 driver 属于
+Node Service；具体 EAIOS 的 facade 在部署侧维护，不是每种 EAIOS 各自部署的 RoboGuide 服务
+或编译期插件。
 
 Local Integration Engine 只执行部署者提供的、启动时完整校验的本地配置。配置声明
 Local System、Capability、Sensor、Resource、固定 Endpoint、受限字段映射和执行生命
@@ -183,12 +184,31 @@ RT-G3 Gate 约束，关系实现不得用 NodeId 或可复用 execution 字符�
 
 Integration 定义 Node Protocol、Messaging、Transport、Session、Router 和 wire conversion。
 DDS、ROS 2、gRPC、MQTT 和序列化属于 Integration 实现选型，不因此获得 execution
-lifecycle authority。Node Service / Adapter 将 canonical execution intent 映射到本地 How，
-并维护节点侧 durable execution continuity；它不管理 Mission 或 Group 生命周期。
+lifecycle authority。当前 `core/integration` 只包含 formal Node Protocol v0.2 wire/session/router，
+不依赖 Control、State 或 Runtime。依赖这些 authority 的 `IntegrationRuntimeBridge` 属于
+Controller application composition，位于 `core/orchestration`，只把已验证的 transport facts
+交给既有 Control/State/Runtime，不选择 replacement 或 Local How。
+
+Node Service / Local Integration Engine 将 canonical execution intent 映射到本地 How，并维护
+节点侧 durable execution continuity；它不管理 Mission 或 Group 生命周期。旧同步 HTTP
+NodeGateway 已退役；`core/artifact-store` 是独立的 filesystem CAS infrastructure，属于
+Artifact 数据平面，不是新增 Local EAIOS 的生产插件机制。具体 EAIOS 的 SDK、Immediate
+How 与 Local Safety 属于 deployment-owned `integrations/` facade。
 
 节点侧部署边界固定为单一 `roboguide-node` 服务。其 Local Integration Engine 可内置
 多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行
 状态下自动切换本地系统或重放动作。
+
+Extension Conformance v0.1 复用 Node Service 的配置编译器，要求 Node Config v0.4 为每个
+exact capability 声明 readiness，并离线验证唯一 owner、固定 endpoint/method/service/tool、
+受限 request mapping、execution state mapping、required resources 与共享
+execute/status/cancel lifecycle。验证不联系 Controller 或 Local EAIOS；未知、timeout、重复
+execution identity 和 restart ambiguity 只形成 reconciliation fence，绝不危险自动重放。
+开发者路径与真实三-driver 配置样例见
+[`docs/extensions/device-extension-conformance-v0.1.md`](../../extensions/device-extension-conformance-v0.1.md)，
+ownership 决策见 [`ADR-0021`](../../decisions/0021-device-extension-boundary-conformance.md)，
+旧 HTTP adapter 退役与 Artifact Store 隔离见
+[`ADR-0022`](../../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。
 
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、

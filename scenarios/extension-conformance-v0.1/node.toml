@@ -1,0 +1,336 @@
+schema = "roboguide.node-config/v0.4"
+node_id = "extension-demo-node"
+server_endpoint = "http://127.0.0.1:50051"
+state_directory = "node-state"
+reconnect_delay_ms = 1000
+
+[[local_systems]]
+id = "demo-eaios"
+runtime_name = "deployment-owned-demo-facade"
+runtime_version = "1.0.0"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "demo-health"
+connection = "demo-health-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "demo-health-http"
+local_system = "demo-eaios"
+endpoint = "http://127.0.0.1:9100"
+timeout_ms = 1000
+
+[[connections]]
+driver = "http"
+id = "demo-http"
+local_system = "demo-eaios"
+endpoint = "http://127.0.0.1:9100"
+timeout_ms = 5000
+
+[[connections]]
+driver = "grpc"
+id = "demo-grpc"
+local_system = "demo-eaios"
+endpoint = "http://127.0.0.1:9200"
+reflection = true
+timeout_ms = 5000
+
+[[connections]]
+driver = "mcp"
+id = "demo-mcp"
+local_system = "demo-eaios"
+endpoint = "http://127.0.0.1:9300/mcp"
+timeout_ms = 5000
+
+[[resources]]
+id = "demo-execution-slot"
+kind = "compute"
+capacity = 1
+owner = "demo-eaios"
+
+[[capabilities]]
+contract = "demo.http_action@v1"
+kind = "mobility"
+owner = "demo-eaios"
+required_resources = ["demo-execution-slot"]
+local_locks = ["demo-http-action"]
+
+[capabilities.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "http-readiness"
+connection = "demo-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/capabilities/http-action"
+
+[capabilities.readiness.step.request]
+base = {}
+
+[capabilities.workflow]
+poll_interval_ms = 100
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/http-dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/http-status/state"
+reason_pointer = "/steps/http-status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+
+[[capabilities.workflow.execute]]
+id = "http-dispatch"
+connection = "demo-http"
+
+[capabilities.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/executions"
+
+[capabilities.workflow.execute.request]
+base = {}
+
+[[capabilities.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[capabilities.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[capabilities.workflow.status]]
+id = "http-status"
+connection = "demo-http"
+
+[capabilities.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/executions/status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "http-cancel"
+connection = "demo-http"
+
+[capabilities.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/executions/cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities]]
+contract = "demo.grpc_action@v1"
+kind = "mobility"
+owner = "demo-eaios"
+required_resources = ["demo-execution-slot"]
+local_locks = ["demo-grpc-action"]
+
+[capabilities.readiness]
+state_pointer = "/state"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "grpc-readiness"
+connection = "demo-grpc"
+
+[capabilities.readiness.step.operation]
+kind = "grpc_unary"
+service = "demo.Readiness"
+method = "Check"
+
+[capabilities.readiness.step.request]
+base = {}
+
+[capabilities.workflow]
+poll_interval_ms = 100
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/grpc-dispatch/execution_id"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/grpc-status/state"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+
+[[capabilities.workflow.execute]]
+id = "grpc-dispatch"
+connection = "demo-grpc"
+
+[capabilities.workflow.execute.operation]
+kind = "grpc_unary"
+service = "demo.Navigation"
+method = "Execute"
+
+[capabilities.workflow.execute.request]
+base = {}
+
+[[capabilities.workflow.status]]
+id = "grpc-status"
+connection = "demo-grpc"
+
+[capabilities.workflow.status.operation]
+kind = "grpc_server_stream"
+service = "demo.Navigation"
+method = "Status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "grpc-cancel"
+connection = "demo-grpc"
+
+[capabilities.workflow.cancel.operation]
+kind = "grpc_unary"
+service = "demo.Navigation"
+method = "Cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities]]
+contract = "demo.mcp_action@v1"
+kind = "observation"
+owner = "demo-eaios"
+required_resources = ["demo-execution-slot"]
+local_locks = ["demo-mcp-action"]
+
+[capabilities.readiness]
+state_pointer = "/state"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "mcp-readiness"
+connection = "demo-mcp"
+
+[capabilities.readiness.step.operation]
+kind = "mcp_tool"
+tool = "readiness"
+
+[capabilities.readiness.step.request]
+base = {}
+
+[capabilities.workflow]
+poll_interval_ms = 100
+
+[capabilities.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/mcp-dispatch/handle"
+
+[capabilities.workflow.execution_state]
+state_pointer = "/steps/mcp-status/state"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+
+[[capabilities.workflow.execute]]
+id = "mcp-dispatch"
+connection = "demo-mcp"
+
+[capabilities.workflow.execute.operation]
+kind = "mcp_tool"
+tool = "execute"
+
+[capabilities.workflow.execute.request]
+base = {}
+
+[[capabilities.workflow.status]]
+id = "mcp-status"
+connection = "demo-mcp"
+
+[capabilities.workflow.status.operation]
+kind = "mcp_tool"
+tool = "status"
+
+[capabilities.workflow.status.request]
+base = {}
+
+[[capabilities.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[capabilities.workflow.cancel]]
+id = "mcp-cancel"
+connection = "demo-mcp"
+
+[capabilities.workflow.cancel.operation]
+kind = "mcp_tool"
+tool = "cancel"
+
+[capabilities.workflow.cancel.request]
+base = {}
+
+[[capabilities.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[capabilities.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"

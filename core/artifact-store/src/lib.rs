@@ -1,9 +1,10 @@
 //! Filesystem content-addressed storage for immutable execution artifacts.
 //!
-//! This module deliberately remains an adapter concern.  It stores opaque bytes
+//! This crate is the concrete infrastructure implementation of the
+//! transport-neutral `ports::ArtifactBlobStore` port. It stores opaque bytes
 //! addressed by a validated SHA-256 digest and does not interpret map manifests,
-//! execution state, or ownership decisions.  Catalog and lifecycle policy stay
-//! in the State and Control planes respectively.
+//! execution state, or ownership decisions. Catalog and lifecycle policy stay in
+//! the State and Control planes respectively.
 
 use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
@@ -91,7 +92,7 @@ pub struct StoredArtifact {
     path: PathBuf,
 }
 
-/// Failures raised by the filesystem artifact adapter.
+/// Failures raised by the filesystem artifact store.
 #[derive(Debug)]
 pub enum ArtifactStoreError {
     /// The supplied digest was not a SHA-256 value in accepted form.
@@ -758,7 +759,7 @@ impl ports::ArtifactBlobStore for FileSystemArtifactStore {
     }
 }
 
-/// Converts adapter-local storage failures into the transport-neutral port error.
+/// Converts store-local failures into the transport-neutral port error.
 fn port_error(error: ArtifactStoreError) -> ports::ArtifactStoreError {
     match error {
         ArtifactStoreError::InvalidUploadId { .. } => ports::ArtifactStoreError::InvalidUploadId,

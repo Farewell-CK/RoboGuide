@@ -55,8 +55,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   envelope；Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
-- `core/adapters` 已提供第一份 backend-neutral HTTP reference adapter，
-  `apps/real-node-smoke` 默认只 probe registration/status，显式 `--execute` 才发送 intent；
+- `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
+  默认 probe formal Node Protocol v0.2，显式 `--simulate-execute` 只发送合成生命周期事实；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
   [`docs/development/README.md`](docs/development/README.md)；
@@ -70,6 +70,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   `Proposed for MVP Slice v0.1`。
 - 通用异构 EAIOS 接入、canonical capability contract 与 Local Skill 映射由
   [`ADR-0006`](docs/decisions/0006-heterogeneous-eaios-integration-contract.md) 记录。
+- 当前 transport / Local Integration Engine ownership 与设备扩展 conformance 由
+  [`ADR-0021`](docs/decisions/0021-device-extension-boundary-conformance.md) 记录；旧 HTTP
+  adapter 退役和 Artifact Store 隔离由
+  [`ADR-0022`](docs/decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 记录。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -186,21 +190,34 @@ Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integr
 Sensor 和 Resource 都保留唯一 owner；Execute 携带 Control 已 Commit 的 resource IDs。
 `execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
 
-`core/adapters::http::HttpNodeGateway` 是第一份同步 HTTP/JSON reference transport；wire DTO
-与 serde 只存在于 adapter crate。`ConfiguredCommandBackend` 仅允许 canonical capability contract
-查找本地预配置 fixed argv，不接受网络 executable，也不拼 shell。HTTP 不是 Node Contract；
-该旧 HTTP probe 不是正式 Node Protocol。异步 lifecycle、配置驱动执行、SQLite journal、
-heartbeat/lease 与 session fencing 由 `roboguide-node`/Integration Server 实现。合同见
+旧同步 HTTP NodeGateway、HTTP wire DTO 和早期 configured command backend 已全部退役；它们
+不再是正式 Node Protocol 或生产节点执行路径。正式异步 lifecycle、配置驱动执行、SQLite
+journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
+Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
+由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
+合同见
 [`contracts/node/v0.2/`](contracts/node/v0.2/)。Node config v0.4 为每个 exact canonical
 contract 增加固定 readiness observation，并通过现有 RegistrationUpdate 更新后续 Matching；
 v0.2/v0.3 的静态 ready 兼容行为不满足真机稳定门槛。配置合同见
 [`contracts/node/v0.4/`](contracts/node/v0.4/README.md)。
 
+设备扩展的离线合同、真实配置样例和开发者路径见
+[`docs/extensions/device-extension-conformance-v0.1.md`](docs/extensions/device-extension-conformance-v0.1.md)。
+可在不启动 Controller 或 Local EAIOS 的情况下运行：
+
 ```bash
-cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081
-cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:8081 \
-  --execute --intent scenarios/real-node-smoke/noop-intent.json
+cargo run -p roboguide-node -- --validate \
+  scenarios/extension-conformance-v0.1/node.toml
 ```
+
+```bash
+cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051
+cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \
+  --simulate-execute
+```
+
+该 smoke 工具注册合成 Node、验证 Welcome/Registered/Heartbeat/Ack，并可在显式模拟模式
+下验证服务器下发的 Execute 生命周期；它不调用 Local EAIOS，也不能替代真实设备测试。
 
 ### Embodied Execution Group
 
@@ -240,7 +257,7 @@ Shared Belief 是带有 Source、Timestamp、Freshness、Uncertainty 和冲突�
 当前代码只实现 **State & Memory Plane — Slice v0.1: Shared Node State**：
 
 ```text
-Runtime / Adapter observation -> Shared Node State -> Control decision
+Runtime / Local EAIOS facade observation -> Shared Node State -> Control decision
 ```
 
 `core/state` 使用确定性内存实现保存 Node identity、Local EAIOS/runtime descriptor、
@@ -249,7 +266,7 @@ liveness。State 保存“观测到了什么以及何时观测”，Control 仍�
 freshness、liveness、lease 和 requirement 决定是否可参与 matching。
 
 当前同时实现 **State & Runtime Integration — Slice v0.1: Node Observation
-Ingestion**。`NodeGateway` 继续代表 Local EAIOS / Vendor Runtime / Adapter 边界；
+Ingestion**。`NodeGateway` 仍代表 Runtime/testkit 中的 legacy Local EAIOS / Vendor Runtime 边界；
 Runtime 从 `NodeGateway.status()` 形成 transport-neutral `NodeHealthObservation`，通过
 `SharedNodeStateWriter` 写入 State。成功读取 gateway 是 `Reachable` 证据；lease expiry
 只更新为 `Unreachable`，不会把 Local EAIOS 最后上报的 health 篡改成 `Offline`。
@@ -318,8 +335,9 @@ Relation；端点是稳定的 `(TaskId, RoleId)` 逻辑槽，Runtime 将其解�
 Task 成功。rebind 改变 Node/attempt 而不改变关系语义，restart 则保守恢复为 `Unknown`。
 Runtime-owned timer、取消状态与显式 resume/remote pause protocol 仍待后续实现。Matching、
 Scheduling、Reservation、Commit 和 replacement selection 仍属于
-Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service /
-Adapter 负责 canonical intent 到本地 EAIOS How 的映射。
+Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service 的
+声明式 workflow 负责 canonical intent 到本地 EAIOS How 的映射，Artifact Store 只服务
+独立数据平面。
 
 ### Local Embodied Systems & Physical World
 
@@ -453,6 +471,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   └── tests/
 ├── scenarios/
 │   ├── phase1-mission-v0.2/ + v0.3/
+│   ├── extension-conformance-v0.1/
 │   ├── execution-relations-v0.1/
 │   └── distributed-spatial-memory-v0.1/
 ├── tools/
@@ -463,8 +482,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── state/               # node/allocation/spatial catalog projections
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
-│   ├── adapters/            # reference HTTP/backend bindings + filesystem artifact CAS
-│   ├── integration/         # formal gRPC Node Protocol v0.2
+│   ├── artifact-store/      # filesystem ArtifactBlobStore implementation
+│   ├── integration/         # formal gRPC Node Protocol v0.2 wire/session/router
+│   ├── orchestration/       # Controller Mission orchestration + IntegrationRuntimeBridge composition
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
 ├── integrations/
@@ -473,7 +493,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── controller/
 │   ├── integration-server/
 │   ├── mission-service/
-│   └── roboguide-node/
+│   ├── roboguide-node/
+│   └── real-node-smoke/
 └── docs/
     ├── README.md
     ├── architecture/
@@ -509,7 +530,12 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0016-distributed-spatial-memory.md
     │   ├── 0017-canonical-capability-contract-identity.md
     │   ├── 0018-mission-intent-loop.md
-    │   └── 0019-capability-readiness-and-localization-evidence.md
+    │   ├── 0019-capability-readiness-and-localization-evidence.md
+    │   ├── 0020-execution-coordination-relations.md
+    │   ├── 0021-device-extension-boundary-conformance.md
+    │   └── 0022-retire-legacy-adapters-and-isolate-artifact-store.md
+    ├── extensions/
+    │   └── device-extension-conformance-v0.1.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png

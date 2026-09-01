@@ -13,8 +13,13 @@ use ports::{EventSink, SharedNodeStateReader};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
+mod integration_bridge;
 mod mission_contract;
 
+pub use integration_bridge::{
+    CONTROLLER_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge, IntegrationRuntimeError,
+    ObservedTaskOutcome, ObservedTaskResult, RemoteExecutionStatus,
+};
 pub use mission_contract::decode_mission_plan;
 
 /// Mission execution lifecycle owned by orchestration rather than Runtime.

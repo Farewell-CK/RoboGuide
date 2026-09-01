@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.3"
+schema = "roboguide.node-config/v0.4"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
@@ -94,6 +94,24 @@ owner = "local-sensors"
 
 [capabilities.workflow]
 poll_interval_ms = 250
+
+[capabilities.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "compute-readiness"
+connection = "local-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/compute.noop"
+
+[capabilities.readiness.step.request]
+base = {}
 
 [capabilities.workflow.local_handle]
 kind = "pointer"

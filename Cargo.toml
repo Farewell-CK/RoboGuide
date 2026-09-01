@@ -6,7 +6,7 @@ members = [
     "core/control",
     "core/orchestration",
     "core/runtime",
-    "core/adapters",
+    "core/artifact-store",
     "core/testkit",
     "core/integration",
     "core/node-service",

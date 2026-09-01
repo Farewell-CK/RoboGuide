@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-adapters = { path = "../../core/adapters" }
-domain = { path = "../../core/domain" }
-ports = { path = "../../core/ports" }
-runtime = { path = "../../core/runtime" }
+integration = { path = "../../core/integration" }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+tonic = { version = "0.14.6", features = ["transport"] }

@@ -16,6 +16,7 @@
 
 - [`development/README.md`](development/README.md)：`Proposed` 开发基线、目标目录、模块职责、依赖方向和变更门槛；
 - [`development/coding-standards.md`](development/coding-standards.md)：Rust/Python 函数文档、类型、错误处理、测试和质量门槛；
+- [`extensions/device-extension-conformance-v0.1.md`](extensions/device-extension-conformance-v0.1.md)：不修改 RoboGuide core 接入新 Local EAIOS 的配置、离线 conformance 与真机验证边界；
 - [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。
 - [`decisions/0002-deaios-node-contract.md`](decisions/0002-deaios-node-contract.md)：DEAIOS 与本地 EAIOS/厂商运行时之间的 Node Contract v0。
 - [`decisions/0003-mission-plan-contract.md`](decisions/0003-mission-plan-contract.md)：Mission Intelligence 向 Rust 核心交付 Task Graph 的 MissionPlan v0 合同。
@@ -35,6 +36,8 @@
 - [`decisions/0018-mission-intent-loop.md`](decisions/0018-mission-intent-loop.md)：自然语言 Mission Request 的澄清、草案、风险审批与内部计划提交边界。
 - [`decisions/0019-capability-readiness-and-localization-evidence.md`](decisions/0019-capability-readiness-and-localization-evidence.md)：真机 capability readiness 与结构化 localization verification evidence 边界。
 - [`decisions/0020-execution-coordination-relations.md`](decisions/0020-execution-coordination-relations.md)：并发 logical executions 之间持续约束的 specification、Runtime state、evidence 与 recovery 边界。
+- [`decisions/0021-device-extension-boundary-conformance.md`](decisions/0021-device-extension-boundary-conformance.md)：Node Protocol transport、Controller composition、Local Integration Engine 与 device-extension conformance ownership。
+- [`decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)：退役旧 HTTP adapter，迁移 smoke 到 Node Protocol，并隔离 Artifact Store 基础设施。
 
 ## 历史架构
 

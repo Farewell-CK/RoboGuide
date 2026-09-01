@@ -6,10 +6,11 @@
 
 mod artifact_http;
 
+use integration::GrpcIntegrationService;
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
-use integration::{
-    CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, GrpcIntegrationService,
-    IntegrationRuntimeBridge, ObservedTaskResult,
+use orchestration::{
+    CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
+    ObservedTaskResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::Clock;
@@ -126,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
     let process_clock = Arc::new(runtime::SystemMonotonicClock::new());
-    let artifact_store = adapters::artifact::FileSystemArtifactStore::new(&artifact_root)?;
+    let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
             .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;

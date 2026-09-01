@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 integration = { path = "../../core/integration" }
-adapters = { path = "../../core/adapters" }
+artifact-store = { path = "../../core/artifact-store" }
 orchestration = { path = "../../core/orchestration" }
 control = { path = "../../core/control" }
 domain = { path = "../../core/domain" }
