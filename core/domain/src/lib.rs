@@ -14,6 +14,7 @@ mod actor;
 mod allocation;
 mod context;
 mod execution;
+mod execution_relation;
 mod localization_evidence;
 mod mission_plan;
 mod node_registration;
@@ -27,6 +28,9 @@ pub use allocation::{
 };
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
+pub use execution_relation::{
+    ExecutionRelationKind, ExecutionRelationSpec, ExecutionRelationState, PlannedExecutionRef,
+};
 pub use localization_evidence::{
     LOCALIZATION_EVIDENCE_SCHEMA_V0_1, LocalizationFrames, LocalizationVerificationEvidence,
     PoseQualityComparison, PoseQualityEvidence,
@@ -47,6 +51,9 @@ pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
 
 /// Version identifier for Mission Plans declaring Context and ContextRole continuity.
 pub const MISSION_PLAN_SCHEMA_V0_2: &str = "roboguide.mission-plan/v0.2";
+
+/// Version identifier for Mission Plans declaring execution-time coordination relations.
+pub const MISSION_PLAN_SCHEMA_V0_3: &str = "roboguide.mission-plan/v0.3";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
@@ -173,6 +180,11 @@ define_identifier!(
     ContextRoleId,
     "Identifies one role that remains continuous across Tasks in a Context.",
     "context role"
+);
+define_identifier!(
+    ExecutionRelationId,
+    "Identifies one execution coordination relation within a mission.",
+    "execution relation"
 );
 define_identifier!(EventId, "Identifies one immutable event record.", "event");
 define_identifier!(
@@ -884,6 +896,20 @@ impl MissionPlan {
                 reason: "Mission Plan has duplicate context ids".to_string(),
             });
         }
+        let relation_ids = contexts
+            .iter()
+            .flat_map(CoordinationContext::relations)
+            .map(ExecutionRelationSpec::relation_id)
+            .collect::<BTreeSet<_>>();
+        let relation_count = contexts
+            .iter()
+            .map(|context| context.relations().len())
+            .sum::<usize>();
+        if relation_ids.len() != relation_count {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "Mission Plan has duplicate execution relation ids".to_string(),
+            });
+        }
         for task in task_graph.tasks() {
             let context = contexts
                 .iter()
@@ -928,6 +954,30 @@ impl MissionPlan {
                 }
             }
         }
+        for context in &contexts {
+            for relation in context.relations() {
+                validate_relation_endpoint(&task_graph, context, relation.source())?;
+                validate_relation_endpoint(&task_graph, context, relation.target())?;
+                if relation.source().task_id() != relation.target().task_id()
+                    && (task_depends_on(
+                        &task_graph,
+                        relation.source().task_id(),
+                        relation.target().task_id(),
+                    ) || task_depends_on(
+                        &task_graph,
+                        relation.target().task_id(),
+                        relation.source().task_id(),
+                    ))
+                {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "execution relation {} connects Tasks ordered by the DAG",
+                            relation.relation_id()
+                        ),
+                    });
+                }
+            }
+        }
         Ok(Self {
             goal,
             task_graph,
@@ -937,7 +987,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_2
+        MISSION_PLAN_SCHEMA_V0_3
     }
 
     /// Returns the original mission goal.
@@ -954,6 +1004,59 @@ impl MissionPlan {
     pub fn contexts(&self) -> &[CoordinationContext] {
         &self.contexts
     }
+}
+
+/// Confirms one relation endpoint is an exact Task/Role in the containing Context.
+fn validate_relation_endpoint(
+    graph: &TaskGraph,
+    context: &CoordinationContext,
+    endpoint: &PlannedExecutionRef,
+) -> Result<(), DomainError> {
+    let task = graph
+        .tasks()
+        .iter()
+        .find(|task| task.task_id() == endpoint.task_id())
+        .ok_or_else(|| DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation references unknown Task {}",
+                endpoint.task_id()
+            ),
+        })?;
+    if task.continuity().context_id() != context.context_id() {
+        return Err(DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation endpoint {}:{} belongs to another Context",
+                endpoint.task_id(),
+                endpoint.role_id()
+            ),
+        });
+    }
+    if !task
+        .requirement()
+        .roles()
+        .iter()
+        .any(|role| role.role_id() == endpoint.role_id())
+    {
+        return Err(DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation references unknown Role {} in Task {}",
+                endpoint.role_id(),
+                endpoint.task_id()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Returns whether `task_id` transitively depends on `candidate_dependency`.
+fn task_depends_on(graph: &TaskGraph, task_id: &TaskId, candidate_dependency: &TaskId) -> bool {
+    let Some(task) = graph.tasks().iter().find(|task| task.task_id() == task_id) else {
+        return false;
+    };
+    task.dependencies().iter().any(|dependency| {
+        dependency == candidate_dependency
+            || task_depends_on(graph, dependency, candidate_dependency)
+    })
 }
 
 /// A node's proposed assignment for one execution-group role.
@@ -2091,6 +2194,61 @@ pub enum EventPayload {
         /// Committed role identity when Runtime knows the execution context.
         role_id: Option<RoleId>,
         /// Diagnostic explaining why execution cannot safely continue.
+        reason: String,
+    },
+    /// Runtime registered one Mission-owned execution coordination relation.
+    ExecutionRelationRegistered {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity from the accepted MissionPlan.
+        relation_id: ExecutionRelationId,
+        /// Logical condition-provider Task.
+        source_task_ref: TaskRef,
+        /// Logical condition-provider Role.
+        source_role_id: RoleId,
+        /// Logical constrained Task.
+        target_task_ref: TaskRef,
+        /// Logical constrained Role.
+        target_role_id: RoleId,
+        /// Closed relation behavior.
+        kind: ExecutionRelationKind,
+    },
+    /// Runtime execution facts changed the observable state of a relation.
+    ExecutionRelationStateChanged {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity.
+        relation_id: ExecutionRelationId,
+        /// Previous Runtime-derived state.
+        previous: ExecutionRelationState,
+        /// New Runtime-derived state.
+        current: ExecutionRelationState,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+    },
+    /// A relation violation or ambiguity fenced target progression for reconciliation.
+    ExecutionRelationReconciliationRequired {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity.
+        relation_id: ExecutionRelationId,
+        /// Violated or unknown Runtime-derived state.
+        state: ExecutionRelationState,
+        /// Logical condition-provider Task.
+        source_task_ref: TaskRef,
+        /// Logical condition-provider Role.
+        source_role_id: RoleId,
+        /// Logical constrained Task.
+        target_task_ref: TaskRef,
+        /// Logical constrained Role.
+        target_role_id: RoleId,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+        /// Stable Runtime diagnostic.
         reason: String,
     },
     /// A role was rebound after a recoverable failure.

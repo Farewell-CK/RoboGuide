@@ -69,6 +69,7 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 | RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
 | RT-G7 | Capability readiness | Node/WebUI process health 与每个 canonical capability 的 readiness 分离；ROS discovery、Router 和 vendor service 缺失必须可观察，不能仅凭进程存活进入 Matching |
 | RT-G8 | Verification evidence | localization verification 需要 active map identity、mode、pose quality 与 coordinate-frame evidence；`has_map=true` 只保留为 smoke 证据 |
+| RT-G9 | Relation actuation | Execution Relation violation/unknown 在 progression fence 之外需要版本化 pause/stop command、durable acknowledgement、deadline 与 completion race；Local Safety authority 不得被远程动作覆盖 |
 
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7
@@ -82,6 +83,11 @@ mapping 仍未闭环。双狗验收条件见
 Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
 dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得
 把 Recovery Decision 下沉到 Runtime，也不得让 Integration 获得 execution lifecycle authority。
+
+[`ADR-0020`](decisions/0020-execution-coordination-relations.md) 建立 lifecycle-derived
+`requires-active` relation、Runtime live state、checkpoint 和 progression fence，但不关闭 RT-G3
+或 RT-G9。hazard/距离/速度等条件事实、relation composition 和硬实时 actuation 需要独立合同、
+现场时序证据与安全决策，不能用自由字符串表达式提前固化。
 
 ## 开发 Bootstrap 提案
 

@@ -642,7 +642,7 @@ impl MissionOrchestrator {
     }
 }
 
-/// Serializes a validated domain MissionPlan into the v0.2 wire shape without typed JSON map keys.
+/// Serializes a validated domain MissionPlan into the v0.3 wire shape without typed JSON map keys.
 fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
     let contexts = plan
         .contexts()
@@ -653,6 +653,20 @@ fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                 "roles": context.roles().iter().map(|role| serde_json::json!({
                     "id": role.context_role_id().as_str(),
                     "actor": role.actor_id().as_str(),
+                })).collect::<Vec<_>>(),
+                "relations": context.relations().iter().map(|relation| serde_json::json!({
+                    "id": relation.relation_id().as_str(),
+                    "kind": match relation.kind() {
+                        domain::ExecutionRelationKind::RequiresActive => "requires-active",
+                    },
+                    "source": {
+                        "task_id": relation.source().task_id().as_str(),
+                        "role_id": relation.source().role_id().as_str(),
+                    },
+                    "target": {
+                        "task_id": relation.target().task_id().as_str(),
+                        "role_id": relation.target().role_id().as_str(),
+                    },
                 })).collect::<Vec<_>>(),
             })
         })
@@ -702,7 +716,7 @@ fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_2,
+        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_3,
         "mission": {"id": plan.goal().mission_id().as_str(), "objective": plan.goal().objective()},
         "contexts": contexts,
         "tasks": tasks,
@@ -735,12 +749,51 @@ mod tests {
     use state::InMemorySharedNodeState;
     use testkit::InMemoryEventLog;
 
+    /// MissionPlan v0.3 decodes one Node-independent relation between concurrent Task roles.
+    #[test]
+    fn execution_relation_fixture_decodes_logical_endpoints() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let plan = decode_mission_plan(source).expect("relation fixture should validate");
+        let relation = &plan.contexts()[0].relations()[0];
+        assert_eq!(relation.relation_id().as_str(), "safety-guards-navigation");
+        assert_eq!(relation.source().task_id().as_str(), "observe-safety");
+        assert_eq!(relation.target().role_id().as_str(), "navigator");
+        assert_eq!(
+            relation.kind(),
+            domain::ExecutionRelationKind::RequiresActive
+        );
+    }
+
+    /// Relation endpoints must exist in one Context and remain concurrently runnable in the DAG.
+    #[test]
+    fn execution_relation_rejects_unknown_or_dag_ordered_endpoints() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut unknown: serde_json::Value = serde_json::from_str(source).expect("fixture is JSON");
+        unknown["contexts"][0]["relations"][0]["source"]["role_id"] =
+            serde_json::json!("missing-role");
+        assert!(
+            decode_mission_plan(&unknown.to_string())
+                .expect_err("unknown relation role must fail")
+                .to_string()
+                .contains("unknown Role")
+        );
+
+        let mut ordered: serde_json::Value = serde_json::from_str(source).expect("fixture is JSON");
+        ordered["tasks"][1]["depends_on"] = serde_json::json!(["observe-safety"]);
+        assert!(
+            decode_mission_plan(&ordered.to_string())
+                .expect_err("DAG-ordered relation must fail")
+                .to_string()
+                .contains("ordered by the DAG")
+        );
+    }
+
     /// The Phase 1 fixture decodes into a four-Task DAG and preserves Context continuity metadata.
     #[test]
     fn phase1_fixture_contains_complete_dag_and_context() {
-        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let source = include_str!("../../../scenarios/phase1-mission-v0.3/mission-plan.json");
         let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
-        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_2);
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
         assert_eq!(plan.contexts().len(), 1);
         assert_eq!(plan.task_graph().tasks().len(), 4);
         assert_eq!(
@@ -754,7 +807,7 @@ mod tests {
     /// An exact submission retry returns existing authority without creating a second Group.
     #[test]
     fn exact_mission_submission_retry_is_idempotent() {
-        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let source = include_str!("../../../scenarios/phase1-mission-v0.3/mission-plan.json");
         let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
         let group_id = ExecutionGroupId::new("group-idempotent").expect("group id valid");
         let correlation = CorrelationId::new("idempotent-submit").expect("trace valid");
@@ -792,7 +845,7 @@ mod tests {
     /// Restored orchestration rejects missing Groups, truncated DAGs, and lifecycle disagreement.
     #[test]
     fn restored_orchestration_cross_checks_control_authority() {
-        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let source = include_str!("../../../scenarios/phase1-mission-v0.3/mission-plan.json");
         let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
         let mission_id = plan.goal().mission_id().clone();
         let group_id = ExecutionGroupId::new("group-restore-authority").expect("group id valid");
@@ -874,7 +927,7 @@ mod tests {
         );
     }
 
-    /// Both directions of the Spatial Memory experiment remain valid MissionPlan v0.2 DAGs.
+    /// Both directions of the Spatial Memory experiment remain valid MissionPlan v0.3 DAGs.
     #[test]
     fn distributed_spatial_memory_fixtures_decode_in_both_directions() {
         let fixtures = [
@@ -894,7 +947,7 @@ mod tests {
         for fixture in fixtures {
             let plan =
                 decode_mission_plan(fixture).expect("Spatial Memory fixture should validate");
-            assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_2);
+            assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
             assert_eq!(plan.contexts().len(), 1);
             assert_eq!(plan.task_graph().tasks().len(), 2);
         }
@@ -1031,6 +1084,19 @@ mod tests {
         )
         .expect_err("legacy plan must be rejected");
         assert!(error.to_string().contains("unsupported MissionPlan schema"));
+    }
+
+    /// MissionPlan v0.2 remains a relation-free compatibility input during v0.3 migration.
+    #[test]
+    fn v0_2_plan_decodes_without_execution_relations() {
+        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let plan = decode_mission_plan(source).expect("v0.2 compatibility input should decode");
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
+        assert!(
+            plan.contexts()
+                .iter()
+                .all(|context| context.relations().is_empty())
+        );
     }
 
     /// Builds a registration with the exact contracts and resources used by the Phase 1 fixture.

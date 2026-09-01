@@ -1,5 +1,5 @@
 {
-  "schema_version": "roboguide.mission-plan/v0.2",
+  "schema_version": "roboguide.mission-plan/v0.3",
   "mission": {
     "id": "mission-map-b-consume",
     "objective": "dog-b imports and verifies map-a revision r1"
@@ -7,7 +7,8 @@
   "contexts": [
     {
       "id": "context-map-b",
-      "roles": [{"id": "dog-b", "actor": "robot-dog-b"}]
+      "roles": [{"id": "dog-b", "actor": "robot-dog-b"}],
+      "relations": []
     }
   ],
   "tasks": [

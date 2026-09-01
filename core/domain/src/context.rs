@@ -1,7 +1,8 @@
 //! Mission Intelligence context declarations shared with orchestration and Control.
 
 use crate::{
-    ActorId, ContextRoleId, CoordinationContextId, DomainError, ResourceBindingScope, RoleId,
+    ActorId, ContextRoleId, CoordinationContextId, DomainError, ExecutionRelationSpec,
+    ResourceBindingScope, RoleId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,6 +42,8 @@ pub struct CoordinationContext {
     context_id: CoordinationContextId,
     /// Continuous actor roles declared by Mission Intelligence.
     roles: Vec<ContextRole>,
+    /// Directional execution-time constraints scoped to this semantic Context.
+    relations: Vec<ExecutionRelationSpec>,
 }
 
 impl CoordinationContext {
@@ -58,7 +61,34 @@ impl CoordinationContext {
                 reason: format!("context {context_id} has duplicate context roles"),
             });
         }
-        Ok(Self { context_id, roles })
+        Ok(Self {
+            context_id,
+            roles,
+            relations: Vec::new(),
+        })
+    }
+
+    /// Creates a Context with Mission-owned execution-time relation specifications.
+    pub fn new_with_relations(
+        context_id: CoordinationContextId,
+        roles: Vec<ContextRole>,
+        relations: Vec<ExecutionRelationSpec>,
+    ) -> Result<Self, DomainError> {
+        let mut context = Self::new(context_id, roles)?;
+        let relation_ids = relations
+            .iter()
+            .map(ExecutionRelationSpec::relation_id)
+            .collect::<BTreeSet<_>>();
+        if relation_ids.len() != relations.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} has duplicate execution relations",
+                    context.context_id
+                ),
+            });
+        }
+        context.relations = relations;
+        Ok(context)
     }
 
     /// Returns this context identity.
@@ -76,6 +106,11 @@ impl CoordinationContext {
         self.roles
             .iter()
             .find(|role| role.context_role_id() == role_id)
+    }
+
+    /// Returns execution-time relation specifications in declaration order.
+    pub fn relations(&self) -> &[ExecutionRelationSpec] {
+        &self.relations
     }
 }
 

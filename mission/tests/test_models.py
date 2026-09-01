@@ -1,4 +1,4 @@
-"""Contract tests for MissionPlan v0.2 parsing and graph invariants."""
+"""Contract tests for MissionPlan v0.3 parsing and graph invariants."""
 
 from __future__ import annotations
 
@@ -10,12 +10,19 @@ from typing import cast
 import pytest
 from mission.models import JSONObject, MissionPlan, MissionPlanError
 
-FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
+RELATION_FIXTURE = Path("scenarios/execution-relations-v0.1/mission-plan.json")
 
 
 def _fixture_json() -> JSONObject:
     """Load a mutable copy of the approved MVP Mission Plan fixture."""
     decoded = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return cast(JSONObject, decoded)
+
+
+def _relation_fixture_json() -> JSONObject:
+    """Load a mutable execution coordination relation fixture."""
+    decoded = json.loads(RELATION_FIXTURE.read_text(encoding="utf-8"))
     return cast(JSONObject, decoded)
 
 
@@ -28,14 +35,44 @@ def test_valid_fixture_round_trips() -> None:
 def test_schema_version_declares_string_type_for_strict_providers() -> None:
     """Strict Responses providers require a type beside the version const constraint."""
     schema = json.loads(
-        Path("contracts/mission/v0.2/mission-plan.schema.json").read_text(encoding="utf-8")
+        Path("contracts/mission/v0.3/mission-plan.schema.json").read_text(encoding="utf-8")
     )
     version = schema["properties"]["schema_version"]
-    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.2"}
+    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.3"}
+    relation_kind = schema["$defs"]["relation"]["properties"]["kind"]
+    assert relation_kind == {"type": "string", "const": "requires-active"}
+
+
+def test_execution_relation_round_trips_logical_endpoints() -> None:
+    """Relation endpoints remain logical Task/Role slots rather than physical Nodes."""
+    plan = MissionPlan.from_json(_relation_fixture_json())
+    relation = plan.contexts[0].relations[0]
+    assert relation.relation_id == "safety-guards-navigation"
+    assert relation.kind == "requires-active"
+    assert relation.source.task_id == "observe-safety"
+    assert relation.target.role_id == "navigator"
+    assert plan.to_json() == _relation_fixture_json()
+
+
+def test_execution_relation_rejects_unknown_or_dag_ordered_endpoints() -> None:
+    """Relations may connect only exact roles that can be concurrently active."""
+    unknown = _relation_fixture_json()
+    contexts = cast(list[JSONObject], unknown["contexts"])
+    relations = cast(list[JSONObject], contexts[0]["relations"])
+    source = cast(JSONObject, relations[0]["source"])
+    source["role_id"] = "missing-role"
+    with pytest.raises(MissionPlanError, match="unknown role"):
+        MissionPlan.from_json(unknown)
+
+    ordered = _relation_fixture_json()
+    tasks = cast(list[JSONObject], ordered["tasks"])
+    tasks[1]["depends_on"] = ["observe-safety"]
+    with pytest.raises(MissionPlanError, match="ordered by the DAG"):
+        MissionPlan.from_json(ordered)
 
 
 def test_structured_execution_parameter_is_rejected() -> None:
-    """Mission Plan v0.2 accepts only scalar transport-neutral parameters."""
+    """Mission Plan v0.3 accepts only scalar transport-neutral parameters."""
     raw = deepcopy(_fixture_json())
     tasks = cast(list[JSONObject], raw["tasks"])
     roles = cast(list[JSONObject], tasks[0]["roles"])

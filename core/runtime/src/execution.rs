@@ -1,5 +1,9 @@
 //! Transport-neutral live execution contexts for committed distributed work.
 
+use crate::relation::{
+    RelationFenceCheckpoint, RelationKey, RelationProofCheckpoint, RelationStateCheckpoint,
+    RuntimeExecutionRelation, restore_relation_maps,
+};
 use domain::{ExecutionCommand, ExecutionGroupId, NodeId, ResourceId, RoleId, TaskRef};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -77,6 +81,37 @@ pub enum ExecutionEvent {
         /// Runtime continuity failure.
         reason: String,
     },
+    /// A Mission-owned execution coordination relation entered the live Runtime registry.
+    RelationRegistered {
+        /// Relation with Mission and Group identity applied to its logical endpoints.
+        relation: RuntimeExecutionRelation,
+    },
+    /// Current endpoint execution facts changed a live relation state.
+    RelationStateChanged {
+        /// Relation whose state changed.
+        relation: RuntimeExecutionRelation,
+        /// Previous Runtime-derived state.
+        previous: domain::ExecutionRelationState,
+        /// New Runtime-derived state.
+        current: domain::ExecutionRelationState,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+    },
+    /// A relation violation or ambiguity fenced target progression for reconciliation.
+    RelationReconciliationRequired {
+        /// Relation requiring coordination policy.
+        relation: RuntimeExecutionRelation,
+        /// Violated or unknown live state.
+        state: domain::ExecutionRelationState,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+        /// Stable Runtime diagnostic.
+        reason: String,
+    },
 }
 
 /// One Runtime-owned live context for a Control-committed role execution.
@@ -126,6 +161,14 @@ pub struct RuntimeExecutionCheckpoint {
     execution_nodes: BTreeMap<String, NodeId>,
     /// Current execution identity for every Group Task role.
     active_executions: Vec<ActiveExecutionCheckpoint>,
+    /// Accepted relation specifications with resolved logical endpoint identity.
+    relations: Vec<RuntimeExecutionRelation>,
+    /// Latest reduced relation states encoded without composite JSON object keys.
+    relation_states: Vec<RelationStateCheckpoint>,
+    /// Latched relation reconciliation fences.
+    relation_fences: Vec<RelationFenceCheckpoint>,
+    /// Target attempts proven to have run under a satisfied relation.
+    relation_proofs: Vec<RelationProofCheckpoint>,
 }
 
 /// Whether a validated dispatch must be sent through Integration.
@@ -176,19 +219,27 @@ impl std::error::Error for ExecutionRuntimeError {}
 #[derive(Debug, Default)]
 pub struct RuntimeExecutionManager {
     /// Dispatched committed execution contexts.
-    executions: BTreeMap<String, ExecutionContext>,
+    pub(crate) executions: BTreeMap<String, ExecutionContext>,
     /// Latest execution lifecycle facts.
-    execution_status: BTreeMap<String, ExecutionStatus>,
+    pub(crate) execution_status: BTreeMap<String, ExecutionStatus>,
     /// Last accepted execution-local sequence across sessions and snapshot replay.
     execution_sequences: BTreeMap<String, u64>,
     /// Node that first reported or received each stable execution identity.
     execution_nodes: BTreeMap<String, NodeId>,
     /// Current authoritative execution identity for each Group Task role.
-    active_executions: BTreeMap<(ExecutionGroupId, TaskRef, RoleId), String>,
+    pub(crate) active_executions: BTreeMap<(ExecutionGroupId, TaskRef, RoleId), String>,
     /// Commands restored from durable state that must never be implicitly sent again.
     restored_executions: BTreeSet<String>,
     /// Tasks for which Runtime already emitted an activation transition.
     activated_tasks: BTreeSet<(ExecutionGroupId, TaskRef)>,
+    /// Mission-owned relation specifications resolved to Group/Task/Role logical slots.
+    pub(crate) relations: BTreeMap<RelationKey, RuntimeExecutionRelation>,
+    /// Current Runtime-derived state for every accepted relation.
+    pub(crate) relation_states: BTreeMap<RelationKey, domain::ExecutionRelationState>,
+    /// Violated or unknown relations that still fence target progression.
+    pub(crate) relation_fences: BTreeSet<RelationKey>,
+    /// Current target attempts observed at least once under a satisfied relation.
+    pub(crate) relation_proofs: BTreeMap<RelationKey, String>,
 }
 
 impl RuntimeExecutionManager {
@@ -202,6 +253,10 @@ impl RuntimeExecutionManager {
             active_executions: BTreeMap::new(),
             restored_executions: BTreeSet::new(),
             activated_tasks: BTreeSet::new(),
+            relations: BTreeMap::new(),
+            relation_states: BTreeMap::new(),
+            relation_fences: BTreeSet::new(),
+            relation_proofs: BTreeMap::new(),
         }
     }
 
@@ -224,12 +279,47 @@ impl RuntimeExecutionManager {
                     },
                 )
                 .collect(),
+            relations: self.relations.values().cloned().collect(),
+            relation_states: self
+                .relation_states
+                .iter()
+                .map(|((group_id, relation_id), state)| RelationStateCheckpoint {
+                    group_id: group_id.clone(),
+                    relation_id: relation_id.clone(),
+                    state: *state,
+                })
+                .collect(),
+            relation_fences: self
+                .relation_fences
+                .iter()
+                .map(|(group_id, relation_id)| RelationFenceCheckpoint {
+                    group_id: group_id.clone(),
+                    relation_id: relation_id.clone(),
+                })
+                .collect(),
+            relation_proofs: self
+                .relation_proofs
+                .iter()
+                .map(
+                    |((group_id, relation_id), target_execution_id)| RelationProofCheckpoint {
+                        group_id: group_id.clone(),
+                        relation_id: relation_id.clone(),
+                        target_execution_id: target_execution_id.clone(),
+                    },
+                )
+                .collect(),
         }
     }
 
     /// Restores a checkpoint conservatively without granting replay authority.
     pub fn restore(checkpoint: RuntimeExecutionCheckpoint) -> Result<Self, ExecutionRuntimeError> {
         validate_checkpoint(&checkpoint)?;
+        let (relations, relation_states, relation_fences, relation_proofs) = restore_relation_maps(
+            checkpoint.relations.clone(),
+            checkpoint.relation_states.clone(),
+            checkpoint.relation_fences.clone(),
+            checkpoint.relation_proofs.clone(),
+        )?;
         let restored_executions = checkpoint.executions.keys().cloned().collect();
         let activated_tasks = checkpoint
             .active_executions
@@ -263,7 +353,7 @@ impl RuntimeExecutionManager {
                 (execution_id, restored_status)
             })
             .collect();
-        Ok(Self {
+        let mut restored = Self {
             executions: checkpoint.executions,
             execution_status,
             execution_sequences: checkpoint.execution_sequences,
@@ -271,7 +361,13 @@ impl RuntimeExecutionManager {
             active_executions,
             restored_executions,
             activated_tasks,
-        })
+            relations,
+            relation_states,
+            relation_fences,
+            relation_proofs,
+        };
+        restored.refresh_all_relations_after_restore();
+        Ok(restored)
     }
 
     /// Validates whether one committed execution needs a new Integration route.
@@ -421,6 +517,11 @@ impl RuntimeExecutionManager {
         };
         let command = execution.command.clone();
         let task_key = (command.group_id().clone(), command.task_ref().clone());
+        let execution_role = (
+            command.group_id().clone(),
+            command.task_ref().clone(),
+            command.role_id().clone(),
+        );
         let mut events = Vec::new();
         if status.proves_activation() && self.activated_tasks.insert(task_key.clone()) {
             events.push(ExecutionEvent::TaskActivated {
@@ -443,6 +544,7 @@ impl RuntimeExecutionManager {
             }),
             ExecutionStatus::Dispatched | ExecutionStatus::Accepted | ExecutionStatus::Running => {}
         }
+        events.extend(self.refresh_relations_for_slot(&execution_role));
         Ok(events)
     }
 
@@ -471,7 +573,8 @@ impl RuntimeExecutionManager {
                 _ => all_completed = false,
             }
         }
-        (saw_role && all_completed).then_some(ObservedTaskResult::Succeeded)
+        (saw_role && all_completed && self.relations_allow_task_success(group_id, task_ref))
+            .then_some(ObservedTaskResult::Succeeded)
     }
 }
 
@@ -528,22 +631,52 @@ fn validate_checkpoint(
             )));
         }
     }
+    for proof in &checkpoint.relation_proofs {
+        let Some(relation) = checkpoint.relations.iter().find(|relation| {
+            relation.group_id() == &proof.group_id && relation.relation_id() == &proof.relation_id
+        }) else {
+            continue;
+        };
+        let Some(context) = checkpoint.executions.get(&proof.target_execution_id) else {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(format!(
+                "relation {} proof references unknown target execution {}",
+                proof.relation_id, proof.target_execution_id
+            )));
+        };
+        if context.command.group_id() != relation.group_id()
+            || context.command.task_ref() != relation.target_task_ref()
+            || context.command.role_id() != relation.target_role_id()
+        {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(format!(
+                "relation {} proof does not reference its target logical slot",
+                proof.relation_id
+            )));
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{CapabilityContractRef, CorrelationId, ExecutionIntent, MissionId, TaskId};
+    use domain::{
+        CapabilityContractRef, CorrelationId, ExecutionIntent, ExecutionRelationId,
+        ExecutionRelationKind, ExecutionRelationSpec, MissionId, PlannedExecutionRef, TaskId,
+    };
 
     /// Builds one deterministic command for Runtime registry tests.
     fn command() -> ExecutionCommand {
+        command_for("task-a", "carrier", "node-a")
+    }
+
+    /// Builds one deterministic command for an exact logical execution slot.
+    fn command_for(task_id: &str, role_id: &str, node_id: &str) -> ExecutionCommand {
         ExecutionCommand::new(
             MissionId::new("mission-a").expect("mission valid"),
-            TaskId::new("task-a").expect("task valid"),
+            TaskId::new(task_id).expect("task valid"),
             ExecutionGroupId::new("group-a").expect("group valid"),
-            RoleId::new("carrier").expect("role valid"),
-            NodeId::new("node-a").expect("node valid"),
+            RoleId::new(role_id).expect("role valid"),
+            NodeId::new(node_id).expect("node valid"),
             ExecutionIntent::new(
                 CapabilityContractRef::new("mobility", "move", "v1").expect("contract valid"),
                 BTreeMap::new(),
@@ -641,6 +774,66 @@ mod tests {
             None,
             "unknown physical state must remain recovery-pending"
         );
+    }
+
+    /// Restore rejects a satisfaction proof attached to a non-target execution attempt.
+    #[test]
+    fn restore_rejects_relation_proof_for_wrong_logical_slot() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let group_id = ExecutionGroupId::new("group-a").expect("group valid");
+        runtime
+            .register_relations(
+                &group_id,
+                &MissionId::new("mission-a").expect("mission valid"),
+                &[ExecutionRelationSpec::new(
+                    ExecutionRelationId::new("source-guards-target").expect("relation valid"),
+                    PlannedExecutionRef::new(
+                        TaskId::new("source-task").expect("task valid"),
+                        RoleId::new("source-role").expect("role valid"),
+                    ),
+                    PlannedExecutionRef::new(
+                        TaskId::new("task-a").expect("task valid"),
+                        RoleId::new("carrier").expect("role valid"),
+                    ),
+                    ExecutionRelationKind::RequiresActive,
+                )
+                .expect("relation valid")],
+            )
+            .expect("relation registers");
+        let source = command_for("source-task", "source-role", "node-source");
+        let target = command();
+        runtime
+            .record_dispatched("source-execution".to_string(), source.clone(), Vec::new())
+            .expect("source dispatch records");
+        runtime
+            .record_dispatched("target-execution".to_string(), target.clone(), Vec::new())
+            .expect("target dispatch records");
+        runtime
+            .observe_execution(
+                "source-execution",
+                source.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("source running records");
+        runtime
+            .observe_execution(
+                "target-execution",
+                target.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("target running records");
+
+        let mut checkpoint = runtime.checkpoint();
+        checkpoint.relation_proofs[0].target_execution_id = "source-execution".to_string();
+        assert!(matches!(
+            RuntimeExecutionManager::restore(checkpoint),
+            Err(ExecutionRuntimeError::InvalidCheckpoint(reason))
+                if reason.contains("target logical slot")
+        ));
     }
 
     /// Unknown execution produces recovery evidence without becoming a terminal Task failure.

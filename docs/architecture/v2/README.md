@@ -23,6 +23,7 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 | State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
 | Embodied Execution Group | 由 Control/Runtime 承载 Mission-level 多 Task 分布式执行上下文 |
 | Distributed Embodied Runtime | 持续承载已 Commit 的 Group/TaskExecution 运行上下文，管理 execution identity、事件、timer、取消和 checkpoint/resume |
+| Execution Coordination Relations | 在已 Commit 的并发 Role execution 之间维护与 NodeId 解耦的持续运行时约束 |
 | Integration | 提供 Node Protocol、Messaging、Transport、Session 和 Router，不拥有执行生命周期 |
 | Local Embodied Systems | 保留感知、导航、运动、硬件控制和即时安全能力 |
 | Physical World | 被执行过程改变，并持续向系统反馈 Observation |
@@ -79,6 +80,26 @@ Binding；走廊是 Spatial Binding，不是 Member。Group Manager 属于 Contr
 负责 committed binding、reservation、rebind 和 release authority；Group 的 live execution
 context 由 Runtime 承载并跨节点运行。State 只保存二者的事实和投影。
 
+### Execution Coordination Relation
+
+Task DAG 表达完成前置关系，不表达两个已经运行的执行单元之间持续成立的约束。
+MissionPlan v0.3 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation。
+关系端点引用 `(TaskId, RoleId)` 逻辑执行槽；Group 接受后补全 Mission/Group identity，Runtime
+再把逻辑槽解析到当前 execution attempt。关系绝不直接引用 NodeId，因此 replacement/rebind
+不会改变其 Mission 语义。
+
+关系 specification 属于 Mission Intelligence 和被接受的完整 MissionPlan；Control 仍只拥有
+commitment、binding 和 recovery decision；Runtime 只拥有 live endpoint resolution、关系状态、
+有序归约和 checkpoint。State Plane 的 durable Event Log 保存 relation evidence，但 v0.1 不建立
+第二份 live relation projection，也不主动触发恢复。
+
+第一版只定义 `requires-active`：target execution 处于 Accepted/Running 时，source execution
+必须持续处于 Accepted/Running。Runtime 将关系归约为 `Dormant`、`Pending`、`Satisfied`、
+`Violated` 或 `Unknown`。`Violated/Unknown` 形成 coordination-required evidence，并 fence
+受约束 Task 的成功归约；Runtime 不选择 replacement、不修改资源承诺，也不把关系违例伪装成
+某个 Node 的物理失败。完整边界见
+[`ADR-0020`](../../decisions/0020-execution-coordination-relations.md)。
+
 ## 4. 决策与承诺语义
 
 ```text
@@ -93,6 +114,8 @@ Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → E
 6. Control 将每个 Task 的 Committed Plan 绑定回同一个 Group；
 7. Runtime 接收 committed execution configuration，承载绑定后的执行过程并产生 canonical
    execution facts；Integration 只负责把 command/event 送达正确的 Node session。
+8. Runtime 按 Mission relation specification 把当前 execution attempts 解析回逻辑 Task/Role
+   端点，持续归约跨 execution 约束；该状态不改变 Proposal/Commit/Binding authority。
 
 未提交的 Proposal 绝不能被当作已经生效的资源分配。
 
@@ -152,6 +175,12 @@ Mission-level Group 的 live context、TaskExecution 状态、execution identity
 timer、取消、事件归约以及 checkpoint/resume；它不执行 Matching、Scheduling、Reservation、
 Commit 或 replacement selection。
 
+Runtime 同时维护已接受 Mission 的 live execution relations，但只对当前事实进行保守归约。
+进程恢复会把仍依赖非终态 execution 的关系恢复为 `Unknown` 并保持 reconciliation fence；
+新的 physical attempt 只要重新占据同一个 `(GroupId, TaskRef, RoleId)` 逻辑槽，关系即可重新
+解析，而无需修改 specification。当前中央 `execution_id` 与 physical attempt 的完整分离仍受
+RT-G3 Gate 约束，关系实现不得用 NodeId 或可复用 execution 字符串充当稳定语义端点。
+
 Integration 定义 Node Protocol、Messaging、Transport、Session、Router 和 wire conversion。
 DDS、ROS 2、gRPC、MQTT 和序列化属于 Integration 实现选型，不因此获得 execution
 lifecycle authority。Node Service / Adapter 将 canonical execution intent 映射到本地 How，
@@ -190,6 +219,8 @@ Detect → Reconcile → Adapt
 - Shared Belief 表达不确定性、过期性、来源和冲突；
 - Node 在线状态与 Capability 可用性相互区分；
 - 任务完成是系统级 Execution State，不是单次动作的返回值；
+- Task DAG 与 live execution relation 相互补充：前者控制 readiness，后者约束并发运行；
+- Execution relation 的稳定端点是逻辑 Task/Role，不是 NodeId 或 adapter-local handle；
 - 恢复必须针对当前世界重新对账，不能重放过期命令；
 - State 和 Memory 具有作用域；
 - 替换实现不能改写架构语义。
@@ -207,6 +238,11 @@ V2 有意保留七个问题：State Authority、Spatial Authority、Control Topo
 Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance
 和 Resource Commitment Semantics。跟踪列表以及 MVP 决策见
 [`implementation-backlog.md`](../../implementation-backlog.md)。
+
+Execution Coordination Relation v0.1 只从 execution lifecycle 推导 `requires-active`，不解析
+hazard、距离、速度或触觉等领域信号，也不提供硬实时 stop/pause actuation。版本化条件事实、
+deadline/window、目标侧协调命令和安全认证必须在获得真实场景证据后分别演进；Local Safety
+始终保留最终权威。
 
 ## 10. 版本关系
 

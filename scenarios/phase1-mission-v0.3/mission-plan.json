@@ -1,0 +1,103 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.3",
+  "mission": {
+    "id": "mission-phase1-001",
+    "objective": "使用持续运输角色和边缘算力完成可恢复的跨节点交付"
+  },
+  "contexts": [
+    {
+      "id": "delivery-context",
+      "roles": [
+        {"id": "carrier", "actor": "carrier"},
+        {"id": "edge", "actor": "edge"}
+      ],
+      "relations": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "prepare",
+      "description": "边缘节点准备交付计划",
+      "context_id": "delivery-context",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "prepare-compute",
+          "actor": "edge",
+          "capability": "compute",
+          "contract": {"namespace": "compute", "name": "prepare", "version": "v1"},
+          "resource_kind": "compute",
+          "context_role": "edge",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "compute", "name": "prepare", "version": "v1"},
+            "parameters": {"plan": "phase1-delivery"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "stage",
+      "description": "运输节点携带共享上下文到交接点",
+      "context_id": "delivery-context",
+      "depends_on": ["prepare"],
+      "roles": [
+        {
+          "id": "stage-carrier",
+          "actor": "carrier",
+          "capability": "transport",
+          "contract": {"namespace": "mobility", "name": "move", "version": "v1"},
+          "resource_kind": "space",
+          "context_role": "carrier",
+          "resource_scope": "context",
+          "execution": {
+            "capability_contract": {"namespace": "mobility", "name": "move", "version": "v1"},
+            "parameters": {"destination": "handoff-zone"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "deliver",
+      "description": "同一持续运输角色完成最终交付",
+      "context_id": "delivery-context",
+      "depends_on": ["stage"],
+      "roles": [
+        {
+          "id": "deliver-carrier",
+          "actor": "carrier",
+          "capability": "transport",
+          "contract": {"namespace": "mobility", "name": "move", "version": "v1"},
+          "resource_kind": "space",
+          "context_role": "carrier",
+          "resource_scope": "context",
+          "execution": {
+            "capability_contract": {"namespace": "mobility", "name": "move", "version": "v1"},
+            "parameters": {"destination": "delivery-zone"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "description": "边缘节点验证交付结果",
+      "context_id": "delivery-context",
+      "depends_on": ["deliver"],
+      "roles": [
+        {
+          "id": "verify-compute",
+          "actor": "edge",
+          "capability": "observation",
+          "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+          "resource_kind": "compute",
+          "context_role": "edge",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+            "parameters": {"expected": "delivered"}
+          }
+        }
+      ]
+    }
+  ]
+}

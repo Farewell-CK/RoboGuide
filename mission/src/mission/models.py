@@ -10,9 +10,10 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.2"
+MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.3"
 CAPABILITIES: Final = frozenset({"mobility", "transport", "compute", "observation"})
 RESOURCE_KINDS: Final = frozenset({"space", "compute", "time"})
+RELATION_KINDS: Final = frozenset({"requires-active"})
 
 
 class MissionPlanError(ValueError):
@@ -226,28 +227,103 @@ class ContextRole:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionRelationEndpoint:
+    """Identify one logical Task/Role slot without selecting a Node or physical attempt."""
+
+    task_id: str
+    role_id: str
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> ExecutionRelationEndpoint:
+        """Parse one exact logical relation endpoint."""
+        item = _object(value, path)
+        _exact_keys(item, {"task_id", "role_id"}, path)
+        return cls(
+            task_id=_text(item["task_id"], f"{path}.task_id"),
+            role_id=_text(item["role_id"], f"{path}.role_id"),
+        )
+
+    def to_json(self) -> JSONObject:
+        """Serialize one logical execution endpoint."""
+        return {"task_id": self.task_id, "role_id": self.role_id}
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRelation:
+    """Declare one directional execution-time constraint inside a Mission Context."""
+
+    relation_id: str
+    kind: str
+    source: ExecutionRelationEndpoint
+    target: ExecutionRelationEndpoint
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> ExecutionRelation:
+        """Parse one closed relation contract and reject self-reference."""
+        item = _object(value, path)
+        _exact_keys(item, {"id", "kind", "source", "target"}, path)
+        kind = _text(item["kind"], f"{path}.kind")
+        if kind not in RELATION_KINDS:
+            raise MissionPlanError(f"{path}.kind is unsupported: {kind}")
+        source = ExecutionRelationEndpoint.from_json(item["source"], f"{path}.source")
+        target = ExecutionRelationEndpoint.from_json(item["target"], f"{path}.target")
+        if source == target:
+            raise MissionPlanError(f"{path} cannot reference the same source and target")
+        return cls(
+            relation_id=_text(item["id"], f"{path}.id"),
+            kind=kind,
+            source=source,
+            target=target,
+        )
+
+    def to_json(self) -> JSONObject:
+        """Serialize one execution coordination relation."""
+        return {
+            "id": self.relation_id,
+            "kind": self.kind,
+            "source": self.source.to_json(),
+            "target": self.target.to_json(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class MissionContext:
     """Describe semantic continuity shared by one or more Tasks."""
 
     context_id: str
     roles: tuple[ContextRole, ...]
+    relations: tuple[ExecutionRelation, ...]
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str) -> MissionContext:
         """Parse one Context and reject duplicate ContextRole identities."""
         item = _object(value, path)
-        _exact_keys(item, {"id", "roles"}, path)
+        _exact_keys(item, {"id", "roles", "relations"}, path)
         roles = tuple(
             ContextRole.from_json(role, f"{path}.roles[{index}]")
             for index, role in enumerate(_array(item["roles"], f"{path}.roles"))
         )
         if len({role.role_id for role in roles}) != len(roles):
             raise MissionPlanError(f"{path}.roles contains duplicate ids")
-        return cls(context_id=_text(item["id"], f"{path}.id"), roles=roles)
+        relations = tuple(
+            ExecutionRelation.from_json(relation, f"{path}.relations[{index}]")
+            for index, relation in enumerate(_array(item["relations"], f"{path}.relations"))
+        )
+        if len({relation.relation_id for relation in relations}) != len(relations):
+            raise MissionPlanError(f"{path}.relations contains duplicate ids")
+        return cls(
+            context_id=_text(item["id"], f"{path}.id"),
+            roles=roles,
+            relations=relations,
+        )
 
     def to_json(self) -> JSONObject:
         """Serialize one Context in declaration order."""
-        return {"id": self.context_id, "roles": [role.to_json() for role in self.roles]}
+        return {
+            "id": self.context_id,
+            "roles": [role.to_json() for role in self.roles],
+            "relations": [relation.to_json() for relation in self.relations],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,11 +428,17 @@ class MissionPlan:
         return plan
 
     def validate_contexts(self) -> None:
-        """Reject unknown Contexts/ContextRoles and mismatched Actor continuity."""
+        """Reject invalid Context continuity and execution relation endpoints."""
         context_ids = [context.context_id for context in self.contexts]
         if len(set(context_ids)) != len(context_ids):
             raise MissionPlanError("contexts contains duplicate ids")
         contexts = {context.context_id: context for context in self.contexts}
+        relation_ids = [
+            relation.relation_id for context in self.contexts for relation in context.relations
+        ]
+        if len(set(relation_ids)) != len(relation_ids):
+            raise MissionPlanError("contexts contain duplicate execution relation ids")
+        tasks = {task.task_id: task for task in self.tasks}
         for task in self.tasks:
             context = contexts.get(task.context_id)
             if context is None:
@@ -374,6 +456,41 @@ class MissionPlan:
                     raise MissionPlanError(
                         f"task {task.task_id} role {role.role_id} actor differs from context role"
                     )
+        for context in self.contexts:
+            for relation in context.relations:
+                for endpoint in (relation.source, relation.target):
+                    endpoint_task = tasks.get(endpoint.task_id)
+                    if endpoint_task is None:
+                        raise MissionPlanError(
+                            f"relation {relation.relation_id} references unknown task "
+                            f"{endpoint.task_id}"
+                        )
+                    if endpoint_task.context_id != context.context_id:
+                        raise MissionPlanError(
+                            f"relation {relation.relation_id} endpoint belongs to another context"
+                        )
+                    if endpoint.role_id not in {role.role_id for role in endpoint_task.roles}:
+                        raise MissionPlanError(
+                            f"relation {relation.relation_id} references unknown role "
+                            f"{endpoint.role_id} in task {endpoint.task_id}"
+                        )
+                if relation.source.task_id != relation.target.task_id and (
+                    self._task_depends_on(relation.source.task_id, relation.target.task_id)
+                    or self._task_depends_on(relation.target.task_id, relation.source.task_id)
+                ):
+                    raise MissionPlanError(
+                        f"relation {relation.relation_id} connects tasks ordered by the DAG"
+                    )
+
+    def _task_depends_on(self, task_id: str, candidate_dependency: str) -> bool:
+        """Return whether one Task transitively depends on another Task."""
+        tasks = {task.task_id: task for task in self.tasks}
+        task = tasks[task_id]
+        return any(
+            dependency == candidate_dependency
+            or self._task_depends_on(dependency, candidate_dependency)
+            for dependency in task.depends_on
+        )
 
     def validate_graph(self) -> None:
         """Reject empty graphs, duplicate tasks, unknown dependencies, and cycles."""

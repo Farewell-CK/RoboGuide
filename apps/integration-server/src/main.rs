@@ -23,7 +23,7 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -199,6 +199,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .orchestrator
         .validate_control_authority(controller.bridge.control())
         .map_err(|error| format!("restored Mission authority is inconsistent: {error}"))?;
+    for mission_id in controller.orchestrator.mission_ids() {
+        let execution = controller
+            .orchestrator
+            .execution(&mission_id)
+            .expect("Mission identity came from orchestration authority");
+        controller
+            .bridge
+            .validate_execution_relations(execution.plan(), execution.group_id())
+            .map_err(|error| {
+                format!("restored Mission relation authority is inconsistent: {error}")
+            })?;
+    }
     validate_restored_actor_placement_coverage(
         controller.bridge.control(),
         &controller.orchestrator,
@@ -535,7 +547,10 @@ fn apply_runtime_events(
             }
             runtime::ExecutionEvent::RoleCompleted { .. }
             | runtime::ExecutionEvent::RoleFailed { .. }
-            | runtime::ExecutionEvent::RecoveryRequired { .. } => {}
+            | runtime::ExecutionEvent::RecoveryRequired { .. }
+            | runtime::ExecutionEvent::RelationRegistered { .. }
+            | runtime::ExecutionEvent::RelationStateChanged { .. }
+            | runtime::ExecutionEvent::RelationReconciliationRequired { .. } => {}
         }
     }
     Ok(())
@@ -871,14 +886,21 @@ async fn handle_http_connection(
                                 .map_err(|error| error.to_string())?;
                         orchestrator
                             .submit(
-                                plan,
+                                plan.clone(),
                                 group_id.clone(),
                                 bridge.control_mut(),
                                 now,
                                 &submit_correlation,
                                 &mut events,
                             )
-                            .map(|_| ())
+                            .map_err(|error| error.to_string())?;
+                        bridge
+                            .register_execution_relations(
+                                &plan,
+                                &group_id,
+                                now,
+                                &submit_correlation,
+                            )
                             .map_err(|error| error.to_string())
                     })
                 };
@@ -940,13 +962,38 @@ async fn handle_http_connection(
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
+                    let relations = controller
+                        .bridge
+                        .relation_snapshots(execution.group_id())
+                        .into_iter()
+                        .map(|snapshot| {
+                            let relation = snapshot.relation();
+                            serde_json::json!({
+                                "id": relation.relation_id().as_str(),
+                                "kind": "requires-active",
+                                "source": {
+                                    "task_id": relation.source_task_ref().task_id().as_str(),
+                                    "role_id": relation.source_role_id().as_str(),
+                                    "execution_id": snapshot.source_execution_id(),
+                                },
+                                "target": {
+                                    "task_id": relation.target_task_ref().task_id().as_str(),
+                                    "role_id": relation.target_role_id().as_str(),
+                                    "execution_id": snapshot.target_execution_id(),
+                                },
+                                "state": format!("{:?}", snapshot.state()),
+                                "reconciliation_required": snapshot.reconciliation_required(),
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     (
                         "200 OK",
                         serde_json::json!({
                             "mission_id": mission_id.as_str(),
                             "group_id": execution.group_id().as_str(),
                             "status": format!("{:?}", execution.lifecycle()),
-                            "tasks": tasks
+                            "tasks": tasks,
+                            "relations": relations
                         }),
                     )
                 }

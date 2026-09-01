@@ -21,8 +21,11 @@ const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
 /// Current JSON payload codec including Distributed Spatial Memory evidence variants.
 const EVENT_PAYLOAD_SCHEMA_V3: &str = "domain.EventPayload.json/v3";
 
-/// Current JSON payload codec including strong localization verification evidence.
+/// JSON payload codec including strong localization verification evidence.
 const EVENT_PAYLOAD_SCHEMA_V4: &str = "domain.EventPayload.json/v4";
+
+/// Current JSON payload codec including execution coordination relation evidence.
+const EVENT_PAYLOAD_SCHEMA_V5: &str = "domain.EventPayload.json/v5";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +449,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V2 => Ok(2),
         EVENT_PAYLOAD_SCHEMA_V3 => Ok(3),
         EVENT_PAYLOAD_SCHEMA_V4 => Ok(4),
+        EVENT_PAYLOAD_SCHEMA_V5 => Ok(5),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -459,6 +463,9 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::ExecutionRelationRegistered { .. }
+        | EventPayload::ExecutionRelationStateChanged { .. }
+        | EventPayload::ExecutionRelationReconciliationRequired { .. } => 5,
         EventPayload::MapLocalizationEvidenceRecorded { .. } => 4,
         EventPayload::MapArtifactDeclared { .. }
         | EventPayload::MapArtifactPublished { .. }
@@ -539,7 +546,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V4,
+                    EVENT_PAYLOAD_SCHEMA_V5,
                     payload_json,
                 ],
             )
@@ -695,6 +702,27 @@ mod tests {
         EventPayload::MapLocalizationEvidenceRecorded { evidence }
     }
 
+    /// Builds one v5-only execution relation registration payload.
+    fn execution_relation_payload() -> EventPayload {
+        let mission_id = MissionId::new("mission-relation").expect("mission id is valid");
+        EventPayload::ExecutionRelationRegistered {
+            group_id: ExecutionGroupId::new("group-relation").expect("group id is valid"),
+            relation_id: domain::ExecutionRelationId::new("safety-guards-navigation")
+                .expect("relation id is valid"),
+            source_task_ref: TaskRef::new(
+                mission_id.clone(),
+                TaskId::new("observe-safety").expect("task id is valid"),
+            ),
+            source_role_id: RoleId::new("safety-observer").expect("role id is valid"),
+            target_task_ref: TaskRef::new(
+                mission_id,
+                TaskId::new("navigate").expect("task id is valid"),
+            ),
+            target_role_id: RoleId::new("navigator").expect("role id is valid"),
+            kind: domain::ExecutionRelationKind::RequiresActive,
+        }
+    }
+
     /// WAL storage survives reopening and preserves causal envelope fields.
     #[test]
     fn sqlite_event_log_survives_reopen() {
@@ -721,7 +749,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V4);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V5);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
@@ -822,6 +850,34 @@ mod tests {
         assert!(matches!(
             log.decoded_events(),
             Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v4")
+        ));
+    }
+
+    /// A v4 marker cannot masquerade relation evidence introduced by codec v5.
+    #[test]
+    fn event_decoder_rejects_relation_payload_under_v4_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-relation-v4.sqlite3");
+        let correlation = CorrelationId::new("relation-version").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(30),
+            &correlation,
+            None,
+            execution_relation_payload(),
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V4],
+            )
+            .expect("fixture marker changes to v4");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v5")
         ));
     }
 

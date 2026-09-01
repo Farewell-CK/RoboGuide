@@ -29,7 +29,7 @@ from mission.requests import (
     MissionRequestStore,
 )
 
-FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 
 
 class FakeInterpreter:

@@ -32,4 +32,5 @@ Released。
 - Mission-level Group/TaskExecution 事件最初使用 `domain.EventPayload.json/v2`；加入 Spatial
   Memory evidence 后的新写入由 ADR-0011 升级为 `domain.EventPayload.json/v3`。Phase 1 的
   该决策首次采用外层 Controller checkpoint v7 与内层 Integration projection v6；ADR-0019
-  因 exact-contract readiness 将两者分别升级为 v8/v7，旧投影仍不得静默恢复。
+  因 exact-contract readiness 将两者分别升级为 v8/v7，ADR-0020 因 Execution Relation
+  registry/state/fence 再升级为 v9/v8；旧投影仍不得静默恢复。

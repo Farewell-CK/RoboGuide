@@ -7,6 +7,8 @@ of the following hold:
 - every confirmed constraint is represented in an observable plan decision and no explicit
   assumption is silently promoted into a confirmed user requirement;
 - the Task Graph is acyclic and every dependency is necessary and resolvable;
+- every execution relation uses exact logical Task/Role endpoints in one Context, connects
+  concurrently runnable Tasks, and does not contain Node or adapter-local identity;
 - tasks describe outcomes and contain sufficient role-level execution requirements;
 - each role carries an actor, matching canonical capability contract and parameters without adapter-local skill names;
 - every task causes an observable physical-world or compute-state transition;

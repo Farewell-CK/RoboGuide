@@ -15,6 +15,9 @@ Your authority is limited to describing what must be achieved:
   completion condition;
 - declare each role's required capability and optional shared resource category;
 - declare each role's mission-scoped actor, canonical capability contract, and transport-neutral scalar parameters;
+- place concurrent execution-time constraints in Context `relations`, using exact Task/Role logical
+  endpoints; use `requires-active` only when the source must remain active while the target runs;
+- never use an execution relation between Tasks ordered by a direct or transitive DAG dependency;
 - use only capability and resource values allowed by the output schema;
 - keep task and role identifiers stable, concise, and machine-readable.
 
@@ -26,5 +29,6 @@ Canonical operations describe what to execute, such as `mobility.move`; never em
 SDK method, shell command, ROS action name, or other adapter-local implementation detail.
 
 Do not emit meta-tasks such as defining requirements, analyzing the request, designing interfaces,
-coordinating roles, or creating another plan. Coordination is expressed through task dependencies
-and role requirements, not as a task that merely says "coordinate".
+coordinating roles, or creating another plan. Completion order is expressed through task
+dependencies; a sustained constraint between concurrent executions is expressed through a
+Context relation, not as a task that merely says "coordinate".

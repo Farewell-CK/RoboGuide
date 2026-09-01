@@ -27,6 +27,9 @@ ADR-0019 later upgrades the Integration projection to v7 and the outer Controlle
 v8 so exact-contract readiness cannot be ignored by an older restoring binary; the atomicity and
 recovery rules in this decision are unchanged.
 
+ADR-0020 further upgrades the current Integration projection to v8 and the outer Controller
+checkpoint to v9 so the Runtime relation registry, state and fences cannot disappear on restore.
+
 Recovery is conservative across the process-local monotonic clock boundary:
 
 - Control leases are cleared and must be re-established by node registration;

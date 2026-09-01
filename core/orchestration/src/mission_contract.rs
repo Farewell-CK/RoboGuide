@@ -1,12 +1,13 @@
-//! MissionPlan v0.2 JSON boundary owned by Mission orchestration.
+//! MissionPlan v0.2/v0.3 JSON boundary owned by Mission orchestration.
 
 use crate::OrchestrationError;
 use domain::{
     ActorId, CapabilityContractRef, CapabilityKind, ContextRole, ContextRoleId,
-    CoordinationContext, CoordinationContextId, ExecutionIntent, ExecutionValue,
-    MISSION_PLAN_SCHEMA_V0_2, MissionGoal, MissionId, MissionPlan, PlannedTask,
-    ResourceBindingScope, ResourceKind, RoleId, RoleRequirement, TaskContinuity, TaskGraph, TaskId,
-    TaskRequirement,
+    CoordinationContext, CoordinationContextId, ExecutionIntent, ExecutionRelationId,
+    ExecutionRelationKind, ExecutionRelationSpec, ExecutionValue, MISSION_PLAN_SCHEMA_V0_2,
+    MISSION_PLAN_SCHEMA_V0_3, MissionGoal, MissionId, MissionPlan, PlannedExecutionRef,
+    PlannedTask, ResourceBindingScope, ResourceKind, RoleId, RoleRequirement, TaskContinuity,
+    TaskGraph, TaskId, TaskRequirement,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -43,6 +44,9 @@ struct ContextDocument {
     id: String,
     /// Semantic actor roles.
     roles: Vec<ContextRoleDocument>,
+    /// Execution-time constraints introduced by MissionPlan v0.3.
+    #[serde(default)]
+    relations: Option<Vec<RelationDocument>>,
 }
 
 /// Wire ContextRole-to-Actor declaration.
@@ -53,6 +57,38 @@ struct ContextRoleDocument {
     id: String,
     /// Mission actor identity.
     actor: String,
+}
+
+/// Wire execution-time coordination relation.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RelationDocument {
+    /// Stable relation identity within the Mission.
+    id: String,
+    /// Closed relation behavior.
+    kind: RelationKindDocument,
+    /// Logical condition-provider endpoint.
+    source: RelationEndpointDocument,
+    /// Logical constrained endpoint.
+    target: RelationEndpointDocument,
+}
+
+/// Wire logical Task/Role relation endpoint.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RelationEndpointDocument {
+    /// Task containing the endpoint role.
+    task_id: String,
+    /// Role occupying the logical execution slot.
+    role_id: String,
+}
+
+/// Supported execution relation semantics in MissionPlan v0.3.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RelationKindDocument {
+    /// Source must stay active while target is active.
+    RequiresActive,
 }
 
 /// Wire Task DAG node.
@@ -151,17 +187,21 @@ enum ScopeDocument {
     Context,
 }
 
-/// Decodes and validates one complete MissionPlan v0.2 JSON document.
+/// Decodes v0.2 compatibility input or one complete MissionPlan v0.3 document.
 pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError> {
     let document: PlanDocument = serde_json::from_str(json).map_err(|error| {
         OrchestrationError::Mission(format!("invalid MissionPlan JSON: {error}"))
     })?;
-    if document.schema_version != MISSION_PLAN_SCHEMA_V0_2 {
+    if !matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_2 | MISSION_PLAN_SCHEMA_V0_3
+    ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
             document.schema_version
         )));
     }
+    let relation_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_3;
     let mission_id = MissionId::new(document.mission.id)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     let goal = MissionGoal::new(mission_id.clone(), document.mission.objective)
@@ -169,7 +209,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     let contexts = document
         .contexts
         .into_iter()
-        .map(context_from_document)
+        .map(|context| context_from_document(context, relation_contract))
         .collect::<Result<Vec<_>, _>>()?;
     let tasks = document
         .tasks
@@ -185,6 +225,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
 /// Converts one wire Context into validated Mission Intelligence domain values.
 fn context_from_document(
     context: ContextDocument,
+    relation_contract: bool,
 ) -> Result<CoordinationContext, OrchestrationError> {
     let context_id = CoordinationContextId::new(context.id)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -200,8 +241,50 @@ fn context_from_document(
             ))
         })
         .collect::<Result<Vec<_>, OrchestrationError>>()?;
-    CoordinationContext::new(context_id, roles)
+    let relations = match (relation_contract, context.relations) {
+        (true, Some(relations)) => relations
+            .into_iter()
+            .map(relation_from_document)
+            .collect::<Result<Vec<_>, _>>()?,
+        (true, None) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan v0.3 Context must declare relations".to_string(),
+            ));
+        }
+        (false, None) => Vec::new(),
+        (false, Some(_)) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan v0.2 cannot declare execution relations".to_string(),
+            ));
+        }
+    };
+    CoordinationContext::new_with_relations(context_id, roles, relations)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))
+}
+
+/// Converts one wire relation into logical Task/Role endpoint identities.
+fn relation_from_document(
+    relation: RelationDocument,
+) -> Result<ExecutionRelationSpec, OrchestrationError> {
+    let endpoint =
+        |value: RelationEndpointDocument| -> Result<PlannedExecutionRef, OrchestrationError> {
+            Ok(PlannedExecutionRef::new(
+                TaskId::new(value.task_id)
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
+                RoleId::new(value.role_id)
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
+            ))
+        };
+    ExecutionRelationSpec::new(
+        ExecutionRelationId::new(relation.id)
+            .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
+        endpoint(relation.source)?,
+        endpoint(relation.target)?,
+        match relation.kind {
+            RelationKindDocument::RequiresActive => ExecutionRelationKind::RequiresActive,
+        },
+    )
+    .map_err(|error| OrchestrationError::Mission(error.to_string()))
 }
 
 /// Converts one wire Task and its role declarations into validated domain values.

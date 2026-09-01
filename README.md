@@ -47,8 +47,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
   显式消费 objective、confirmed constraints 和 assumptions；
-- Mission 输出使用 `contracts/mission/v0.2/` 中的版本化合同；每个 Role 分别声明
-  Capability/Resource requirement 与 canonical `ExecutionIntent`；
+- Mission 输出使用 `contracts/mission/v0.3/` 中的版本化合同；每个 Role 分别声明
+  Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
+  不绑定 NodeId 的 execution-time cross-role relation；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1 和 SQLite WAL evidence
   envelope；Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
@@ -311,7 +312,11 @@ Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单
 Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它承载
 Mission-level Group 的 live execution context。当前 slice 已实现 TaskExecution 的 execution
 identity、事件顺序归约、checkpoint fencing、recovery-required evidence 和 lifecycle
-transition；Runtime-owned timer、取消状态与显式 resume protocol 仍待后续实现。Matching、
+transition。MissionPlan v0.3 还允许 Context 声明 `requires-active` Execution Coordination
+Relation；端点是稳定的 `(TaskId, RoleId)` 逻辑槽，Runtime 将其解析到当前 attempt，归约
+`Dormant/Pending/Satisfied/Violated/Unknown`，并以 relation fence 阻止未经满足证明的 target
+Task 成功。rebind 改变 Node/attempt 而不改变关系语义，restart 则保守恢复为 `Unknown`。
+Runtime-owned timer、取消状态与显式 resume/remote pause protocol 仍待后续实现。Matching、
 Scheduling、Reservation、Commit 和 replacement selection 仍属于
 Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service /
 Adapter 负责 canonical intent 到本地 EAIOS How 的映射。
@@ -396,7 +401,8 @@ Spatial Memory evidence，不驱动 Task/Group lifecycle。身份认证与传输
 范围内。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
 会恢复 Control/State/Runtime projection；Spatial evidence 会在同一事务中 carry-forward 该
 checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission
-失败。缺少 checkpoint、schema 不支持或序号不一致时 fail-closed。
+失败；live relation 同样保守重算并保留 coordination fence。缺少 checkpoint、schema 不支持、
+relation registry 与 MissionPlan 不一致或序号不一致时 fail-closed。
 
 当前 composition root 是单 writer：进程启动时会持有 controller SQLite 同目录下的
 `<database>.writer.lock`，第二个指向同一数据库的 Integration Server 会立即启动失败，避免
@@ -435,7 +441,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
-│   ├── mission/v0.2/
+│   ├── mission/v0.2/ + v0.3/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ + v0.3/ + v0.4/
@@ -446,7 +452,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── prompts/v0/
 │   └── tests/
 ├── scenarios/
-│   ├── phase1-mission-v0.2/
+│   ├── phase1-mission-v0.2/ + v0.3/
+│   ├── execution-relations-v0.1/
 │   └── distributed-spatial-memory-v0.1/
 ├── tools/
 │   └── quality/

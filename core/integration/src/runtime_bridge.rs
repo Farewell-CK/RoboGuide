@@ -13,6 +13,7 @@ use domain::{
 use ports::{EventSink, SharedNodeStateWriter};
 use runtime::{
     ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
+    RuntimeRelationSnapshot,
 };
 use state::InMemorySharedNodeState;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -20,9 +21,8 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 7 records exact-contract readiness and prevents older binaries from restoring a
-/// checkpoint while silently reverting to legacy static-ready behavior.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v7";
+/// Version 8 records Runtime relation specifications, live states, proofs, and fences.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -460,6 +460,76 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             .map(remote_status)
     }
 
+    /// Installs Mission-owned relation specifications into the sole Runtime live registry.
+    pub fn register_execution_relations(
+        &mut self,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        let group = self.control.group(group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Protocol(
+                "execution relations require an existing Mission-level Group".to_string(),
+            )
+        })?;
+        if group.mission_id() != plan.goal().mission_id() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "execution relation plan differs from Group Mission".to_string(),
+            ));
+        }
+        let specifications = plan
+            .contexts()
+            .iter()
+            .flat_map(domain::CoordinationContext::relations)
+            .cloned()
+            .collect::<Vec<_>>();
+        let runtime_events = self
+            .runtime
+            .register_relations(group_id, plan.goal().mission_id(), &specifications)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        for event in runtime_events {
+            append_runtime_evidence(&mut self.events, &event, timestamp, correlation_id);
+            self.runtime_events.push_back(event);
+        }
+        Ok(())
+    }
+
+    /// Confirms restored Runtime relation authority exactly matches an accepted MissionPlan.
+    pub fn validate_execution_relations(
+        &self,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        let group = self.control.group(group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Checkpoint(
+                "execution relation Group is absent from Control authority".to_string(),
+            )
+        })?;
+        if group.mission_id() != plan.goal().mission_id() {
+            return Err(IntegrationRuntimeError::Checkpoint(
+                "execution relation plan differs from restored Group Mission".to_string(),
+            ));
+        }
+        let specifications = plan
+            .contexts()
+            .iter()
+            .flat_map(domain::CoordinationContext::relations)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.runtime
+            .validate_relations(group_id, plan.goal().mission_id(), &specifications)
+            .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))
+    }
+
+    /// Returns observable live relation snapshots for one Mission-level Group.
+    pub fn relation_snapshots(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Vec<RuntimeRelationSnapshot> {
+        self.runtime.relation_snapshots(group_id)
+    }
+
     /// Drains canonical Runtime transitions for application-level lifecycle handling.
     pub fn take_runtime_events(&mut self) -> Vec<ExecutionEvent> {
         self.runtime_events.drain(..).collect()
@@ -583,6 +653,49 @@ fn append_runtime_evidence<E: EventSink>(
             group_id: context.as_ref().map(|command| command.group_id().clone()),
             task_ref: context.as_ref().map(|command| command.task_ref().clone()),
             role_id: context.as_ref().map(|command| command.role_id().clone()),
+            reason: reason.clone(),
+        },
+        ExecutionEvent::RelationRegistered { relation } => {
+            EventPayload::ExecutionRelationRegistered {
+                group_id: relation.group_id().clone(),
+                relation_id: relation.relation_id().clone(),
+                source_task_ref: relation.source_task_ref().clone(),
+                source_role_id: relation.source_role_id().clone(),
+                target_task_ref: relation.target_task_ref().clone(),
+                target_role_id: relation.target_role_id().clone(),
+                kind: relation.kind(),
+            }
+        }
+        ExecutionEvent::RelationStateChanged {
+            relation,
+            previous,
+            current,
+            source_execution_id,
+            target_execution_id,
+        } => EventPayload::ExecutionRelationStateChanged {
+            group_id: relation.group_id().clone(),
+            relation_id: relation.relation_id().clone(),
+            previous: *previous,
+            current: *current,
+            source_execution_id: source_execution_id.clone(),
+            target_execution_id: target_execution_id.clone(),
+        },
+        ExecutionEvent::RelationReconciliationRequired {
+            relation,
+            state,
+            source_execution_id,
+            target_execution_id,
+            reason,
+        } => EventPayload::ExecutionRelationReconciliationRequired {
+            group_id: relation.group_id().clone(),
+            relation_id: relation.relation_id().clone(),
+            state: *state,
+            source_task_ref: relation.source_task_ref().clone(),
+            source_role_id: relation.source_role_id().clone(),
+            target_task_ref: relation.target_task_ref().clone(),
+            target_role_id: relation.target_role_id().clone(),
+            source_execution_id: source_execution_id.clone(),
+            target_execution_id: target_execution_id.clone(),
             reason: reason.clone(),
         },
     };
@@ -867,6 +980,139 @@ mod tests {
             ],
         )
         .expect("test MissionPlan is valid")
+    }
+
+    /// Builds one same-Task two-Role plan with a Node-independent execution relation.
+    fn related_single_task_plan() -> domain::MissionPlan {
+        let mission_id = domain::MissionId::new("mission-relation").expect("mission id is valid");
+        let task_id = domain::TaskId::new("guidance").expect("task id is valid");
+        let source_role = domain::RoleId::new("safety-observer").expect("role id is valid");
+        let target_role = domain::RoleId::new("navigator").expect("role id is valid");
+        let requirement = domain::TaskRequirement::new(
+            mission_id.clone(),
+            task_id.clone(),
+            vec![
+                domain::RoleRequirement::new(
+                    source_role.clone(),
+                    CapabilityKind::Observation,
+                    None,
+                ),
+                domain::RoleRequirement::new(target_role.clone(), CapabilityKind::Mobility, None),
+            ],
+        )
+        .expect("requirement is valid");
+        let intent = domain::ExecutionIntent::new(
+            CapabilityContractRef::new("test", "execute", "v1").expect("contract is valid"),
+            BTreeMap::new(),
+        )
+        .expect("intent is valid");
+        let context_id =
+            domain::CoordinationContextId::new("guidance-context").expect("context id is valid");
+        let task = domain::PlannedTask::new(
+            "exercise relation integration",
+            requirement,
+            BTreeMap::from([
+                (source_role.clone(), intent.clone()),
+                (target_role.clone(), intent),
+            ]),
+            Vec::new(),
+            domain::TaskContinuity::new(context_id.clone(), BTreeMap::new(), BTreeMap::new()),
+        )
+        .expect("task is valid");
+        let relation = domain::ExecutionRelationSpec::new(
+            domain::ExecutionRelationId::new("safety-guards-navigation")
+                .expect("relation id is valid"),
+            domain::PlannedExecutionRef::new(task_id.clone(), source_role),
+            domain::PlannedExecutionRef::new(task_id, target_role),
+            domain::ExecutionRelationKind::RequiresActive,
+        )
+        .expect("relation is valid");
+        domain::MissionPlan::new(
+            domain::MissionGoal::new(mission_id.clone(), "exercise relation integration")
+                .expect("goal is valid"),
+            domain::TaskGraph::new(mission_id, vec![task]).expect("graph is valid"),
+            vec![
+                domain::CoordinationContext::new_with_relations(
+                    context_id,
+                    Vec::new(),
+                    vec![relation],
+                )
+                .expect("context is valid"),
+            ],
+        )
+        .expect("relation plan is valid")
+    }
+
+    /// Relation registration emits durable evidence and survives checkpoint validation.
+    #[test]
+    fn relation_registration_round_trips_through_integration_checkpoint() {
+        let plan = related_single_task_plan();
+        let group_id = domain::ExecutionGroupId::new("group-relation").expect("group id is valid");
+        let correlation = CorrelationId::new("relation-registration").expect("correlation valid");
+        let mut control = ControlPlane::new();
+        control
+            .create_mission_group(
+                group_id.clone(),
+                &plan,
+                TimestampMs::new(5),
+                &correlation,
+                &mut InMemoryEventLog::new(),
+            )
+            .expect("Mission Group is created before Runtime relation registration");
+        let mut bridge = IntegrationRuntimeBridge::new(
+            control,
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        bridge
+            .register_execution_relations(&plan, &group_id, TimestampMs::new(10), &correlation)
+            .expect("relation registers");
+        assert!(bridge.events.contains_payload(|payload| matches!(
+            payload,
+            EventPayload::ExecutionRelationRegistered { relation_id, .. }
+                if relation_id.as_str() == "safety-guards-navigation"
+        )));
+        assert_eq!(
+            bridge.relation_snapshots(&group_id)[0].state(),
+            domain::ExecutionRelationState::Dormant
+        );
+
+        let checkpoint = bridge.checkpoint_json().expect("checkpoint serializes");
+        let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+            &checkpoint,
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+            TimestampMs::new(20),
+        )
+        .expect("checkpoint restores");
+        restored
+            .validate_execution_relations(&plan, &group_id)
+            .expect("restored relation registry matches MissionPlan");
+        assert_eq!(restored.relation_snapshots(&group_id).len(), 1);
+    }
+
+    /// Integration cannot create a relation registry beside an absent Control Group.
+    #[test]
+    fn relation_registration_requires_existing_control_group() {
+        let plan = related_single_task_plan();
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let result = bridge.register_execution_relations(
+            &plan,
+            &domain::ExecutionGroupId::new("group-absent").expect("group id is valid"),
+            TimestampMs::new(10),
+            &CorrelationId::new("relation-registration").expect("correlation valid"),
+        );
+        assert!(matches!(
+            result,
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("existing Mission-level Group")
+        ));
     }
 
     /// Registration and heartbeat facts enter existing Control lease authority and Shared State.

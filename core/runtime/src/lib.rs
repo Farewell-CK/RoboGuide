@@ -6,12 +6,14 @@
 
 mod clock;
 mod execution;
+mod relation;
 
 pub use clock::{FixedClock, SystemMonotonicClock};
 pub use execution::{
     DispatchDecision, ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionStatus,
     ObservedTaskResult, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
 };
+pub use relation::{RuntimeExecutionRelation, RuntimeRelationSnapshot};
 
 use domain::{
     EventPayload, ExecutionCommand, NODE_CONTRACT_VERSION_V0_1, NodeContractVersion, NodeEvent,

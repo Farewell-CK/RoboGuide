@@ -10,8 +10,9 @@ Execution Group 或本地设备控制。
   Controller client、合同值、Responses Interpreter/Planner、HTTP API 和 CLI；
 - `prompts/v0/`：独立版本化的 Interpreter、Planner 与 Reviewer Prompt；
 - `tests/`：合同、配置、安全边界和 Fake Responses 的离线测试；
-- `../contracts/mission/v0.2/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role
-  execution intent 和 Task/Context resource scope 的 MissionPlan v0.2 Schema；
+- `../contracts/mission/v0.3/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role
+  execution intent、Task/Context resource scope 和 execution coordination relations 的
+  MissionPlan v0.3 Schema；
 - `../contracts/mission/request-v0.1/` 与 `inventory-v0.1/`：文本请求状态投影和只读
   规划预检快照；旧 `v0/` 继续保留，避免静默改写已版本化合同。
 

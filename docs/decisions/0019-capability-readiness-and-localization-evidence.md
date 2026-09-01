@@ -48,6 +48,9 @@ localization mode、pose quality 或 coordinate-frame 关系，不能作为稳�
 - Runtime 只关联 execution identity 并等待 Node terminal fact；Control/Orchestration 不解析
   vendor quality 指标。Adapter 负责把 Local EAIOS evidence 映射为版本化 canonical shape。
 
+2026-09-01：ADR-0020 进一步把当前 payload codec 升级为 v5（读取保留 v2/v3/v4），并把
+当前 Integration/Controller checkpoint 从 v7/v8 升级为 v8/v9；本 ADR 的版本号保留为历史。
+
 ## Consequences
 
 - RT-G7 可以复用现有 RegistrationUpdate、Shared Node State 和 Matching 逻辑，不建立第二套
