@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+  python:
+    name: Python
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --dev --frozen
+
+      - name: Check formatting
+        run: uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service
+
+      - name: Run Ruff
+        run: uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service
+
+      - name: Run mypy
+        run: >
+          uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality
+          integrations/robonix-map-service/robonix-map-service.py integrations/robonix-map-service/tests
+
+      - name: Check Python function documentation
+        run: uv run python tools/quality/check_python_function_docs.py mission apps/mission-service integrations/robonix-map-service
+
+      - name: Run tests
+        run: uv run pytest -q
