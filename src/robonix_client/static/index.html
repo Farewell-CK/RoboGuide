@@ -1,64 +1,133 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260728b" />
+    <meta name="theme-color" content="#10131a" />
+    <title>多智能体操控系统</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260827i" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="nav-rail">
-        <div class="brand">Robonix Client</div>
-        <nav class="nav-list" aria-label="Workspace">
-          <button class="nav-item active" type="button" data-page="dashboard"><span>Chat</span></button>
-          <button class="nav-item" type="button" data-page="vitals"><span>Vitals</span></button>
-          <button class="nav-item" type="button" data-page="audio"><span>Audio</span></button>
-          <button class="nav-item" type="button" data-page="settings"><span>Settings</span></button>
+        <div class="brand">多智能体操控系统</div>
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" type="button" data-page="overview">
+            <span class="nav-item-icon" aria-hidden="true">🤖</span>
+            <span>多智能体操控</span>
+          </button>
+          <button class="nav-item" type="button" data-page="maps">
+            <span class="nav-item-icon" aria-hidden="true">🗺</span>
+            <span>地图设置</span>
+          </button>
         </nav>
+        <div class="nav-section-label">智能体</div>
+        <div class="nav-agents" id="navAgents"></div>
+        <button class="nav-add-agent" id="addAgentBtn" type="button">+ 添加智能体</button>
+        <div class="nav-footer">
+          <span id="modelLabel" class="model-label">模型: --</span>
+        </div>
       </aside>
 
       <main class="workspace">
-        <header class="command-bar">
+        <header class="command-bar command-bar-overview">
           <div class="select-field wide">
-            <span>Session</span>
-            <input id="sessionTitleInput" autocomplete="off" placeholder="Untitled chat" title="Name of this session. Edit to rename it; New session creates one under this name." />
+            <span>会话</span>
+            <input id="sessionTitleInput" autocomplete="off" placeholder="未命名会话" title="为当前会话命名。点击「新会话」以该名称创建新会话，机器人规划器会按会话保留历史。" />
           </div>
-          <button class="new-session-button" type="button" id="newSessionAction" title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model."><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label">New session</span></button>
-          <label class="select-field endpoint">
-            <span>Robot Host</span>
-            <input id="robotHost" autocomplete="off" placeholder="100.x.y.z" />
-          </label>
-          <label class="select-field">
-            <span>Atlas Port</span>
-            <input id="atlasPort" autocomplete="off" inputmode="numeric" placeholder="50051" />
-          </label>
-          <label class="select-field">
-            <span>User</span>
-            <input id="userId" autocomplete="off" placeholder="voice:client" />
-          </label>
-          <button class="status-chip" id="refreshSystem" type="button">
-            <span class="dot"></span>
-            <span id="connectionState">offline</span>
-          </button>
-          <button class="status-chip handsfree-chip offline" id="handsfreeToggle" type="button" title="Robot-local wake phrase configured by Speech">
-            <span class="dot"></span>
-            <span id="handsfreeState">Hands-free off</span>
-          </button>
-          <button class="button connect-button" id="connectNow" type="button">Connect</button>
+          <button class="new-session-button" type="button" id="newSessionAction" title="在该名称下创建新会话，机器人规划器会按会话保留历史，新会话会清空历史并停止向模型重发历史轮次。"><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label">新会话</span></button>
         </header>
+        <section class="page work-page overview-page active" data-page-panel="overview" aria-labelledby="overviewTitle">
+          <div class="overview-shell">
+            <header class="overview-header">
+              <div>
+                <h2 id="overviewTitle">多智能体操控</h2>
+                <span class="overview-header-sub">左侧是所有智能体状态；右侧是与大模型的对话，对话中下达的指令会分发给全部智能体执行。当前模型：<strong id="modelNameInline">--</strong></span>
+              </div>
+            </header>
+            <div class="overview-grid-layout">
+              <section class="overview-status-panel">
+                <div class="overview-status-head">
+                  <h3>智能体状态</h3>
+                  <div class="overview-pager" id="overviewPager" hidden>
+                    <button class="icon-button" id="overviewPrev" type="button" aria-label="上一页">‹</button>
+                    <span id="overviewPageInfo">第 1 / 1 页</span>
+                    <button class="icon-button" id="overviewNext" type="button" aria-label="下一页">›</button>
+                  </div>
+                </div>
+                <div class="overview-grid" id="overviewGrid"></div>
+              </section>
+              <section class="overview-chat-panel">
+                <div class="overview-chat-messages" id="overviewChatMessages" aria-live="polite"></div>
+                <form class="overview-composer" id="overviewComposer" onsubmit="return false;">
+                  <textarea id="overviewTaskInput" rows="2" placeholder="向大模型下达指令（例：让所有机器狗列队走到客厅门口）"></textarea>
+                  <button class="button" id="overviewSend" type="submit">发送</button>
+                </form>
+              </section>
+            </div>
+          </div>
+        </section>
 
-        <section class="page dashboard-page active" data-page-panel="dashboard">
+        <!-- agent-detail page 单个智能体的操控界面 -->
+        <section class="page work-page agent-detail-page" data-page-panel="agent-detail" aria-labelledby="agentDetailTitle" hidden>
+          <div class="agent-detail-shell">
+            <header class="agent-detail-header">
+              <div class="agent-detail-identity">
+                <span class="agent-detail-eyebrow">智能体操控界面</span>
+                <div class="agent-detail-title-line">
+                  <h2 id="agentDetailTitle">--</h2>
+                  <span class="agent-detail-id-pill" id="agentDetailIdPill">id: --</span>
+                  <span class="health-label unknown" id="agentDetailStatus">unknown</span>
+                </div>
+                <span class="agent-detail-sub" id="agentDetailSub">请先在左侧选择一个智能体</span>
+              </div>
+              <div class="agent-detail-actions">
+                <button class="ghost-button" id="agentDetailRename" type="button" title="修改该智能体的显示名称">重命名</button>
+                <button class="ghost-button" id="agentDetailConnect" type="button" title="立即向该智能体发起一次 /api/system 探测">连接</button>
+                <button class="danger-button" id="agentDetailRemove" type="button" title="从多智能体系统中移除该智能体（无法删除 default 智能体）">移除</button>
+              </div>
+            </header>
+            <div class="agent-detail-tabs" role="tablist" aria-label="智能体子功能">
+              <button class="agent-detail-tab active" type="button" data-agent-tab="chat" role="tab" aria-selected="true">
+                <span class="agent-detail-tab-icon" aria-hidden="true">💬</span>
+                <span>对话</span>
+              </button>
+              <button class="agent-detail-tab" type="button" data-agent-tab="vitals" role="tab" aria-selected="false">
+                <span class="agent-detail-tab-icon" aria-hidden="true">🩺</span>
+                <span>状态监控</span>
+              </button>
+              <button class="agent-detail-tab" type="button" data-agent-tab="audio" role="tab" aria-selected="false">
+                <span class="agent-detail-tab-icon" aria-hidden="true">🎙</span>
+                <span>音频</span>
+              </button>
+              <button class="agent-detail-tab" type="button" data-agent-tab="maps" role="tab" aria-selected="false">
+                <span class="agent-detail-tab-icon" aria-hidden="true">🗺</span>
+                <span>地图</span>
+              </button>
+              <button class="agent-detail-tab" type="button" data-agent-tab="settings" role="tab" aria-selected="false">
+                <span class="agent-detail-tab-icon" aria-hidden="true">⚙</span>
+                <span>连接设置</span>
+              </button>
+            </div>
+            <div class="agent-detail-body" id="agentDetailBody" aria-live="polite">
+              <div class="agent-detail-empty" id="agentDetailEmpty">
+                点击左侧任意智能体即可进入其操控界面。
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page dashboard-page" data-page-panel="dashboard" hidden>
           <section class="dashboard-grid">
             <section class="panel conversation-panel">
             <div class="panel-header">
               <div>
-                <h2>Conversation</h2>
-                <span id="promptTitle">What should Robonix do?</span>
+                <h2>对话</h2>
+                <span id="promptTitle">请告诉 Robonix 要做什么？</span>
               </div>
               <div class="panel-actions">
-                <button class="ghost-button" id="renameSession" type="button">Rename</button>
-                <button class="ghost-button" id="clearHistory" type="button">Clear</button>
+                <button class="ghost-button" id="renameSession" type="button">重命名</button>
+                <button class="ghost-button" id="clearHistory" type="button">清空</button>
               </div>
             </div>
             <div class="chat-body">
@@ -67,11 +136,11 @@
             </div>
             <form class="composer" id="composer">
               <div class="composer-row">
-                <textarea id="taskInput" rows="1" placeholder="Type a message..."></textarea>
-                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice recording (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label">Start recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label">Stop recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label">Abort all tasks</span></button>
-                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)"><span class="btn-label">Send</span><kbd class="btn-key">Enter</kbd></button>
+                <textarea id="taskInput" rows="1" placeholder="向 Robonix 输入指令…"></textarea>
+                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="开始语音录制 (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label">开始录音</span><kbd class="btn-key">F2</kbd></button>
+                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="停止录音并把已识别内容发送出去 (F2)。不会取消任务。" hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label">停止录音</span><kbd class="btn-key">F2</kbd></button>
+                <button class="danger-button stop-button" type="button" id="stopButton" title="紧急停止：取消所有正在运行的任务和机器人动作，不会停止语音录制。" hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label">中止全部任务</span></button>
+                <button class="send-button" type="submit" id="sendButton" title="发送任务 (Enter)"><span class="btn-label">发送</span><kbd class="btn-key">Enter</kbd></button>
               </div>
             </form>
             </section>
@@ -80,52 +149,52 @@
               <section class="panel current-goal-panel">
                 <div class="panel-header compact">
                   <div>
-                    <h2>Current Goal</h2>
-                    <span>Current task and selected goal context.</span>
+                    <h2>当前目标</h2>
+                    <span>当前任务与所选目标上下文。</span>
                   </div>
                 </div>
-                <div class="goal-line" id="goalLine">Goal: waiting for a task.</div>
+                <div class="goal-line" id="goalLine">目标：等待任务</div>
                 <div class="goal-preview" data-goal-preview></div>
               </section>
 
               <section class="panel rtdl-panel execution-panel">
                 <div class="panel-header">
                   <div>
-                    <h2>RTDL Forest</h2>
-                    <span data-plan-summary>waiting for real plan</span>
+                    <h2>RTDL 计划树</h2>
+                    <span data-plan-summary>等待真实计划</span>
                   </div>
                 </div>
                 <button class="rtdl-history-launch active-rtdl-launch" id="openActiveRtdl" type="button">
                   <span>
-                    <strong>Active RTDL</strong>
-                    <small id="activeRtdlSummary">Open live Executor plans</small>
+                    <strong>活跃 RTDL</strong>
+                    <small id="activeRtdlSummary">打开实时执行器计划</small>
                   </span>
-                  <span class="rtdl-history-count" id="activeRtdlCount">unavailable</span>
+                  <span class="rtdl-history-count" id="activeRtdlCount">不可用</span>
                 </button>
                 <div class="execution-table">
                   <div class="table-head">
-                    <span>Node</span>
-                    <span>Type</span>
-                    <span>Status</span>
+                    <span>节点</span>
+                    <span>类型</span>
+                    <span>状态</span>
                     <span>Provider / ID</span>
-                    <span>Duration</span>
-                    <span>Started</span>
+                    <span>耗时</span>
+                    <span>启动时间</span>
                   </div>
                   <div class="plan-tree" data-plan-tree="full"></div>
                 </div>
                 <button class="rtdl-history-launch" id="openRtdlHistory" type="button">
                   <span>
-                    <strong>Execution history</strong>
-                    <small>Open completed RTDL plans in a full workspace</small>
+                    <strong>执行历史</strong>
+                    <small>在工作区中查看已完成的 RTDL 计划</small>
                   </span>
                   <span class="rtdl-history-count" id="rtdlHistoryCount">0</span>
                 </button>
                 <div class="execution-detail" id="executionDetail">
-                  <div class="detail-title" id="executionDetailTitle">Node detail</div>
+                  <div class="detail-title" id="executionDetailTitle">节点详情</div>
                   <div class="detail-grid">
                     <div><span>Provider / ID</span><strong id="activeProvider">-</strong></div>
-                    <div><span>Started</span><strong id="activeStarted">-</strong></div>
-                    <div><span>Duration</span><strong id="activeDuration">-</strong></div>
+                    <div><span>启动时间</span><strong id="activeStarted">-</strong></div>
+                    <div><span>耗时</span><strong id="activeDuration">-</strong></div>
                   </div>
                   <pre class="args" id="activeArgs">{}</pre>
                 </div>
@@ -134,10 +203,10 @@
               <section class="panel trace-panel thought-panel">
                 <div class="panel-header">
                   <div>
-                    <h2>Event Log</h2>
-                    <span><span data-event-summary>0</span> event(s)</span>
+                    <h2>事件日志</h2>
+                    <span><span data-event-summary>0</span> 条事件</span>
                   </div>
-                  <span data-current-task-label>Current Task: idle</span>
+                  <span data-current-task-label>当前任务：空闲</span>
                 </div>
                 <div class="event-list" data-event-list></div>
               </section>
@@ -145,122 +214,122 @@
           </section>
         </section>
 
-        <section class="page vitals-page" data-page-panel="vitals" aria-labelledby="vitalsRobotName">
+        <section class="page vitals-page" data-page-panel="vitals" aria-labelledby="vitalsRobotName" hidden>
           <div class="vitals-shell" id="vitalsRoot">
             <header class="vitals-overview">
               <div class="vitals-identity">
-                <span class="vitals-eyebrow">Live robot</span>
+                <span class="vitals-eyebrow">实时机器人</span>
                 <div class="vitals-title-line">
-                  <h2 id="vitalsRobotName">Robot</h2>
-                  <span class="health-label unknown" id="vitalsOverallHealth">unknown</span>
+                  <h2 id="vitalsRobotName">机器人</h2>
+                  <span class="health-label unknown" id="vitalsOverallHealth">未知</span>
                 </div>
-                <span id="vitalsRobotMeta">Waiting for Soma</span>
+                <span id="vitalsRobotMeta">等待 Soma</span>
               </div>
-              <div class="vitals-overview-metrics" aria-label="Robot health summary">
+              <div class="vitals-overview-metrics" aria-label="机器人健康摘要">
                 <div class="vitals-overview-metric">
-                  <span>Hardware</span>
-                  <strong id="vitalsHardwareSummary">0 components</strong>
+                  <span>硬件</span>
+                  <strong id="vitalsHardwareSummary">0 个组件</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Battery</span>
+                  <span>电池</span>
                   <strong id="vitalsBatterySummary">--</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Software</span>
-                  <strong id="vitalsSoftwareSummary">0 modules</strong>
+                  <span>软件</span>
+                  <strong id="vitalsSoftwareSummary">0 个模块</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Updated</span>
+                  <span>更新于</span>
                   <strong id="vitalsUpdatedAt">--</strong>
                 </div>
               </div>
               <div class="vitals-overview-actions">
-                <div class="vitals-source-strip" id="vitalsSourceStrip" aria-label="Data source status"></div>
+                <div class="vitals-source-strip" id="vitalsSourceStrip" aria-label="数据源状态"></div>
                 <button class="vitals-alert-button" id="vitalsAlertsOpen" type="button" aria-haspopup="dialog" aria-controls="vitalsAlertPanel">
                   <span id="vitalsAlertsIcon" aria-hidden="true"></span>
-                  <span>Alerts</span>
+                  <span>告警</span>
                   <strong id="vitalsAlertCount">0</strong>
                 </button>
-                <button class="icon-button vitals-refresh" id="vitalsReconnect" type="button" title="Reconnect health streams" aria-label="Reconnect health streams">
+                <button class="icon-button vitals-refresh" id="vitalsReconnect" type="button" title="重连健康数据流" aria-label="重连健康数据流">
                   <span id="vitalsReconnectIcon" aria-hidden="true"></span>
                 </button>
               </div>
             </header>
 
             <div class="vitals-main">
-              <aside class="vitals-components-pane" aria-label="Robot components">
+              <aside class="vitals-components-pane" aria-label="机器人组件">
                 <header class="vitals-pane-header">
                   <div>
-                    <h3>Body</h3>
-                    <span id="vitalsComponentCount">0 components</span>
+                    <h3>机身</h3>
+                    <span id="vitalsComponentCount">0 个组件</span>
                   </div>
                 </header>
                 <div class="vitals-component-list" id="vitalsComponentList"></div>
               </aside>
 
-              <section class="vitals-stage" aria-label="Robot digital twin">
+              <section class="vitals-stage" aria-label="机器人数字孪生">
                 <div class="vitals-canvas" id="vitalsCanvas"></div>
                 <div class="vitals-stage-status">
                   <span class="vitals-live-dot"></span>
-                  <span id="vitalsRenderMode">procedural model</span>
+                  <span id="vitalsRenderMode">过程化模型</span>
                 </div>
                 <div class="vitals-stage-selection">
-                  <span>Selected component</span>
-                  <strong id="vitalsStageSelection">Robot</strong>
+                  <span>选中组件</span>
+                  <strong id="vitalsStageSelection">机器人</strong>
                 </div>
                 <div class="vitals-stage-caption">
-                  <strong id="vitalsStageName">Robot</strong>
+                  <strong id="vitalsStageName">机器人</strong>
                   <span id="vitalsStageDimensions">--</span>
                 </div>
               </section>
 
-              <aside class="vitals-inspector" aria-label="Selected component details">
+              <aside class="vitals-inspector" aria-label="选中组件详情">
                 <header class="vitals-pane-header">
                   <div>
-                    <h3 id="vitalsInspectorTitle">Robot</h3>
+                    <h3 id="vitalsInspectorTitle">机器人</h3>
                     <span id="vitalsInspectorPath">body</span>
                   </div>
-                  <span class="health-label unknown" id="vitalsInspectorHealth">unknown</span>
+                  <span class="health-label unknown" id="vitalsInspectorHealth">未知</span>
                 </header>
                 <div class="vitals-inspector-body" id="vitalsInspectorBody"></div>
               </aside>
             </div>
 
-            <section class="vitals-software" aria-label="Software health">
+            <section class="vitals-software" aria-label="软件健康">
               <header class="vitals-software-header">
-                <div class="segmented-control" role="tablist" aria-label="Software health view">
-                  <button class="active" id="vitalsModulesTab" type="button" role="tab" aria-selected="true">Modules</button>
+                <div class="segmented-control" role="tablist" aria-label="软件健康视图">
+                  <button class="active" id="vitalsModulesTab" type="button" role="tab" aria-selected="true">模块</button>
                   <button id="vitalsProvidersTab" type="button" role="tab" aria-selected="false">Providers</button>
                 </div>
-                <span id="vitalsSoftwareDetail">Waiting for Vitals</span>
+                <span id="vitalsSoftwareDetail">等待 Vitals</span>
               </header>
               <div class="vitals-software-list" id="vitalsSoftwareList"></div>
             </section>
-            <footer class="vitals-page-credit" id="vitalsCredit" aria-label="Vitals created by Zhenyu Zhang">
-              Made by Zhenyu Zhang
+            <footer class="vitals-page-credit" id="vitalsCredit" aria-label="Vitals 制作">
+              由 Zhenyu Zhang 制作
             </footer>
 
             <div class="vitals-alert-layer" id="vitalsAlertPanelLayer" hidden>
-              <button class="vitals-alert-scrim" id="vitalsAlertPanelScrim" type="button" aria-label="Close alert panel"></button>
+              <button class="vitals-alert-scrim" id="vitalsAlertPanelScrim" type="button" aria-label="关闭告警面板"></button>
               <aside class="vitals-alert-panel" id="vitalsAlertPanel" role="dialog" aria-modal="true" aria-labelledby="vitalsAlertPanelTitle">
                 <header class="vitals-alert-panel-header">
                   <div>
-                    <span>Persistent incidents</span>
-                    <h3 id="vitalsAlertPanelTitle">Alert center</h3>
+                    <span>持续事件</span>
+                    <h3 id="vitalsAlertPanelTitle">告警中心</h3>
                   </div>
-                  <button class="icon-button" id="vitalsAlertsClose" type="button" title="Close alert panel" aria-label="Close alert panel">
+                  <button class="icon-button" id="vitalsAlertsClose" type="button" title="关闭告警面板" aria-label="关闭告警面板">
                     <span id="vitalsAlertsCloseIcon" aria-hidden="true"></span>
                   </button>
                 </header>
                 <div class="vitals-alert-toolbar">
-                  <div class="segmented-control" role="tablist" aria-label="Alert view">
-                    <button class="active" id="vitalsOpenAlertsTab" type="button" role="tab" aria-selected="true">Open</button>
-                    <button id="vitalsAlertHistoryTab" type="button" role="tab" aria-selected="false">History</button>
+                  <div class="segmented-control" role="tablist" aria-label="告警视图">
+                    <button class="active" id="vitalsOpenAlertsTab" type="button" role="tab" aria-selected="true">未关闭</button>
+                    <button id="vitalsAlertHistoryTab" type="button" role="tab" aria-selected="false">历史</button>
                   </div>
                   <div class="vitals-alert-toolbar-actions">
-                    <span id="vitalsAlertSummary">No open alerts</span>
+                    <span id="vitalsAlertSummary">无未关闭告警</span>
                     <button class="secondary-button vitals-alert-clear-history" id="vitalsClearAlertHistory" type="button" hidden>
-                      Clear history
+                      清空历史
                     </button>
                   </div>
                 </div>
@@ -273,39 +342,39 @@
                 <header>
                   <span class="vitals-warning-icon" id="vitalsWarningIcon" aria-hidden="true"></span>
                   <div>
-                    <span id="vitalsWarningSeverity">ERROR</span>
-                    <h3 id="vitalsWarningTitle">Robot alert</h3>
+                    <span id="vitalsWarningSeverity">错误</span>
+                    <h3 id="vitalsWarningTitle">机器人告警</h3>
                   </div>
                 </header>
-                <p id="vitalsWarningDetail">A health anomaly requires attention.</p>
+                <p id="vitalsWarningDetail">检测到需要关注的健康异常。</p>
                 <div class="vitals-warning-meta">
-                  <span id="vitalsWarningSource">component</span>
-                  <span id="vitalsWarningTime">now</span>
+                  <span id="vitalsWarningSource">组件</span>
+                  <span id="vitalsWarningTime">刚刚</span>
                 </div>
                 <footer>
-                  <button class="secondary-button" id="vitalsWarningDismiss" type="button">Dismiss</button>
-                  <button class="primary-button" id="vitalsWarningInspect" type="button">Inspect</button>
+                  <button class="secondary-button" id="vitalsWarningDismiss" type="button">忽略</button>
+                  <button class="primary-button" id="vitalsWarningInspect" type="button">查看详情</button>
                 </footer>
               </section>
             </div>
           </div>
         </section>
 
-        <section class="page work-page audio-page" data-page-panel="audio">
+        <section class="page work-page audio-page" data-page-panel="audio" hidden>
           <section class="audio-layout">
             <section class="audio-column audio-config-column">
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Audio Device Server</h2>
-                  <span id="audioServerSummary">Client-machine audio device server is not checked yet.</span>
+                  <h2>本机音频设备服务</h2>
+                  <span id="audioServerSummary">尚未检查本机音频设备服务状态。</span>
                 </div>
-                <span id="audioServerState">offline</span>
+                <span id="audioServerState">离线</span>
               </div>
               <div class="audio-actions">
-                <button class="button" id="startAudioServer" type="button">Start Audio</button>
-                <button class="button" id="checkAudioServer" type="button">Check</button>
-                <button class="button" id="refreshAudioDevices" type="button">Refresh Devices</button>
+                <button class="button" id="startAudioServer" type="button">启动音频服务</button>
+                <button class="button" id="checkAudioServer" type="button">检查</button>
+                <button class="button" id="refreshAudioDevices" type="button">刷新设备</button>
               </div>
               <div class="audio-status-grid" id="audioServerStatus"></div>
             </section>
@@ -313,68 +382,68 @@
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Robonix Audio Route</h2>
-                  <span>Select the primitive and device used by F2 and hands-free interaction.</span>
+                  <h2>Robonix 音频路由</h2>
+                  <span>选择 F2 与免提交互所使用的原语和设备。</span>
                 </div>
               </div>
               <div class="audio-device-grid">
                 <label class="field">
-                  <span>Input Primitive</span>
+                  <span>输入原语</span>
                   <select id="micNodeId"></select>
                 </label>
                 <label class="field">
-                  <span>Input Device</span>
+                  <span>输入设备</span>
                   <select id="micDeviceId"></select>
                 </label>
                 <label class="field">
-                  <span>Output Primitive</span>
+                  <span>输出原语</span>
                   <select id="speakerNodeId"></select>
                 </label>
                 <label class="field">
-                  <span>Output Device</span>
+                  <span>输出设备</span>
                   <select id="speakerDeviceId"></select>
                 </label>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="refreshAudioRoute" type="button">Refresh Route</button>
-                <button class="button" id="applyAudioRoute" type="button">Apply Route</button>
+                <button class="button" id="refreshAudioRoute" type="button">刷新路由</button>
+                <button class="button" id="applyAudioRoute" type="button">应用路由</button>
               </div>
-              <span class="audio-route-status" id="audioRouteStatus">No Robonix audio route loaded.</span>
+              <span class="audio-route-status" id="audioRouteStatus">尚未加载 Robonix 音频路由。</span>
             </section>
 
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Client Bridge Diagnostics</h2>
-                  <span>Current local devices used when Audio Route selects the client bridge.</span>
+                  <h2>本机桥接诊断</h2>
+                  <span>音频路由选择本机桥接时所使用的当前设备。</span>
                 </div>
               </div>
               <div class="audio-device-grid audio-device-readout">
                 <div class="field">
-                  <span>Microphone</span>
-                  <strong id="bridgeInputDevice">Not selected</strong>
+                  <span>麦克风</span>
+                  <strong id="bridgeInputDevice">未选择</strong>
                 </div>
                 <div class="field">
-                  <span>Speaker</span>
-                  <strong id="bridgeOutputDevice">Not selected</strong>
+                  <span>扬声器</span>
+                  <strong id="bridgeOutputDevice">未选择</strong>
                 </div>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="testMicrophone" type="button">Test Microphone</button>
-                <button class="button" id="testSpeaker" type="button">Test Speaker</button>
+                <button class="button" id="testMicrophone" type="button">测试麦克风</button>
+                <button class="button" id="testSpeaker" type="button">测试扬声器</button>
               </div>
               <span class="audio-test-status" id="audioTestStatus" role="status">
-                Run a microphone or speaker test to verify the selected route.
+                运行麦克风或扬声器测试以验证当前路由。
               </span>
             </section>
 
             <section class="panel audio-panel audio-meter-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Input Level</h2>
+                  <h2>输入电平</h2>
                   <span id="audioLevelText">0%</span>
                 </div>
-                <span id="audioLevelState">idle</span>
+                <span id="audioLevelState">空闲</span>
               </div>
               <div class="audio-meter">
                 <span id="audioLevelBar"></span>
@@ -385,24 +454,24 @@
             <section class="panel enroll-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Voiceprint</h2>
-                  <span id="enrollState">ready</span>
+                  <h2>声纹注册</h2>
+                  <span id="enrollState">就绪</span>
                 </div>
               </div>
               <div class="form-grid compact">
                 <label class="field">
-                  <span>User ID</span>
+                  <span>用户 ID</span>
                   <input id="enrollUserId" placeholder="wheatfox" />
                 </label>
                 <label class="field">
-                  <span>User Name</span>
+                  <span>用户名</span>
                   <input id="enrollUserName" placeholder="Client User" />
                 </label>
                 <label class="field">
-                  <span>Record Seconds</span>
+                  <span>录制秒数</span>
                   <input id="recordSeconds" type="number" min="2" max="30" step="1" />
                 </label>
-                <button class="button form-button" id="enrollVoice" type="button">Enroll Voice</button>
+                <button class="button form-button" id="enrollVoice" type="button">注册声纹</button>
               </div>
             </section>
             </section>
@@ -411,8 +480,8 @@
             <section class="panel audio-log-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Audio Log</h2>
-                  <span id="audioLogSummary">Audio device log.</span>
+                  <h2>音频日志</h2>
+                  <span id="audioLogSummary">音频设备日志。</span>
                 </div>
               </div>
               <pre class="audio-log" id="audioLog"></pre>
@@ -421,41 +490,71 @@
           </section>
         </section>
 
-        <section class="page work-page" data-page-panel="settings">
+        <section class="page work-page maps-page" data-page-panel="maps" aria-labelledby="mapsPageTitle" hidden>
+          <header class="maps-page-header">
+            <div>
+              <h2 id="mapsPageTitle">地图管理</h2>
+              <span>左列为各机器人拥有的地图，右列为共享地图库。把右列地图拖到左列机器人上即可把地图部署到该机器人（共享库中保留副本）。</span>
+            </div>
+            <div class="maps-page-actions">
+              <button class="button maps-refresh-button" id="mapsRefreshAll" type="button" title="刷新所有机器人地图与共享地图库">全部刷新</button>
+            </div>
+          </header>
+          <section class="maps-boards">
+            <section class="panel maps-board maps-board-robots">
+              <div class="maps-board-header">
+                <h3>机器人地图</h3>
+                <span id="robotsBoardSummary" class="maps-board-summary">所有机器人的地图，按智能体分组。</span>
+              </div>
+              <div class="maps-error" id="robotsError" role="alert" hidden></div>
+              <div class="maps-board-body" id="robotsBoard" aria-live="polite"></div>
+            </section>
+            <section class="panel maps-board maps-board-shared">
+              <div class="maps-board-header">
+                <h3>共享地图库</h3>
+                <span id="sharedBoardSummary" class="maps-board-summary">本机共享地图库，集中存放所有机器人地图。</span>
+              </div>
+              <div class="maps-error" id="sharedError" role="alert" hidden></div>
+              <div class="maps-board-body maps-board-body-shared" id="sharedBoard" aria-live="polite"></div>
+            </section>
+          </section>
+        </section>
+
+        <section class="page work-page" data-page-panel="settings" hidden>
           <section class="settings-page-grid">
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <h2>Connection</h2>
-                  <span>Saved only in this client browser.</span>
+                  <h2>连接设置</h2>
+                  <span>仅保存在当前浏览器中。</span>
                 </div>
               </div>
               <div class="form-grid">
                 <label class="field">
-                  <span>Robot Host</span>
+                  <span>机器人主机</span>
                   <input id="robotHostSettings" autocomplete="off" placeholder="100.x.y.z" />
                 </label>
                 <label class="field">
-                  <span>Atlas Port</span>
+                  <span>Atlas 端口</span>
                   <input id="atlasPortSettings" autocomplete="off" inputmode="numeric" placeholder="50051" />
                 </label>
                 <label class="field">
-                  <span>Liaison Endpoint</span>
-                  <input id="liaisonEndpoint" autocomplete="off" placeholder="Auto-discover from Atlas" />
+                  <span>Liaison 端点</span>
+                  <input id="liaisonEndpoint" autocomplete="off" placeholder="从 Atlas 自动发现" />
                 </label>
                 <label class="field">
-                  <span>User ID</span>
+                  <span>用户 ID</span>
                   <input id="settingsUserId" autocomplete="off" placeholder="voice:client" />
                 </label>
                 <label class="field">
-                  <span>Voice Record Limit (s)</span>
+                  <span>语音录制时长上限（秒）</span>
                   <input id="settingsRecordSeconds" type="number" min="2" max="60" step="1" />
                 </label>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="saveClientSettings" type="button">Save Settings</button>
+                <button class="button" id="saveClientSettings" type="button">保存设置</button>
               </div>
-              <span class="audio-route-status" id="settingsStatus">Changes are saved locally.</span>
+              <span class="audio-route-status" id="settingsStatus">更改将保存在本地。</span>
             </section>
           </section>
         </section>
@@ -466,10 +565,10 @@
       <section class="active-rtdl-modal">
         <header class="rtdl-history-modal-header">
           <div>
-            <h2 id="activeRtdlTitle">Active RTDL</h2>
-            <span id="activeRtdlModalSummary">Live plans reported by Executor</span>
+            <h2 id="activeRtdlTitle">活跃 RTDL</h2>
+            <span id="activeRtdlModalSummary">执行器上报的实时计划</span>
           </div>
-          <button class="icon-button modal-close" id="closeActiveRtdl" type="button" aria-label="Close active RTDL">×</button>
+          <button class="icon-button modal-close" id="closeActiveRtdl" type="button" aria-label="关闭活跃 RTDL">×</button>
         </header>
         <div class="active-rtdl-modal-body" id="activeRtdlList" aria-live="polite"></div>
       </section>
@@ -479,27 +578,69 @@
       <section class="rtdl-history-modal">
         <header class="rtdl-history-modal-header">
           <div>
-            <h2 id="rtdlHistoryTitle">Execution history</h2>
-            <span>Completed RTDL plans for this client session</span>
+            <h2 id="rtdlHistoryTitle">执行历史</h2>
+            <span>本客户端会话已完成的 RTDL 计划</span>
           </div>
-          <button class="icon-button modal-close" id="closeRtdlHistory" type="button" aria-label="Close execution history">×</button>
+          <button class="icon-button modal-close" id="closeRtdlHistory" type="button" aria-label="关闭执行历史">×</button>
         </header>
         <div class="rtdl-history-modal-body">
           <div class="history-plan-tree" id="rtdlHistoryTrees"></div>
           <aside class="history-execution-detail">
-            <div class="detail-title" id="historyExecutionDetailTitle">Node detail</div>
+            <div class="detail-title" id="historyExecutionDetailTitle">节点详情</div>
             <div class="detail-grid history-detail-grid">
               <div><span>Provider / ID</span><strong id="historyActiveProvider">-</strong></div>
-              <div><span>Started</span><strong id="historyActiveStarted">-</strong></div>
-              <div><span>Duration</span><strong id="historyActiveDuration">-</strong></div>
+              <div><span>开始时间</span><strong id="historyActiveStarted">-</strong></div>
+              <div><span>持续时长</span><strong id="historyActiveDuration">-</strong></div>
             </div>
-            <pre class="args history-args" id="historyActiveArgs">Select an RTDL node to inspect its arguments and result.</pre>
+            <pre class="args history-args" id="historyActiveArgs">选择 RTDL 节点以查看其参数和结果。</pre>
           </aside>
         </div>
       </section>
     </div>
 
-    <script src="/static/app.js?v=20260717a"></script>
-    <script src="/static/vitals.bundle.js?v=20260728b"></script>
+    <!-- 添加智能体模态框 -->
+    <div class="modal-backdrop" id="addAgentModal" role="dialog" aria-modal="true" aria-labelledby="addAgentTitle" hidden>
+      <section class="add-agent-modal">
+        <header class="rtdl-history-modal-header">
+          <div>
+            <h2 id="addAgentTitle">添加智能体</h2>
+            <span>注册一台机器狗到多智能体操控系统（gRPC 直连 Atlas，无需密码）</span>
+          </div>
+          <button class="icon-button modal-close" id="addAgentCancel" type="button" aria-label="关闭添加智能体">×</button>
+        </header>
+        <form class="add-agent-form" id="addAgentForm">
+          <div class="form-grid">
+            <label class="field">
+              <span>主机 / IP <em>必填</em></span>
+              <input id="newAgentHost" placeholder="10.0.0.5" autocomplete="off" required />
+            </label>
+            <label class="field">
+              <span>Atlas 端口</span>
+              <input id="newAgentPort" placeholder="50051" inputmode="numeric" autocomplete="off" value="50051" />
+            </label>
+            <label class="field">
+              <span>显示名称（可选）</span>
+              <input id="newAgentLabel" placeholder="客厅狗" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>智能体 ID（留空自动生成）</span>
+              <input id="newAgentId" placeholder="agent-客厅狗" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>用户 ID（可选，用于语音）</span>
+              <input id="newAgentUser" placeholder="voice:client" autocomplete="off" />
+            </label>
+          </div>
+          <div class="audio-device-actions">
+            <button class="button" type="submit" id="addAgentSubmit">保存</button>
+            <button class="ghost-button" type="button" id="addAgentCancel2">取消</button>
+          </div>
+          <span class="audio-route-status" id="addAgentError" role="alert"></span>
+        </form>
+      </section>
+    </div>
+
+    <script src="/static/app.js?v=20260827i"></script>
+    <script src="/static/vitals.bundle.js?v=20260827i"></script>
   </body>
 </html>

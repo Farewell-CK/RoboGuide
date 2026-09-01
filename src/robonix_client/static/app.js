@@ -1,7 +1,23 @@
 const $ = (id) => document.getElementById(id);
 const maybe = (id) => document.getElementById(id);
 
+// 多智能体注册表：每个 agent 包含 settings（从 /api/agents 拉取后回填）、
+// 状态快照（来自 /api/system）、活跃 ws 连接等。
+//
+// activeAgentId —— 当前在 "agent-detail" 页打开的智能体；侧栏点击会更新它。
+// activePage    —— "overview" | "agent-detail" | "maps"。
+// agentsPage    —— overview 4 宫格当前页（每页 4 个）。
+// wsByAgent     —— 每 agent 独立维护的 task / abort / voice / handsfree 连接，
+//                 active agent 自动建连，切换时旧的保留以便切回。
 const state = {
+  agents: {},
+  activeAgentId: null,
+  defaultAgentId: "default",
+  activePage: "overview",
+  agentsPage: 0,
+  wsByAgent: {},
+  // 历史 settings 字段保留作为 default agent 的本地缓冲，让旧 collectSettings()
+  // 调用（无 agentId）能继续工作而不至于 500。
   settings: {},
   sessionId: getSessionId(),
   sessionTitle: "",
@@ -17,7 +33,12 @@ const state = {
   executorPlansReady: false,
   executorPlanIds: new Set(),
   executorMissingPolls: new Map(),
-  activeAgentId: null,
+  // 注意：与上面的 agents 字典重名是历史包袱；这里特指聊天消息里正在
+// 累积 agent 输出的那条消息 id。
+  activeMessageAgentId: null,
+  // 各 agent 的独立数据。键为 agentId；首次访问时按需初始化。
+  // 切到另一 agent 时把 state.* 镜像到旧条目，再把新条目同步回 state。
+  agentsById: {},
   history: loadConversations(),
   busy: false,
   taskRunning: false,
@@ -54,6 +75,12 @@ const state = {
     auraFrame: 0,
     route: { micProviders: [], speakerProviders: [], micDevices: [], speakerDevices: [] },
   },
+  overviewChat: {
+    messages: [],
+    sending: false,
+    turnId: "",
+  },
+  modelName: "",
 };
 
 /// Name captured for a New session click that is still in flight.
@@ -67,10 +94,974 @@ let pendingNewSessionTitle = null;
 const DEFAULT_ATLAS_PORT = 50051;
 const AUDIO_LOG_MAX_LINES = 120;
 const AUDIO_LOG_MAX_CHARS = 260;
+const OVERVIEW_GRID_SIZE = 4;
+
+// ── 多智能体桥接层 ────────────────────────────────────────────────
+// state.agents 字典：{ [agentId]: { agentId, label, host, atlasPort, ..., settings, snapshot, status } }
+function ensureAgentEntry(agentId) {
+  if (!state.agents[agentId]) {
+    state.agents[agentId] = {
+      agentId,
+      label: agentId,
+      host: "",
+      atlasPort: DEFAULT_ATLAS_PORT,
+      userId: "",
+      settings: {},
+      snapshot: null,
+      status: "unknown",
+      sessionId: getSessionId(),
+    };
+  }
+  return state.agents[agentId];
+}
+
+function listAgents() {
+  return Object.values(state.agents).sort((a, b) => {
+    if (a.agentId === state.defaultAgentId) return -1;
+    if (b.agentId === state.defaultAgentId) return 1;
+    return String(a.label || a.agentId).localeCompare(String(b.label || b.agentId));
+  });
+}
+
+function activeAgent() {
+  if (state.activeAgentId && state.agents[state.activeAgentId]) {
+    return state.agents[state.activeAgentId];
+  }
+  const first = listAgents()[0];
+  if (first) {
+    state.activeAgentId = first.agentId;
+    return first;
+  }
+  return ensureAgentEntry(state.defaultAgentId);
+}
+
+// ── per-agent 状态隔离 ─────────────────────────────────────────────
+// state.sessionId/messages/timeline/plan/... 是当前 activeAgent 的视图。
+// 切换 agent 时调用 snapshotAgentState() 把旧 agent 的视图写回
+// state.agentsById[old]；切换后调用 restoreAgentState() 从
+// state.agentsById[new] 取回（如不存在则用空模板）。
+const AGENT_STATE_KEYS = [
+  "sessionId", "sessionTitle", "attachments", "messages", "timeline",
+  "plan", "planRecords", "batches", "nodeStates", "taskState",
+  "activeMessageAgentId", "taskRunning", "busy", "activeTurnId",
+  "activePilotSessionId", "stopInFlight",
+];
+
+function blankAgentState() {
+  return {
+    sessionId: getSessionId(),
+    sessionTitle: "",
+    attachments: [],
+    messages: [],
+    timeline: [],
+    plan: null,
+    planRecords: [],
+    batches: [],
+    nodeStates: {},
+    taskState: null,
+    activeMessageAgentId: null,
+    taskRunning: false,
+    busy: false,
+    activeTurnId: "",
+    activePilotSessionId: "",
+    stopInFlight: false,
+  };
+}
+
+function snapshotAgentState(agentId) {
+  if (!agentId) return;
+  const target = state.agentsById[agentId] || blankAgentState();
+  for (const key of AGENT_STATE_KEYS) {
+    if (key in state) target[key] = state[key];
+  }
+  state.agentsById[agentId] = target;
+}
+
+function restoreAgentState(agentId) {
+  const source = state.agentsById[agentId] || blankAgentState();
+  for (const key of AGENT_STATE_KEYS) {
+    if (key in source) state[key] = source[key];
+    else state[key] = blankAgentState()[key];
+  }
+  if (!state.sessionId) state.sessionId = getSessionId();
+  if (!state.messages) state.messages = [];
+  if (!state.timeline) state.timeline = [];
+  if (!state.planRecords) state.planRecords = [];
+  if (!state.batches) state.batches = [];
+  if (!state.nodeStates) state.nodeStates = {};
+}
+
+// 返回指定 agent（或当前激活 agent）的 settings 字典。
+// 旧调用方 collectSettings() 不传参时退回到当前激活 agent。
+function getAgentSettings(agentId) {
+  const id = agentId || state.activeAgentId || state.defaultAgentId;
+  const entry = state.agents[id];
+  if (entry && entry.settings && Object.keys(entry.settings).length) {
+    return entry.settings;
+  }
+  return state.settings || {};
+}
+
+function buildAgentAtlas(settings) {
+  const host = normalizeRobotHost(settings?.robotHost);
+  const port = normalizeAtlasPort(settings?.atlasPort);
+  return host ? `${host}:${port}` : (settings?.atlasEndpoint || "");
+}
+
+// /api/agents 返回的是公开视图（无 settings），拉详情时再 POST 拿完整 settings
+async function refreshAgents() {
+  let data = { agents: [] };
+  try {
+    const r = await fetch("/api/agents");
+    data = await r.json();
+  } catch (_) {
+    return;
+  }
+  const incoming = new Set();
+  for (const a of data.agents || []) {
+    incoming.add(a.agentId);
+    const entry = ensureAgentEntry(a.agentId);
+    entry.agentId = a.agentId;
+    entry.label = a.label || a.agentId;
+    entry.host = a.host || "";
+    entry.atlasPort = a.atlasPort || DEFAULT_ATLAS_PORT;
+    entry.userId = a.userId || "";
+    entry.lastSeen = a.lastSeen || 0;
+  }
+  // 清理已被删除的
+  for (const id of Object.keys(state.agents)) {
+    if (!incoming.has(id)) delete state.agents[id];
+  }
+  if (data.defaultAgentId) state.defaultAgentId = data.defaultAgentId;
+  // 把每个 agent 的完整 settings 拉回来（公开视图不带 settings 字段）
+  await Promise.all(listAgents().map((entry) => refreshAgentSettings(entry.agentId)));
+  // 校正 activeAgent
+  if (!state.agents[state.activeAgentId]) {
+    const first = listAgents()[0];
+    state.activeAgentId = first ? first.agentId : null;
+  }
+  renderNav();
+  renderOverviewGrid();
+  // 同步顶栏 agent 切换下拉
+  syncAgentSelector();
+}
+
+async function refreshAgentSettings(agentId) {
+  // 通过 POST /api/agents（空 body）返回 agent + settings 来回填。
+  // 我们额外加一个临时端点不太经济，因此复用 upsert 行为：先 GET
+  // /api/agents，再用同一个 id POST 一份来自 registry 视图的 settings；
+  // 实际中通过后端 GET /api/agents 返回的 host 拼 settings 即可。
+  const entry = state.agents[agentId];
+  if (!entry) return;
+  // 这里直接基于公开视图构造 settings（host/atlasPort/userId），
+  // 用户编辑过的本地 override 仍存在 entry.settings 上时优先用。
+  const fallback = {
+    robotHost: entry.host,
+    atlasPort: entry.atlasPort,
+    userId: entry.userId,
+    atlasEndpoint: buildAgentAtlas({ robotHost: entry.host, atlasPort: entry.atlasPort }),
+  };
+  entry.settings = { ...fallback, ...(entry.settings || {}) };
+}
+
+async function upsertAgent({ agentId, label, settings }) {
+  const body = { agentId: agentId || "", label: label || "", settings: settings || {} };
+  const r = await fetch("/api/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!data.ok) throw new Error(data.error || "agent upsert failed");
+  await refreshAgents();
+  return data.agent;
+}
+
+async function renameAgentApi(agentId, label) {
+  const r = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  const data = await r.json();
+  if (!data.ok) throw new Error(data.error || "rename failed");
+  return data.agent;
+}
+
+async function deleteAgentApi(agentId) {
+  const r = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+  const data = await r.json();
+  if (!data.ok) throw new Error(data.error || "delete failed");
+  await refreshAgents();
+}
+
+async function refreshModel() {
+  try {
+    const r = await fetch("/api/model");
+    const data = await r.json();
+    state.modelName = data.model || "";
+    setText("modelLabel", state.modelName ? `模型: ${state.modelName}` : "模型: 未设置");
+  } catch (_) {
+    setText("modelLabel", "模型: --");
+  }
+}
 
 function getSessionId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// 轮询所有 agent 的 /api/system，更新 overview 状态卡和侧栏的 status 点。
+// 不阻塞：每个 agent 单独一个 fetch，错误时仅标记为 offline。
+async function refreshAllAgentsSnapshot() {
+  const agents = listAgents();
+  if (agents.length === 0) return;
+  await Promise.all(agents.map(async (entry) => {
+    if (!entry.host) {
+      entry.snapshot = null;
+      entry.status = "unknown";
+      return;
+    }
+    const atlas = buildAgentAtlas({ robotHost: entry.host, atlasPort: entry.atlasPort });
+    if (!atlas) {
+      entry.snapshot = null;
+      entry.status = "unknown";
+      return;
+    }
+    try {
+      const data = await fetch(`/api/system?atlas=${encodeURIComponent(atlas)}`).then((r) => r.json());
+      entry.snapshot = data;
+      entry.status = data.error ? "offline" : (data.summary?.state || "online");
+    } catch (_) {
+      entry.snapshot = { error: "snapshot fetch failed" };
+      entry.status = "offline";
+    }
+    // Fetch live signals (camera/map URL, pose, battery) for the card.
+    // Failures are silent — the card just keeps its placeholders.
+    try {
+      const live = await fetch(`/api/agents/${encodeURIComponent(entry.agentId)}/live`).then((r) => r.json());
+      if (live && live.ok) {
+        entry.snapshot = {
+          ...(entry.snapshot || {}),
+          cameraUrl: live.cameraUrl,
+          mapUrl: live.mapUrl,
+          mapName: live.mapName,
+          pose: live.pose,
+          battery: live.battery,
+        };
+      }
+    } catch (_) { /* placeholder stays */ }
+  }));
+  renderNav();
+  renderOverviewGrid();
+  renderAgentDetail();
+}
+
+
+// ── 侧栏 + overview 渲染 ─────────────────────────────────────────
+function renderNav() {
+  const list = maybe("navAgents");
+  if (!list) return;
+  clear(list);
+  const agents = listAgents();
+  if (agents.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "nav-empty";
+    empty.textContent = "暂无智能体，点击下方添加";
+    list.appendChild(empty);
+    return;
+  }
+  for (const entry of agents) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "nav-agent-item";
+    btn.dataset.agentId = entry.agentId;
+    if (entry.agentId === state.activeAgentId) btn.classList.add("active");
+    const dot = document.createElement("span");
+    dot.className = `nav-agent-dot status-${entry.status || "unknown"}`;
+    const name = document.createElement("span");
+    name.className = "nav-agent-name";
+    name.textContent = entry.label || entry.agentId;
+    const idPill = document.createElement("span");
+    idPill.className = "nav-agent-id-pill";
+    idPill.textContent = entry.agentId;
+    idPill.title = `智能体 ID: ${entry.agentId}`;
+    const sub = document.createElement("span");
+    sub.className = "nav-agent-host";
+    sub.textContent = entry.host ? `${entry.host}${entry.atlasPort ? `:${entry.atlasPort}` : ""}` : "(未配置主机)";
+    btn.append(dot, name, idPill, sub);
+    btn.addEventListener("click", () => selectAgent(entry.agentId));
+    list.appendChild(btn);
+  }
+}
+
+function syncAgentSelector() {
+  const sel = maybe("activeAgentSelect");
+  if (!sel) return;
+  const agents = listAgents();
+  const previous = sel.value;
+  sel.replaceChildren();
+  for (const entry of agents) {
+    const opt = document.createElement("option");
+    opt.value = entry.agentId;
+    opt.textContent = entry.label || entry.agentId;
+    sel.appendChild(opt);
+  }
+  if (state.activeAgentId && agents.some((a) => a.agentId === state.activeAgentId)) {
+    sel.value = state.activeAgentId;
+  } else if (previous && agents.some((a) => a.agentId === previous)) {
+    sel.value = previous;
+  }
+  sel.onchange = () => selectAgent(sel.value);
+}
+
+function selectAgent(agentId) {
+  if (!state.agents[agentId]) return;
+  if (state.activeAgentId === agentId) {
+    // 同一个 agent：仅刷新 UI
+    renderNav();
+    syncAgentSelector();
+    syncAgentLabel();
+    activatePage("agent-detail");
+    renderAgentDetail();
+    return;
+  }
+  // 把当前 activeAgent 的对话/计划/任务状态写回独立存储
+  snapshotAgentState(state.activeAgentId);
+  // 切到新 agent：恢复它的视图（如未存过则取空模板）
+  const previous = state.activeAgentId;
+  state.activeAgentId = agentId;
+  restoreAgentState(agentId);
+  renderNav();
+  syncAgentSelector();
+  syncAgentLabel();
+  // 切到 agent-detail（每个智能体的操控界面）
+  activatePage("agent-detail");
+  renderAgentDetail();
+  // 切换后让相关视图全部重渲染（聊天/计划/时间线）
+  renderMessages();
+  renderTimeline();
+  renderPlan();
+  renderSceneAssets();
+  renderSessionChip();
+  // 切到不同 agent 时把顶栏的"连接状态"等也刷一遍
+  refreshSystem();
+  refreshActivePlans();
+  // 记录切换到时间线
+  if (previous) {
+    addTimeline("status", `切换到智能体 ${agentId}`);
+  }
+}
+
+function syncAgentLabel() {
+  const label = maybe("activeAgentLabel");
+  if (!label) return;
+  const agent = state.agents[state.activeAgentId];
+  label.textContent = agent ? (agent.label || agent.agentId) : "未选择智能体";
+}
+
+// ── agent-detail 页面渲染 ───────────────────────────────────────────
+// 智能体详情页是一个"该智能体的操控界面"的中转站：标题区显示当前智能体
+// 身份和状态，tab 栏让用户跳转到该智能体的对话/状态监控/音频/地图/连接设置。
+// 这里只渲染头部和 tab 高亮；具体内容由原 dashboard/vitals/audio/maps/settings
+// 页面承担，通过 selectAgentTab() 切到对应 page 并保留 activeAgentId。
+function renderAgentDetail() {
+  const agent = state.agents[state.activeAgentId];
+  const titleEl = maybe("agentDetailTitle");
+  const idPill = maybe("agentDetailIdPill");
+  const statusEl = maybe("agentDetailStatus");
+  const subEl = maybe("agentDetailSub");
+  const empty = maybe("agentDetailEmpty");
+  const body = maybe("agentDetailBody");
+  const renameBtn = maybe("agentDetailRename");
+  const connectBtn = maybe("agentDetailConnect");
+  const removeBtn = maybe("agentDetailRemove");
+  if (!titleEl) return;
+  if (!agent) {
+    titleEl.textContent = "未选择智能体";
+    if (idPill) idPill.textContent = "id: --";
+    if (statusEl) {
+      statusEl.textContent = "unknown";
+      statusEl.className = "health-label unknown";
+    }
+    if (subEl) subEl.textContent = "请先在左侧选择或添加一个智能体";
+    if (empty) empty.hidden = false;
+    if (renameBtn) renameBtn.disabled = true;
+    if (connectBtn) connectBtn.disabled = true;
+    if (removeBtn) removeBtn.disabled = true;
+    if (body) body.replaceChildren(empty);
+    return;
+  }
+  titleEl.textContent = agent.label || agent.agentId;
+  if (idPill) idPill.textContent = `id: ${agent.agentId}`;
+  const summary = agent.snapshot?.summary;
+  const stateLabel = summary?.state || agent.status || "unknown";
+  if (statusEl) {
+    statusEl.textContent = stateLabel;
+    statusEl.className = `health-label ${statusKey(stateLabel)}`;
+  }
+  if (subEl) {
+    const atlas = agent.host ? `${agent.host}:${agent.atlasPort || DEFAULT_ATLAS_PORT}` : "(未配置主机)";
+    const lastSeen = agent.lastSeen ? ` · 最近活跃 ${new Date(agent.lastSeen * 1000).toLocaleTimeString()}` : "";
+    subEl.textContent = `${atlas}${lastSeen}`;
+  }
+  if (empty) empty.hidden = true;
+  if (renameBtn) renameBtn.disabled = agent.agentId === state.defaultAgentId;
+  if (renameBtn) renameBtn.title = agent.agentId === state.defaultAgentId ? "default 智能体的名称始终等于主机 IP，无法重命名" : "修改该智能体的显示名称";
+  if (removeBtn) removeBtn.disabled = agent.agentId === state.defaultAgentId;
+  if (removeBtn) removeBtn.title = agent.agentId === state.defaultAgentId ? "default 智能体不能移除，请清空其设置" : "从多智能体系统中移除该智能体";
+  if (connectBtn) connectBtn.disabled = false;
+  // 默认 tab = 对话（如果还没选过）
+  if (!state.activeAgentTab) state.activeAgentTab = "chat";
+  highlightAgentTab(state.activeAgentTab);
+  renderAgentDetailBody();
+}
+
+function selectAgentTab(name) {
+  state.activeAgentTab = name;
+  highlightAgentTab(name);
+  // 把 tab 切换直接跳到对应的 page，方便用户继续操作
+  const tabToPage = {
+    chat: "dashboard",
+    vitals: "vitals",
+    audio: "audio",
+    maps: "maps",
+    settings: "settings",
+  };
+  const target = tabToPage[name] || "dashboard";
+  activatePage(target);
+}
+
+function highlightAgentTab(name) {
+  document.querySelectorAll("[data-agent-tab]").forEach((button) => {
+    const active = button.dataset.agentTab === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function renderAgentDetailBody() {
+  const body = maybe("agentDetailBody");
+  const empty = maybe("agentDetailEmpty");
+  if (!body) return;
+  const agent = state.agents[state.activeAgentId];
+  if (!agent) {
+    if (empty) body.replaceChildren(empty);
+    return;
+  }
+  body.replaceChildren();
+  const summary = agent.snapshot?.summary;
+  const contracts = agent.snapshot?.requiredContracts || [];
+  const providers = agent.snapshot?.providers || [];
+  const grid = document.createElement("div");
+  grid.className = "agent-detail-summary";
+
+  // 身份卡片
+  const identity = document.createElement("section");
+  identity.className = "agent-detail-card";
+  identity.innerHTML = `
+    <header>身份</header>
+    <div class="agent-detail-card-row"><span>智能体 ID</span><strong>${escapeHtml(agent.agentId)}</strong></div>
+    <div class="agent-detail-card-row"><span>显示名称</span><strong>${escapeHtml(agent.label || agent.agentId)}</strong></div>
+    <div class="agent-detail-card-row"><span>主机 / IP</span><strong>${escapeHtml(agent.host || "(未配置)")}</strong></div>
+    <div class="agent-detail-card-row"><span>Atlas 端口</span><strong>${agent.atlasPort || DEFAULT_ATLAS_PORT}</strong></div>
+    <div class="agent-detail-card-row"><span>用户 ID</span><strong>${escapeHtml(agent.userId || "(默认)")}</strong></div>
+  `;
+  grid.appendChild(identity);
+
+  // 连接快照
+  const conn = document.createElement("section");
+  conn.className = "agent-detail-card";
+  const stateLabel = summary?.state || (agent.snapshot?.error ? "offline" : "unknown");
+  const stateKey = statusKey(stateLabel);
+  conn.innerHTML = `
+    <header>连接快照</header>
+    <div class="agent-detail-card-row"><span>运行状态</span><strong><span class="health-label ${stateKey}">${escapeHtml(stateLabel)}</span></strong></div>
+    <div class="agent-detail-card-row"><span>活跃任务</span><strong>${summary?.active ?? 0}</strong></div>
+    <div class="agent-detail-card-row"><span>错误数</span><strong>${summary?.errors ?? 0}</strong></div>
+    <div class="agent-detail-card-row"><span>Provider 数量</span><strong>${providers.length}</strong></div>
+    <div class="agent-detail-card-row"><span>必选契约</span><strong>${contracts.length}</strong></div>
+    ${agent.snapshot?.error ? `<div class="agent-detail-card-row error"><span>错误</span><strong>${escapeHtml(String(agent.snapshot.error).slice(0, 200))}</strong></div>` : ""}
+  `;
+  grid.appendChild(conn);
+
+  // 当前对话信息
+  const chat = document.createElement("section");
+  chat.className = "agent-detail-card";
+  const lastUser = (state.messages || []).slice().reverse().find((m) => m.role === "user");
+  const lastAgent = (state.messages || []).slice().reverse().find((m) => m.role === "agent");
+  const lastTask = state.taskState || null;
+  chat.innerHTML = `
+    <header>当前会话</header>
+    <div class="agent-detail-card-row"><span>会话名</span><strong>${escapeHtml(state.sessionTitle || "未命名会话")}</strong></div>
+    <div class="agent-detail-card-row"><span>会话 ID</span><strong>${escapeHtml(String(state.sessionId || "").slice(0, 8))}</strong></div>
+    <div class="agent-detail-card-row"><span>消息数</span><strong>${(state.messages || []).length}</strong></div>
+    <div class="agent-detail-card-row"><span>最近用户消息</span><strong>${lastUser ? escapeHtml(truncate(lastUser.text || "(空)", 60)) : "(无)"}</strong></div>
+    <div class="agent-detail-card-row"><span>最近智能体回复</span><strong>${lastAgent ? escapeHtml(truncate(lastAgent.text || "(空)", 60)) : "(无)"}</strong></div>
+    <div class="agent-detail-card-row"><span>任务状态</span><strong>${escapeHtml(lastTask?.status || (state.taskRunning ? "运行中" : "空闲"))}</strong></div>
+  `;
+  grid.appendChild(chat);
+
+  body.appendChild(grid);
+}
+
+function truncate(text, max) {
+  const value = String(text || "");
+  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function escapeHtml(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+async function renameActiveAgent() {
+  const agent = state.agents[state.activeAgentId];
+  if (!agent || agent.agentId === state.defaultAgentId) return;
+  const next = window.prompt("修改智能体显示名称", agent.label || agent.agentId);
+  if (next === null) return;
+  const cleaned = next.trim();
+  if (!cleaned) return;
+  try {
+    const updated = await renameAgentApi(agent.agentId, cleaned);
+    Object.assign(agent, { label: updated.label });
+    renderNav();
+    renderOverviewGrid();
+    renderAgentDetail();
+    syncAgentSelector();
+    syncAgentLabel();
+  } catch (err) {
+    addStatusLine(`重命名失败: ${err.message || err}`);
+  }
+}
+
+async function removeActiveAgent() {
+  const agent = state.agents[state.activeAgentId];
+  if (!agent || agent.agentId === state.defaultAgentId) return;
+  if (!window.confirm(`确认移除智能体「${agent.label || agent.agentId}」？该操作不可撤销。`)) return;
+  try {
+    await deleteAgentApi(agent.agentId);
+    addStatusLine(`已移除智能体 ${agent.agentId}`);
+    // 删除后从 agentsById 清理
+    delete state.agentsById[agent.agentId];
+    if (state.wsByAgent[agent.agentId]) {
+      try { state.wsByAgent[agent.agentId].close?.(); } catch (_) { /* noop */ }
+      delete state.wsByAgent[agent.agentId];
+    }
+    // 退回 overview
+    activatePage("overview");
+  } catch (err) {
+    addStatusLine(`移除失败: ${err.message || err}`);
+  }
+}
+
+function connectActiveAgent() {
+  refreshSystem();
+  addStatusLine(`正在探测 ${state.activeAgentId || "(未选择)"} 的 Atlas ...`);
+}
+
+function renderOverviewGrid() {
+  const grid = maybe("overviewGrid");
+  if (!grid) return;
+  clear(grid);
+  const all = listAgents();
+  if (all.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "overview-grid-empty";
+    empty.textContent = "请先在左侧添加至少一个智能体";
+    grid.appendChild(empty);
+    const pager = maybe("overviewPager");
+    if (pager) pager.hidden = true;
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(all.length / OVERVIEW_GRID_SIZE));
+  if (state.agentsPage >= totalPages) state.agentsPage = totalPages - 1;
+  if (state.agentsPage < 0) state.agentsPage = 0;
+  const start = state.agentsPage * OVERVIEW_GRID_SIZE;
+  const page = all.slice(start, start + OVERVIEW_GRID_SIZE);
+  for (const entry of page) grid.appendChild(buildOverviewCard(entry));
+  const pager = maybe("overviewPager");
+  if (pager) {
+    pager.hidden = totalPages <= 1;
+    const info = maybe("overviewPageInfo");
+    if (info) info.textContent = `第 ${state.agentsPage + 1} / ${totalPages} 页`;
+  }
+  const prev = maybe("overviewPrev");
+  const next = maybe("overviewNext");
+  if (prev) prev.disabled = state.agentsPage <= 0;
+  if (next) next.disabled = state.agentsPage >= totalPages - 1;
+}
+
+function buildOverviewCard(entry) {
+  const card = document.createElement("div");
+  card.className = `overview-card status-${entry.status || "unknown"}`;
+  card.addEventListener("click", (event) => {
+    if (event.target.closest(".overview-card-close")) return;
+    selectAgent(entry.agentId);
+  });
+
+  // ── 头部：状态点 + 名称 + ID + 关闭按钮 ─────────────────────────
+  const head = document.createElement("header");
+  const dot = document.createElement("span");
+  dot.className = `nav-agent-dot status-${entry.status || "unknown"}`;
+  const name = document.createElement("strong");
+  name.textContent = entry.label || entry.agentId;
+  head.append(dot, name);
+  const idPill = document.createElement("span");
+  idPill.className = "overview-card-id";
+  idPill.textContent = entry.agentId;
+  head.append(idPill);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "overview-card-close";
+  closeBtn.title = "关闭该智能体连接";
+  closeBtn.setAttribute("aria-label", `关闭智能体 ${entry.agentId} 的连接`);
+  closeBtn.textContent = "关闭";
+  closeBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeAgentConnection(entry.agentId);
+  });
+  head.appendChild(closeBtn);
+
+  // ── 上半部分：相机画面 ────────────────────────────────────────
+  const camera = buildCameraSection(entry);
+
+  // ── 下半部分：左地图 + 右状态面板 ─────────────────────────────
+  const bottom = document.createElement("div");
+  bottom.className = "overview-card-bottom";
+  const mapSection = buildMapSection(entry);
+  const statusPanel = buildStatusPanel(entry);
+  bottom.append(mapSection, statusPanel);
+
+  card.append(head, camera, bottom);
+  return card;
+}
+
+// ── 相机画面 ─────────────────────────────────────────────────────
+function buildCameraSection(entry) {
+  const wrap = document.createElement("div");
+  wrap.className = "overview-card-camera";
+  const url = entry.snapshot?.cameraUrl;
+  if (url) {
+    const img = document.createElement("img");
+    img.alt = `${entry.agentId} 相机画面`;
+    img.loading = "lazy";
+    // 加时间戳避免浏览器缓存旧帧
+    img.src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+    img.addEventListener("error", () => {
+      wrap.replaceChildren();
+      wrap.appendChild(buildCameraPlaceholder(entry, "无法加载相机画面"));
+    });
+    wrap.appendChild(img);
+  } else {
+    wrap.appendChild(buildCameraPlaceholder(entry, "未提供相机画面"));
+  }
+  const overlay = document.createElement("span");
+  overlay.className = "overview-card-camera-overlay";
+  overlay.textContent = `${entry.host || entry.agentId} · 相机`;
+  wrap.appendChild(overlay);
+  return wrap;
+}
+
+function buildCameraPlaceholder(entry, text) {
+  const ph = document.createElement("div");
+  ph.className = "overview-card-camera-placeholder";
+  const icon = document.createElement("span");
+  icon.className = "icon";
+  icon.textContent = "📷";
+  const label = document.createElement("span");
+  label.textContent = text;
+  ph.append(icon, label);
+  return ph;
+}
+
+// ── 地图与位置 ──────────────────────────────────────────────────
+function buildMapSection(entry) {
+  const wrap = document.createElement("div");
+  wrap.className = "overview-card-map";
+  const mapUrl = entry.snapshot?.mapUrl;
+  const pose = entry.snapshot?.pose;
+  if (mapUrl) {
+    const img = document.createElement("img");
+    img.alt = `${entry.agentId} 当前地图`;
+    img.loading = "lazy";
+    img.src = mapUrl + (mapUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
+    img.addEventListener("error", () => {
+      wrap.replaceChildren();
+      wrap.appendChild(buildMapPlaceholder(entry));
+    });
+    wrap.appendChild(img);
+  } else {
+    wrap.appendChild(buildMapPlaceholder(entry));
+  }
+  // 位置标记
+  if (pose && Number.isFinite(pose.x) && Number.isFinite(pose.y)) {
+    const marker = document.createElement("div");
+    marker.className = "overview-card-pose-marker";
+    const theta = Number.isFinite(pose.theta) ? pose.theta : 0;
+    marker.style.left = `${(pose.x * 100).toFixed(2)}%`;
+    marker.style.top = `${((1 - pose.y) * 100).toFixed(2)}%`;
+    marker.innerHTML =
+      `<svg viewBox="0 0 14 14">` +
+      `<polygon class="arrow" points="7,1 12,12 7,9 2,12" transform="rotate(${(theta * 180 / Math.PI).toFixed(1)} 7 7)"/>` +
+      `</svg>`;
+    if (pose.stale) marker.classList.add("is-stale");
+    wrap.appendChild(marker);
+  }
+  const overlay = document.createElement("span");
+  overlay.className = "overview-card-map-overlay";
+  const mapName = entry.snapshot?.mapName || "未加载地图";
+  overlay.textContent = mapName;
+  wrap.appendChild(overlay);
+  return wrap;
+}
+
+function buildMapPlaceholder(entry) {
+  const ph = document.createElement("div");
+  ph.className = "overview-card-map-placeholder";
+  const icon = document.createElement("span");
+  icon.className = "icon";
+  icon.textContent = "🗺";
+  const label = document.createElement("span");
+  label.textContent = "暂无地图";
+  ph.append(icon, label);
+  return ph;
+}
+
+// ── 状态面板：状态 / 错误 / 电池 / 关闭 ──────────────────────────
+function buildStatusPanel(entry) {
+  const panel = document.createElement("div");
+  panel.className = "overview-card-status";
+  const summary = entry.snapshot?.summary || {};
+  const battery = entry.snapshot?.battery;
+
+  // 状态行
+  const stateRow = document.createElement("div");
+  stateRow.className = "overview-card-status-row";
+  const stateLabel = document.createElement("span");
+  stateLabel.className = "overview-card-status-label";
+  stateLabel.textContent = "状态";
+  const stateValue = document.createElement("span");
+  stateValue.className = "overview-card-status-value";
+  const stateText = entry.status === "online"
+    ? (summary.state || "运行中")
+    : entry.status === "offline"
+      ? "离线"
+      : "未连接";
+  stateValue.textContent = stateText;
+  if (entry.status === "online") stateValue.classList.add("good");
+  else if (entry.status === "offline") stateValue.classList.add("bad");
+  stateRow.append(stateLabel, stateValue);
+  panel.appendChild(stateRow);
+
+  // 任务行
+  const taskRow = document.createElement("div");
+  taskRow.className = "overview-card-status-row";
+  const taskLabel = document.createElement("span");
+  taskLabel.className = "overview-card-status-label";
+  taskLabel.textContent = "任务";
+  const taskValue = document.createElement("span");
+  taskValue.className = "overview-card-status-value";
+  if (summary.active) {
+    taskValue.textContent = `运行 ${summary.active} · 错误 ${summary.errors || 0}`;
+    taskValue.classList.add("good");
+  } else {
+    taskValue.textContent = "空闲";
+  }
+  taskRow.append(taskLabel, taskValue);
+  panel.appendChild(taskRow);
+
+  // 电池行
+  const batteryRow = document.createElement("div");
+  batteryRow.className = "overview-card-status-row";
+  const batLabel = document.createElement("span");
+  batLabel.className = "overview-card-status-label";
+  batLabel.textContent = "电池";
+  const batWrap = document.createElement("span");
+  batWrap.className = "overview-card-battery";
+  if (battery && Number.isFinite(battery.percent)) {
+    const bar = document.createElement("span");
+    bar.className = "overview-card-battery-bar";
+    const fill = document.createElement("span");
+    fill.className = "overview-card-battery-fill";
+    const pct = Math.max(0, Math.min(100, battery.percent));
+    fill.style.transform = `scaleX(${(pct / 100).toFixed(3)})`;
+    if (pct < 15) fill.classList.add("critical");
+    else if (pct < 35) fill.classList.add("low");
+    bar.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "overview-card-status-value";
+    value.textContent = `${pct.toFixed(0)}%`;
+    if (pct < 15) value.classList.add("bad");
+    else if (pct < 35) value.classList.add("warn");
+    batWrap.append(bar, value);
+  } else {
+    const value = document.createElement("span");
+    value.className = "overview-card-status-value";
+    value.textContent = "--";
+    const bar = document.createElement("span");
+    bar.className = "overview-card-battery-bar";
+    const fill = document.createElement("span");
+    fill.className = "overview-card-battery-fill unknown";
+    fill.style.transform = `scaleX(0)`;
+    bar.appendChild(fill);
+    batWrap.append(bar, value);
+  }
+  batteryRow.append(batLabel, batWrap);
+  panel.appendChild(batteryRow);
+
+  // 错误日志
+  const errBox = document.createElement("div");
+  errBox.className = "overview-card-status-errors";
+  const errors = collectRecentErrors(entry);
+  if (errors.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "empty";
+    empty.textContent = "无错误";
+    errBox.appendChild(empty);
+  } else {
+    for (const line of errors) {
+      const row = document.createElement("span");
+      row.textContent = line;
+      errBox.appendChild(row);
+    }
+  }
+  panel.appendChild(errBox);
+  return panel;
+}
+
+function collectRecentErrors(entry) {
+  const out = [];
+  const snap = entry.snapshot;
+  if (!snap) return out;
+  if (snap.error) out.push(`❌ ${snap.error}`);
+  const providers = Array.isArray(snap.providers) ? snap.providers : [];
+  for (const p of providers) {
+    if (p && p.state === "ERROR") {
+      out.push(`· ${p.id || p.kind || "?"} (${p.stateDetail || "ERROR"})`);
+    }
+  }
+  return out.slice(0, 4);
+}
+
+// 断开指定智能体的连接：关闭其活动 WebSocket，
+// 把状态置为 offline，并刷新 overview / sidebar 状态显示。
+// 如果是当前激活的智能体，还会清理该智能体正在进行的交互连接。
+function closeAgentConnection(agentId) {
+  if (!agentId) return;
+  // 关闭 per-agent ws 池
+  const ws = state.wsByAgent?.[agentId];
+  if (ws) {
+    try { ws.close?.(); } catch (_) { /* noop */ }
+    try { delete state.wsByAgent[agentId]; } catch (_) { /* noop */ }
+  }
+  // 若是当前激活的智能体，则把进行中的交互 socket 也一并关闭
+  // （task / abort / voice 等是按 activeAgent 工作的）。
+  if (state.activeAgentId === agentId) {
+    for (const socket of [...state.interactionSockets]) {
+      try { socket.close?.(); } catch (_) { /* noop */ }
+    }
+    state.interactionSockets.clear();
+    state.activeStreams = 0;
+    state.busy = false;
+    state.taskRunning = false;
+    setBusy(false);
+  }
+  const entry = state.agents[agentId];
+  if (entry) {
+    entry.status = "offline";
+    entry.snapshot = { error: "connection closed by user", summary: { state: "offline" } };
+  }
+  addStatusLine(`已关闭智能体 ${agentId} 的连接`);
+  renderNav();
+  renderOverviewGrid();
+  if (state.activeAgentId === agentId) {
+    renderAgentDetail();
+    syncAgentLabel();
+  }
+}
+
+function overviewPrevPage() {
+  if (state.agentsPage > 0) {
+    state.agentsPage -= 1;
+    renderOverviewGrid();
+  }
+}
+
+function overviewNextPage() {
+  const total = Math.max(1, Math.ceil(listAgents().length / OVERVIEW_GRID_SIZE));
+  if (state.agentsPage < total - 1) {
+    state.agentsPage += 1;
+    renderOverviewGrid();
+  }
+}
+
+// ── 添加智能体模态框 ─────────────────────────────────────────────
+function openAddAgentModal() {
+  const modal = maybe("addAgentModal");
+  if (!modal) return;
+  modal.hidden = false;
+  const idEl = maybe("newAgentId");
+  const labelEl = maybe("newAgentLabel");
+  const hostEl = maybe("newAgentHost");
+  const portEl = maybe("newAgentPort");
+  const userEl = maybe("newAgentUser");
+  if (idEl) idEl.value = "";
+  if (labelEl) labelEl.value = "";
+  if (hostEl) hostEl.value = "";
+  if (portEl) portEl.value = String(DEFAULT_ATLAS_PORT);
+  if (userEl) userEl.value = "";
+  setText("addAgentError", "");
+  idEl?.focus();
+}
+
+function closeAddAgentModal() {
+  const modal = maybe("addAgentModal");
+  if (modal) modal.hidden = true;
+}
+
+async function submitAddAgent(event) {
+  event?.preventDefault?.();
+  const idEl = maybe("newAgentId");
+  const labelEl = maybe("newAgentLabel");
+  const hostEl = maybe("newAgentHost");
+  const portEl = maybe("newAgentPort");
+  const userEl = maybe("newAgentUser");
+  const agentId = (idEl?.value || "").trim();
+  const label = (labelEl?.value || "").trim();
+  const host = (hostEl?.value || "").trim();
+  const port = normalizeAtlasPort(portEl?.value || DEFAULT_ATLAS_PORT);
+  const userId = (userEl?.value || "").trim();
+  if (!host) {
+    setText("addAgentError", "请填写机器人 IP 或主机名");
+    return;
+  }
+  try {
+    const agent = await upsertAgent({
+      agentId,
+      label: label || host,
+      settings: { robotHost: host, atlasPort: port, userId },
+    });
+    closeAddAgentModal();
+    state.activeAgentId = agent.agentId;
+    selectAgent(agent.agentId);
+  } catch (err) {
+    setText("addAgentError", `添加失败: ${err.message || err}`);
+  }
+}
+
+function buildAgentSettingsFromEntry(entry) {
+  return {
+    robotHost: entry.host || "",
+    atlasPort: entry.atlasPort || DEFAULT_ATLAS_PORT,
+    userId: entry.userId || "",
+    atlasEndpoint: buildAgentAtlas({ robotHost: entry.host, atlasPort: entry.atlasPort }),
+  };
 }
 
 function wsUrl(path) {
@@ -84,19 +1075,29 @@ function audioServerWsUrl(path) {
 }
 
 function saveSettings() {
-  localStorage.setItem("robonix.settings", JSON.stringify(collectSettings()));
+  // 多 agent 模式下 settings 持久化由后端 /api/agents 完成，
+  // 不再写 localStorage。此函数保留作为 no-op 兼容旧调用方。
+  try {
+    const snapshot = {};
+    for (const [id, entry] of Object.entries(state.agents)) {
+      snapshot[id] = entry.settings;
+    }
+    localStorage.setItem("robonix.agentSettings", JSON.stringify(snapshot));
+  } catch (_) {
+    // localStorage 满了也只是丢掉本地缓冲，后端还有持久化。
+  }
 }
 
 async function persistSettings() {
-  const settings = collectSettings();
-  saveSettings();
-  const result = await fetch("/api/settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ settings }),
-  }).then((response) => response.json()).catch((error) => ({ ok: false, error: String(error) }));
-  if (!result.ok) throw new Error(result.error || "settings write failed");
-  return result;
+  // 兼容旧调用方：把 active agent 的 settings 同步到后端 /api/agents。
+  const agent = activeAgent();
+  if (!agent) return { ok: false, error: "no active agent" };
+  const result = await upsertAgent({
+    agentId: agent.agentId,
+    label: agent.label,
+    settings: agent.settings,
+  });
+  return { ok: true, agent: result };
 }
 
 function normalizeRobotHost(raw) {
@@ -234,14 +1235,33 @@ function restoreLastSession() {
 }
 
 async function init() {
+  // 先拉取 agents 注册表。state.agents 在此之后才被填充。
+  await refreshAgents();
+  await refreshModel();
   const [defaults, persistedResult] = await Promise.all([
     fetch("/api/defaults").then((r) => r.json()).catch(() => ({})),
     fetch("/api/settings").then((r) => r.json()).catch(() => ({ settings: {} })),
   ]);
-  const stored = loadStoredSettings();
+  const stored = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("robonix.agentSettings") || "{}");
+    } catch (_) {
+      return {};
+    }
+  })();
+  // 兼容旧的 robonix.settings（单 agent）到 default agent 上
+  let legacyStored = {};
+  try {
+    legacyStored = JSON.parse(localStorage.getItem("robonix.settings") || "{}");
+  } catch (_) {
+    legacyStored = {};
+  }
   const persisted = persistedResult.ok ? persistedResult.settings || {} : {};
+  // CLI/environment values are launch defaults, not immutable policy. Stored
+  // browser settings must win so changing robot host or audio routing survives
+  // a refresh even when the client was initially launched with --robot-host.
   const atlas = parseAtlasEndpoint(defaults.atlasEndpoint || "");
-  state.settings = {
+  const baseSettings = {
     robotHost: defaults.robotHost || atlas.host || "",
     atlasPort: defaults.atlasPort || atlas.port || DEFAULT_ATLAS_PORT,
     liaisonEndpoint: "",
@@ -257,12 +1277,30 @@ async function init() {
     enrollUserId: "",
     enrollUserName: "",
     ...defaults,
-    ...stored,
-    ...persisted,
   };
-  // CLI/environment values are launch defaults, not immutable policy. Stored
-  // browser settings must win so changing robot host or audio routing survives
-  // a refresh even when the client was initially launched with --robot-host.
+  // 把持久化 settings 合并到 default agent；其它 agent 用各自 registry 视图。
+  const defaultAgent = state.agents[state.defaultAgentId];
+  if (defaultAgent) {
+    defaultAgent.settings = {
+      ...defaultAgent.settings,
+      ...baseSettings,
+      ...legacyStored,
+      ...persisted,
+      ...(stored[state.defaultAgentId] || {}),
+    };
+    defaultAgent.atlasPort = defaultAgent.settings.atlasPort || DEFAULT_ATLAS_PORT;
+    defaultAgent.host = defaultAgent.settings.robotHost || defaultAgent.host;
+  }
+  // 其它 agent：用本地缓存覆盖
+  for (const [id, cached] of Object.entries(stored)) {
+    if (id === state.defaultAgentId) continue;
+    const entry = state.agents[id];
+    if (entry && cached && typeof cached === "object") {
+      entry.settings = { ...entry.settings, ...cached };
+    }
+  }
+  // state.settings 作为兼容旧调用方的回退
+  state.settings = defaultAgent ? defaultAgent.settings : baseSettings;
   // An explicitly launched session id wins; otherwise come back to whatever
   // conversation was open before the reload instead of a fresh empty one.
   if (defaults.sessionId) state.sessionId = defaults.sessionId;
@@ -277,6 +1315,9 @@ async function init() {
   renderTimeline();
   renderPlan();
   renderSceneAssets();
+  renderNav();
+  renderOverviewGrid();
+  activatePage("overview");
   refreshSystem();
   refreshActivePlans();
   refreshAudioRoute();
@@ -288,6 +1329,10 @@ async function init() {
   setInterval(refreshActivePlans, 2000);
   setInterval(refreshHandsfree, 2500);
   setInterval(refreshVoiceFinishSupport, 7000);
+  setInterval(refreshAgents, 15000);
+  setInterval(refreshModel, 30000);
+  // 多智能体总览：每 5 秒轮询一次所有 agent 的 /api/system，更新状态卡。
+  setInterval(refreshAllAgentsSnapshot, 5000);
 }
 
 function bindSettings() {
@@ -353,39 +1398,55 @@ async function syncConnectionSettings(fromSettings = false, persist = false) {
   saveSettings();
   window.dispatchEvent(new CustomEvent("robonix:settings"));
   if (!persist) {
-    setText("settingsStatus", "Changed locally. Select Save to persist.");
+    setText("settingsStatus", "本地已修改，请点击保存以持久化。");
     return;
   }
-  setText("settingsStatus", "Saving...");
+  setText("settingsStatus", "保存中...");
   try {
     const result = await persistSettings();
-    setText("settingsStatus", `Saved to ${result.path}.`);
+    setText("settingsStatus", `已保存到 ${result.path}。`);
   } catch (error) {
-    setText("settingsStatus", `Save failed: ${error}`);
+    setText("settingsStatus", `保存失败: ${error}`);
   }
 }
 
-function collectSettings() {
-  return {
-    robotHost: normalizeRobotHost(maybe("robotHost")?.value || state.settings.robotHost || ""),
-    atlasPort: normalizeAtlasPort(maybe("atlasPort")?.value || state.settings.atlasPort || DEFAULT_ATLAS_PORT),
-    atlasEndpoint: buildAtlasEndpoint(
-      maybe("robotHost")?.value || state.settings.robotHost || "",
-      maybe("atlasPort")?.value || state.settings.atlasPort || DEFAULT_ATLAS_PORT,
-    ),
-    liaisonEndpoint: maybe("liaisonEndpoint")?.value.trim() || state.settings.liaisonEndpoint || "",
-    userId: maybe("userId")?.value.trim() || state.settings.userId || "",
-    sessionId: state.sessionId,
-    recordSeconds: Number(maybe("recordSeconds")?.value || state.settings.recordSeconds || 30),
-    language: maybe("language")?.value.trim() || state.settings.language || "",
-    micNodeId: maybe("micNodeId")?.value.trim() || state.settings.micNodeId || "",
-    micDeviceId: maybe("micDeviceId")?.value.trim() || state.settings.micDeviceId || "",
-    speakerNodeId: maybe("speakerNodeId")?.value.trim() || state.settings.speakerNodeId || "",
-    speakerDeviceId: maybe("speakerDeviceId")?.value.trim() || state.settings.speakerDeviceId || "",
-    ttsNodeId: state.settings.ttsNodeId || "",
-    enrollUserId: maybe("enrollUserId")?.value.trim() || state.settings.enrollUserId || "",
-    enrollUserName: maybe("enrollUserName")?.value.trim() || state.settings.enrollUserName || "",
+function collectSettings(agentId) {
+  // 多 agent 模式下从此函数读取，不再依赖 DOM。旧调用方不传参时
+  // 回退到当前激活 agent。DOM 中的输入框（agent-detail Settings 子
+  // 面板）由各自的事件回调写回对应 agent 的 settings，这里只读。
+  const targetId = agentId || state.activeAgentId || state.defaultAgentId;
+  const base = getAgentSettings(targetId) || {};
+  const fallback = {
+    robotHost: "",
+    atlasPort: DEFAULT_ATLAS_PORT,
+    atlasEndpoint: "",
+    liaisonEndpoint: "",
+    userId: "",
+    recordSeconds: 30,
+    language: "",
+    micNodeId: "",
+    micDeviceId: "",
+    speakerNodeId: "",
+    speakerDeviceId: "",
+    ttsNodeId: "",
+    enrollUserId: "",
+    enrollUserName: "",
   };
+  const merged = { ...fallback, ...base };
+  // 若用户当前在 agent-detail 的 Settings 子面板编辑了 input，反映出来。
+  // 这里只在 activeAgent 上做 DOM 同步，避免误改其它 agent。
+  if (!agentId || agentId === state.activeAgentId) {
+    const domHost = maybe("robotHostSettings")?.value?.trim() || maybe("robotHost")?.value?.trim();
+    if (domHost) merged.robotHost = domHost;
+    const domPort = maybe("atlasPortSettings")?.value?.trim() || maybe("atlasPort")?.value?.trim();
+    if (domPort) merged.atlasPort = normalizeAtlasPort(domPort);
+    const domLiaison = maybe("liaisonEndpoint")?.value?.trim();
+    if (domLiaison) merged.liaisonEndpoint = domLiaison;
+    const domUser = maybe("settingsUserId")?.value?.trim() || maybe("userId")?.value?.trim();
+    if (domUser) merged.userId = domUser;
+  }
+  merged.atlasEndpoint = buildAgentAtlas(merged);
+  return merged;
 }
 
 function interactionSettings(useActiveTurn = false) {
@@ -412,7 +1473,7 @@ function bindEvents() {
     event.preventDefault();
     if (state.voiceRecording) {
       if (state.voiceFinishSupported) finishVoiceCapture();
-      else addStatusLine("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit.");
+      else addStatusLine("该机器人不支持手动结束录音，需等待静音或达到录音时长上限。");
       return;
     }
     if (state.voiceActive) return;
@@ -421,7 +1482,7 @@ function bindEvents() {
   $("stopButton").addEventListener("click", stopCurrentTask);
   maybe("finishVoiceButton")?.addEventListener("click", finishVoiceCapture);
   maybe("voiceButton")?.addEventListener("click", startVoice);
-  $("refreshSystem").addEventListener("click", refreshSystem);
+  maybe("refreshSystem")?.addEventListener("click", refreshSystem);
   maybe("handsfreeToggle")?.addEventListener("click", toggleHandsfree);
   // The command bar's name field renames the open session as you type it;
   // the button beside it starts a new one under whatever name it holds.
@@ -453,8 +1514,8 @@ function bindEvents() {
   $("clearHistory").addEventListener("click", clearHistory);
   maybe("connectNow")?.addEventListener("click", async () => {
     state.settings = collectSettings();
-    await persistSettings().catch((error) => addTimeline("error", `settings save failed: ${error}`));
-    addTimeline("system", `connecting to ${state.settings.robotHost}:${state.settings.atlasPort}`);
+    await persistSettings().catch((error) => addTimeline("error", `保存设置失败: ${error}`));
+    addTimeline("system", `正在连接 ${state.settings.robotHost}:${state.settings.atlasPort}`);
     refreshSystem();
   });
   maybe("startAudioServer")?.addEventListener("click", startAudioServer);
@@ -467,6 +1528,7 @@ function bindEvents() {
   maybe("enrollVoice")?.addEventListener("click", enrollVoice);
   maybe("testMicrophone")?.addEventListener("click", testMicrophone);
   maybe("testSpeaker")?.addEventListener("click", testSpeaker);
+  maybe("mapsRefreshAll")?.addEventListener("click", refreshAllMaps);
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => activatePage(button.dataset.page));
   });
@@ -486,9 +1548,33 @@ function bindEvents() {
   maybe("rtdlHistoryModal")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeRtdlHistory();
   });
+  // 多 agent 导航
+  maybe("addAgentBtn")?.addEventListener("click", openAddAgentModal);
+  maybe("addAgentCancel")?.addEventListener("click", closeAddAgentModal);
+  maybe("addAgentCancel2")?.addEventListener("click", closeAddAgentModal);
+  maybe("addAgentForm")?.addEventListener("submit", submitAddAgent);
+  maybe("overviewPrev")?.addEventListener("click", overviewPrevPage);
+  maybe("overviewNext")?.addEventListener("click", overviewNextPage);
+  // overview 聊天广播
+  maybe("overviewComposer")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendOverviewTask();
+  });
+  maybe("overviewSend")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    sendOverviewTask();
+  });
+  // agent-detail 操控界面
+  maybe("agentDetailRename")?.addEventListener("click", renameActiveAgent);
+  maybe("agentDetailConnect")?.addEventListener("click", connectActiveAgent);
+  maybe("agentDetailRemove")?.addEventListener("click", removeActiveAgent);
+  document.querySelectorAll("[data-agent-tab]").forEach((button) => {
+    button.addEventListener("click", () => selectAgentTab(button.dataset.agentTab));
+  });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !maybe("activeRtdlModal")?.hidden) closeActiveRtdl();
     if (event.key === "Escape" && !maybe("rtdlHistoryModal")?.hidden) closeRtdlHistory();
+    if (event.key === "Escape" && !maybe("addAgentModal")?.hidden) closeAddAgentModal();
   });
 }
 
@@ -546,7 +1632,7 @@ async function refreshHandsfree() {
 
 async function toggleHandsfree() {
   if (state.voiceActive) {
-    addStatusLine("Stop the active F2 voice session before changing hands-free mode.");
+    addStatusLine("请先结束当前的 F2 语音会话，再切换免提模式。");
     return;
   }
   if (state.handsfree.busy) return;
@@ -561,7 +1647,7 @@ async function toggleHandsfree() {
   state.handsfree = { ...state.handsfree, ...result, busy: false };
   renderHandsfree();
   syncHandsfreeEventStream();
-  addTimeline(result.ok ? "voice" : "error", result.ok ? `robot hands-free ${enabled ? "enabled" : "disabled"}` : `hands-free: ${result.error || result.detail || "unavailable"}`);
+  addTimeline(result.ok ? "voice" : "error", result.ok ? `机器人免提${enabled ? "已开启" : "已关闭"}` : `免提: ${result.error || result.detail || "不可用"}`);
 }
 
 function renderHandsfree() {
@@ -672,13 +1758,13 @@ function syncHandsfreeEventStream() {
   state.handsfreeSocket = socket;
   socket.onopen = () => {
     socket.send(JSON.stringify({ settings: collectSettings() }));
-    addStatusLine("Watching robot hands-free interaction.");
+    addStatusLine("正在监听机器人免提事件。");
   };
   socket.onmessage = (message) => {
     const payload = JSON.parse(message.data);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event);
-    if (payload.type === "accepted") addTimeline("voice", "hands-free event stream connected");
-    if (payload.type === "error") addMessage("error", payload.error || "hands-free event stream failed");
+    if (payload.type === "accepted") addTimeline("voice", "免提事件流已连接");
+    if (payload.type === "error") addMessage("error", payload.error || "免提事件流异常");
   };
   socket.onclose = () => {
     if (state.handsfreeSocket === socket) state.handsfreeSocket = null;
@@ -742,12 +1828,231 @@ function renderAttachments() {
 }
 
 function activatePage(name) {
+  state.activePage = name;
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === name));
-  document.querySelectorAll("[data-page-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.pagePanel === name));
+  document.querySelectorAll("[data-page-panel]").forEach((panel) => {
+    const active = panel.dataset.pagePanel === name;
+    panel.classList.toggle("active", active);
+    // 旧路径完全靠 .active 来显隐；agent-detail 在 HTML 里默认 hidden，
+    // 这里手动同步 hidden，避免同时显示两个 page。
+    if (active) {
+      panel.hidden = false;
+    } else if (panel.classList.contains("page")) {
+      panel.hidden = true;
+    }
+  });
   window.dispatchEvent(new CustomEvent("robonix:page", { detail: { name } }));
   if (name === "audio") {
     checkAudioServer();
   }
+  if (name === "maps") {
+    refreshAllMaps();
+  }
+  if (name === "overview") {
+    renderOverviewGrid();
+    // overview 聊天按需刷新
+    refreshOverviewChat();
+  }
+  if (name === "agent-detail") {
+    renderAgentDetail();
+  }
+  if (name === "dashboard" || name === "vitals" || name === "audio" || name === "settings") {
+    // 切到子页时同步 activeAgent 视图（RTDL/audio 内部 fetch 会走 collectSettings）
+    syncAgentLabel();
+    refreshSystem();
+  }
+}
+
+function refreshOverviewChat() {
+  // 把 overview 聊天的"消息列表"重新渲染：每条用户指令 + 每个 agent 的
+  // 实时回执按时间顺序排列。
+  const root = maybe("overviewChatMessages");
+  if (!root) return;
+  clear(root);
+  const messages = state.overviewChat?.messages || [];
+  if (messages.length === 0) {
+    const agents = listAgents();
+    if (agents.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "message status";
+      empty.textContent = "请先在左侧添加至少一个智能体";
+      root.appendChild(empty);
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "message status";
+      empty.textContent = "在下方输入框向大模型下达指令，指令会分发给全部已注册的智能体执行。";
+      root.appendChild(empty);
+    }
+    return;
+  }
+  for (const msg of messages) {
+    const node = renderOverviewChatMessage(msg);
+    if (node) root.appendChild(node);
+  }
+  root.scrollTop = root.scrollHeight;
+}
+
+function renderOverviewChatMessage(msg) {
+  if (!msg) return null;
+  const el = document.createElement("div");
+  el.className = `message ${msg.role || "status"}`;
+  if (msg.role === "user") {
+    const label = document.createElement("div");
+    label.className = "overview-chat-label";
+    label.textContent = "你 · 广播给全部智能体";
+    el.appendChild(label);
+    el.appendChild(document.createTextNode(msg.text || ""));
+  } else if (msg.role === "agent") {
+    const head = document.createElement("div");
+    head.className = "overview-chat-agent-head";
+    const id = document.createElement("span");
+    id.className = "overview-chat-agent-id";
+    id.textContent = msg.agentId || "(未知)";
+    const state = document.createElement("span");
+    state.className = `overview-chat-agent-state ${msg.state || "pending"}`;
+    state.textContent = msg.state || "pending";
+    head.append(id, state);
+    el.appendChild(head);
+    el.appendChild(document.createTextNode(msg.text || "(无回复)"));
+  } else {
+    el.textContent = msg.text || "";
+  }
+  return el;
+}
+
+function appendOverviewMessage(msg) {
+  if (!state.overviewChat) state.overviewChat = { messages: [] };
+  state.overviewChat.messages.push({ ...msg, at: Date.now() });
+  // 限制消息条数，避免内存膨胀
+  state.overviewChat.messages = state.overviewChat.messages.slice(-200);
+  refreshOverviewChat();
+}
+
+// overview 聊天：向所有智能体广播同一条指令。返回时把每个 agent 的回执
+// 标注 agentId 后渲染。
+async function sendOverviewTask() {
+  const input = maybe("overviewTaskInput");
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  const agents = listAgents();
+  if (agents.length === 0) {
+    addStatusLine("请先在左侧添加至少一个智能体");
+    return;
+  }
+  if (state.overviewChat?.sending) {
+    addStatusLine("上一次广播尚未完成，请稍候。");
+    return;
+  }
+  if (state.overviewChat) state.overviewChat.sending = true;
+  const sendBtn = maybe("overviewSend");
+  if (sendBtn) sendBtn.disabled = true;
+  appendOverviewMessage({ role: "user", text, agentId: "broadcast" });
+  input.value = "";
+  for (const entry of agents) {
+    appendOverviewMessage({ role: "agent", agentId: entry.agentId, text: "正在派发...", state: "pending" });
+  }
+  await Promise.all(agents.map((entry) => dispatchOverviewTaskToAgent(entry, text)));
+  if (state.overviewChat) state.overviewChat.sending = false;
+  if (sendBtn) sendBtn.disabled = false;
+}
+
+// 对单个 agent 派发 overview 指令：新建一个临时 task WebSocket，把首条
+// 智能体回复文本通过 overview 聊天 UI 渲染。完成后自动关闭。
+async function dispatchOverviewTaskToAgent(entry, text) {
+  const settings = buildAgentSettingsFromEntry(entry);
+  if (!settings.atlasEndpoint) {
+    updateOverviewAgentReply(entry.agentId, "未配置 Atlas 端点，无法派发", "failed");
+    return;
+  }
+  const socket = new WebSocket(wsUrl("/ws/task"));
+  let agentText = "";
+  let finalText = "";
+  let taskState = "pending";
+  let receivedAny = false;
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try { if (socket.readyState <= WebSocket.OPEN) socket.close(); } catch (_) { /* noop */ }
+      resolve();
+    };
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        text,
+        settings: { ...settings, sessionId: getSessionId() },
+        interactionMode: "task",
+        steer: false,
+        expectedTurnId: "",
+        agentId: entry.agentId,
+      }));
+    };
+    socket.onmessage = (event) => {
+      receivedAny = true;
+      const payload = JSON.parse(event.data);
+      if (payload.type === "error") {
+        updateOverviewAgentReply(entry.agentId, `错误: ${payload.error || "unknown"}`, "failed");
+        finish();
+        return;
+      }
+      const evt = payload.event || payload;
+      if (payload.type === "pilot_event" && evt) {
+        if (evt.kind === "text_chunk" && evt.textChunk) {
+          agentText += evt.textChunk;
+          updateOverviewAgentReply(entry.agentId, agentText, "running");
+        } else if (evt.kind === "final_text" && evt.finalText) {
+          finalText = mergeFinalText(finalText, evt.finalText);
+          agentText = finalText;
+          updateOverviewAgentReply(entry.agentId, finalText, "running");
+        } else if (evt.kind === "task_state" && evt.taskState) {
+          const status = String(evt.taskState.status || "").toLowerCase();
+          if (["failed", "canceled", "cancelled", "aborted"].includes(status)) {
+            taskState = "failed";
+            updateOverviewAgentReply(entry.agentId, agentText || "(任务失败，无文本回复)", "failed");
+            finish();
+            return;
+          }
+          if (["done", "completed"].includes(status)) {
+            taskState = "success";
+          }
+        }
+      }
+      if (payload.type === "status" && payload.message) {
+        // 把 status 透传为追加
+        if (!agentText) agentText = `[状态] ${payload.message}`;
+      }
+      if (payload.type === "done") {
+        taskState = taskState === "failed" ? "failed" : (receivedAny ? "success" : "pending");
+        updateOverviewAgentReply(entry.agentId, agentText || finalText || "(无回复)", taskState);
+        finish();
+      }
+    };
+    socket.onerror = () => {
+      updateOverviewAgentReply(entry.agentId, "WebSocket 连接失败", "failed");
+      finish();
+    };
+    socket.onclose = () => {
+      taskState = taskState === "failed" ? "failed" : (receivedAny ? "success" : "pending");
+      updateOverviewAgentReply(entry.agentId, agentText || finalText || "(无回复)", taskState);
+      finish();
+    };
+  });
+}
+
+function updateOverviewAgentReply(agentId, text, state) {
+  if (!state.overviewChat) state.overviewChat = { messages: [] };
+  // 找到最后一条带这个 agentId 的 agent 消息
+  for (let i = state.overviewChat.messages.length - 1; i >= 0; i -= 1) {
+    const m = state.overviewChat.messages[i];
+    if (m.role === "agent" && m.agentId === agentId) {
+      m.text = text;
+      if (state) m.state = state;
+      refreshOverviewChat();
+      return;
+    }
+  }
+  appendOverviewMessage({ role: "agent", agentId, text, state });
 }
 
 /// Drop every pointer into the Pilot turn of the conversation being left.
@@ -767,7 +2072,7 @@ function forgetActiveTurn() {
 function newSession() {
   if (state.busy) {
     pendingNewSessionTitle = null;
-    addStatusLine("Abort the running task before starting a new session.");
+    addStatusLine("请先中止正在运行的任务，再开启新会话。");
     return;
   }
   // Captured at mousedown, before the field blurred. An untouched field still
@@ -789,7 +2094,7 @@ function newSession() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  state.sessionTitle = uniqueConversationTitle(requestedTitle || "Untitled chat", state.sessionId);
+  state.sessionTitle = uniqueConversationTitle(requestedTitle || "未命名会话", state.sessionId);
   $("promptTitle").textContent = state.sessionTitle;
   renderSessionChip();
   // force: an empty transcript would otherwise fail the has-content check and
@@ -798,8 +2103,8 @@ function newSession() {
   // Pilot keys conversation history by session id, so a fresh id is what
   // actually drops the old turns from the next prompt. Say so -- against an
   // already-empty transcript the reset is otherwise invisible.
-  addStatusLine("New session started; the planner's history for this conversation is cleared.");
-  addTimeline("status", `new session ${state.sessionId.slice(0, 8)}`);
+  addStatusLine("已开启新会话；规划器针对该会话的历史已清空。");
+  addTimeline("status", `新建会话 ${state.sessionId.slice(0, 8)}`);
   renderMessages();
   renderTimeline();
   renderPlan();
@@ -851,9 +2156,9 @@ async function sendTask() {
   const wasBusy = hasActiveTurn();
   state.activeVoiceMode = "voice";
   const display = text || attachments.map((item) => item.name).join(", ");
-  addMessage("user", display, wasBusy ? "added to running task" : (attachments.length ? `${attachments.length} image` : ""), attachments);
-  addStatusLine(wasBusy ? "Sent to the running task; waiting for Pilot to react." : "Submitted task; waiting for Pilot stream.");
-  addTimeline("task", wasBusy ? `added: ${display}` : `task: ${display}`);
+  addMessage("user", display, wasBusy ? "已加入运行中的任务" : (attachments.length ? `${attachments.length} 张图片` : ""), attachments);
+  addStatusLine(wasBusy ? "已发送到运行中的任务，等待 Pilot 响应。" : "任务已提交，等待 Pilot 流式回复。");
+  addTimeline("task", wasBusy ? `追加: ${display}` : `任务: ${display}`);
   persistCurrentConversation(display);
   $("taskInput").value = "";
   autoGrowInput();
@@ -881,9 +2186,9 @@ function stopCurrentTask() {
   state.stopInFlight = true;
   const button = $("stopButton");
   button.disabled = true;
-  setButtonLabel(button, "Aborting");
-  addStatusLine("Abort requested; canceling every running task and any robot motion.");
-  addTimeline("cancel", `abort requested${state.activeTurnId ? ` for ${state.activeTurnId}` : ""}`);
+  setButtonLabel(button, "中止中");
+  addStatusLine("已请求中止；正在取消所有运行中的任务和机器人动作。");
+  addTimeline("cancel", `已请求中止${state.activeTurnId ? ` (${state.activeTurnId})` : ""}`);
 
   stopActiveVoiceSession();
 
@@ -903,7 +2208,7 @@ function stopCurrentTask() {
 function resetStopState() {
   state.stopInFlight = false;
   $("stopButton").disabled = false;
-  setButtonLabel($("stopButton"), "Abort all tasks");
+  setButtonLabel($("stopButton"), "中止全部任务");
 }
 
 function completeStopState() {
@@ -943,9 +2248,9 @@ function finishVoiceCapture() {
   const button = maybe("finishVoiceButton");
   if (button) {
     button.disabled = true;
-    setButtonLabel(button, "Stopping");
+    setButtonLabel(button, "结束中");
   }
-  addStatusLine("Stopping recording; submitting what has been recognized so far.");
+  addStatusLine("正在结束录音；将已识别内容提交。");
   const send = () => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
   };
@@ -955,7 +2260,7 @@ function finishVoiceCapture() {
 
 function startVoice() {
   if (state.voiceActive) {
-    addStatusLine("Voice recording is already active.");
+    addStatusLine("语音录制已在进行中。");
     return;
   }
   const wasBusy = hasActiveTurn();
@@ -964,8 +2269,8 @@ function startVoice() {
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => button.classList.add("active"));
   if (maybe("voiceState")) $("voiceState").textContent = "recording";
   syncVoiceControls();
-  addStatusLine("Listening for voice input.");
-  addTimeline("voice", wasBusy ? "voice input for running task" : "voice session requested");
+  addStatusLine("正在监听语音输入。");
+  addTimeline("voice", wasBusy ? "为运行中的任务追加语音输入" : "已请求语音会话");
   const socket = new WebSocket(wsUrl("/ws/voice"));
   beginStream(socket);
   socket.robonixVoiceMode = "voice";
@@ -998,10 +2303,10 @@ function wireStream(socket, done, voiceSocket = null) {
     const payload = JSON.parse(event.data);
     if (payload.type === "pilot_event") handlePilotEvent(payload.event);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event, voiceSocket);
-    if (payload.type === "accepted") addStatusLine("Connected; waiting for Robonix events.");
-    if (payload.type === "status") addTimeline("status", payload.message || "status");
+    if (payload.type === "accepted") addStatusLine("已连接，等待 Robonix 事件。");
+    if (payload.type === "status") addTimeline("status", payload.message || "状态更新");
     if (payload.type === "finish_requested") {
-      addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? "recording stop requested" : "could not stop recording"));
+      addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? "已请求结束录音" : "无法结束录音"));
       // A rejected request leaves the turn recording, so hand the control back
       // rather than stranding the user with a dead "Stopping" button.
       if (!payload.ok) {
@@ -1015,7 +2320,7 @@ function wireStream(socket, done, voiceSocket = null) {
       socket.close();
     }
   };
-  socket.onerror = () => addMessage("error", "stream failed");
+  socket.onerror = () => addMessage("error", "数据流异常");
   socket.onclose = done;
 }
 
@@ -1028,7 +2333,7 @@ function handlePilotEvent(event) {
     state.plan = event.plan;
     upsertPlanRecord(event.plan);
     announcePlan(event.plan);
-    addTimeline("plan", `live round ${event.plan.round}: ${planCalls(event.plan).length} call(s)`);
+    addTimeline("plan", `实时轮次 ${event.plan.round}: ${planCalls(event.plan).length} 个调用`);
     renderPlan();
     persistCurrentConversation();
     refreshActivePlans();
@@ -1043,7 +2348,7 @@ function handlePilotEvent(event) {
         if (Number.isFinite(Number(result.nodeIndex))) record.nodeStates[String(result.nodeIndex)] = result;
       });
     });
-    addTimeline(event.batchResult.anyFailed ? "error" : "result", `round ${event.batchResult.round} result`);
+    addTimeline(event.batchResult.anyFailed ? "error" : "result", `第 ${event.batchResult.round} 轮结果`);
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "node_state" && event.nodeState) {
@@ -1051,7 +2356,7 @@ function handlePilotEvent(event) {
     updatePlanRecordResult(event.nodeState.planId, (record) => {
       record.nodeStates[String(event.nodeState.nodeIndex)] = event.nodeState;
     });
-    addTimeline(event.nodeState.state === "FAILED" ? "error" : "status", `${event.nodeState.opId || `node ${event.nodeState.nodeIndex}`} ${event.nodeState.state}`);
+    addTimeline(event.nodeState.state === "FAILED" ? "error" : "status", `${event.nodeState.opId || `节点 ${event.nodeState.nodeIndex}`} ${event.nodeState.state}`);
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "task_state" && event.taskState) {
@@ -1064,8 +2369,8 @@ function handlePilotEvent(event) {
       state.taskRunning = false;
     }
     setBusy(state.activeStreams > 0 || state.taskRunning);
-    addTimeline("status", event.taskState.status || event.taskState.goal || "task update");
-    addStatusLine(event.taskState.status || event.taskState.goal || "Task state updated.");
+    addTimeline("status", event.taskState.status || event.taskState.goal || "任务状态更新");
+    addStatusLine(event.taskState.status || event.taskState.goal || "任务状态已更新。");
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "status" && event.status) {
@@ -1081,7 +2386,7 @@ function handlePilotEvent(event) {
       state.taskRunning = false;
       setBusy(state.activeStreams > 0);
     }
-    addTimeline("status", event.status.message || `state ${event.status.state}`);
+    addTimeline("status", event.status.message || `状态 ${event.status.state}`);
     if (event.status.message) addStatusLine(event.status.message);
   }
 }
@@ -1138,15 +2443,15 @@ function handleVoiceEvent(event, sourceSocket = null) {
     handlePilotEvent(event.pilot);
   } else if (event.kind === "tts_started") {
     setTtsAura(true);
-    addMessage("status", label || "TTS playback started");
-    addTimeline("voice", label || "TTS playback started");
+    addMessage("status", label || "TTS 播报开始");
+    addTimeline("voice", label || "TTS 播报开始");
   } else if (event.kind === "tts_done") {
     setTtsAura(false);
     const skipped = String(label || "").toLowerCase().includes("skipped");
-    addMessage(skipped ? "error" : "status", label || "TTS playback done");
-    addTimeline(skipped ? "error" : "voice", label || "TTS playback done");
+    addMessage(skipped ? "error" : "status", label || "TTS 播报结束");
+    addTimeline(skipped ? "error" : "voice", label || "TTS 播报结束");
   } else if (event.kind === "error") {
-    addMessage("error", event.error || "voice error");
+    addMessage("error", event.error || "语音异常");
   } else {
     addTimeline("voice", label);
   }
@@ -1767,7 +3072,7 @@ function renderActivePlans(error = "") {
   if (error) {
     count.textContent = "unavailable";
     if (summary) summary.textContent = "Executor state unavailable";
-    if (modalSummary) modalSummary.textContent = "Live Executor query failed";
+    if (modalSummary) modalSummary.textContent = "执行器实时查询失败";
     const row = document.createElement("div");
     row.className = "active-rtdl-empty error";
     row.textContent = error;
@@ -1776,12 +3081,12 @@ function renderActivePlans(error = "") {
   }
   const planCount = state.executorPlans.length;
   count.textContent = String(planCount);
-  if (summary) summary.textContent = planCount ? `${planCount} running · open live workspace` : "No plans running";
-  if (modalSummary) modalSummary.textContent = `${planCount} live plan${planCount === 1 ? "" : "s"} reported by Executor`;
+  if (summary) summary.textContent = planCount ? `${planCount} 个运行中 · 打开实时工作区` : "当前无运行中的计划";
+  if (modalSummary) modalSummary.textContent = `执行器上报了 ${planCount} 个实时计划`;
   if (!state.executorPlans.length) {
     const row = document.createElement("div");
     row.className = "active-rtdl-empty";
-    row.textContent = "Executor reports no active RTDL plans.";
+    row.textContent = "执行器报告当前没有活跃的 RTDL 计划。";
     root.appendChild(row);
     return;
   }
@@ -2080,12 +3385,18 @@ async function refreshVoiceFinishSupport() {
 }
 
 async function refreshSystem() {
-  const atlas = buildAtlasEndpoint($("robotHost").value, $("atlasPort").value);
+  const settings = collectSettings();
+  const atlas = settings.atlasEndpoint || buildAtlasEndpoint(settings.robotHost, settings.atlasPort);
   if (!atlas) {
-    renderSystem({ error: "Set Robot Host and Atlas Port first.", summary: { state: "offline" }, requiredContracts: [], providers: [] });
+    renderSystem({ error: "请先配置机器人主机和 Atlas 端口。", summary: { state: "offline" }, requiredContracts: [], providers: [] });
     return;
   }
   const data = await fetch(`/api/system?atlas=${encodeURIComponent(atlas)}`).then((r) => r.json()).catch((error) => ({ error: String(error) }));
+  const entry = state.agents[state.activeAgentId];
+  if (entry) {
+    entry.snapshot = data;
+    entry.status = data.error ? "offline" : (data.summary?.state || "online");
+  }
   renderSystem(data);
 }
 
@@ -2093,13 +3404,18 @@ function renderSystem(data) {
   const summary = data.summary || {};
   const stateLabel = data.error ? "offline" : summary.state || "unknown";
   const online = !data.error;
-  $("connectionState").textContent = stateLabel;
-  $("refreshSystem").classList.toggle("offline", !online);
-  $("refreshSystem").classList.toggle("online", online);
-  if (maybe("connectNow")) {
-    $("connectNow").textContent = online ? "Connected" : "Connect";
-    $("connectNow").classList.toggle("connected", online);
-    $("connectNow").title = online ? "Atlas is reachable" : "Check Atlas connection";
+  const refreshSystem = maybe("refreshSystem");
+  if (refreshSystem) {
+    const conn = maybe("connectionState");
+    if (conn) conn.textContent = stateLabel;
+    refreshSystem.classList.toggle("offline", !online);
+    refreshSystem.classList.toggle("online", online);
+  }
+  const connectNow = maybe("connectNow");
+  if (connectNow) {
+    connectNow.textContent = online ? "已连接" : "连接";
+    connectNow.classList.toggle("connected", online);
+    connectNow.title = online ? "Atlas 已连通" : "检查 Atlas 连接";
   }
   if (maybe("metricState")) $("metricState").textContent = stateLabel;
   if (maybe("metricActive")) $("metricActive").textContent = String(summary.active || 0);
@@ -2150,18 +3466,18 @@ function renderRobotState(data) {
   const recording = maybe("voiceState") ? $("voiceState").textContent === "recording" : false;
   const audioReady = contractAvailable(contracts, "Speaker") || contractAvailable(contracts, "TTS");
   const rows = [
-    { label: "Base", icon: "B", ok: contractAvailable(contracts, "Executor") || contractAvailable(contracts, "Liaison submit"), status: "OK", value: "0.00 m/s", source: "mock" },
-    { label: "Arm", icon: "A", ok: summary.errors === 0, status: "OK", value: "Idle", source: "mock" },
-    { label: "Head / Camera", icon: "C", ok: true, status: "OK", value: "Tracking", source: "mock" },
-    { label: "Battery", icon: "P", ok: true, status: "86%", value: "2h 14m", source: "mock", battery: 86 },
-    { label: "Localization", icon: "L", ok: !data.error, status: "OK", value: "0.04 m", source: "mock", separated: true },
-    { label: "Navigation", icon: "N", ok: contractAvailable(contracts, "Executor"), status: state.busy ? "Moving" : "Ready", value: state.busy ? "0.32 m" : "0.00 m", source: "derived", warn: state.busy },
-    { label: "Audio Input", icon: "M", ok: contractAvailable(contracts, "Mic") || contractAvailable(contracts, "ASR"), status: recording ? "Listening" : "Standby", value: "", source: "real", wave: recording },
-    { label: "Audio Output", icon: "S", ok: audioReady, status: state.ttsPlaying ? "Speaking" : "Ready", value: "", source: "real", wave: state.ttsPlaying },
-    { label: "Connection", icon: "O", ok: !data.error, status: data.error ? "Offline" : "Online", value: "", source: "real", separated: true },
-    { label: "Safety", icon: "!", ok: summary.errors === 0, status: summary.errors ? `${summary.errors} error(s)` : "OK", value: "", source: "derived", danger: summary.errors > 0 },
+    { label: "底盘", icon: "B", ok: contractAvailable(contracts, "Executor") || contractAvailable(contracts, "Liaison submit"), status: "正常", value: "0.00 m/s", source: "mock" },
+    { label: "机械臂", icon: "A", ok: summary.errors === 0, status: "正常", value: "空闲", source: "mock" },
+    { label: "头部/相机", icon: "C", ok: true, status: "正常", value: "跟踪中", source: "mock" },
+    { label: "电池", icon: "P", ok: true, status: "86%", value: "2h 14m", source: "mock", battery: 86 },
+    { label: "定位", icon: "L", ok: !data.error, status: "正常", value: "0.04 m", source: "mock", separated: true },
+    { label: "导航", icon: "N", ok: contractAvailable(contracts, "Executor"), status: state.busy ? "运动中" : "就绪", value: state.busy ? "0.32 m" : "0.00 m", source: "derived", warn: state.busy },
+    { label: "音频输入", icon: "M", ok: contractAvailable(contracts, "Mic") || contractAvailable(contracts, "ASR"), status: recording ? "监听中" : "待机", value: "", source: "real", wave: recording },
+    { label: "音频输出", icon: "S", ok: audioReady, status: state.ttsPlaying ? "播报中" : "就绪", value: "", source: "real", wave: state.ttsPlaying },
+    { label: "连接", icon: "O", ok: !data.error, status: data.error ? "离线" : "在线", value: "", source: "real", separated: true },
+    { label: "安全", icon: "!", ok: summary.errors === 0, status: summary.errors ? `${summary.errors} 个错误` : "正常", value: "", source: "derived", danger: summary.errors > 0 },
   ];
-  setTextAll("[data-robot-mode]", data.error ? "Offline" : state.busy ? "Executing" : "Ready");
+  setTextAll("[data-robot-mode]", data.error ? "离线" : state.busy ? "执行中" : "就绪");
   document.querySelectorAll("[data-robot-state-list]").forEach((root) => {
     clear(root);
     rows.forEach((item) => {
@@ -2362,13 +3678,13 @@ function renameConversation(sessionId) {
   // window.prompt blocks the event loop, which would stall a live event
   // stream, so renaming waits. Say so rather than ignoring the click.
   if (state.busy) {
-    addStatusLine("Renaming is unavailable while a task is running.");
+    addStatusLine("任务运行中无法重命名会话。");
     return;
   }
   if (sessionId === state.sessionId) persistCurrentConversation("", true);
   const conversation = state.history.find((item) => item.id === sessionId);
-  const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || "Untitled chat";
-  const nextTitle = window.prompt("Rename session", currentTitle);
+  const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || "未命名会话";
+  const nextTitle = window.prompt("重命名会话", currentTitle);
   if (nextTitle === null) return;
   const trimmed = nextTitle.trim();
   if (!trimmed) return;
@@ -2442,7 +3758,7 @@ function openConversation(sessionId) {
   // screen, so switching mid-flight would file another session's replies
   // here. Refuse, but say why -- returning silently reads as a dead list.
   if (state.busy) {
-    addStatusLine("A task is still running in this session. Abort it before switching conversations.");
+    addStatusLine("当前会话仍有任务在运行，请先中止任务再切换会话。");
     return;
   }
   persistCurrentConversation();
@@ -2621,12 +3937,12 @@ async function applyAudioRoute() {
     body: JSON.stringify({ settings: state.settings }),
   }).then((response) => response.json()).catch((error) => ({ error: String(error) }));
   if (!result.ok) {
-    setText("audioRouteStatus", `Route apply failed: ${result.error || "unknown error"}`);
+    setText("audioRouteStatus", `路由应用失败: ${result.error || "未知错误"}`);
     return;
   }
   const count = Array.isArray(result.selected) ? result.selected.length : 0;
-  setText("audioRouteStatus", `Route applied to ${count} selected device${count === 1 ? "" : "s"}.`);
-  addTimeline("audio", "audio route applied");
+  setText("audioRouteStatus", `已对 ${count} 个选中设备应用路由。`);
+  addTimeline("audio", "音频路由已应用");
 }
 
 async function startAudioServer() {
@@ -2737,7 +4053,7 @@ async function applyAudioDevices() {
   if (output !== undefined && output !== "") body.output = Number(output);
   appendAudioLog(`applying devices ${JSON.stringify(body)}`);
   const result = await audioServerOnce("/set_device", body);
-  appendAudioLog(result.ok ? "device selection applied" : `device selection failed: ${result.error || "unknown error"}`);
+  appendAudioLog(result.ok ? "设备选择已应用" : `设备选择失败: ${result.error || "未知错误"}`);
   await loadAudioDevices();
 }
 
@@ -2768,9 +4084,9 @@ function startAudioVuStream() {
       renderAudioLevel(0, 0);
     }
   };
-  socket.onerror = () => setText("audioLevelState", "offline");
+  socket.onerror = () => setText("audioLevelState", "离线");
   socket.onclose = () => {
-    setText("audioLevelState", "offline");
+    setText("audioLevelState", "离线");
     state.audio.vuSocket = null;
   };
 }
@@ -2901,12 +4217,12 @@ async function enrollVoice() {
   const userName = $("enrollUserName").value.trim() || userId;
   const seconds = Number($("recordSeconds").value || 6);
   if (!userId) {
-    renderEnroll({ ok: false, error: "Voice ID is required" });
+    renderEnroll({ ok: false, error: "请填写语音 ID" });
     return;
   }
-  $("enrollState").textContent = `recording ${seconds}s`;
+  $("enrollState").textContent = `录音中 ${seconds}s`;
   $("enrollVoice").classList.add("busy");
-  addTimeline("voiceprint", `recording ${seconds}s for ${userId}`);
+  addTimeline("voiceprint", `为 ${userId} 录音 ${seconds}s`);
   const result = await fetch("/api/voiceprint/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2923,7 +4239,7 @@ async function enrollVoice() {
 
 async function testSpeaker() {
   $("testSpeaker").classList.add("busy");
-  addTimeline("audio", "speaker test requested");
+  addTimeline("audio", "已请求扬声器测试");
   const result = await fetch("/api/audio/play-test", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2952,7 +4268,7 @@ async function testSpeaker() {
 async function testMicrophone() {
   const button = $("testMicrophone");
   button.classList.add("busy");
-  addTimeline("audio", "microphone test requested");
+  addTimeline("audio", "已请求麦克风测试");
   const result = await fetch("/api/audio/mic-test", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2972,13 +4288,13 @@ async function testMicrophone() {
 }
 
 function renderEnroll(result) {
-  $("enrollState").textContent = result.ok ? "enrolled" : "failed";
+  $("enrollState").textContent = result.ok ? "已注册" : "失败";
   if (result.ok && result.userId) {
     applyVoiceUser(result.userId);
   }
   const text = result.ok
-    ? `${result.alreadyEnrolled ? "using existing" : "enrolled"} voice:${result.userId} (${result.bytes} bytes)`
-    : `enroll failed: ${result.error}`;
+    ? `${result.alreadyEnrolled ? "已使用现有" : "已注册"} voice:${result.userId} (${result.bytes} 字节)`
+    : `注册失败: ${result.error}`;
   addTimeline("voiceprint", text);
   const root = $("audioServerStatus");
   clear(root);
@@ -3016,10 +4332,10 @@ function renderAudioServer(result) {
   clear(root);
   if (result.wsUrl) state.audio.wsUrl = result.wsUrl;
   const online = Boolean(result.ok || result.reachable);
-  setText("audioServerState", online ? "online" : "offline");
-  setText("audioServerSummary", online ? (result.url || result.wsUrl || "Audio device server reachable.") : (result.error || "Client audio device server is offline."));
+  setText("audioServerState", online ? "在线" : "离线");
+  setText("audioServerSummary", online ? (result.url || result.wsUrl || "音频设备服务可访问。") : (result.error || "客户端音频设备服务离线。"));
   const lines = [
-    online ? "ok" : "not reachable",
+    online ? "ok" : "不可访问",
     result.error || "",
     result.wsUrl || "",
     result.uiUrl || result.url || "",
@@ -3050,8 +4366,8 @@ function setButtonLabel(node, text) {
 function setBusy(value) {
   state.busy = value;
   $("sendButton").classList.toggle("busy", value);
-  setButtonLabel($("sendButton"), "Send");
-  $("sendButton").title = value ? "Send to the running task (Enter)" : "Send task (Enter)";
+  setButtonLabel($("sendButton"), "发送");
+  $("sendButton").title = value ? "向运行中的任务追加 (Enter)" : "发送任务 (Enter)";
   $("stopButton").hidden = !value;
   // Left enabled while busy on purpose: a disabled button swallows the click
   // and the "abort the running task first" guard never gets to explain
@@ -3064,7 +4380,7 @@ function setBusy(value) {
     // Same button either way: it starts a recording. Whether that recording
     // opens a new task or adds to the running one is context, not a separate
     // control, so the label stays put and only the tooltip explains it.
-    setButtonLabel(button, "Start recording");
+    setButtonLabel(button, "开始录音");
   });
   // syncVoiceControls owns the tooltip and the hidden state for this button.
   syncVoiceControls();
@@ -3090,6 +4406,596 @@ function setTextAll(selector, text) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+// mapsApi: thin wrapper that POSTs JSON to the maps API and rejects on
+// non-2xx so the UI can show a single error string. Used by every maps
+// mutation in this page.
+async function mapsApi(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (err) {
+    throw new Error(`non-JSON response from ${path} (status ${response.status})`);
+  }
+  if (!response.ok || (payload && payload.ok === false)) {
+    const message =
+      (payload && (payload.error || payload.message)) ||
+      `${path} failed with status ${response.status}`;
+    const result = new Error(message);
+    result.payload = payload;
+    throw result;
+  }
+  return payload;
+}
+
+// ── Maps page ──────────────────────────────────────────────────────────────
+// The Maps page is split into two columns:
+//   * Left  — one card per registered agent, each showing the maps that
+//             live on that agent. A "同步" button on the card pulls
+//             new maps from the agent into the shared library; the X
+//             on each tile removes the map from the agent itself.
+//   * Right — a flat grid of every map that lives in the local shared
+//             library. Tiles can be dragged onto a robot card on the
+//             left to deploy the map to that robot; the X removes the
+//             map from the shared library entirely.
+//
+// Internally a "map" is one of the entries returned by the robot's
+// `robonix/primitive/map/list` snapshot (file or dir). Maps are matched
+// across the two columns by `<robotId>/<name>` so a map synced from
+// agent A is not mistakenly thought to live on agent B.
+
+// Per-agent map listings keyed by agentId. Each value is the latest
+// `list_maps` response (or `null` while the request is in flight).
+const mapsPageState = {
+  byAgent: {},
+  shared: null,
+  sharedRoot: "",
+  sharedByKey: {},
+  totalShared: 0,
+};
+
+let mapsBoardInFlight = false;
+const perAgentRefreshInFlight = new Set();
+
+function setRobotsError(message) {
+  const box = maybe("robotsError");
+  if (!box) return;
+  if (!message) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  box.hidden = false;
+  box.textContent = message;
+}
+
+function setSharedError(message) {
+  const box = maybe("sharedError");
+  if (!box) return;
+  if (!message) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  box.hidden = false;
+  box.textContent = message;
+}
+
+function buildAtlasEndpointForAgent(entry) {
+  if (!entry) return "";
+  return buildAtlasEndpoint(entry.host, entry.atlasPort);
+}
+
+function collectSettingsForAgent(entry) {
+  const settings = typeof collectSettings === "function" ? collectSettings() : {};
+  const atlas = buildAtlasEndpointForAgent(entry);
+  return {
+    ...settings,
+    robotHost: entry.host || settings.robotHost || "",
+    atlasPort: entry.atlasPort || settings.atlasPort,
+    atlasEndpoint: atlas || settings.atlasEndpoint || "",
+  };
+}
+
+async function refreshAllMaps() {
+  if (mapsBoardInFlight) return;
+  mapsBoardInFlight = true;
+  try {
+    await Promise.all([refreshSharedBoard(), refreshRobotsBoard()]);
+  } finally {
+    mapsBoardInFlight = false;
+  }
+}
+
+async function refreshRobotsBoard() {
+  const board = maybe("robotsBoard");
+  if (!board) return;
+  const agents = listAgents();
+  if (agents.length === 0) {
+    clear(board);
+    const empty = document.createElement("div");
+    empty.className = "maps-robot-card-empty";
+    empty.textContent = "请先在左侧添加至少一个智能体。";
+    board.appendChild(empty);
+    return;
+  }
+  // Fetch each agent's listing in parallel; render progressively so a
+  // slow agent does not block the others.
+  await Promise.all(agents.map((entry) => refreshAgentMaps(entry)));
+  clear(board);
+  for (const entry of agents) board.appendChild(buildAgentMapsCard(entry));
+  const summary = maybe("robotsBoardSummary");
+  if (summary) {
+    const totalMaps = agents.reduce((sum, a) => sum + (mapsPageState.byAgent[a.agentId]?.files?.length || 0), 0);
+    summary.textContent = `共 ${agents.length} 个智能体，${totalMaps} 张地图。`;
+  }
+}
+
+async function refreshAgentMaps(entry) {
+  if (!entry) return;
+  if (perAgentRefreshInFlight.has(entry.agentId)) return;
+  const atlas = buildAtlasEndpointForAgent(entry);
+  if (!atlas) {
+    mapsPageState.byAgent[entry.agentId] = { available: false, files: [], mapsDir: "", error: "未配置主机" };
+    return;
+  }
+  perAgentRefreshInFlight.add(entry.agentId);
+  try {
+    const response = await fetch("/api/maps/list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: collectSettingsForAgent(entry) }),
+    });
+    const result = await response.json().catch(() => ({
+      available: false,
+      mapsDir: "",
+      count: 0,
+      files: [],
+      error: `non-JSON response (status ${response.status})`,
+    }));
+    mapsPageState.byAgent[entry.agentId] = result;
+  } catch (error) {
+    mapsPageState.byAgent[entry.agentId] = {
+      available: false,
+      mapsDir: "",
+      count: 0,
+      files: [],
+      error: String(error),
+    };
+  } finally {
+    perAgentRefreshInFlight.delete(entry.agentId);
+  }
+}
+
+function buildAgentMapsCard(entry) {
+  const card = document.createElement("section");
+  card.className = "maps-robot-card";
+  card.dataset.agentId = entry.agentId;
+  // 拖入事件
+  card.addEventListener("dragover", onAgentCardDragOver);
+  card.addEventListener("dragenter", onAgentCardDragEnter);
+  card.addEventListener("dragleave", onAgentCardDragLeave);
+  card.addEventListener("drop", onAgentCardDrop);
+
+  // 头部：名字 + ID + 状态 + 操作按钮
+  const header = document.createElement("div");
+  header.className = "maps-robot-card-header";
+
+  const title = document.createElement("div");
+  title.className = "maps-robot-card-title";
+  const label = document.createElement("span");
+  label.textContent = entry.label || entry.agentId;
+  title.appendChild(label);
+  const idPill = document.createElement("span");
+  idPill.className = "maps-robot-card-id";
+  idPill.textContent = entry.agentId;
+  title.appendChild(idPill);
+
+  const actions = document.createElement("div");
+  actions.className = "maps-robot-card-actions";
+  const syncBtn = document.createElement("button");
+  syncBtn.type = "button";
+  syncBtn.className = "button maps-sync-button";
+  syncBtn.textContent = "同步到共享库";
+  syncBtn.title = "将该智能体上所有地图拉取到本地共享地图库";
+  syncBtn.addEventListener("click", () => syncAgentMapsToShared(entry, syncBtn));
+  actions.append(syncBtn);
+
+  header.append(title, actions);
+  card.appendChild(header);
+
+  // 主机 / 状态
+  const meta = document.createElement("div");
+  meta.className = "maps-robot-card-host";
+  const host = entry.host || "(未配置主机)";
+  meta.textContent = `Atlas: ${host}:${entry.atlasPort || 50051}`;
+  card.appendChild(meta);
+
+  const data = mapsPageState.byAgent[entry.agentId];
+  const stateRow = document.createElement("div");
+  stateRow.className = "maps-robot-card-host";
+  if (!data) {
+    stateRow.textContent = "状态: 加载中…";
+  } else if (data.error) {
+    stateRow.textContent = `状态: ${data.error}`;
+  } else if (!data.available) {
+    stateRow.textContent = "状态: 不可用";
+  } else {
+    const files = Array.isArray(data.files) ? data.files : [];
+    stateRow.textContent = `状态: ${data.mapsDir || ""} · ${files.length} 项`;
+  }
+  card.appendChild(stateRow);
+
+  // 地图瓦片区
+  const tiles = document.createElement("div");
+  tiles.className = "maps-robot-card-maps";
+  if (data?.error) {
+    const error = document.createElement("div");
+    error.className = "maps-robot-card-empty";
+    error.textContent = data.error;
+    tiles.appendChild(error);
+  } else if (data && Array.isArray(data.files) && data.files.length > 0) {
+    for (const file of data.files) tiles.appendChild(buildAgentMapTile(entry, file));
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "maps-robot-card-empty";
+    empty.textContent = "暂无地图。点击「同步到共享库」以下载或等待机器狗生成。";
+    tiles.appendChild(empty);
+  }
+  card.appendChild(tiles);
+  return card;
+}
+
+function buildAgentMapTile(entry, file) {
+  const tile = document.createElement("div");
+  tile.className = "map-tile";
+  tile.draggable = true;
+  tile.dataset.kind = "robot";
+  tile.dataset.agentId = entry.agentId;
+  tile.dataset.mapName = file.name;
+  tile.dataset.mapKey = `${entry.agentId}/${file.name}`;
+  tile.title = `${file.name}（${file.kind || "file"}）— 删除会从该机器人移除`;
+
+  const name = document.createElement("span");
+  name.className = "map-tile-name";
+  name.textContent = file.name;
+  const meta = document.createElement("span");
+  meta.className = "map-tile-meta";
+  const sizeText = formatBytes(file.sizeBytes);
+  meta.textContent = `${file.kind === "dir" ? "目录" : "文件"}${sizeText ? " · " + sizeText : ""}`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "map-tile-close";
+  close.setAttribute("aria-label", `删除 ${entry.agentId} 上的地图 ${file.name}`);
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    deleteAgentMap(entry.agentId, file.name);
+  });
+  tile.append(name, meta, close);
+  // 拖拽源信息（机器人侧用于显示，不直接接收）
+  tile.addEventListener("dragstart", onMapTileDragStart);
+  tile.addEventListener("dragend", onMapTileDragEnd);
+  return tile;
+}
+
+async function refreshSharedBoard() {
+  const board = maybe("sharedBoard");
+  if (!board) return;
+  try {
+    const response = await fetch("/api/maps/shared", { method: "GET" });
+    const result = await response.json().catch(() => ({
+      ok: false,
+      error: `non-JSON response (status ${response.status})`,
+      root: "",
+      robots: [],
+      totalFiles: 0,
+    }));
+    if (!result.ok) {
+      mapsPageState.shared = result;
+      setSharedError(result.error || "共享地图库不可用");
+    } else {
+      mapsPageState.shared = result;
+      setSharedError("");
+    }
+  } catch (error) {
+    mapsPageState.shared = { ok: false, error: String(error), root: "", robots: [], totalFiles: 0 };
+    setSharedError(String(error));
+  }
+  renderSharedBoard();
+}
+
+function renderSharedBoard() {
+  const board = maybe("sharedBoard");
+  if (!board) return;
+  clear(board);
+  const summary = maybe("sharedBoardSummary");
+  if (!mapsPageState.shared || !mapsPageState.shared.ok) {
+    const empty = document.createElement("div");
+    empty.className = "maps-robot-card-empty";
+    empty.textContent = "共享地图库不可用";
+    board.appendChild(empty);
+    if (summary) summary.textContent = "共享地图库不可用";
+    return;
+  }
+  const root = mapsPageState.shared.root || "";
+  mapsPageState.sharedRoot = root;
+  // 合并所有机器人下的地图为一张平铺表（同名 + 同源 = 同一个 map）
+  const byKey = new Map();
+  for (const robot of mapsPageState.shared.robots || []) {
+    for (const file of robot.files || []) {
+      const key = `${robot.robotId}/${file.name}`;
+      const prev = byKey.get(key);
+      if (prev) {
+        // 同源同名视为同一份，保留最新的 mtime
+        if ((file.mtimeUnix || 0) > (prev.mtimeUnix || 0)) {
+          byKey.set(key, { ...file, sourceRobotId: robot.robotId });
+        }
+      } else {
+        byKey.set(key, { ...file, sourceRobotId: robot.robotId });
+      }
+    }
+  }
+  mapsPageState.sharedByKey = byKey;
+  mapsPageState.totalShared = byKey.size;
+  if (summary) summary.textContent = `共享地图库：${root} · 共 ${byKey.size} 项`;
+  if (byKey.size === 0) {
+    const empty = document.createElement("div");
+    empty.className = "maps-robot-card-empty";
+    empty.textContent = "尚无共享地图。点击左侧机器人卡片的「同步到共享库」以下载地图。";
+    board.appendChild(empty);
+    return;
+  }
+  // 按 (sourceRobotId, name) 排序
+  const entries = [...byKey.values()].sort((a, b) => {
+    if (a.sourceRobotId === b.sourceRobotId) return a.name.localeCompare(b.name);
+    return a.sourceRobotId.localeCompare(b.sourceRobotId);
+  });
+  for (const file of entries) board.appendChild(buildSharedMapTile(file));
+}
+
+function buildSharedMapTile(file) {
+  const tile = document.createElement("div");
+  tile.className = "map-tile";
+  tile.draggable = true;
+  tile.dataset.kind = "shared";
+  tile.dataset.mapName = file.name;
+  tile.dataset.sourceRobotId = file.sourceRobotId;
+  tile.dataset.mapKey = `${file.sourceRobotId}/${file.name}`;
+  tile.title = `源: ${file.sourceRobotId}/${file.name}（${file.kind || "file"}）— 拖到左侧机器人以部署`;
+
+  const name = document.createElement("span");
+  name.className = "map-tile-name";
+  name.textContent = file.name;
+  const meta = document.createElement("span");
+  meta.className = "map-tile-meta";
+  const sizeText = formatBytes(file.sizeBytes);
+  const srcText = file.sourceRobotId ? `@${file.sourceRobotId}` : "";
+  const parts = [file.kind === "dir" ? "目录" : "文件"];
+  if (sizeText) parts.push(sizeText);
+  if (srcText) parts.push(srcText);
+  meta.textContent = parts.join(" · ");
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "map-tile-close";
+  close.setAttribute("aria-label", `从共享库删除 ${file.sourceRobotId}/${file.name}`);
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    deleteSharedMap(file.sourceRobotId, file.name);
+  });
+  tile.append(name, meta, close);
+  tile.addEventListener("dragstart", onMapTileDragStart);
+  tile.addEventListener("dragend", onMapTileDragEnd);
+  return tile;
+}
+
+// ── Drag and drop ────────────────────────────────────────────────────────
+const MAP_MIME = "application/x-robonix-map";
+
+function onMapTileDragStart(event) {
+  const tile = event.currentTarget;
+  const payload = JSON.stringify({
+    kind: tile.dataset.kind,
+    mapName: tile.dataset.mapName,
+    sourceRobotId: tile.dataset.sourceRobotId || "",
+    agentId: tile.dataset.agentId || "",
+    mapKey: tile.dataset.mapKey,
+  });
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = tile.dataset.kind === "shared" ? "copy" : "move";
+    event.dataTransfer.setData(MAP_MIME, payload);
+    event.dataTransfer.setData("text/plain", payload);
+  }
+  tile.classList.add("is-dragging");
+}
+
+function onMapTileDragEnd(event) {
+  event.currentTarget.classList.remove("is-dragging");
+  document.querySelectorAll(".maps-robot-card.is-drop-target, .maps-board-body.is-drop-target")
+    .forEach((el) => el.classList.remove("is-drop-target"));
+}
+
+function getDragPayload(event) {
+  const dt = event.dataTransfer;
+  if (!dt) return null;
+  const raw = dt.getData(MAP_MIME) || dt.getData("text/plain");
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+function onAgentCardDragOver(event) {
+  const payload = getDragPayload(event);
+  if (!payload || payload.kind !== "shared") return; // 机器人上自有地图不能再拖回
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  event.currentTarget.classList.add("is-drop-target");
+}
+
+function onAgentCardDragEnter(event) {
+  const payload = getDragPayload(event);
+  if (!payload || payload.kind !== "shared") return;
+  event.preventDefault();
+  event.currentTarget.classList.add("is-drop-target");
+}
+
+function onAgentCardDragLeave(event) {
+  // 仅当真正离开卡片的可见区域时才清除高亮（避免子元素抖动）
+  const card = event.currentTarget;
+  if (!card.contains(event.relatedTarget)) {
+    card.classList.remove("is-drop-target");
+  }
+}
+
+async function onAgentCardDrop(event) {
+  const card = event.currentTarget;
+  card.classList.remove("is-drop-target");
+  const payload = getDragPayload(event);
+  if (!payload) return;
+  event.preventDefault();
+  const targetAgentId = card.dataset.agentId;
+  if (!targetAgentId) return;
+  if (payload.kind !== "shared") {
+    setSharedError("仅支持从共享地图库拖入");
+    return;
+  }
+  await deploySharedMapToAgent(targetAgentId, payload.sourceRobotId, payload.mapName);
+}
+
+// ── Operations ──────────────────────────────────────────────────────────
+let agentSyncInFlight = new Set();
+
+async function syncAgentMapsToShared(entry, button) {
+  if (!entry) return;
+  if (agentSyncInFlight.has(entry.agentId)) return;
+  const atlas = buildAtlasEndpointForAgent(entry);
+  if (!atlas) {
+    setRobotsError(`智能体 ${entry.agentId} 未配置主机，无法同步。`);
+    return;
+  }
+  // 共享库按物理机器人（host）维度组织，而不是 agentId。同一 host
+  // 下多个 agent 共享同一份子目录，避免重复占用磁盘。
+  const hostKey = (entry.host || entry.agentId || "").trim();
+  agentSyncInFlight.add(entry.agentId);
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+  }
+  setRobotsError("");
+  try {
+    const result = await mapsApi("/api/maps/shared/sync", {
+      settings: collectSettingsForAgent(entry),
+      robot_id: hostKey,
+    });
+    const pulled = result.pulledCount || 0;
+    const failed = result.failedCount || 0;
+    if (failed > 0) {
+      setRobotsError(`同步完成：成功 ${pulled}，失败 ${failed}`);
+    } else {
+      setRobotsError(`已同步 ${pulled} 项到共享地图库`);
+    }
+  } catch (err) {
+    setRobotsError(`同步失败: ${err.message || err}`);
+  } finally {
+    agentSyncInFlight.delete(entry.agentId);
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+    }
+  }
+  await refreshSharedBoard();
+}
+
+let deployInFlight = new Set();
+
+async function deploySharedMapToAgent(targetAgentId, sourceRobotId, mapName) {
+  if (!targetAgentId || !sourceRobotId || !mapName) return;
+  const key = `${targetAgentId}::${sourceRobotId}::${mapName}`;
+  if (deployInFlight.has(key)) return;
+  const target = state.agents[targetAgentId];
+  if (!target) {
+    setRobotsError(`未找到目标智能体 ${targetAgentId}`);
+    return;
+  }
+  const atlas = buildAtlasEndpointForAgent(target);
+  if (!atlas) {
+    setRobotsError(`目标智能体 ${targetAgentId} 未配置主机，无法部署`);
+    return;
+  }
+  deployInFlight.add(key);
+  setRobotsError("");
+  try {
+    const result = await mapsApi("/api/maps/shared/deploy", {
+      settings: collectSettingsForAgent(target),
+      robot_id: sourceRobotId,
+      name: mapName,
+    });
+    setRobotsError(`已将 ${mapName} 部署到 ${target.label || targetAgentId}`);
+    // 部署成功后刷新该机器人的地图列表
+    await refreshAgentMaps(target);
+    await refreshRobotsBoard();
+    return result;
+  } catch (err) {
+    setRobotsError(`部署失败: ${err.message || err}`);
+  } finally {
+    deployInFlight.delete(key);
+  }
+}
+
+async function deleteSharedMap(sourceRobotId, name) {
+  if (!sourceRobotId || !name) return;
+  if (!window.confirm(`从共享地图库删除 ${sourceRobotId}/${name}？`)) return;
+  try {
+    await mapsApi("/api/maps/shared/delete", { robot_id: sourceRobotId, name });
+    setSharedError(`已删除 ${name}`);
+  } catch (err) {
+    setSharedError(`删除失败: ${err.message || err}`);
+    return;
+  }
+  await refreshSharedBoard();
+}
+
+async function deleteAgentMap(agentId, name) {
+  if (!agentId || !name) return;
+  if (!window.confirm(`从智能体 ${agentId} 删除地图 ${name}？`)) return;
+  const target = state.agents[agentId];
+  if (!target) {
+    setRobotsError(`未找到智能体 ${agentId}`);
+    return;
+  }
+  try {
+    await mapsApi("/api/maps/robot/delete", {
+      settings: collectSettingsForAgent(target),
+      agentId,
+      name,
+    });
+    setRobotsError(`已从 ${target.label || agentId} 删除 ${name}`);
+  } catch (err) {
+    setRobotsError(`删除失败: ${err.message || err}`);
+    return;
+  }
+  await refreshAgentMaps(target);
+  await refreshRobotsBoard();
+}
+
+function formatBytes(num) {
+  const value = Number(num);
+  if (!Number.isFinite(value) || value < 0) return "";
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let scaled = value / 1024;
+  for (const unit of units) {
+    if (scaled < 1024 || unit === units[units.length - 1]) {
+      return `${scaled.toFixed(scaled >= 10 ? 0 : 1)} ${unit}`;
+    }
+    scaled /= 1024;
+  }
+  return `${value} B`;
 }
 
 init();

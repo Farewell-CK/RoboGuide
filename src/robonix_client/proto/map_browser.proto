@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+// Hand-written for the robonix-client side. The robonix side generates a
+// matching file via `rbnx codegen` against the `lite3_map_browser`
+// primitive's declared capabilities:
+//   * robonix/primitive/map/list
+//   * robonix/primitive/map/get
+//   * robonix/primitive/map/push
+//   * robonix/primitive/map/delete
+//
+// All list / push / delete responses carry their payload as a JSON
+// string in `data` (same shape as the existing list response). The
+// get response is a strongly-typed `GetMap_Response` with the raw
+// `bytes data` so the client can stream the file straight to disk.
+//
+// If a future codegen version changes the schema, regenerate the client
+// stub with protoc and replace `map_browser_pb2.py`:
+//   protoc --proto_path=src/robonix_client/proto \
+//           --python_out=src/robonix_client/proto \
+//           src/robonix_client/proto/map_browser.proto
+package robonix.primitive.map;
+
+message ListMaps_Request {}
+
+message ListMaps_Response {
+  // JSON listing of the configured maps directory, matching the shape
+  // emitted by `lite3_map_browser.map_browser_driver.list_maps`.
+  string data = 1;
+}
+
+message GetMap_Request {
+  // File name; validated against the same strict pattern the driver
+  // uses (A-Za-z0-9._-+ space, no leading '.', no separators, <=200).
+  string name = 1;
+}
+
+message GetMap_Response {
+  string name = 1;
+  // Raw file bytes; rejected by the driver if larger than
+  // `max_map_bytes` (default 256 MiB).
+  bytes data = 2;
+}
+
+message PushMap_Request {
+  string name = 1;
+  bytes data = 2;
+}
+
+message PushMap_Response {
+  // JSON `{ok, error, name, size_bytes}` mirroring the driver output.
+  string data = 1;
+}
+
+message DeleteMap_Request {
+  string name = 1;
+}
+
+message DeleteMap_Response {
+  // JSON `{ok, error, name}`.
+  string data = 1;
+}

@@ -11,28 +11,46 @@ from urllib.parse import urlparse
 import grpc
 import yaml
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import audio_server_control
+from .agents import (
+    DEFAULT_AGENT_ID,
+    hydrate_from_disk,
+    new_agent_id,
+    persist_to_disk,
+    registry as agents_registry,
+)
 from .audio_reverse_bridge import AudioReverseBridge
 from .vitals_api import router as vitals_router
+from . import transport
 from .transport import (
     DEFAULT_ATLAS,
     ClientSettings,
     abort_turn,
+    delete_from_shared,
+    delete_map,
+    deploy_from_shared_to_robot,
     discover_audio_bridge,
     enroll_voiceprint,
     finish_voice_capture,
+    get_camera_snapshot,
+    get_chassis_state,
     get_handsfree_status,
+    get_service_map_state,
     list_active_plans,
     list_audio_devices,
     list_audio_providers,
+    list_maps,
+    list_shared_library,
     play_tts_test,
     pcm16_stats,
+    pull_from_robot_to_shared,
     record_pcm,
     select_audio_device,
+    shared_maps_root,
     start_voice_session,
     set_handsfree_enabled,
     submit_text,
@@ -94,43 +112,51 @@ class AudioServerStartRequest(BaseModel):
 
 
 class EnrollRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     userId: str
     userName: str = ""
     seconds: float = 6.0
 
 
 class AudioPlayTestRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     text: str = "Robonix speaker test"
 
 
 class AudioMicTestRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     seconds: float = 1.0
 
 
 class AudioReverseConnectRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     providerId: str
 
 
 class HandsfreeSetRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     enabled: bool
 
 
 class ClientSettingsRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
 
 
 class AudioProviderDevicesRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
     providerId: str
 
 
 class AudioRouteApplyRequest(BaseModel):
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
 
 
 def _payload_steer(payload: dict[str, Any]) -> bool:
@@ -160,12 +186,460 @@ def _save_persisted_settings(settings: dict[str, Any]) -> dict[str, Any]:
         encoding="utf-8",
     )
     temporary.replace(SETTINGS_PATH)
+    # Mirror the legacy write into the default agent so the new
+    # multi-agent sidebar stays in sync even when callers still
+    # use the legacy /api/settings endpoint.
+    try:
+        agents_registry.update_legacy(selected)
+        persist_to_disk()
+    except Exception:
+        pass
     return selected
+
+
+# ── Agent helpers ──────────────────────────────────────────────────
+# Settings payloads may include ``agentId`` on top of the legacy
+# ``settings`` blob; the helper picks the right ``ClientSettings``
+# to use for a request. Missing or unknown agent ids fall back to
+# the default agent so a partially-migrated front end keeps working.
+def _settings_for(agent_id: str | None, payload: dict[str, Any] | None) -> ClientSettings:
+    payload = payload or {}
+    if agent_id:
+        try:
+            return agents_registry.resolve_settings(agent_id)
+        except Exception:
+            pass
+    # Last-resort: build a fresh ClientSettings from the inline blob.
+    # This mirrors the legacy code path that pre-dated the registry.
+    try:
+        return ClientSettings.from_payload(payload)
+    except Exception:
+        return agents_registry.resolve_settings(None)
+
+
+def _serialise_agent(rec) -> dict[str, Any]:
+    return rec.to_public_dict()
+
+
+def _serialise_agent_with_settings(rec) -> dict[str, Any]:
+    return {**_serialise_agent(rec), "settings": rec.settings.to_payload()}
+
+
+# ── Agents API ─────────────────────────────────────────────────────
+@app.get("/api/agents")
+async def agents_list() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "defaultAgentId": DEFAULT_AGENT_ID,
+        "agents": [_serialise_agent(r) for r in agents_registry.list()],
+    }
+
+
+class AgentUpsertRequest(BaseModel):
+    agentId: str = ""
+    label: str = ""
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/agents")
+async def agents_upsert(req: AgentUpsertRequest) -> dict[str, Any]:
+    try:
+        agent_id = (req.agentId or "").strip() or new_agent_id()
+        rec = agents_registry.upsert(agent_id, req.label, req.settings)
+        persist_to_disk()
+        return {"ok": True, "agent": _serialise_agent_with_settings(rec)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+class AgentPatchRequest(BaseModel):
+    label: str = ""
+
+
+@app.patch("/api/agents/{agent_id}")
+async def agents_patch(agent_id: str, req: AgentPatchRequest) -> dict[str, Any]:
+    try:
+        rec = agents_registry.rename(agent_id, req.label)
+        if rec is None:
+            return {"ok": False, "error": f"agent {agent_id!r} not found"}
+        persist_to_disk()
+        return {"ok": True, "agent": _serialise_agent(rec)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.delete("/api/agents/{agent_id}")
+async def agents_delete(agent_id: str) -> dict[str, Any]:
+    if agent_id == DEFAULT_AGENT_ID:
+        return {
+            "ok": False,
+            "error": "cannot remove the default agent; clear its settings instead",
+        }
+    removed = agents_registry.remove(agent_id)
+    if not removed:
+        return {"ok": False, "error": f"agent {agent_id!r} not found"}
+    persist_to_disk()
+    return {"ok": True}
+
+
+# ── Agent "live" endpoints ─────────────────────────────────────────
+# These power the small camera / map / pose / battery tiles in the
+# overview grid. They fan out to three backends in parallel:
+#   1. `transport.get_chassis_state`  — pose + battery (gRPC MCP)
+#   2. `transport.get_camera_snapshot` — JPEG frame (gRPC MCP)
+#   3. `transport.get_service_map_state` — current map_id + map-frame
+#      pose from the `service-map-rbnx` sidecar (HTTP, port 8092)
+# All three are best-effort: failures degrade to empty payloads, so
+# the overview card falls back to placeholders without crashing the
+# rest of the snapshot.
+TRANSPARENT_PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000d4944415478da63000100000005000100"
+    "0d0a2db40000000049454e44ae426082"
+)
+
+
+def _resolve_agent_settings(agent_id: str) -> tuple[Any, ClientSettings | None]:
+    """Return the registry record + ClientSettings for an agent, or
+    (None, None) if not found. Centralised so the live endpoints all
+    hit the same lookup logic."""
+    rec = agents_registry.get(agent_id)
+    if rec is None:
+        return None, None
+    return rec, rec.settings
+
+
+@app.get("/api/agents/{agent_id}/live")
+async def agents_live(agent_id: str) -> dict[str, Any]:
+    """Aggregate per-agent live signals for the overview card.
+
+    Each field is best-effort: if the source is unavailable the
+    corresponding value is left as ``None`` so the front end can fall
+    back to a placeholder without crashing the whole card.
+    """
+    rec, settings = _resolve_agent_settings(agent_id)
+    if rec is None:
+        return {"ok": False, "error": f"agent {agent_id!r} not found"}
+    # The snapshot URLs use an agent-scoped version (`?v=`) so the
+    # browser cache busts whenever the agent record changes; the
+    # timestamp at the front end (see app.js) handles periodic refresh
+    # of the same agent.
+    camera_url = f"/api/agents/{agent_id}/camera"
+    map_url = f"/api/agents/{agent_id}/map-image"
+    payload: dict[str, Any] = {
+        "ok": True,
+        "agentId": agent_id,
+        "cameraUrl": camera_url,
+        "mapUrl": map_url,
+        "mapName": "",
+        "pose": None,
+        "battery": None,
+        "atlasEndpoint": settings.atlas_endpoint,
+        "robotHost": settings.robot_host,
+    }
+    if not settings.robot_host:
+        return payload
+    # Fan out to all three backends in parallel. Each is wrapped in
+    # its own try/except so a single failure does not poison the
+    # whole snapshot.
+    tasks: dict[str, Any] = {}
+    if settings.atlas_endpoint:
+        tasks["chassis"] = asyncio.create_task(transport.get_chassis_state(settings))
+    if settings.robot_host:
+        tasks["service_map"] = asyncio.create_task(
+            transport.get_service_map_state(settings.robot_host)
+        )
+    if tasks:
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for key, result in zip(tasks.keys(), results):
+            if isinstance(result, Exception) or not isinstance(result, dict):
+                continue
+            if key == "chassis":
+                if result.get("ok"):
+                    payload["battery"] = result.get("battery")
+                    # Chassis MCP gives odom-frame pose; we keep it as
+                    # a fallback if service-map has nothing to offer.
+                    payload["pose"] = result.get("odom")
+                else:
+                    payload["chassisError"] = result.get("error", "")
+            elif key == "service_map":
+                if result.get("ok"):
+                    payload["mapName"] = result.get("map_name") or result.get("map_id")
+                    # service-map-rbnx gives map-frame pose — preferred
+                    # over the chassis MCP's odom-frame pose for the
+                    # mini-map.
+                    pose = result.get("pose")
+                    if pose:
+                        payload["pose"] = pose
+                else:
+                    payload["serviceMapError"] = result.get("error", "")
+    return payload
+
+
+@app.get("/api/agents/{agent_id}/camera")
+async def agents_camera(agent_id: str) -> Response:
+    """Return a single JPEG/PNG frame from the robot's camera.
+
+    The endpoint calls the `robonix/primitive/camera/snapshot` MCP via
+    gRPC, decodes the `sensor_msgs/Image.data` field, and serves the
+    raw bytes with the matching MIME type. The front end appends a
+    `?t=<ts>` cache-bust parameter; combined with FastAPI's default
+    no-store semantics, each request re-fetches a fresh frame.
+    """
+    rec, settings = _resolve_agent_settings(agent_id)
+    if rec is None or settings is None:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=404)
+    if not settings.atlas_endpoint:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    jpeg = await transport.get_camera_snapshot(settings)
+    if not jpeg:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    # `camera/snapshot` typically returns JPEG bytes; PNGs are also
+    # possible if the camera primitive chooses to encode that way.
+    media_type = "image/jpeg"
+    if jpeg[:4] == b"\x89PNG":
+        media_type = "image/png"
+    return Response(
+        content=jpeg,
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# ── PGM / PNG helpers for the mini-map tile ───────────────────────────
+# service-map-rbnx stores the current map as a PGM (occupancy grid)
+# in `<DEPLOY_ROOT>/rbnx-boot/cache/service-map-rbnx/maps/<map_id>/`.
+# The `lite3_map_browser.map/get` MCP can pull any file out, so we:
+#   1. ask service-map for the current map_id,
+#   2. fetch <map_id>/map.pgm via map/get,
+#   3. fetch <map_id>/map.yaml (optional) for resolution/origin,
+#   4. convert to a PNG that the front end can drop straight into
+#      an <img>.
+_PGM_CACHED: dict[str, tuple[float, bytes]] = {}
+_PGM_CACHE_TTL_S = 2.0  # avoid re-fetching the same map on every poll
+
+def _pgm_to_png(pgm: bytes) -> bytes | None:
+    """Decode a PGM (P5 binary or P2 ASCII) to PNG bytes.
+
+    Pure stdlib (no PIL dependency) so the client runs in the
+    minimum-dependency environment. Returns None on parse failure.
+    """
+    import io
+    import struct
+    if not pgm or len(pgm) < 10:
+        return None
+    # Tokenise header
+    pos = 0
+    header_tokens: list[bytes] = []
+    comment = False
+    while len(header_tokens) < 4 and pos < len(pgm):
+        if comment:
+            nl = pgm.find(b"\n", pos)
+            if nl == -1:
+                return None
+            pos = nl + 1
+            comment = False
+            continue
+        # skip whitespace
+        while pos < len(pgm) and pgm[pos : pos + 1] in (b" ", b"\t", b"\r", b"\n"):
+            pos += 1
+        if pos >= len(pgm):
+            return None
+        if pgm[pos : pos + 1] == b"#":
+            comment = True
+            continue
+        # scan token
+        start = pos
+        while pos < len(pgm) and pgm[pos : pos + 1] not in (b" ", b"\t", b"\r", b"\n", b"#"):
+            pos += 1
+        header_tokens.append(pgm[start:pos])
+    if len(header_tokens) < 3:
+        return None
+    magic = header_tokens[0]
+    try:
+        width = int(header_tokens[1])
+        height = int(header_tokens[2])
+    except ValueError:
+        return None
+    if magic not in (b"P5", b"P2"):
+        return None
+    max_val = 255
+    if len(header_tokens) >= 4:
+        try:
+            max_val = int(header_tokens[3])
+        except ValueError:
+            max_val = 255
+    # Skip exactly one whitespace separator after the max value (P5)
+    if pos < len(pgm) and pgm[pos : pos + 1] in (b" ", b"\t", b"\r", b"\n"):
+        pos += 1
+    elif pos < len(pgm):
+        # Tokeniser stopped at the next token, no separator — fine for P2
+        pass
+    if magic == b"P5":
+        if len(pgm) - pos < width * height:
+            return None
+        pixels = pgm[pos : pos + width * height]
+    else:
+        # P2: ASCII pixel values, separated by whitespace
+        data_text = pgm[pos:]
+        tokens = data_text.split()
+        if len(tokens) < width * height:
+            return None
+        try:
+            pixels = bytes(int(t) for t in tokens[: width * height])
+        except ValueError:
+            return None
+    # Occupancy grid convention: 0 = occupied (black), 255 = free
+    # (white), -1 (204) = unknown (grey). Invert to a typical map
+    # look: free=light grey, occupied=dark, unknown=mid grey.
+    out = bytearray(width * height * 3)
+    for i in range(width * height):
+        v = pixels[i]
+        if v >= 250:
+            r = g = b = 245
+        elif v <= 10:
+            r = g = b = 40
+        elif v == 205:  # unknown
+            r = g = b = 150
+        else:
+            r = g = b = int(245 - (245 - 40) * (v / 255.0))
+        out[i * 3] = r
+        out[i * 3 + 1] = g
+        out[i * 3 + 2] = b
+    # Encode as PNG (filter type 0, 8-bit RGB)
+    def _png_chunk(tag: bytes, data: bytes) -> bytes:
+        import zlib
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+    def _bead(arr: bytearray) -> bytearray:
+        # Add a leading filter byte (0 = None) per scanline
+        out2 = bytearray()
+        for y in range(height):
+            out2.append(0)
+            out2.extend(arr[y * width * 3 : (y + 1) * width * 3])
+        return out2
+    import zlib
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    idat = zlib.compress(bytes(_bead(out)), 6)
+    iend = b""
+    return sig + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", iend)
+
+
+@app.get("/api/agents/{agent_id}/map-image")
+async def agents_map_image(agent_id: str) -> Response:
+    """Return the current map image for the robot.
+
+    Resolution order:
+      1. cache the last successful fetch for 2 s
+      2. ask `service-map-rbnx` for the current `map_id` (port 8092)
+      3. fetch `<map_id>/map.pgm` via `robonix/primitive/map/get`
+      4. convert to PNG via pure-stdlib PGM decoder
+    """
+    rec, settings = _resolve_agent_settings(agent_id)
+    if rec is None or settings is None:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=404)
+    if not settings.robot_host or not settings.atlas_endpoint:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    # 1. cache
+    loop = asyncio.get_event_loop()
+    now = loop.time()
+    cache_key = f"{agent_id}"
+    cached = _PGM_CACHED.get(cache_key)
+    if cached and (now - cached[0]) < _PGM_CACHE_TTL_S:
+        return Response(content=cached[1], media_type="image/png", headers={"Cache-Control": "no-store"})
+    # 2. current map id
+    sm = await transport.get_service_map_state(settings.robot_host)
+    if not sm.get("ok") or not sm.get("map_id"):
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    map_id = sm["map_id"]
+    # 3. fetch the pgm
+    try:
+        file_resp = await transport.get_map(settings, f"{map_id}/map.pgm")
+    except Exception:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    if not file_resp.get("data"):
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    # 4. decode
+    png = _pgm_to_png(file_resp["data"])
+    if not png:
+        return Response(content=TRANSPARENT_PNG_1X1, media_type="image/png", status_code=503)
+    _PGM_CACHED[cache_key] = (now, png)
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+# ── Model name API (LLM model currently in use) ──────────────────
+_MODEL_PATH = Path(
+    os.environ.get(
+        "ROBONIX_CLIENT_MODEL_FILE",
+        Path.home() / ".config" / "robonix-client" / "model.txt",
+    )
+).expanduser()
+
+
+def _read_model_name() -> str:
+    try:
+        if _MODEL_PATH.exists():
+            value = _MODEL_PATH.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+    return os.environ.get("ROBONIX_CLIENT_LLM_MODEL", "").strip()
+
+
+def _write_model_name(name: str) -> str:
+    cleaned = (name or "").strip()
+    _MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if cleaned:
+        _MODEL_PATH.write_text(cleaned + "\n", encoding="utf-8")
+    elif _MODEL_PATH.exists():
+        _MODEL_PATH.unlink()
+    return cleaned
+
+
+@app.get("/api/model")
+async def model_get() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "model": _read_model_name(),
+        "path": str(_MODEL_PATH),
+    }
+
+
+class ModelSetRequest(BaseModel):
+    model: str = ""
+
+
+@app.put("/api/model")
+async def model_set(req: ModelSetRequest) -> dict[str, Any]:
+    name = _write_model_name(req.model)
+    return {"ok": True, "model": name, "path": str(_MODEL_PATH)}
 
 
 @app.on_event("startup")
 async def start_client_audio() -> None:
-    """Start local device I/O. The robot endpoint is Atlas-discovered later."""
+    """Start local device I/O. The robot endpoint is Atlas-discovered later.
+
+    Also hydrate the in-memory agent registry from disk so the first
+    request to ``/api/agents`` reflects the persisted state (the
+    legacy single-agent install gets a ``default`` entry seeded from
+    the same ``settings.yaml``).
+    """
+    try:
+        hydrate_from_disk()
+    except Exception:
+        # A corrupt settings file must not prevent the UI from
+        # booting — the user can re-register agents from scratch.
+        pass
     if os.environ.get("ROBONIX_CLIENT_REVERSE_AUDIO", "1").lower() in {"0", "false", "no"}:
         return
     audio_server_control.start()
@@ -175,6 +649,10 @@ async def start_client_audio() -> None:
 async def stop_client_audio() -> None:
     global _reverse_audio
     try:
+        try:
+            persist_to_disk()
+        except Exception:
+            pass
         if _reverse_audio is not None:
             _reverse_audio.stop()
     finally:
@@ -257,12 +735,27 @@ async def put_settings(req: ClientSettingsRequest) -> dict[str, Any]:
 
 
 @app.get("/api/system")
-async def system(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
+async def system(
+    atlas: str = Query(DEFAULT_ATLAS),
+    agentId: str = Query(""),
+) -> dict[str, Any]:
     try:
-        return await system_snapshot(atlas)
+        # When an agent id is supplied the registry owns the
+        # authoritative atlas endpoint; the legacy ``atlas`` query
+        # parameter is only used as an override (or as a hint for
+        # un-registered agents). The transport layer then
+        # short-circuits the discovery if the endpoint is the
+        # ``atlas`` placeholder from a partial config.
+        target = atlas
+        if agentId:
+            try:
+                target = agents_registry.resolve_settings(agentId).atlas_endpoint
+            except Exception:
+                pass
+        return await system_snapshot(target)
     except Exception as exc:
         return {
-            "atlasEndpoint": atlas,
+            "atlasEndpoint": target,
             "summary": {"providers": 0, "active": 0, "errors": 1, "terminated": 0, "state": "offline"},
             "requiredContracts": [],
             "providers": [],
@@ -273,9 +766,166 @@ async def system(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
 @app.post("/api/executor/active-plans")
 async def executor_active_plans(req: ClientSettingsRequest) -> dict[str, Any]:
     try:
-        return await list_active_plans(ClientSettings.from_payload(req.settings))
+        return await list_active_plans(_settings_for(req.agentId, req.settings))
     except Exception as exc:
         return {"available": False, "count": 0, "plans": [], "error": str(exc)}
+
+
+@app.post("/api/maps/list")
+async def maps_list(req: ClientSettingsRequest) -> dict[str, Any]:
+    """List files in the robot's `robonix/primitive/map/list` cache.
+
+    Mirrors the error contract used by `/api/executor/active-plans`:
+    on failure the response has `available: false` plus a human-readable
+    `error` field. The Maps page renders the file list and surface any
+    failure message in the page header.
+    """
+    try:
+        return await list_maps(_settings_for(req.agentId, req.settings))
+    except Exception as exc:
+        return {
+            "available": False,
+            "mapsDir": "",
+            "count": 0,
+            "files": [],
+            "error": str(exc),
+        }
+
+
+@app.get("/api/maps/shared")
+async def maps_shared_list() -> dict[str, Any]:
+    """List the local shared map library (no robot required).
+
+    Walks `<root>/<robot_id>/...`. The root defaults to
+    `<repo>/maps` and can be overridden via `ROBONIX_SHARED_MAPS_DIR`.
+    Always returns `ok: true`; failure to enumerate a particular
+    directory is reflected in the absent entries (per-file `OSError`
+    is caught and that file is simply skipped).
+    """
+    try:
+        return {"ok": True, **list_shared_library()}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "root": str(shared_maps_root()),
+            "robots": [],
+            "totalFiles": 0,
+            "error": str(exc),
+        }
+
+
+class MapsSharedSyncRequest(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict)
+    robot_id: str = ""
+
+
+class MapsSharedDeployRequest(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict)
+    robot_id: str = ""
+    name: str = ""
+
+
+class MapsSharedDeleteRequest(BaseModel):
+    robot_id: str = ""
+    name: str = ""
+
+
+class MapsRobotDeleteRequest(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict)
+    agentId: str = ""
+    name: str = ""
+
+
+@app.post("/api/maps/shared/sync")
+async def maps_shared_sync(req: MapsSharedSyncRequest) -> dict[str, Any]:
+    """Pull every file from the robot's cache into the shared library.
+
+    `robot_id` defaults to the connected robot's host (the same value
+    `ClientSettings.atlas_endpoint` uses) so the typical call from the
+    UI is just `{ "settings": {...} }` without needing to know the host.
+    """
+    robot_id = (req.robot_id or "").strip()
+    if not robot_id:
+        try:
+            settings = _settings_for(req.agentId, req.settings)
+        except Exception as exc:
+            return {"ok": False, "error": f"bad settings: {exc}"}
+        robot_id = settings.robot_host or settings.atlas_host or ""
+    if not robot_id:
+        return {
+            "ok": False,
+            "error": "robot_id is required (set Robot Host or pass it explicitly)",
+        }
+    try:
+        return await pull_from_robot_to_shared(
+            _settings_for(req.agentId, req.settings), robot_id
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "robotId": robot_id,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/maps/shared/deploy")
+async def maps_shared_deploy(req: MapsSharedDeployRequest) -> dict[str, Any]:
+    """Push a file from the shared library onto the connected robot.
+
+    `robot_id` identifies which subdirectory of the shared library the
+    file comes from (typically "the robot it was originally synced
+    from"). The destination is the robot described by `settings`. The
+    two are decoupled on purpose — a map synced from robot A can be
+    pushed to robot B without copying through any temp space.
+    """
+    if not req.robot_id or not req.name:
+        return {
+            "ok": False,
+            "error": "robot_id and name are required",
+        }
+    try:
+        return await deploy_from_shared_to_robot(
+            _settings_for(req.agentId, req.settings), req.robot_id, req.name
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "sourceRobotId": req.robot_id,
+            "name": req.name,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/maps/shared/delete")
+async def maps_shared_delete(req: MapsSharedDeleteRequest) -> dict[str, Any]:
+    """Delete a single file from the local shared library."""
+    if not req.robot_id or not req.name:
+        return {"ok": False, "error": "robot_id and name are required"}
+    try:
+        return delete_from_shared(req.robot_id, req.name)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "robotId": req.robot_id,
+            "name": req.name,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/maps/robot/delete")
+async def maps_robot_delete(req: MapsRobotDeleteRequest) -> dict[str, Any]:
+    """Delete a single file from the connected robot's map cache."""
+    if not req.name:
+        return {"ok": False, "error": "name is required"}
+    try:
+        result = await delete_map(
+            _settings_for(req.agentId, req.settings), req.name
+        )
+        if not result.get("ok", True) and result.get("error"):
+            return {"ok": False, "name": req.name, "error": result["error"]}
+        return {"ok": True, "name": req.name, "robot": result}
+    except Exception as exc:
+        return {"ok": False, "name": req.name, "error": str(exc)}
 
 
 @app.post("/api/voice/finish-supported")
@@ -287,7 +937,7 @@ async def voice_finish_supported_route(req: ClientSettingsRequest) -> dict[str, 
     not as an error.
     """
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         return {"supported": await voice_finish_supported(settings)}
     except Exception:
         return {"supported": False}
@@ -296,7 +946,7 @@ async def voice_finish_supported_route(req: ClientSettingsRequest) -> dict[str, 
 @app.post("/api/handsfree/set")
 async def handsfree_set(req: HandsfreeSetRequest) -> dict[str, Any]:
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         bridge = await _connect_selected_reverse_audio(settings) if req.enabled else None
         response = await set_handsfree_enabled(settings, req.enabled)
         if bridge is not None:
@@ -309,7 +959,7 @@ async def handsfree_set(req: HandsfreeSetRequest) -> dict[str, Any]:
 @app.post("/api/handsfree/status")
 async def handsfree_status(req: ClientSettingsRequest) -> dict[str, Any]:
     try:
-        return await get_handsfree_status(ClientSettings.from_payload(req.settings))
+        return await get_handsfree_status(_settings_for(req.agentId, req.settings))
     except Exception as exc:
         return {"available": False, "enabled": False, "state": "unavailable", "error": str(exc)}
 
@@ -317,7 +967,7 @@ async def handsfree_status(req: ClientSettingsRequest) -> dict[str, Any]:
 @app.post("/api/audio-route/providers")
 async def audio_route_providers(req: ClientSettingsRequest) -> dict[str, Any]:
     try:
-        return await list_audio_providers(ClientSettings.from_payload(req.settings))
+        return await list_audio_providers(_settings_for(req.agentId, req.settings))
     except Exception as exc:
         return {"micProviders": [], "speakerProviders": [], "error": str(exc)}
 
@@ -325,7 +975,7 @@ async def audio_route_providers(req: ClientSettingsRequest) -> dict[str, Any]:
 @app.post("/api/audio-route/devices")
 async def audio_route_devices(req: AudioProviderDevicesRequest) -> dict[str, Any]:
     try:
-        return await list_audio_devices(ClientSettings.from_payload(req.settings), req.providerId)
+        return await list_audio_devices(_settings_for(req.agentId, req.settings), req.providerId)
     except Exception as exc:
         return {"providerId": req.providerId, "devices": [], "error": str(exc)}
 
@@ -333,7 +983,7 @@ async def audio_route_devices(req: AudioProviderDevicesRequest) -> dict[str, Any
 @app.post("/api/audio-route/apply")
 async def audio_route_apply(req: AudioRouteApplyRequest) -> dict[str, Any]:
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         await _connect_selected_reverse_audio(settings)
         selected: list[dict[str, Any]] = []
         if settings.mic_node_id and settings.mic_device_id:
@@ -378,7 +1028,7 @@ async def audio_server_status() -> dict[str, Any]:
 async def audio_reverse_connect(req: AudioReverseConnectRequest) -> dict[str, Any]:
     try:
         bridge = await _connect_reverse_audio(
-            ClientSettings.from_payload(req.settings), req.providerId
+            _settings_for(req.agentId, req.settings), req.providerId
         )
         return {"ok": True, **bridge}
     except Exception as exc:
@@ -452,7 +1102,7 @@ async def audio_server_health(
 @app.post("/api/voiceprint/enroll")
 async def voiceprint_enroll(req: EnrollRequest) -> dict[str, Any]:
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         return await enroll_voiceprint(settings, req.userId, req.userName, req.seconds)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -461,7 +1111,7 @@ async def voiceprint_enroll(req: EnrollRequest) -> dict[str, Any]:
 @app.post("/api/audio/play-test")
 async def audio_play_test(req: AudioPlayTestRequest) -> dict[str, Any]:
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         return await play_tts_test(settings, req.text)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -471,7 +1121,7 @@ async def audio_play_test(req: AudioPlayTestRequest) -> dict[str, Any]:
 async def audio_mic_test(req: AudioMicTestRequest) -> dict[str, Any]:
     """Verify the selected Robonix microphone path with a short PCM capture."""
     try:
-        settings = ClientSettings.from_payload(req.settings)
+        settings = _settings_for(req.agentId, req.settings)
         handsfree = await get_handsfree_status(settings)
         if (
             handsfree.get("enabled")
@@ -506,7 +1156,7 @@ async def task_ws(ws: WebSocket) -> None:
     await ws.accept()
     try:
         payload = await ws.receive_json()
-        settings = ClientSettings.from_payload(payload.get("settings"))
+        settings = _settings_for(payload.get("agentId"), payload.get("settings"))
         text = (payload.get("text") or "").strip()
         attachments = payload.get("attachments") or []
         steer = _payload_steer(payload)
@@ -537,7 +1187,7 @@ async def abort_ws(ws: WebSocket) -> None:
     await ws.accept()
     try:
         payload = await ws.receive_json()
-        settings = ClientSettings.from_payload(payload.get("settings"))
+        settings = _settings_for(payload.get("agentId"), payload.get("settings"))
         expected_turn_id = _payload_expected_turn_id(payload)
         await ws.send_json({"type": "accepted", "sessionId": settings.session_id})
         async for item in abort_turn(settings, expected_turn_id):
@@ -556,7 +1206,7 @@ async def voice_ws(ws: WebSocket) -> None:
     await ws.accept()
     try:
         payload = await ws.receive_json()
-        settings = ClientSettings.from_payload(payload.get("settings"))
+        settings = _settings_for(payload.get("agentId"), payload.get("settings"))
         steer = _payload_steer(payload)
         expected_turn_id = _payload_expected_turn_id(payload)
         await _connect_selected_reverse_audio(settings)
@@ -626,7 +1276,7 @@ async def handsfree_events_ws(ws: WebSocket) -> None:
     await ws.accept()
     try:
         payload = await ws.receive_json()
-        settings = ClientSettings.from_payload(payload.get("settings"))
+        settings = _settings_for(payload.get("agentId"), payload.get("settings"))
         await _connect_selected_reverse_audio(settings)
         await ws.send_json({"type": "accepted", "sessionId": settings.session_id})
         async for item in watch_handsfree_events(settings):
