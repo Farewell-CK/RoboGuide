@@ -1,5 +1,8 @@
 # ADR-0023：Application-Accepted Node Protocol Facts
 
+> ADR-0024 将 wire 升级为 Node Protocol v0.3；本 ADR 决定的 application-accepted
+> `Registered`/`Ack` 语义保持不变。
+
 - 状态：Accepted
 - 日期：2026-09-01
 - 范围：Node Protocol `Registered`/`Ack`、Controller composition、durable fact acceptance
@@ -33,6 +36,9 @@ Controller composition 因全局 ResourceId 冲突、未知 ownership、executio
    的首个 Heartbeat 完成 route/liveness 证明，并触发既有 `drive_ready_tasks` 路径。
 6. `Unavailable` 是 Integration 自身观察到的本地 transport fact，没有远端 Ack，因此不需要
    application completion response。
+7. 入站 gRPC reader 与 application acceptance 使用独立队列：reader 可持续接收并校验
+   heartbeat/fact，仍由串行 Controller consumer 在 durable acceptance 后发送 Ack。若任一 fact
+   被拒绝或 acceptance 超时，当前 session 终止，避免把未持久化的路由暂态继续用于执行。
 
 ## Consequences
 
@@ -40,6 +46,8 @@ Controller composition 因全局 ResourceId 冲突、未知 ownership、executio
 - `core/integration` 仍不依赖 Control、State 或 Runtime，也不获得 registration authority；
 - application rejection 不再静默，Node 会看到 gRPC failure 并进入保守重连；
 - 注册完成到首个任务 dispatch 至少需要一个已接受 Heartbeat，符合 lease/liveness 门槛；
+- 慢速 Controller/SQLite acceptance 不再阻塞 gRPC 网络读循环，session 仍以有序 durable
+  acceptance 作为 Ack 边界；
 - Node Protocol protobuf v0.2 wire shape 不变，但 acknowledgement 语义被收紧。
 
 ## Acceptance evidence

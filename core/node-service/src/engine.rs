@@ -7,10 +7,10 @@ use crate::{
     ExecutionJournal, ExecutionSpec, JournalError, JournalExecution, JournalStatus,
     LocalHealthState, MappedExecutionFact, MappedExecutionPhase, PrepareArtifactFreeze,
     PrepareDispatch, PreparedArtifact, PreparedArtifactRecord, ReplicaEvidenceStatus,
-    WorkflowContext,
+    StateExportFact, WorkflowContext,
 };
 use domain::{LocalSystemId, MapArtifactManifest, MissionId, NodeId, TaskId, TaskRef, TimestampMs};
-use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
+use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -36,14 +36,14 @@ pub struct LocalExecutionEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeObservation {
     /// Process/local-system health, kept independent from exact capability readiness.
-    status: integration::grpc::v0_2::NodeStatus,
+    status: integration::grpc::v0_3::NodeStatus,
     /// Exact canonical contract readiness in deterministic contract order.
     capabilities: BTreeMap<String, CapabilityReadinessFact>,
 }
 
 impl NodeObservation {
     /// Returns the current process/local-system health observation.
-    pub const fn status(&self) -> &integration::grpc::v0_2::NodeStatus {
+    pub const fn status(&self) -> &integration::grpc::v0_3::NodeStatus {
         &self.status
     }
 
@@ -171,7 +171,7 @@ impl LocalIntegrationEngine {
     }
 
     /// Observes every configured Local EAIOS and aggregates a truthful Node heartbeat status.
-    pub async fn status(&self) -> integration::grpc::v0_2::NodeStatus {
+    pub async fn status(&self) -> integration::grpc::v0_3::NodeStatus {
         let mut tasks = tokio::task::JoinSet::new();
         let checks = self
             .inner
@@ -231,7 +231,7 @@ impl LocalIntegrationEngine {
             .map(|(owner, state, detail)| format!("{owner}={state:?}:{detail}"))
             .collect::<Vec<_>>()
             .join("; ");
-        integration::grpc::v0_2::NodeStatus {
+        integration::grpc::v0_3::NodeStatus {
             health: state.to_string(),
             detail,
         }
@@ -308,6 +308,38 @@ impl LocalIntegrationEngine {
             status,
             capabilities,
         }
+    }
+
+    /// Samples selected configured State exports without changing health or execution lifecycle.
+    ///
+    /// A failed local sample is omitted so the Controller retains the previous record until its
+    /// configured validity expires. Other exports in the same polling cycle remain available.
+    pub async fn observe_state_exports(
+        &self,
+        export_ids: &BTreeSet<String>,
+    ) -> Vec<StateExportFact> {
+        let mut tasks = tokio::task::JoinSet::new();
+        for export_id in export_ids {
+            let Some(export) = self.inner.catalog.state_exports().get(export_id).cloned() else {
+                continue;
+            };
+            let engine = self.clone();
+            tasks.spawn(async move {
+                let mut context = WorkflowContext::new(serde_json::json!({}));
+                engine
+                    .run_steps(std::slice::from_ref(export.step()), &mut context)
+                    .await?;
+                export.map(&context).map_err(EngineError::Mapping)
+            });
+        }
+        let mut facts = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            if let Ok(Ok(fact)) = result {
+                facts.push(fact);
+            }
+        }
+        facts.sort_by(|left, right| left.export_id.cmp(&right.export_id));
+        facts
     }
 
     /// Returns all durable snapshots for reconnect replay.
@@ -1588,7 +1620,7 @@ fn canonical_invocation_json(
                 .value
                 .as_ref()
                 .ok_or_else(|| EngineError::Protocol("invocation scalar is empty".to_string()))?;
-            use integration::grpc::v0_2::scalar_value::Value;
+            use integration::grpc::v0_3::scalar_value::Value;
             let value = match value {
                 Value::BoolValue(value) => serde_json::Value::Bool(*value),
                 Value::IntegerValue(value) => serde_json::Value::Number((*value).into()),

@@ -5,7 +5,7 @@ driver。正式链路保持：
 
 ```text
 ExecutionIntent
-  -> Node Protocol v0.2
+  -> Node Protocol v0.3
   -> roboguide-node
   -> Local Integration Engine
   -> configured HTTP / dynamic gRPC / MCP
@@ -16,7 +16,7 @@ ExecutionIntent
 
 | 位置 | 正式责任 | 明确不负责 |
 | --- | --- | --- |
-| `core/integration` | Node Protocol v0.2 protobuf wire、gRPC session、lease/session fencing、NodeId command router 和 wire 校验 | Control reservation/recovery、Runtime/Task lifecycle、Local How |
+| `core/integration` | Node Protocol v0.3 protobuf wire、gRPC session、lease/session fencing、NodeId command router 和 wire 校验 | Control reservation/recovery、Runtime/Task lifecycle、Local How |
 | `core/orchestration` | Controller application composition，包括 `IntegrationRuntimeBridge` 对 Control/State/Runtime 的事实归约 | transport framing、endpoint 选择、Local EAIOS 调用 |
 | `core/artifact-store` | 独立 filesystem CAS、分块上传和 digest/path 安全 | Map/Task/Group 状态、Control ownership、Local EAIOS workflow |
 | `core/node-service` | 每台机器唯一的 `roboguide-node`、配置编译、HTTP/dynamic gRPC/MCP driver、journal、local lock 和 status/cancel lifecycle | 物理 safety、Immediate How、Control commitment/recovery |
@@ -29,14 +29,18 @@ checkpoint schema；`core/orchestration` 只把 transport fact 接到既有 auth
 ## 离线 conformance
 
 `roboguide-node` 的配置编译器先整体校验并冻结配置，再允许进程连接任何 endpoint。版本
-`roboguide.node-config/v0.4` 是 Extension Conformance 的最低版本；v0.2/v0.3 仍可用于
-legacy smoke，但静态 `available=true` 不满足 conformance。
+`roboguide.node-config/v0.5` 是 Extension Conformance 的当前版本；v0.2-v0.4 仍可解析为
+空 State/Memory declaration，但不满足当前 conformance。Node Protocol v0.2 endpoint 只返回
+明确迁移诊断，不再接受 session。
 
 成功编译只证明以下静态部署不变量：
 
 - 每个 canonical `namespace.name@version` 只有一个 local-system owner；
-- v0.4 每个 exact capability 都有独立 readiness probe，未知值、超时或 probe failure
+- v0.5 每个 exact capability 都有独立 readiness probe，未知值、超时或 probe failure
   fail-closed 为 unavailable；
+- 每个 State export 固定 owner、Node/World object、Reported/Observed semantic、schema、TTL、
+  sampling interval 和固定 observation workflow；每个 Memory provider 固定 owner、五类 kind、scope、
+  visibility、schema 和 media type；
 - connection endpoint、HTTP method/path、gRPC service/method/descriptor 或 MCP tool
   由配置固定，网络 `ExecutionIntent` 不能改写；
 - execute、status、cancel 都是非空、有序 workflow，local handle 只能来自 execute
@@ -50,6 +54,10 @@ legacy smoke，但静态 `available=true` 不满足 conformance。
 `connection`、`capabilities.<contract>`、`workflow` 和 `workflow.step.<id>` 路径，且报告不
 包含 credential 值。报告显式输出 `runtime_probes_executed=false` 和
 `hardware_probes_executed=false`。
+
+State observation route 固定不等于离线编译能证明外部操作无副作用。deployment-owned facade
+必须把该 endpoint/method/service/tool 实现为 observation；这一点与真实 health/readiness 一样
+需要运行时或硬件验证。
 
 报告的 `implementation_guarantees` 单独列出当前 Node Service 代码由 engine/journal 测试覆盖的
 不变量，例如 status 才能确认 terminal outcome、cancel acknowledgement 不合成 `Cancelled`、
@@ -65,7 +73,8 @@ timeout/unknown fencing、identity conflict 和 restart no-replay。它们不是
 2. 复制并修改真实配置样例
    [`scenarios/extension-conformance-v0.1/node.toml`](../../scenarios/extension-conformance-v0.1/node.toml)。
    该样例在同一个 Node 中声明 HTTP、dynamic gRPC reflection 和 MCP 三种 connection，
-   每个 capability 都有 readiness、required resource 和 execute/status/cancel workflow。
+   每个 capability 都有 readiness、required resource 和 execute/status/cancel workflow；样例还
+   声明 State export 以及 Execution/Spatial/Semantic/Experience/Artifact 五类 Memory provider。
 3. 在不启动 facade、不启动 Controller 的情况下运行：
 
    ```bash
@@ -98,6 +107,8 @@ timeout/unknown fencing、identity conflict 和 restart no-replay。它们不是
    将 `server_endpoint` 改为 Controller LAN 地址；Local facade endpoint 保持节点本机
    loopback 或 Unix socket。RoboGuide Server 只发送 canonical intent 和已 Commit 的
    resource IDs，不能下发 Local How。
+   State sampling 失败只会让旧 record 过期，不会改变 health/readiness 或触发 recovery；Memory
+   provider 声明只建立 discovery contract，exchangeable bytes 仍必须经过 Artifact CAS。
 6. 在真实设备上单独执行 health/readiness、execute/status/cancel 和断电/重启演练，保存
    facade 的请求/状态证据，再把配置部署到生产节点。新增设备不需要修改或重新编译
    RoboGuide；只有当本地接口无法由现有 HTTP、dynamic gRPC 或 MCP driver 表达时，才需要

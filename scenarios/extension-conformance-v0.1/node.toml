@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.4"
+schema = "roboguide.node-config/v0.5"
 node_id = "extension-demo-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
@@ -62,6 +62,75 @@ id = "demo-execution-slot"
 kind = "compute"
 capacity = 1
 owner = "demo-eaios"
+
+[[state_exports]]
+id = "demo-runtime-state"
+owner = "demo-eaios"
+object_class = "node"
+object_type = "runtime"
+object_id = "extension-demo-node"
+semantic = "reported"
+payload_schema = "roboguide.example.runtime-health/v0.1"
+valid_for_ms = 15000
+interval_ms = 5000
+value_pointer = ""
+
+[state_exports.step]
+id = "demo-runtime-state"
+connection = "demo-health-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/health"
+
+[state_exports.step.request]
+base = {}
+
+[[memory_providers]]
+id = "execution-history"
+owner = "demo-eaios"
+kind = "execution"
+scope = "local"
+visibility = "discoverable"
+payload_schema = "roboguide.example.execution-history/v0.1"
+media_type = "application/json"
+
+[[memory_providers]]
+id = "spatial-assets"
+owner = "demo-eaios"
+kind = "spatial"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.example.spatial-asset/v0.1"
+media_type = "application/octet-stream"
+
+[[memory_providers]]
+id = "semantic-models"
+owner = "demo-eaios"
+kind = "semantic"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.example.semantic-model/v0.1"
+media_type = "application/json"
+
+[[memory_providers]]
+id = "experience-records"
+owner = "demo-eaios"
+kind = "experience"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.example.experience/v0.1"
+media_type = "application/json"
+
+[[memory_providers]]
+id = "opaque-artifacts"
+owner = "demo-eaios"
+kind = "artifact"
+scope = "local"
+visibility = "discoverable"
+payload_schema = "roboguide.example.artifact/v0.1"
+media_type = "application/octet-stream"
 
 [[capabilities]]
 contract = "demo.http_action@v1"

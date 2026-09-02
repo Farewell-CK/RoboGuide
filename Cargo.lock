@@ -772,6 +772,7 @@ dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "serde_json",
  "testkit",
  "tokio",
  "tokio-stream",
@@ -1793,6 +1794,7 @@ dependencies = [
  "domain",
  "ports",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
 ]

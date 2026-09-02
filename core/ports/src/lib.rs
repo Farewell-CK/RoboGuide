@@ -5,15 +5,19 @@
 //! Transport-neutral ports owned by the DEAIOS core.
 
 mod allocation;
+mod memory;
 mod node_gateway;
 mod spatial_memory;
+mod state_record;
 
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
+pub use memory::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
 pub use node_gateway::{NodeGateway, NodeGatewayError, NodeGatewayErrorKind};
 pub use spatial_memory::{
     ArtifactBlobReader, ArtifactBlobStore, ArtifactBlobWriter, ArtifactStoreError, MapCatalogError,
     MapCatalogReader, MapCatalogWriter,
 };
+pub use state_record::{StateRecordError, StateRecordReader, StateRecordWriter};
 
 use domain::{
     CorrelationId, EventId, EventPayload, NodeHealthObservation, NodeId, NodeLivenessObservation,

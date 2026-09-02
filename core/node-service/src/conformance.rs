@@ -105,16 +105,42 @@ pub struct CapabilityConformance {
     pub contract: String,
     /// Sole local-system owner.
     pub owner: String,
-    /// Fixed readiness observation, when supplied by node-config/v0.4.
+    /// Fixed readiness observation, when supplied by node-config/v0.5.
     pub readiness: Option<StepConformance>,
     /// Control-committed resource identities required by the workflow.
     pub required_resources: Vec<String>,
     /// Node-local lock identities; these do not grant Control authority.
     pub local_locks: Vec<String>,
-    /// Whether schema v0.4 supplied an exact readiness observation.
+    /// Whether schema v0.5 supplied an exact readiness observation.
     pub exact_readiness: bool,
     /// Compiled lifecycle and mapping summary.
     pub workflow: WorkflowConformance,
+}
+
+/// One selective State channel proven to use a fixed local sampling route.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StateExportConformance {
+    /// Node-wide export identity.
+    pub id: String,
+    /// Local-system owner.
+    pub owner: String,
+    /// Reported or observed semantic.
+    pub semantic: String,
+    /// Fixed sampling workflow step.
+    pub step: StepConformance,
+}
+
+/// One selective Memory provider declaration retained in the extension report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemoryProviderConformance {
+    /// Node-wide provider identity.
+    pub id: String,
+    /// Local-system owner.
+    pub owner: String,
+    /// Execution, Spatial, Semantic, Experience, or Artifact kind.
+    pub kind: String,
+    /// Discoverable or exchangeable policy.
+    pub visibility: String,
 }
 
 /// One Node Service implementation guarantee shared by every supported local driver family.
@@ -190,6 +216,10 @@ pub struct ExtensionConformanceReport {
     pub connections: Vec<ConnectionConformance>,
     /// Canonical capabilities and their workflow proofs.
     pub capabilities: Vec<CapabilityConformance>,
+    /// Selective fixed-route State exports.
+    pub state_exports: Vec<StateExportConformance>,
+    /// Selective heterogeneous Memory providers.
+    pub memory_providers: Vec<MemoryProviderConformance>,
     /// Static checks guaranteed by successful production compilation.
     pub checks: ConformanceChecks,
     /// Extension Conformance v0.1 compatibility alias for implementation guarantees.
@@ -208,7 +238,7 @@ pub struct ExtensionConformanceReport {
 pub struct ConformanceChecks {
     /// Every canonical contract has one owner.
     pub unique_capability_owner: bool,
-    /// v0.4 configurations have one exact readiness workflow per contract.
+    /// v0.5 configurations have one exact readiness workflow per contract.
     pub exact_readiness: bool,
     /// All endpoint, method, service, and tool selections are fixed.
     pub fixed_routes: bool,
@@ -218,6 +248,8 @@ pub struct ConformanceChecks {
     pub execution_state_mapping: bool,
     /// Every required resource exists and belongs to the capability owner.
     pub required_resources: bool,
+    /// State and Memory exposure is explicit, owner-scoped, and schema v0.5 validated.
+    pub selective_state_memory: bool,
 }
 
 /// Compiles one authored Node configuration and returns an offline conformance report.
@@ -225,6 +257,14 @@ pub fn compile_extension_config(
     path: &Path,
 ) -> Result<ExtensionConformanceReport, ConformanceError> {
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
+    if config.schema() != crate::CONFIG_SCHEMA_V0_5 {
+        return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
+            location: "schema".to_string(),
+            code: "state-memory-contract-required".to_string(),
+            message: "Extension Conformance v0.1 requires node-config/v0.5 State/Memory semantics"
+                .to_string(),
+        }));
+    }
     if let Some(capability) = config
         .capabilities()
         .values()
@@ -233,7 +273,7 @@ pub fn compile_extension_config(
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: format!("capabilities.{}.readiness", capability.contract()),
             code: "readiness-required".to_string(),
-            message: "Extension Conformance v0.1 requires node-config/v0.4 exact readiness"
+            message: "Extension Conformance v0.1 requires node-config/v0.5 exact readiness"
                 .to_string(),
         }));
     }
@@ -323,6 +363,26 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
         local_systems: catalog.local_systems().keys().cloned().collect(),
         connections,
         capabilities,
+        state_exports: catalog
+            .state_exports()
+            .values()
+            .map(|export| StateExportConformance {
+                id: export.id().to_string(),
+                owner: export.owner().to_string(),
+                semantic: export.semantic().to_string(),
+                step: step_report(export.step()),
+            })
+            .collect(),
+        memory_providers: catalog
+            .memory_providers()
+            .values()
+            .map(|provider| MemoryProviderConformance {
+                id: provider.id().to_string(),
+                owner: provider.owner().to_string(),
+                kind: provider.kind().to_string(),
+                visibility: provider.visibility().to_string(),
+            })
+            .collect(),
         checks: ConformanceChecks {
             unique_capability_owner: true,
             exact_readiness,
@@ -330,6 +390,7 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
             request_mappings: true,
             execution_state_mapping,
             required_resources: true,
+            selective_state_memory: true,
         },
         lifecycle: NODE_SERVICE_IMPLEMENTATION_GUARANTEES.to_vec(),
         implementation_guarantees: NODE_SERVICE_IMPLEMENTATION_GUARANTEES.to_vec(),
@@ -487,7 +548,7 @@ mod tests {
         std::fs::write(
             &path,
             r#"
-schema = "roboguide.node-config/v0.4"
+schema = "roboguide.node-config/v0.5"
 node_id = "node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "state"
@@ -536,7 +597,7 @@ cancel = []
         ));
     }
 
-    /// Conformance rejects a v0.4 workflow that cannot distinguish every execution phase.
+    /// Conformance rejects a v0.5 workflow that cannot distinguish every execution phase.
     #[test]
     fn incomplete_execution_state_mapping_is_diagnostic() {
         let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml");
@@ -574,7 +635,7 @@ cancel = []
         std::fs::write(
             &path,
             concat!(
-                "schema = \"roboguide.node-config/v0.4\"\n",
+                "schema = \"roboguide.node-config/v0.5\"\n",
                 "controller_password = \"TOP_SECRET_VALUE\"\n",
             ),
         )

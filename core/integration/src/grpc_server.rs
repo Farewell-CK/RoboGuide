@@ -1,9 +1,9 @@
 //! Formal gRPC Node Protocol server and concurrent session command routing.
 
-use crate::grpc::v0_2::node_message::Message as NodePayload;
-use crate::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
-use crate::grpc::v0_2::server_message::Message as ServerPayload;
-use crate::grpc::v0_2::{
+use crate::grpc::v0_3::node_message::Message as NodePayload;
+use crate::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
+use crate::grpc::v0_3::server_message::Message as ServerPayload;
+use crate::grpc::v0_3::{
     Ack, Cancel, Execute, NODE_CONTRACT_VERSION, NodeMessage, PROTOCOL_VERSION, Registered,
     ServerMessage, Welcome,
 };
@@ -16,7 +16,7 @@ use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status};
 
 /// Current Integration Server implementation version.
-const SERVER_VERSION: &str = "roboguide.server/v0.2";
+const SERVER_VERSION: &str = "roboguide.server/v0.3";
 /// Maximum time transport waits for Controller composition to durably accept one fact.
 const APPLICATION_ACCEPTANCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -30,7 +30,7 @@ pub enum GrpcNodeEvent {
         /// Server-issued lease identity.
         lease_id: String,
         /// Accepted node registration.
-        registration: crate::grpc::v0_2::NodeRegistration,
+        registration: crate::grpc::v0_3::NodeRegistration,
     },
     /// A heartbeat or registration update was received.
     NodeMessage {
@@ -156,17 +156,52 @@ struct RoutedSession {
     lease_duration: std::time::Duration,
     /// Last accepted management sequence for heartbeat/registration updates.
     management_sequence: u64,
+    /// State export identities accepted in the latest complete registration snapshot.
+    state_export_ids: BTreeSet<String>,
     /// Whether Controller composition accepted registration and `Registered` was emitted.
     active: bool,
 }
 
 impl GrpcNodeRouter {
+    /// Returns whether a route still belongs to the supplied session, regardless of lease state.
+    pub fn session_matches(&self, node_id: &str, session_id: &str) -> Result<bool, Status> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        Ok(sessions
+            .get(node_id)
+            .is_some_and(|route| route.session_id == session_id))
+    }
+
+    /// Returns whether any route currently exists for a Node.
+    pub fn has_session(&self, node_id: &str) -> Result<bool, Status> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        Ok(sessions.contains_key(node_id))
+    }
+
+    /// Returns whether one identity names the active, unexpired session for a Node.
+    pub fn session_is_current(&self, node_id: &str, session_id: &str) -> Result<bool, Status> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        Ok(sessions.get(node_id).is_some_and(|route| {
+            route.active
+                && route.session_id == session_id
+                && route.last_heartbeat.elapsed() < route.lease_duration
+        }))
+    }
+
     /// Sends a canonical Execute through the node's current session.
     pub fn execute(
         &self,
         node_id: &str,
         execution_id: String,
-        invocation: crate::grpc::v0_2::CanonicalInvocation,
+        invocation: crate::grpc::v0_3::CanonicalInvocation,
         resource_ids: Vec<String>,
     ) -> Result<(), Status> {
         if execution_id.trim().is_empty()
@@ -251,6 +286,31 @@ pub struct GrpcIntegrationService {
     events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     /// Process-local unique session/lease source.
     next_session: Arc<AtomicU64>,
+    /// Boot-unique nonce preventing session identity reuse after process restart.
+    boot_nonce: String,
+}
+
+/// Legacy v0.2 service endpoint retained only to return an explicit migration diagnostic.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GrpcLegacyV02Service;
+
+#[tonic::async_trait]
+impl crate::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocol
+    for GrpcLegacyV02Service
+{
+    type NodeSessionStream = Pin<
+        Box<dyn Stream<Item = Result<crate::grpc::v0_2::ServerMessage, Status>> + Send + 'static>,
+    >;
+
+    /// Rejects v0.2 sessions because State/Memory declarations require Protocol v0.3.
+    async fn node_session(
+        &self,
+        _request: Request<tonic::Streaming<crate::grpc::v0_2::NodeMessage>>,
+    ) -> Result<Response<Self::NodeSessionStream>, Status> {
+        Err(Status::failed_precondition(
+            "Node Protocol v0.2 is retired; configure roboguide.node-protocol/v0.3 and roboguide.node.v0.3",
+        ))
+    }
 }
 
 impl GrpcIntegrationService {
@@ -262,6 +322,14 @@ impl GrpcIntegrationService {
                 router: router.clone(),
                 events,
                 next_session: Arc::new(AtomicU64::new(1)),
+                boot_nonce: format!(
+                    "{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos())
+                        .unwrap_or_default()
+                ),
             },
             router,
         )
@@ -282,9 +350,17 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
         let router = self.router.clone();
         let events = self.events.clone();
         let identity = self.next_session.fetch_add(1, Ordering::Relaxed);
+        let boot_nonce = self.boot_nonce.clone();
         tokio::spawn(async move {
-            if let Err(status) =
-                run_grpc_session(inbound, outbound.clone(), router, events, identity).await
+            if let Err(status) = run_grpc_session(
+                inbound,
+                outbound.clone(),
+                router,
+                events,
+                identity,
+                boot_nonce,
+            )
+            .await
             {
                 eprintln!("RoboGuide gRPC node session {identity} ended: {status}");
                 let _ = outbound.send(Err(status));
@@ -303,6 +379,7 @@ async fn run_grpc_session(
     router: GrpcNodeRouter,
     events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     identity: u64,
+    boot_nonce: String,
 ) -> Result<(), Status> {
     let first = inbound
         .next()
@@ -354,8 +431,8 @@ async fn run_grpc_session(
         ));
     }
     validate_registration(&registration)?;
-    let session_id = format!("grpc-session-{identity}");
-    let lease_id = format!("grpc-lease-{identity}");
+    let session_id = format!("grpc-session-{boot_nonce}-{identity}");
+    let lease_id = format!("grpc-lease-{boot_nonce}-{identity}");
     let previous = router
         .sessions
         .lock()
@@ -369,6 +446,11 @@ async fn run_grpc_session(
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_millis(15_000),
                 management_sequence: 0,
+                state_export_ids: registration
+                    .state_exports
+                    .iter()
+                    .map(|export| export.export_id.clone())
+                    .collect(),
                 active: false,
             },
         );
@@ -401,27 +483,83 @@ async fn run_grpc_session(
         }
         return Err(status);
     }
-    let mut lease_check = tokio::time::interval(std::time::Duration::from_millis(250));
-    let session_result: Result<(), Status> = async {
+    // Keep reading and validating the transport stream while Controller application acceptance
+    // may be slow. ACKs are emitted only by the serial application loop after durable acceptance.
+    let (validated_sender, mut validated_receiver) =
+        mpsc::unbounded_channel::<Result<NodeMessage, Status>>();
+    let reader_router = router.clone();
+    let reader_node_id = node_id.clone();
+    let reader_session_id = session_id.clone();
+    let reader_task = tokio::spawn(async move {
+        let mut lease_check = tokio::time::interval(std::time::Duration::from_millis(250));
         loop {
             let message = tokio::select! {
-                message = inbound.next() => match message { Some(message) => message?, None => break },
+                message = inbound.next() => match message {
+                    Some(Ok(message)) => message,
+                    Some(Err(error)) => {
+                        let _ = validated_sender.send(Err(error));
+                        break;
+                    }
+                    None => break,
+                },
                 _ = lease_check.tick() => {
-                    if route_is_expired(&router, &node_id, &session_id)? { break; }
-                    continue;
+                    match route_is_expired(&reader_router, &reader_node_id, &reader_session_id) {
+                        Ok(true) => {
+                            let _ = validated_sender.send(Err(Status::deadline_exceeded(
+                                "node heartbeat lease expired",
+                            )));
+                            break;
+                        }
+                        Ok(false) => continue,
+                        Err(error) => {
+                            let _ = validated_sender.send(Err(error));
+                            break;
+                        }
+                    }
                 }
             };
-            if !accept_current_message(&router, &node_id, &session_id, &message)? {
-                continue;
+            match reader_router.session_matches(&reader_node_id, &reader_session_id) {
+                Ok(true) => {}
+                Ok(false) => {
+                    let _ = validated_sender
+                        .send(Err(Status::aborted("session superseded by reconnect")));
+                    break;
+                }
+                Err(error) => {
+                    let _ = validated_sender.send(Err(error));
+                    break;
+                }
             }
+            match accept_current_message(
+                &reader_router,
+                &reader_node_id,
+                &reader_session_id,
+                &message,
+            ) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    let _ = validated_sender.send(Err(error));
+                    break;
+                }
+            }
+            if validated_sender.send(Ok(message)).is_err() {
+                break;
+            }
+        }
+    });
+    let session_result: Result<(), Status> = async {
+        while let Some(message) = validated_receiver.recv().await {
+            let message = message?;
             let sequence = match &message.message {
                 Some(NodePayload::Heartbeat(value)) => value.sequence,
                 Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
+                Some(NodePayload::StateObservationBatch(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
             };
-            deliver_for_acceptance(
+            let delivery = deliver_for_acceptance(
                 &events,
                 GrpcNodeEvent::NodeMessage {
                     node_id: node_id.clone(),
@@ -429,7 +567,8 @@ async fn run_grpc_session(
                     message,
                 },
             )
-            .await?;
+            .await;
+            delivery?;
             if sequence > 0 {
                 let _ = outbound.send(Ok(ServerMessage {
                     message: Some(ServerPayload::Ack(Ack { sequence })),
@@ -439,6 +578,7 @@ async fn run_grpc_session(
         Ok(())
     }
     .await;
+    reader_task.abort();
     let removed = remove_current_route(&router, &node_id, &session_id)?;
     if removed {
         emit_unavailable(&events, node_id, session_id);
@@ -593,6 +733,19 @@ fn accept_current_message(
                 }
                 validate_registration(registration)?;
                 route.management_sequence = value.sequence;
+                route.state_export_ids = registration
+                    .state_exports
+                    .iter()
+                    .map(|export| export.export_id.clone())
+                    .collect();
+                &value.session_id
+            }
+            Some(NodePayload::StateObservationBatch(value)) => {
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                validate_state_observation_batch(value, &route.state_export_ids)?;
+                route.management_sequence = value.sequence;
                 &value.session_id
             }
             Some(NodePayload::ExecutionEvent(value)) => &value.session_id,
@@ -607,8 +760,8 @@ fn accept_current_message(
     Ok(true)
 }
 
-/// Validates complete v0.2 ownership without inferring Local How on the Server.
-fn validate_registration(registration: &crate::grpc::v0_2::NodeRegistration) -> Result<(), Status> {
+/// Validates complete v0.3 ownership without inferring Local How on the Server.
+fn validate_registration(registration: &crate::grpc::v0_3::NodeRegistration) -> Result<(), Status> {
     if registration.node_id.trim().is_empty()
         || registration.node_contract_version != NODE_CONTRACT_VERSION
     {
@@ -683,6 +836,81 @@ fn validate_registration(registration: &crate::grpc::v0_2::NodeRegistration) -> 
             ));
         }
     }
+    let mut export_ids = BTreeSet::new();
+    for export in &registration.state_exports {
+        require_known_owner(&export.local_system_id, &local_system_ids)?;
+        if export.export_id.trim().is_empty()
+            || !export_ids.insert(export.export_id.as_str())
+            || export.object_type.trim().is_empty()
+            || export.object_id.trim().is_empty()
+            || export.payload_schema.trim().is_empty()
+            || export.valid_for_ms == 0
+            || !matches!(export.object_class, 1 | 2)
+            || !matches!(export.semantic, 3 | 4)
+        {
+            return Err(Status::invalid_argument(
+                "State exports must be unique node/world Reported/Observed channels with schemas and positive validity",
+            ));
+        }
+    }
+    let mut provider_ids = BTreeSet::new();
+    for provider in &registration.memory_providers {
+        require_known_owner(&provider.local_system_id, &local_system_ids)?;
+        let group_scope_valid = match provider.scope {
+            2 => !provider.execution_group_id.trim().is_empty(),
+            1 | 3 => provider.execution_group_id.is_empty(),
+            _ => false,
+        };
+        if provider.provider_id.trim().is_empty()
+            || !provider_ids.insert(provider.provider_id.as_str())
+            || !matches!(provider.kind, 1..=5)
+            || !group_scope_valid
+            || !matches!(provider.visibility, 1 | 2)
+            || provider.payload_schema.trim().is_empty()
+            || provider.media_type.trim().is_empty()
+        {
+            return Err(Status::invalid_argument(
+                "Memory providers must have unique identities, known kinds/scopes/visibility, and nonblank schemas",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validates one bounded State batch against the current registration snapshot.
+fn validate_state_observation_batch(
+    batch: &crate::grpc::v0_3::StateObservationBatch,
+    export_ids: &BTreeSet<String>,
+) -> Result<(), Status> {
+    const MAX_BATCH_RECORDS: usize = 64;
+    const MAX_RECORD_BYTES: usize = 64 * 1024;
+    const MAX_BATCH_BYTES: usize = 512 * 1024;
+
+    if batch.observations.is_empty() || batch.observations.len() > MAX_BATCH_RECORDS {
+        return Err(Status::invalid_argument(
+            "State observation batch must contain 1 through 64 records",
+        ));
+    }
+    let mut observed_exports = BTreeSet::new();
+    let mut total_bytes = 0usize;
+    for observation in &batch.observations {
+        total_bytes = total_bytes.saturating_add(observation.json_value.len());
+        if !export_ids.contains(&observation.export_id)
+            || !observed_exports.insert(observation.export_id.as_str())
+            || observation.json_value.len() > MAX_RECORD_BYTES
+            || observation.has_confidence && observation.confidence_millionths > 1_000_000
+            || serde_json::from_slice::<serde_json::Value>(&observation.json_value).is_err()
+        {
+            return Err(Status::invalid_argument(
+                "State observations must reference unique registered exports and contain bounded valid JSON",
+            ));
+        }
+    }
+    if total_bytes > MAX_BATCH_BYTES {
+        return Err(Status::invalid_argument(
+            "State observation batch exceeds 512 KiB",
+        ));
+    }
     Ok(())
 }
 
@@ -719,6 +947,114 @@ fn require_known_owner(owner: &str, known: &BTreeSet<&str>) -> Result<(), Status
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds one registered-export set for State batch validation tests.
+    fn state_exports() -> BTreeSet<String> {
+        BTreeSet::from(["hazard-state".to_string(), "contact-state".to_string()])
+    }
+
+    /// A bounded batch may carry independent valid JSON observations for registered exports.
+    #[test]
+    fn state_batch_accepts_registered_bounded_json() {
+        let batch = crate::grpc::v0_3::StateObservationBatch {
+            session_id: "session-a".to_string(),
+            sequence: 2,
+            observations: vec![
+                crate::grpc::v0_3::StateObservation {
+                    export_id: "hazard-state".to_string(),
+                    json_value: br#"{"present":true}"#.to_vec(),
+                    has_source_observed_at: true,
+                    source_observed_at_ms: 10,
+                    has_confidence: true,
+                    confidence_millionths: 900_000,
+                },
+                crate::grpc::v0_3::StateObservation {
+                    export_id: "contact-state".to_string(),
+                    json_value: br#"{"connected":false}"#.to_vec(),
+                    has_source_observed_at: false,
+                    source_observed_at_ms: 0,
+                    has_confidence: false,
+                    confidence_millionths: 0,
+                },
+            ],
+        };
+
+        validate_state_observation_batch(&batch, &state_exports())
+            .expect("registered bounded observations should be accepted");
+    }
+
+    /// State batches cannot smuggle undeclared channels or duplicate one channel in a batch.
+    #[test]
+    fn state_batch_rejects_undeclared_and_duplicate_exports() {
+        let observation = crate::grpc::v0_3::StateObservation {
+            export_id: "unknown-state".to_string(),
+            json_value: b"true".to_vec(),
+            has_source_observed_at: false,
+            source_observed_at_ms: 0,
+            has_confidence: false,
+            confidence_millionths: 0,
+        };
+        let undeclared = crate::grpc::v0_3::StateObservationBatch {
+            session_id: "session-a".to_string(),
+            sequence: 2,
+            observations: vec![observation],
+        };
+        assert_eq!(
+            validate_state_observation_batch(&undeclared, &state_exports())
+                .expect_err("undeclared export should be rejected")
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+
+        let observation = crate::grpc::v0_3::StateObservation {
+            export_id: "hazard-state".to_string(),
+            json_value: b"true".to_vec(),
+            has_source_observed_at: false,
+            source_observed_at_ms: 0,
+            has_confidence: false,
+            confidence_millionths: 0,
+        };
+        let duplicate = crate::grpc::v0_3::StateObservationBatch {
+            session_id: "session-a".to_string(),
+            sequence: 2,
+            observations: vec![observation.clone(), observation],
+        };
+        assert_eq!(
+            validate_state_observation_batch(&duplicate, &state_exports())
+                .expect_err("duplicate export should be rejected")
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+
+    /// Invalid JSON, oversized payloads, and invalid confidence fail at the protocol boundary.
+    #[test]
+    fn state_batch_rejects_invalid_payload_bounds() {
+        for (json_value, has_confidence, confidence) in [
+            (b"not-json".to_vec(), false, 0),
+            (vec![b' '; 64 * 1024 + 1], false, 0),
+            (b"true".to_vec(), true, 1_000_001),
+        ] {
+            let batch = crate::grpc::v0_3::StateObservationBatch {
+                session_id: "session-a".to_string(),
+                sequence: 2,
+                observations: vec![crate::grpc::v0_3::StateObservation {
+                    export_id: "hazard-state".to_string(),
+                    json_value,
+                    has_source_observed_at: false,
+                    source_observed_at_ms: 0,
+                    has_confidence,
+                    confidence_millionths: confidence,
+                }],
+            };
+            assert_eq!(
+                validate_state_observation_batch(&batch, &state_exports())
+                    .expect_err("invalid State payload should be rejected")
+                    .code(),
+                tonic::Code::InvalidArgument
+            );
+        }
+    }
 
     /// Transport emits success only after application authority explicitly accepts the fact.
     #[tokio::test]
@@ -808,6 +1144,7 @@ mod tests {
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_secs(15),
                 management_sequence: 0,
+                state_export_ids: BTreeSet::new(),
                 active: false,
             },
         );
@@ -815,7 +1152,7 @@ mod tests {
             .execute(
                 "dog-a",
                 "execution-1".to_string(),
-                crate::grpc::v0_2::CanonicalInvocation {
+                crate::grpc::v0_3::CanonicalInvocation {
                     mission_id: "m".to_string(),
                     task_id: "t".to_string(),
                     group_id: "g".to_string(),
@@ -844,6 +1181,7 @@ mod tests {
                 last_heartbeat: std::time::Instant::now() - std::time::Duration::from_secs(2),
                 lease_duration: std::time::Duration::from_secs(1),
                 management_sequence: 0,
+                state_export_ids: BTreeSet::new(),
                 active: true,
             },
         );
@@ -852,7 +1190,7 @@ mod tests {
                 .execute(
                     "dog-a",
                     "execution-1".to_string(),
-                    crate::grpc::v0_2::CanonicalInvocation {
+                    crate::grpc::v0_3::CanonicalInvocation {
                         mission_id: "m".to_string(),
                         task_id: "t".to_string(),
                         group_id: "g".to_string(),
@@ -865,6 +1203,62 @@ mod tests {
                 .expect_err("expired route rejected")
                 .code(),
             tonic::Code::Unavailable
+        );
+    }
+
+    /// Memory data-plane callers can identify only the active, unexpired route for one Node.
+    #[test]
+    fn current_session_check_rejects_pending_wrong_and_expired_routes() {
+        let router = GrpcNodeRouter::default();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        router.sessions.lock().expect("registry lock").insert(
+            "dog-a".to_string(),
+            RoutedSession {
+                session_id: "session-current".to_string(),
+                sender,
+                lease_id: "lease-current".to_string(),
+                last_heartbeat: std::time::Instant::now(),
+                lease_duration: std::time::Duration::from_secs(15),
+                management_sequence: 0,
+                state_export_ids: BTreeSet::new(),
+                active: false,
+            },
+        );
+        assert!(
+            !router
+                .session_is_current("dog-a", "session-current")
+                .expect("pending route can be inspected")
+        );
+
+        {
+            let mut sessions = router.sessions.lock().expect("registry lock");
+            sessions.get_mut("dog-a").expect("route exists").active = true;
+        }
+        assert!(
+            router
+                .session_is_current("dog-a", "session-current")
+                .expect("active route can be inspected")
+        );
+        assert!(
+            !router
+                .session_is_current("dog-a", "session-old")
+                .expect("stale identity can be inspected")
+        );
+        assert!(
+            !router
+                .session_is_current("dog-b", "session-current")
+                .expect("unknown Node can be inspected")
+        );
+
+        {
+            let mut sessions = router.sessions.lock().expect("registry lock");
+            let route = sessions.get_mut("dog-a").expect("route exists");
+            route.last_heartbeat = std::time::Instant::now() - std::time::Duration::from_secs(16);
+        }
+        assert!(
+            !router
+                .session_is_current("dog-a", "session-current")
+                .expect("expired route can be inspected")
         );
     }
 
@@ -882,11 +1276,12 @@ mod tests {
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_secs(15),
                 management_sequence: 0,
+                state_export_ids: BTreeSet::new(),
                 active: true,
             },
         );
         let message = NodeMessage {
-            message: Some(NodePayload::Heartbeat(crate::grpc::v0_2::Heartbeat {
+            message: Some(NodePayload::Heartbeat(crate::grpc::v0_3::Heartbeat {
                 session_id: "session-old".to_string(),
                 lease_id: "lease-old".to_string(),
                 sequence: 10,

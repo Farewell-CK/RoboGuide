@@ -6,12 +6,14 @@
 
 use artifact_store::{ArtifactStoreError as CasError, ArtifactUpload, FileSystemArtifactStore};
 use domain::{
-    EventPayload, MapArtifactManifest, MapRevisionSelector, MissionId, NodeId, SpatialAnchorId,
-    TimestampMs,
+    EventPayload, MapArtifactManifest, MapRevisionSelector, MemoryArtifactManifest, MemoryId,
+    MemoryOwner, MemoryRevisionId, MemorySelector, MissionId, NodeId, SpatialAnchorId, TimestampMs,
 };
-use ports::{EventSink, MapCatalogReader, MapCatalogWriter};
+use ports::{
+    EventSink, MapCatalogReader, MapCatalogWriter, MemoryCatalogReader, MemoryCatalogWriter,
+};
 use serde::Deserialize;
-use state::{MapCatalogProjection, PersistedCheckpoint, SqliteEventLog};
+use state::{MapCatalogProjection, MemoryCatalogProjection, PersistedCheckpoint, SqliteEventLog};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -36,11 +38,50 @@ const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Frequency at which idle sessions are removed even when no HTTP request arrives.
 const UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Composition-owned admission for generic Memory claims entering the catalog data plane.
+pub trait MemoryProviderAdmission: Send + Sync {
+    /// Validates that one manifest is covered by a current provider declaration.
+    fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), String>;
+
+    /// Validates that one replica reporter is a currently registered node.
+    fn admit_replica_node(&self, node_id: &NodeId) -> Result<(), String>;
+
+    /// Validates that one write was issued by the active session of its semantic Node owner.
+    fn admit_publisher(
+        &self,
+        publisher: Option<&MemoryPublicationIdentity>,
+        expected_node_id: &NodeId,
+    ) -> Result<(), String>;
+}
+
+/// Node/session identity attached to one generic Memory mutation on the internal data plane.
+#[derive(Debug, Clone)]
+pub struct MemoryPublicationIdentity {
+    /// Stable Node identity expected to own the current gRPC route.
+    node_id: NodeId,
+    /// Current session identity issued after Controller registration acceptance.
+    session_id: String,
+}
+
+impl MemoryPublicationIdentity {
+    /// Returns the publishing Node identity.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the publishing Node's current session identity.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+}
+
 /// Shared catalog and evidence-log authority used by the artifact listener.
 #[derive(Clone)]
 pub struct ArtifactCatalog {
     /// Rebuildable metadata projection guarded for concurrent HTTP requests.
     projection: Arc<Mutex<MapCatalogProjection>>,
+    /// Generic non-map Memory metadata sharing the same evidence log and CAS.
+    memory_projection: Arc<Mutex<MemoryCatalogProjection>>,
     /// Durable evidence sink used for map lifecycle events.
     event_log: SqliteEventLog,
     /// Process-local serializer shared with the controller's event batches.
@@ -58,15 +99,29 @@ impl ArtifactCatalog {
         write_gate: Arc<Mutex<()>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut projection = MapCatalogProjection::new();
+        let mut memory_projection = MemoryCatalogProjection::new();
         let mut timestamp_high_water = TimestampMs::new(0);
         for event in event_log.decoded_events()? {
             timestamp_high_water = timestamp_high_water.max(event.timestamp());
             if let Err(error) = projection.apply_event(&event) {
                 return Err(format!("spatial catalog replay failed: {error}").into());
             }
+            if matches!(
+                event.payload(),
+                EventPayload::MemoryManifestPublished { .. }
+                    | EventPayload::MemoryArtifactStaged { .. }
+                    | EventPayload::MemoryArtifactImported { .. }
+                    | EventPayload::MemoryArtifactRejected { .. }
+            ) && let Err(error) = memory_projection.apply_memory_event(&event)
+            {
+                return Err(format!("generic Memory catalog replay failed: {error}").into());
+            }
         }
+        validate_disjoint_memory_namespace(&projection, &memory_projection)
+            .map_err(|error| format!("Memory selector replay failed: {error}"))?;
         Ok(Self {
             projection: Arc::new(Mutex::new(projection)),
+            memory_projection: Arc::new(Mutex::new(memory_projection)),
             event_log: event_log.clone(),
             write_gate,
             timestamp_high_water: Arc::new(Mutex::new(timestamp_high_water)),
@@ -138,13 +193,84 @@ impl ArtifactCatalog {
         Ok(projection.revisions())
     }
 
+    /// Reads typed map replica evidence in deterministic node order.
+    fn map_replicas(
+        &self,
+        selector: &MapRevisionSelector,
+    ) -> Result<Vec<domain::MapReplicaSnapshot>, HttpError> {
+        self.ensure_available()?;
+        let projection = self
+            .projection
+            .lock()
+            .map_err(|_| HttpError::internal("spatial catalog lock is poisoned"))?;
+        Ok(projection.replicas(selector))
+    }
+
+    /// Reads every generic Memory manifest in deterministic selector order.
+    fn memories(&self) -> Result<Vec<MemoryArtifactManifest>, HttpError> {
+        self.ensure_available()?;
+        self.memory_projection
+            .lock()
+            .map_err(|_| HttpError::internal("generic Memory catalog lock is poisoned"))
+            .map(|projection| projection.memories())
+    }
+
+    /// Reads one generic Memory manifest without exposing catalog mutation.
+    fn memory(
+        &self,
+        selector: &MemorySelector,
+    ) -> Result<Option<MemoryArtifactManifest>, HttpError> {
+        self.ensure_available()?;
+        self.memory_projection
+            .lock()
+            .map_err(|_| HttpError::internal("generic Memory catalog lock is poisoned"))
+            .map(|projection| projection.memory(selector))
+    }
+
+    /// Reads generic Memory replica evidence in deterministic node order.
+    fn memory_replicas(
+        &self,
+        selector: &MemorySelector,
+    ) -> Result<Vec<domain::MemoryReplicaSnapshot>, HttpError> {
+        self.ensure_available()?;
+        self.memory_projection
+            .lock()
+            .map_err(|_| HttpError::internal("generic Memory catalog lock is poisoned"))
+            .map(|projection| projection.memory_replicas(selector))
+    }
+
     /// Appends and projects one map event atomically from the HTTP caller's perspective.
     fn append(&self, payload: EventPayload) -> Result<(), HttpError> {
+        self.append_with_admission(payload, None)
+    }
+
+    /// Appends one generic Memory event after admission under the shared Controller write gate.
+    fn append_memory(
+        &self,
+        payload: EventPayload,
+        admission: &dyn MemoryProviderAdmission,
+        publisher: Option<&MemoryPublicationIdentity>,
+    ) -> Result<(), HttpError> {
+        self.append_with_admission(payload, Some((admission, publisher)))
+    }
+
+    /// Serializes optional Memory admission with Controller registration updates and persistence.
+    fn append_with_admission(
+        &self,
+        payload: EventPayload,
+        admission: Option<(
+            &dyn MemoryProviderAdmission,
+            Option<&MemoryPublicationIdentity>,
+        )>,
+    ) -> Result<(), HttpError> {
         let _write_guard = self
             .write_gate
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
+        if let Some((admission, publisher)) = admission {
+            admit_memory_payload(&payload, admission, publisher)?;
+        }
         let timestamp = self.next_timestamp()?;
         let mut projection = self
             .projection
@@ -154,6 +280,24 @@ impl ArtifactCatalog {
         candidate
             .apply_payload(timestamp, &payload)
             .map_err(|error| HttpError::conflict(error.to_string()))?;
+        let mut memory_projection = self
+            .memory_projection
+            .lock()
+            .map_err(|_| HttpError::internal("generic Memory catalog lock is poisoned"))?;
+        let mut memory_candidate = memory_projection.clone();
+        if matches!(
+            &payload,
+            EventPayload::MemoryManifestPublished { .. }
+                | EventPayload::MemoryArtifactStaged { .. }
+                | EventPayload::MemoryArtifactImported { .. }
+                | EventPayload::MemoryArtifactRejected { .. }
+        ) {
+            memory_candidate
+                .apply_memory_payload(timestamp, &payload)
+                .map_err(|error| HttpError::conflict(error.to_string()))?;
+        }
+        validate_disjoint_memory_namespace(&candidate, &memory_candidate)
+            .map_err(HttpError::conflict)?;
         let correlation = domain::CorrelationId::new("spatial-artifact-http")
             .map_err(|error| HttpError::internal(error.to_string()))?;
         let mut log = self.event_log.clone();
@@ -197,6 +341,7 @@ impl ArtifactCatalog {
             )));
         }
         *projection = candidate;
+        *memory_projection = memory_candidate;
         Ok(())
     }
 
@@ -211,6 +356,78 @@ impl ArtifactCatalog {
         *high_water = TimestampMs::new(next);
         Ok(*high_water)
     }
+}
+
+/// Admits one generic Memory payload while the caller holds the shared event write gate.
+fn admit_memory_payload(
+    payload: &EventPayload,
+    admission: &dyn MemoryProviderAdmission,
+    publisher: Option<&MemoryPublicationIdentity>,
+) -> Result<(), HttpError> {
+    match payload {
+        EventPayload::MemoryManifestPublished { manifest } => {
+            admission
+                .admit_manifest(manifest)
+                .map_err(HttpError::forbidden)?;
+            let MemoryOwner::Node { node_id, .. } = manifest.owner() else {
+                return Err(HttpError::forbidden(
+                    "public Memory publication requires a Node-owned manifest",
+                ));
+            };
+            admission
+                .admit_publisher(publisher, node_id)
+                .map_err(HttpError::forbidden)
+        }
+        EventPayload::MemoryArtifactStaged { manifest, node_id }
+        | EventPayload::MemoryArtifactImported { manifest, node_id }
+        | EventPayload::MemoryArtifactRejected {
+            manifest, node_id, ..
+        } => {
+            admission
+                .admit_manifest(manifest)
+                .map_err(HttpError::forbidden)?;
+            admission
+                .admit_replica_node(node_id)
+                .map_err(HttpError::forbidden)?;
+            admission
+                .admit_publisher(publisher, node_id)
+                .map_err(HttpError::forbidden)
+        }
+        _ => Err(HttpError::internal(
+            "Memory admission was requested for unrelated evidence",
+        )),
+    }
+}
+
+/// Rejects selectors that would resolve to both a typed map and a generic Memory revision.
+fn validate_disjoint_memory_namespace(
+    maps: &MapCatalogProjection,
+    memories: &MemoryCatalogProjection,
+) -> Result<(), String> {
+    let generic = memories
+        .memories()
+        .into_iter()
+        .map(|manifest| {
+            (
+                manifest.selector().memory_id().as_str().to_string(),
+                manifest.selector().revision_id().as_str().to_string(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for revision in maps.revisions() {
+        let selector = revision.manifest().selector();
+        let key = (
+            selector.map_id().as_str().to_string(),
+            selector.revision_id().as_str().to_string(),
+        );
+        if generic.contains(&key) {
+            return Err(format!(
+                "selector {}/{} is already owned by the other Memory catalog",
+                key.0, key.1
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Loads the complete controller checkpoint represented by the current durable log head.
@@ -452,6 +669,7 @@ pub async fn serve_artifact_http(
     listener: TcpListener,
     store: FileSystemArtifactStore,
     catalog: ArtifactCatalog,
+    memory_admission: Arc<dyn MemoryProviderAdmission>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let uploads: Uploads = Arc::new(Mutex::new(UploadRegistry::production()));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
@@ -463,10 +681,16 @@ pub async fn serve_artifact_http(
                 let shared_store = store.clone();
                 let shared_catalog = catalog.clone();
                 let shared_uploads = uploads.clone();
+                let shared_memory_admission = Arc::clone(&memory_admission);
                 tokio::spawn(async move {
                     if let Err(error) =
-                        handle_connection(&mut stream, &shared_store, &shared_catalog, &shared_uploads)
-                            .await
+                        handle_connection(
+                            &mut stream,
+                            &shared_store,
+                            &shared_catalog,
+                            &shared_uploads,
+                            shared_memory_admission.as_ref(),
+                        ).await
                     {
                         let _ = write_json(&mut stream, error.status(), &error.body()).await;
                     }
@@ -487,6 +711,7 @@ async fn handle_connection(
     store: &FileSystemArtifactStore,
     catalog: &ArtifactCatalog,
     uploads: &Uploads,
+    memory_admission: &dyn MemoryProviderAdmission,
 ) -> Result<(), HttpError> {
     let mut head = read_request_head(stream).await?;
     let method = head.method.clone();
@@ -504,11 +729,13 @@ async fn handle_connection(
             let revisions = catalog.revisions()?;
             Response::Json("200 OK", serde_json::json!({"revisions": revisions}))
         }
+        ("GET", "/v1/memories") => list_memories(catalog)?,
         ("GET", path) if path.starts_with("/v1/artifacts/") => {
             stream_artifact(stream, store, path.trim_start_matches("/v1/artifacts/")).await?;
             return Ok(());
         }
         ("GET", path) if path.starts_with("/v1/maps/") => get_revision(catalog, path)?,
+        ("GET", path) if path.starts_with("/v1/memories/") => get_memory(catalog, path)?,
         (method, path)
             if matches!(method, "POST" | "PUT")
                 && path.starts_with("/v1/artifact-uploads/")
@@ -535,6 +762,14 @@ async fn handle_connection(
             let request = head.read_json(stream).await?;
             record_replica(catalog, &request, path)?
         }
+        ("POST", path) if path.starts_with("/v1/memories/") && path.ends_with("/replicas") => {
+            let request = head.read_json(stream).await?;
+            record_memory_replica(catalog, store, memory_admission, &request, path)?
+        }
+        ("POST", path) if path.starts_with("/v1/memories/") && path.contains("/revisions/") => {
+            let request = head.read_json(stream).await?;
+            publish_memory(catalog, store, memory_admission, &request, path)?
+        }
         ("POST", path) if path.starts_with("/v1/maps/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
             publish_revision(catalog, store, &request, path)?
@@ -542,6 +777,223 @@ async fn handle_connection(
         _ => return Err(HttpError::not_found("artifact endpoint not found")),
     };
     response.write(stream).await
+}
+
+/// Lists generic Memory plus a read-only adapter over typed Spatial map revisions.
+fn list_memories(catalog: &ArtifactCatalog) -> Result<Response, HttpError> {
+    let mut memories = catalog
+        .memories()?
+        .into_iter()
+        .map(|manifest| {
+            let key = (
+                manifest.selector().memory_id().as_str().to_string(),
+                manifest.selector().revision_id().as_str().to_string(),
+            );
+            serde_json::to_value(manifest)
+                .map(|value| (key, value))
+                .map_err(|error| HttpError::internal(format!("encode Memory manifest: {error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    memories.extend(
+        catalog
+            .revisions()?
+            .into_iter()
+            .map(|snapshot| {
+                let selector = snapshot.manifest().selector();
+                let key = (
+                    selector.map_id().as_str().to_string(),
+                    selector.revision_id().as_str().to_string(),
+                );
+                (key, map_memory_view(snapshot))
+            })
+            .collect::<Vec<_>>(),
+    );
+    memories.sort_by(|left, right| left.0.cmp(&right.0));
+    let memories = memories
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    Ok(Response::Json(
+        "200 OK",
+        serde_json::json!({
+            "schema": "roboguide.memory-catalog/v0.1",
+            "memories": memories,
+        }),
+    ))
+}
+
+/// Returns one generic Memory manifest and its node-local replica evidence.
+fn get_memory(catalog: &ArtifactCatalog, path: &str) -> Result<Response, HttpError> {
+    let selector = memory_selector_from_path(path, false)?;
+    if let Some(manifest) = catalog.memory(&selector)? {
+        let replicas = catalog.memory_replicas(&selector)?;
+        return Ok(Response::Json(
+            "200 OK",
+            serde_json::json!({"manifest": manifest, "replicas": replicas}),
+        ));
+    }
+    let map_selector = map_selector_from_memory(&selector)?;
+    let snapshot = catalog
+        .revision(&map_selector)?
+        .ok_or_else(|| HttpError::not_found("unknown Memory revision"))?;
+    let replicas = catalog.map_replicas(&map_selector)?;
+    Ok(Response::Json(
+        "200 OK",
+        serde_json::json!({"manifest": map_memory_view(snapshot), "replicas": replicas}),
+    ))
+}
+
+/// Publishes immutable Memory metadata after verifying any referenced CAS content.
+fn publish_memory(
+    catalog: &ArtifactCatalog,
+    store: &FileSystemArtifactStore,
+    memory_admission: &dyn MemoryProviderAdmission,
+    request: &Request,
+    path: &str,
+) -> Result<Response, HttpError> {
+    let selector = memory_selector_from_path(path, false)?;
+    let manifest: MemoryArtifactManifest = parse_json(&request.body)?;
+    manifest
+        .validate()
+        .map_err(|error| HttpError::bad_request(error.to_string()))?;
+    if manifest.selector() != &selector {
+        return Err(HttpError::bad_request(
+            "Memory manifest selector does not match request path",
+        ));
+    }
+    if manifest.kind() == domain::MemoryKind::Spatial
+        && manifest.payload_schema() == domain::SPATIAL_MEMORY_SCHEMA_V0_1
+    {
+        return Err(HttpError::bad_request(
+            "typed map manifests must use /v1/maps so Spatial validation remains authoritative",
+        ));
+    }
+    if let Some(artifact) = manifest.artifact() {
+        store
+            .verify_artifact(artifact.content_digest().as_str(), artifact.byte_size())
+            .map_err(map_cas_error)?;
+    }
+    catalog.append_memory(
+        EventPayload::MemoryManifestPublished { manifest },
+        memory_admission,
+        request.memory_publisher.as_ref(),
+    )?;
+    Ok(Response::Json(
+        "201 Created",
+        serde_json::json!({"status": "published"}),
+    ))
+}
+
+/// Records one generic staged/imported/rejected exchange transition.
+fn record_memory_replica(
+    catalog: &ArtifactCatalog,
+    store: &FileSystemArtifactStore,
+    memory_admission: &dyn MemoryProviderAdmission,
+    request: &Request,
+    path: &str,
+) -> Result<Response, HttpError> {
+    let selector = memory_selector_from_path(path, true)?;
+    let input: MemoryReplicaInput = parse_json(&request.body)?;
+    if input.manifest.selector() != &selector {
+        return Err(HttpError::bad_request(
+            "Memory replica manifest selector does not match request path",
+        ));
+    }
+    let artifact = input.manifest.artifact().ok_or_else(|| {
+        HttpError::bad_request("metadata-only Memory cannot produce replica evidence")
+    })?;
+    store
+        .verify_artifact(artifact.content_digest().as_str(), artifact.byte_size())
+        .map_err(map_cas_error)?;
+    let node_id =
+        NodeId::new(input.node_id).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let payload = match input.status.as_str() {
+        "staged" => EventPayload::MemoryArtifactStaged {
+            manifest: input.manifest,
+            node_id,
+        },
+        "imported" => EventPayload::MemoryArtifactImported {
+            manifest: input.manifest,
+            node_id,
+        },
+        "rejected" => EventPayload::MemoryArtifactRejected {
+            manifest: input.manifest,
+            node_id,
+            reason: input
+                .reason
+                .unwrap_or_else(|| "rejected by node".to_string()),
+        },
+        _ => {
+            return Err(HttpError::bad_request(
+                "generic Memory replica status must be staged/imported/rejected",
+            ));
+        }
+    };
+    catalog.append_memory(payload, memory_admission, request.memory_publisher.as_ref())?;
+    Ok(Response::Json(
+        "202 Accepted",
+        serde_json::json!({"status": input.status}),
+    ))
+}
+
+/// Parses the fixed `/v1/memories/{id}/revisions/{revision}` resource grammar.
+fn memory_selector_from_path(path: &str, replica: bool) -> Result<MemorySelector, HttpError> {
+    let parts = path
+        .trim_start_matches("/v1/memories/")
+        .split('/')
+        .collect::<Vec<_>>();
+    let expected_len = if replica { 4 } else { 3 };
+    if parts.len() != expected_len || parts[1] != "revisions" || replica && parts[3] != "replicas" {
+        return Err(HttpError::not_found("Memory revision path is invalid"));
+    }
+    Ok(MemorySelector::new(
+        MemoryId::new(parts[0]).map_err(|error| HttpError::bad_request(error.to_string()))?,
+        MemoryRevisionId::new(parts[2])
+            .map_err(|error| HttpError::bad_request(error.to_string()))?,
+    ))
+}
+
+/// Converts the shared path-safe Memory selector into its typed map counterpart.
+fn map_selector_from_memory(selector: &MemorySelector) -> Result<MapRevisionSelector, HttpError> {
+    Ok(MapRevisionSelector::new(
+        domain::MapId::new(selector.memory_id().as_str())
+            .map_err(|error| HttpError::bad_request(error.to_string()))?,
+        domain::MapRevisionId::new(selector.revision_id().as_str())
+            .map_err(|error| HttpError::bad_request(error.to_string()))?,
+    ))
+}
+
+/// Adapts one typed map snapshot into generic Memory discovery JSON without duplicating facts.
+fn map_memory_view(snapshot: domain::MapRevisionSnapshot) -> serde_json::Value {
+    let manifest = snapshot.manifest();
+    serde_json::json!({
+        "schema": "roboguide.memory-manifest-view/v0.1",
+        "selector": {
+            "memory_id": manifest.selector().map_id().as_str(),
+            "revision_id": manifest.selector().revision_id().as_str(),
+        },
+        "kind": "spatial",
+        "provider_id": "typed-map-catalog",
+        "owner": {
+            "owner": "node",
+            "node_id": manifest.producer_node_id().as_str(),
+            "local_system_id": manifest.producer_local_system_id().map(domain::LocalSystemId::as_str),
+        },
+        "scope": {"kind": "global"},
+        "visibility": "exchangeable",
+        "payload_schema": domain::SPATIAL_MEMORY_SCHEMA_V0_1,
+        "media_type": manifest.media_type(),
+        "artifact": {
+            "content_digest": manifest.artifact().content_digest(),
+            "byte_size": manifest.artifact().byte_size(),
+        },
+        "source_mission_id": manifest.source_mission_id(),
+        "source_execution_id": manifest.source_execution_id(),
+        "source_task_ref": manifest.source_task_ref(),
+        "created_at": manifest.created_at(),
+        "typed_extension": "map",
+        "status": snapshot.status(),
+    })
 }
 
 /// Records one complete strong localization evidence event after path identity validation.
@@ -951,6 +1403,20 @@ struct ReplicaInput {
     reason: Option<String>,
 }
 
+/// Generic Memory replica evidence request body.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryReplicaInput {
+    /// Exact immutable Memory metadata represented by the replica.
+    manifest: MemoryArtifactManifest,
+    /// Node reporting local staging/import evidence.
+    node_id: String,
+    /// Monotonic generic replica transition.
+    status: String,
+    /// Optional rejection diagnostic.
+    reason: Option<String>,
+}
+
 /// Parsed HTTP request headers and bytes read beyond the header delimiter.
 #[derive(Debug)]
 struct RequestHead {
@@ -960,6 +1426,8 @@ struct RequestHead {
     path: String,
     /// Declared request body length.
     content_length: u64,
+    /// Optional Node/session identity used only by generic Memory mutations.
+    memory_publisher: Option<MemoryPublicationIdentity>,
     /// Body prefix already read while locating the header delimiter.
     prefetched_body: Vec<u8>,
 }
@@ -970,6 +1438,8 @@ struct Request {
     path: String,
     /// JSON request body bytes.
     body: Vec<u8>,
+    /// Optional Node/session identity used only by generic Memory mutations.
+    memory_publisher: Option<MemoryPublicationIdentity>,
 }
 
 impl RequestHead {
@@ -984,6 +1454,7 @@ impl RequestHead {
         Ok(Request {
             path: self.path.clone(),
             body: self.prefetched_body.clone(),
+            memory_publisher: self.memory_publisher.clone(),
         })
     }
 
@@ -1107,6 +1578,8 @@ fn parse_request_head(bytes: Vec<u8>, header_end: usize) -> Result<RequestHead, 
     let path = target.split('?').next().unwrap_or(target).to_string();
     let mut content_length = None;
     let mut has_transfer_encoding = false;
+    let mut memory_node_id = None;
+    let mut memory_session_id = None;
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
@@ -1130,6 +1603,20 @@ fn parse_request_head(bytes: Vec<u8>, header_end: usize) -> Result<RequestHead, 
             content_length = Some(parsed);
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
             has_transfer_encoding = true;
+        } else if name.eq_ignore_ascii_case("x-roboguide-node-id") {
+            if memory_node_id.replace(value.trim().to_string()).is_some() {
+                return Err(HttpError::bad_request(
+                    "duplicate X-RoboGuide-Node-Id header",
+                ));
+            }
+        } else if name.eq_ignore_ascii_case("x-roboguide-session-id")
+            && memory_session_id
+                .replace(value.trim().to_string())
+                .is_some()
+        {
+            return Err(HttpError::bad_request(
+                "duplicate X-RoboGuide-Session-Id header",
+            ));
         }
     }
     if has_transfer_encoding {
@@ -1147,6 +1634,21 @@ fn parse_request_head(bytes: Vec<u8>, header_end: usize) -> Result<RequestHead, 
     if content_length > MAX_ARTIFACT_BYTES {
         return Err(HttpError::too_large("request body exceeds artifact limit"));
     }
+    let memory_publisher = match (memory_node_id, memory_session_id) {
+        (Some(node_id), Some(session_id)) if !session_id.is_empty() => {
+            Some(MemoryPublicationIdentity {
+                node_id: NodeId::new(node_id)
+                    .map_err(|error| HttpError::bad_request(error.to_string()))?,
+                session_id,
+            })
+        }
+        (None, None) => None,
+        _ => {
+            return Err(HttpError::bad_request(
+                "generic Memory publisher requires both Node and session headers",
+            ));
+        }
+    };
     let prefetched_body = bytes[header_end..].to_vec();
     let expected = usize::try_from(content_length)
         .map_err(|_| HttpError::too_large("request body is too large"))?;
@@ -1159,6 +1661,7 @@ fn parse_request_head(bytes: Vec<u8>, header_end: usize) -> Result<RequestHead, 
         method,
         path,
         content_length,
+        memory_publisher,
         prefetched_body,
     })
 }
@@ -1261,6 +1764,14 @@ impl HttpError {
         }
     }
 
+    /// Builds a 403 error for claims outside current provider ownership.
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: "403 Forbidden",
+            message: message.into(),
+        }
+    }
+
     /// Builds a 413 error.
     fn too_large(message: impl Into<String>) -> Self {
         Self {
@@ -1334,7 +1845,8 @@ mod tests {
     use super::*;
     use artifact_store::digest_bytes;
     use domain::{
-        ContentDigest, MapArtifactRef, MapId, MapReplicaStatus, MapRevisionId, MissionId,
+        ContentDigest, LocalSystemId, MapArtifactRef, MapId, MapReplicaStatus, MapRevisionId,
+        MemoryArtifactRef, MemoryKind, MemoryOwner, MemoryScope, MemoryVisibility, MissionId,
         SpatialAnchorId,
     };
     use ports::MapCatalogReader;
@@ -1343,6 +1855,85 @@ mod tests {
     const TEST_CHECKPOINT_SCHEMA: &str = "roboguide.test-controller/v1";
     /// Opaque checkpoint body carried forward by artifact-only event batches.
     const TEST_CHECKPOINT_JSON: &str = r#"{"controller":"unchanged"}"#;
+
+    /// Test-only admission that isolates catalog behavior from Controller registration fixtures.
+    struct AllowTestMemoryAdmission;
+
+    impl MemoryProviderAdmission for AllowTestMemoryAdmission {
+        /// Accepts fixture manifests whose provider semantics are tested separately.
+        fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Accepts fixture replica nodes whose transition semantics are tested by the projection.
+        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Accepts absent fixture sessions because transport behavior is tested independently.
+        fn admit_publisher(
+            &self,
+            _publisher: Option<&MemoryPublicationIdentity>,
+            _expected_node_id: &NodeId,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// Test-only admission that proves HTTP publication fails before catalog mutation.
+    struct DenyTestMemoryAdmission;
+
+    impl MemoryProviderAdmission for DenyTestMemoryAdmission {
+        /// Rejects every fixture manifest as undeclared.
+        fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
+            Err("fixture provider is not registered".to_string())
+        }
+
+        /// Rejects every fixture replica reporter as unregistered.
+        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
+            Err("fixture replica node is not registered".to_string())
+        }
+
+        /// Rejects every fixture session as non-current.
+        fn admit_publisher(
+            &self,
+            _publisher: Option<&MemoryPublicationIdentity>,
+            _expected_node_id: &NodeId,
+        ) -> Result<(), String> {
+            Err("fixture publisher session is not current".to_string())
+        }
+    }
+
+    /// Test-only admission that requires one exact current owner session.
+    struct FixtureSessionMemoryAdmission;
+
+    impl MemoryProviderAdmission for FixtureSessionMemoryAdmission {
+        /// Accepts provider semantics so this fixture isolates publisher fencing.
+        fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Accepts registered-node semantics so this fixture isolates publisher fencing.
+        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Requires the semantic owner and fixture current session to match exactly.
+        fn admit_publisher(
+            &self,
+            publisher: Option<&MemoryPublicationIdentity>,
+            expected_node_id: &NodeId,
+        ) -> Result<(), String> {
+            let publisher = publisher.ok_or_else(|| "fixture publisher is missing".to_string())?;
+            if publisher.node_id() != expected_node_id {
+                return Err("fixture publisher does not own the Memory".to_string());
+            }
+            if publisher.session_id() != "session-current" {
+                return Err("fixture publisher session is stale".to_string());
+            }
+            Ok(())
+        }
+    }
 
     /// Creates one production-shaped empty upload registry for HTTP request tests.
     fn test_uploads() -> Uploads {
@@ -1388,6 +1979,40 @@ mod tests {
         .expect("manifest is valid")
     }
 
+    /// Builds one generic exchangeable Memory manifest backed by a finalized CAS artifact.
+    fn fixture_memory_manifest(
+        id: &str,
+        kind: MemoryKind,
+        digest: &str,
+        byte_size: u64,
+    ) -> MemoryArtifactManifest {
+        MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new(id).expect("Memory id is valid"),
+                MemoryRevisionId::new("r1").expect("Memory revision is valid"),
+            ),
+            kind,
+            "fixture-provider",
+            MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("memory").expect("system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.memory/v1",
+            "application/octet-stream",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new(digest).expect("digest is valid"),
+                byte_size,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("Memory manifest is valid")
+    }
+
     /// Builds one raw HTTP request with an optional body and explicit content length.
     fn raw_request(method: &str, path: &str, body: &[u8], include_length: bool) -> Vec<u8> {
         let length = if include_length {
@@ -1397,6 +2022,17 @@ mod tests {
         };
         let header = format!(
             "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{length}Connection: close\r\n\r\n"
+        );
+        let mut request = header.into_bytes();
+        request.extend_from_slice(body);
+        request
+    }
+
+    /// Builds one generic Memory mutation carrying its framework-level Node session identity.
+    fn raw_memory_request(path: &str, body: &[u8], node_id: &str, session_id: &str) -> Vec<u8> {
+        let header = format!(
+            "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nX-RoboGuide-Node-Id: {node_id}\r\nX-RoboGuide-Session-Id: {session_id}\r\nConnection: close\r\n\r\n",
+            body.len()
         );
         let mut request = header.into_bytes();
         request.extend_from_slice(body);
@@ -1425,6 +2061,24 @@ mod tests {
         uploads: &Uploads,
         request: Vec<u8>,
     ) -> Vec<u8> {
+        request_once_with_admission(
+            store,
+            catalog,
+            uploads,
+            request,
+            Arc::new(AllowTestMemoryAdmission),
+        )
+        .await
+    }
+
+    /// Sends one request with caller-selected Memory admission behavior.
+    async fn request_once_with_admission(
+        store: &FileSystemArtifactStore,
+        catalog: &ArtifactCatalog,
+        uploads: &Uploads,
+        request: Vec<u8>,
+        memory_admission: Arc<dyn MemoryProviderAdmission>,
+    ) -> Vec<u8> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener binds");
@@ -1434,9 +2088,14 @@ mod tests {
         let server_uploads = uploads.clone();
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.expect("test request accepts");
-            if let Err(error) =
-                handle_connection(&mut stream, &server_store, &server_catalog, &server_uploads)
-                    .await
+            if let Err(error) = handle_connection(
+                &mut stream,
+                &server_store,
+                &server_catalog,
+                &server_uploads,
+                memory_admission.as_ref(),
+            )
+            .await
             {
                 let _ = write_json(&mut stream, error.status(), &error.body()).await;
             }
@@ -1475,11 +2134,17 @@ mod tests {
         let server_store = store.clone();
         let server_catalog = catalog.clone();
         let server_uploads = uploads.clone();
+        let memory_admission = Arc::new(AllowTestMemoryAdmission);
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.expect("test request accepts");
-            if let Err(error) =
-                handle_connection(&mut stream, &server_store, &server_catalog, &server_uploads)
-                    .await
+            if let Err(error) = handle_connection(
+                &mut stream,
+                &server_store,
+                &server_catalog,
+                &server_uploads,
+                memory_admission.as_ref(),
+            )
+            .await
             {
                 let _ = write_json(&mut stream, error.status(), &error.body()).await;
             }
@@ -1521,6 +2186,346 @@ mod tests {
         response[separator + 4..].to_vec()
     }
 
+    /// All five Memory kinds publish through one catalog while their bytes remain in CAS.
+    #[tokio::test]
+    async fn generic_memory_catalog_publishes_all_kinds_and_tracks_selective_exchange() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let store = FileSystemArtifactStore::new(directory.path().join("artifacts"))
+            .expect("CAS initializes");
+        let bytes = b"shared-memory-artifact";
+        let digest = digest_bytes(bytes);
+        let mut upload = store.begin_upload("memory-fixture").expect("upload begins");
+        upload.write_chunk(bytes).expect("artifact bytes write");
+        upload
+            .finalize(&digest, bytes.len() as u64)
+            .expect("artifact finalizes");
+        let event_log =
+            SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+        seed_controller_checkpoint(&event_log);
+        let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let uploads = test_uploads();
+        let kinds = [
+            ("execution-a", MemoryKind::Execution),
+            ("spatial-a", MemoryKind::Spatial),
+            ("semantic-a", MemoryKind::Semantic),
+            ("experience-a", MemoryKind::Experience),
+            ("artifact-a", MemoryKind::Artifact),
+        ];
+
+        for (id, kind) in kinds {
+            let manifest = fixture_memory_manifest(id, kind, &digest, bytes.len() as u64);
+            let body = serde_json::to_vec(&manifest).expect("manifest serializes");
+            let path = format!("/v1/memories/{id}/revisions/r1");
+            response_body(
+                &request_once(
+                    &store,
+                    &catalog,
+                    &uploads,
+                    raw_request("POST", &path, &body, true),
+                )
+                .await,
+                "201 Created",
+            );
+        }
+
+        let execution = fixture_memory_manifest(
+            "execution-a",
+            MemoryKind::Execution,
+            &digest,
+            bytes.len() as u64,
+        );
+        let replica = serde_json::to_vec(&serde_json::json!({
+            "manifest": execution,
+            "node_id": "dog-b",
+            "status": "staged",
+        }))
+        .expect("replica request serializes");
+        response_body(
+            &request_once(
+                &store,
+                &catalog,
+                &uploads,
+                raw_request(
+                    "POST",
+                    "/v1/memories/execution-a/revisions/r1/replicas",
+                    &replica,
+                    true,
+                ),
+            )
+            .await,
+            "202 Accepted",
+        );
+
+        let list = request_once(
+            &store,
+            &catalog,
+            &uploads,
+            raw_request("GET", "/v1/memories", &[], false),
+        )
+        .await;
+        let list: serde_json::Value = serde_json::from_slice(&response_body(&list, "200 OK"))
+            .expect("Memory catalog response is JSON");
+        assert_eq!(list["memories"].as_array().map(Vec::len), Some(5));
+
+        let detail = request_once(
+            &store,
+            &catalog,
+            &uploads,
+            raw_request("GET", "/v1/memories/execution-a/revisions/r1", &[], false),
+        )
+        .await;
+        let detail: serde_json::Value = serde_json::from_slice(&response_body(&detail, "200 OK"))
+            .expect("Memory detail response is JSON");
+        assert_eq!(detail["replicas"][0]["status"], "staged");
+    }
+
+    /// Exchangeable Memory publication fails closed when referenced CAS bytes are absent.
+    #[tokio::test]
+    async fn generic_memory_publication_requires_existing_verified_cas_bytes() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let store = FileSystemArtifactStore::new(directory.path().join("artifacts"))
+            .expect("CAS initializes");
+        let event_log =
+            SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+        seed_controller_checkpoint(&event_log);
+        let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let manifest = fixture_memory_manifest(
+            "missing-a",
+            MemoryKind::Artifact,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            12,
+        );
+        let body = serde_json::to_vec(&manifest).expect("manifest serializes");
+
+        response_body(
+            &request_once(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_request("POST", "/v1/memories/missing-a/revisions/r1", &body, true),
+            )
+            .await,
+            "404 Not Found",
+        );
+        assert!(
+            catalog
+                .memories()
+                .expect("catalog remains readable")
+                .is_empty()
+        );
+    }
+
+    /// HTTP publication cannot bypass the composition-owned provider admission port.
+    #[tokio::test]
+    async fn generic_memory_publication_requires_admitted_provider() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let store = FileSystemArtifactStore::new(directory.path().join("artifacts"))
+            .expect("CAS initializes");
+        let bytes = b"memory-provider-admission";
+        let digest = digest_bytes(bytes);
+        let mut upload = store
+            .begin_upload("admission-fixture")
+            .expect("upload begins");
+        upload.write_chunk(bytes).expect("artifact bytes write");
+        upload
+            .finalize(&digest, bytes.len() as u64)
+            .expect("artifact finalizes");
+        let event_log =
+            SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+        seed_controller_checkpoint(&event_log);
+        let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let manifest = fixture_memory_manifest(
+            "experience-a",
+            MemoryKind::Experience,
+            &digest,
+            bytes.len() as u64,
+        );
+        let body = serde_json::to_vec(&manifest).expect("manifest serializes");
+
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_request(
+                    "POST",
+                    "/v1/memories/experience-a/revisions/r1",
+                    &body,
+                    true,
+                ),
+                Arc::new(DenyTestMemoryAdmission),
+            )
+            .await,
+            "403 Forbidden",
+        );
+        assert!(
+            catalog
+                .memories()
+                .expect("catalog remains readable")
+                .is_empty()
+        );
+    }
+
+    /// Generic Memory publication is fenced to the current session of its semantic owner Node.
+    #[tokio::test]
+    async fn generic_memory_publication_requires_current_owner_session() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let store = FileSystemArtifactStore::new(directory.path().join("artifacts"))
+            .expect("CAS initializes");
+        let bytes = b"memory-publisher-session";
+        let digest = digest_bytes(bytes);
+        let mut upload = store
+            .begin_upload("session-fixture")
+            .expect("upload begins");
+        upload.write_chunk(bytes).expect("artifact bytes write");
+        upload
+            .finalize(&digest, bytes.len() as u64)
+            .expect("artifact finalizes");
+        let event_log =
+            SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+        seed_controller_checkpoint(&event_log);
+        let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let manifest = fixture_memory_manifest(
+            "session-memory",
+            MemoryKind::Experience,
+            &digest,
+            bytes.len() as u64,
+        );
+        let body = serde_json::to_vec(&manifest).expect("manifest serializes");
+        let path = "/v1/memories/session-memory/revisions/r1";
+        let admission: Arc<dyn MemoryProviderAdmission> = Arc::new(FixtureSessionMemoryAdmission);
+
+        for request in [
+            raw_request("POST", path, &body, true),
+            raw_memory_request(path, &body, "dog-b", "session-current"),
+            raw_memory_request(path, &body, "dog-a", "session-old"),
+        ] {
+            response_body(
+                &request_once_with_admission(
+                    &store,
+                    &catalog,
+                    &test_uploads(),
+                    request,
+                    Arc::clone(&admission),
+                )
+                .await,
+                "403 Forbidden",
+            );
+            assert!(
+                catalog
+                    .memories()
+                    .expect("catalog remains readable")
+                    .is_empty()
+            );
+        }
+
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_memory_request(path, &body, "dog-a", "session-current"),
+                admission,
+            )
+            .await,
+            "201 Created",
+        );
+        assert_eq!(catalog.memories().expect("catalog is readable").len(), 1);
+
+        let replica = serde_json::to_vec(&serde_json::json!({
+            "manifest": manifest,
+            "node_id": "dog-b",
+            "status": "staged",
+        }))
+        .expect("replica request serializes");
+        let replica_path = "/v1/memories/session-memory/revisions/r1/replicas";
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_memory_request(replica_path, &replica, "dog-a", "session-current"),
+                Arc::new(FixtureSessionMemoryAdmission),
+            )
+            .await,
+            "403 Forbidden",
+        );
+        assert!(
+            catalog
+                .memory_replicas(manifest.selector())
+                .expect("replicas remain readable")
+                .is_empty()
+        );
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_memory_request(replica_path, &replica, "dog-b", "session-current"),
+                Arc::new(FixtureSessionMemoryAdmission),
+            )
+            .await,
+            "202 Accepted",
+        );
+        assert_eq!(
+            catalog
+                .memory_replicas(manifest.selector())
+                .expect("replicas are readable")
+                .len(),
+            1
+        );
+    }
+
+    /// Typed maps and generic Memory cannot claim the same unified selector in either order.
+    #[test]
+    fn typed_and_generic_memory_selectors_are_mutually_exclusive() {
+        let first_directory = tempfile::tempdir().expect("temporary directory exists");
+        let first_log = SqliteEventLog::open(first_directory.path().join("events.sqlite3"))
+            .expect("event log opens");
+        seed_controller_checkpoint(&first_log);
+        let first_catalog = ArtifactCatalog::replay_with_gate(&first_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let digest = "a".repeat(64);
+        let map = fixture_manifest(&digest, 12);
+        let generic = fixture_memory_manifest("map-a", MemoryKind::Artifact, &digest, 12);
+        first_catalog
+            .append(EventPayload::MapArtifactPublished {
+                manifest: map.clone(),
+            })
+            .expect("typed map claims selector first");
+        assert_eq!(
+            first_catalog
+                .append(EventPayload::MemoryManifestPublished {
+                    manifest: generic.clone(),
+                })
+                .expect_err("generic Memory must not reuse typed selector")
+                .status(),
+            "409 Conflict"
+        );
+
+        let second_directory = tempfile::tempdir().expect("temporary directory exists");
+        let second_log = SqliteEventLog::open(second_directory.path().join("events.sqlite3"))
+            .expect("event log opens");
+        seed_controller_checkpoint(&second_log);
+        let second_catalog =
+            ArtifactCatalog::replay_with_gate(&second_log, Arc::new(Mutex::new(())))
+                .expect("catalog replays");
+        second_catalog
+            .append(EventPayload::MemoryManifestPublished { manifest: generic })
+            .expect("generic Memory claims selector first");
+        assert_eq!(
+            second_catalog
+                .append(EventPayload::MapArtifactPublished { manifest: map })
+                .expect_err("typed map must not reuse generic selector")
+                .status(),
+            "409 Conflict"
+        );
+    }
+
     /// Fixed-length framing rejects ambiguous requests and separates head and body size limits.
     #[test]
     fn request_head_framing_is_bounded_and_unambiguous() {
@@ -1555,6 +2560,16 @@ mod tests {
             ),
             (
                 b"POST /v1/artifact-uploads HTTP/1.1\r\nContent-Length: +1\r\n\r\n"
+                    .as_slice(),
+                "400 Bad Request",
+            ),
+            (
+                b"POST /v1/memories/a/revisions/r1 HTTP/1.1\r\nContent-Length: 0\r\nX-RoboGuide-Node-Id: dog-a\r\n\r\n"
+                    .as_slice(),
+                "400 Bad Request",
+            ),
+            (
+                b"POST /v1/memories/a/revisions/r1 HTTP/1.1\r\nContent-Length: 0\r\nX-RoboGuide-Session-Id: session-a\r\n\r\n"
                     .as_slice(),
                 "400 Bad Request",
             ),
@@ -1767,6 +2782,7 @@ mod tests {
         let interrupted_start = Request {
             path: "/v1/artifact-uploads".to_string(),
             body: br#"{"upload_id":"interrupted"}"#.to_vec(),
+            memory_publisher: None,
         };
         start_upload(&interrupted_start, &store, &uploads).expect("upload starts");
         let interrupted = raw_request_with_declared_length(
@@ -1921,6 +2937,37 @@ mod tests {
         let manifest_json: serde_json::Value =
             serde_json::from_slice(&manifest_body).expect("manifest response is JSON");
         assert_eq!(manifest_json["status"], "Published");
+
+        let list_memories = raw_request("GET", "/v1/memories", &[], false);
+        let memories_body = response_body(
+            &request_once(&store, &catalog, &uploads, list_memories).await,
+            "200 OK",
+        );
+        let memories_json: serde_json::Value =
+            serde_json::from_slice(&memories_body).expect("memory catalog response is JSON");
+        assert_eq!(memories_json["memories"][0]["kind"], "spatial");
+        assert_eq!(memories_json["memories"][0]["typed_extension"], "map");
+        assert_eq!(
+            memories_json["memories"][0]["artifact"]["content_digest"],
+            digest
+        );
+
+        let memory_detail = raw_request("GET", "/v1/memories/map-a/revisions/r1", &[], false);
+        let memory_detail_body = response_body(
+            &request_once(&store, &catalog, &uploads, memory_detail).await,
+            "200 OK",
+        );
+        let memory_detail_json: serde_json::Value = serde_json::from_slice(&memory_detail_body)
+            .expect("typed map Memory detail response is JSON");
+        assert_eq!(memory_detail_json["manifest"]["typed_extension"], "map");
+        assert_eq!(
+            memory_detail_json["manifest"]["selector"]["memory_id"],
+            "map-a"
+        );
+        assert_eq!(
+            memory_detail_json["replicas"].as_array().map(Vec::len),
+            Some(0)
+        );
 
         let get_blob = raw_request("GET", &format!("/v1/artifacts/{digest}"), &[], false);
         let blob_body = response_body(

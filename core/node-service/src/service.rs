@@ -1,18 +1,26 @@
-//! Formal Node Protocol v0.2 lifecycle around the generic Local Integration Engine.
+//! Formal Node Protocol v0.3 lifecycle around the generic Local Integration Engine.
 
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
-use integration::grpc::v0_2::node_message::Message as NodePayload;
-use integration::grpc::v0_2::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
-use integration::grpc::v0_2::server_message::Message as ServerPayload;
-use integration::grpc::v0_2::{
+use integration::grpc::v0_3::node_message::Message as NodePayload;
+use integration::grpc::v0_3::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
+use integration::grpc::v0_3::server_message::Message as ServerPayload;
+use integration::grpc::v0_3::{
     Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
-    NODE_CONTRACT_VERSION, NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError,
-    Register, RegistrationUpdate, Resource, Sensor, ServerMessage,
+    MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NODE_CONTRACT_VERSION,
+    NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError, Register, RegistrationUpdate,
+    Resource, Sensor, ServerMessage, StateExportDescriptor, StateObjectClass, StateObservation,
+    StateObservationBatch, StateSemantic,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+/// Maximum State records carried by one Node Protocol management message.
+const MAX_STATE_BATCH_RECORDS: usize = 64;
+/// Maximum aggregate State JSON bytes carried by one management message.
+const MAX_STATE_BATCH_BYTES: usize = 512 * 1024;
 
 /// Long-running, vendor-neutral node-side RoboGuide service.
 pub struct NodeService {
@@ -40,7 +48,7 @@ impl NodeService {
         }
     }
 
-    /// Runs one Hello -> Welcome -> Register -> Registered v0.2 session.
+    /// Runs one Hello -> Welcome -> Register -> Registered v0.3 session.
     pub async fn run_session(&self) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
         let mut client =
@@ -93,12 +101,19 @@ impl NodeService {
         };
         let mut local_events = self.engine.subscribe();
         self.replay_snapshots(&registered.session_id, &outbound)?;
+        let management_sequence = Arc::new(tokio::sync::Mutex::new(0_u64));
         let heartbeat_task = self.spawn_heartbeat(
             registered.session_id.clone(),
             registered.lease_id.clone(),
             welcome.heartbeat_interval_ms.max(1),
             outbound.clone(),
             initial_readiness,
+            Arc::clone(&management_sequence),
+        );
+        let state_task = self.spawn_state_observations(
+            registered.session_id.clone(),
+            outbound.clone(),
+            management_sequence,
         );
         let session_result: Result<(), NodeServiceError> = async {
             loop {
@@ -124,6 +139,7 @@ impl NodeService {
             }
         }.await;
         heartbeat_task.abort();
+        state_task.abort();
         session_result
     }
 
@@ -135,15 +151,16 @@ impl NodeService {
         interval_ms: u64,
         outbound: mpsc::UnboundedSender<NodeMessage>,
         mut previous_readiness: BTreeMap<String, bool>,
+        sequence: Arc<tokio::sync::Mutex<u64>>,
     ) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
             let mut heartbeat =
                 tokio::time::interval(std::time::Duration::from_millis(interval_ms));
-            let mut sequence = 0_u64;
             loop {
                 heartbeat.tick().await;
                 let observation = engine.observe().await;
+                let mut sequence = sequence.lock().await;
                 for message in management_messages(
                     &session_id,
                     &lease_id,
@@ -153,6 +170,76 @@ impl NodeService {
                     &mut previous_readiness,
                 ) {
                     if outbound.send(message).is_err() {
+                        return;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Periodically samples configured State channels without coupling failure to heartbeat health.
+    fn spawn_state_observations(
+        &self,
+        session_id: String,
+        outbound: mpsc::UnboundedSender<NodeMessage>,
+        sequence: Arc<tokio::sync::Mutex<u64>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let engine = self.engine.clone();
+        tokio::spawn(async move {
+            let intervals = engine
+                .catalog()
+                .state_exports()
+                .iter()
+                .map(|(id, export)| (id.clone(), export.interval_ms()))
+                .collect::<BTreeMap<_, _>>();
+            let Some(minimum_interval) = intervals.values().copied().min() else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            let mut next_due = intervals
+                .keys()
+                .cloned()
+                .map(|id| (id, tokio::time::Instant::now()))
+                .collect::<BTreeMap<_, _>>();
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_millis(minimum_interval));
+            loop {
+                ticker.tick().await;
+                let now = tokio::time::Instant::now();
+                let due = next_due
+                    .iter_mut()
+                    .filter_map(|(id, due_at)| {
+                        if now < *due_at {
+                            return None;
+                        }
+                        let interval = intervals[id];
+                        *due_at = now + std::time::Duration::from_millis(interval);
+                        Some(id.clone())
+                    })
+                    .collect::<BTreeSet<_>>();
+                let facts = engine.observe_state_exports(&due).await;
+                if facts.is_empty() {
+                    continue;
+                }
+                let batches = state_observation_batches(facts);
+                if batches.is_empty() {
+                    continue;
+                }
+                let mut sequence = sequence.lock().await;
+                for observations in batches {
+                    *sequence = sequence.saturating_add(1);
+                    if outbound
+                        .send(NodeMessage {
+                            message: Some(NodePayload::StateObservationBatch(
+                                StateObservationBatch {
+                                    session_id: session_id.clone(),
+                                    sequence: *sequence,
+                                    observations,
+                                },
+                            )),
+                        })
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -234,6 +321,41 @@ impl NodeService {
         }
         Ok(())
     }
+}
+
+/// Encodes sampled State facts into protocol-bounded deterministic batches.
+fn state_observation_batches(facts: Vec<crate::StateExportFact>) -> Vec<Vec<StateObservation>> {
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut current_bytes = 0usize;
+    for fact in facts {
+        let Ok(json_value) = serde_json::to_vec(&fact.value) else {
+            continue;
+        };
+        if json_value.len() > domain::MAX_STATE_PAYLOAD_BYTES {
+            continue;
+        }
+        if !current.is_empty()
+            && (current.len() == MAX_STATE_BATCH_RECORDS
+                || current_bytes.saturating_add(json_value.len()) > MAX_STATE_BATCH_BYTES)
+        {
+            batches.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current_bytes = current_bytes.saturating_add(json_value.len());
+        current.push(StateObservation {
+            export_id: fact.export_id,
+            json_value,
+            has_source_observed_at: fact.source_observed_at_ms.is_some(),
+            source_observed_at_ms: fact.source_observed_at_ms.unwrap_or_default(),
+            has_confidence: fact.confidence_millionths.is_some(),
+            confidence_millionths: fact.confidence_millionths.unwrap_or_default(),
+        });
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
 }
 
 /// Sends an explicit local rejection without changing execution terminal state.
@@ -370,6 +492,57 @@ fn registration_from_readiness(
             local_system_id: sensor.owner().to_string(),
         })
         .collect();
+    let state_exports = catalog
+        .state_exports()
+        .values()
+        .map(|export| StateExportDescriptor {
+            export_id: export.id().to_string(),
+            local_system_id: export.owner().to_string(),
+            object_class: match export.object_class() {
+                "node" => StateObjectClass::Node as i32,
+                "world" => StateObjectClass::World as i32,
+                _ => StateObjectClass::Unspecified as i32,
+            },
+            object_type: export.object_type().to_string(),
+            object_id: export.object_id().to_string(),
+            semantic: match export.semantic() {
+                "reported" => StateSemantic::Reported as i32,
+                "observed" => StateSemantic::Observed as i32,
+                _ => StateSemantic::Unspecified as i32,
+            },
+            payload_schema: export.payload_schema().to_string(),
+            valid_for_ms: export.valid_for_ms(),
+        })
+        .collect();
+    let memory_providers = catalog
+        .memory_providers()
+        .values()
+        .map(|provider| MemoryProviderDescriptor {
+            provider_id: provider.id().to_string(),
+            local_system_id: provider.owner().to_string(),
+            kind: match provider.kind() {
+                "execution" => MemoryKind::Execution as i32,
+                "spatial" => MemoryKind::Spatial as i32,
+                "semantic" => MemoryKind::Semantic as i32,
+                "experience" => MemoryKind::Experience as i32,
+                "artifact" => MemoryKind::Artifact as i32,
+                _ => MemoryKind::Unspecified as i32,
+            },
+            scope: match provider.scope() {
+                "local" => MemoryScopeKind::Local as i32,
+                "global" => MemoryScopeKind::Global as i32,
+                _ => MemoryScopeKind::Unspecified as i32,
+            },
+            execution_group_id: String::new(),
+            visibility: match provider.visibility() {
+                "discoverable" => MemoryVisibility::Discoverable as i32,
+                "exchangeable" => MemoryVisibility::Exchangeable as i32,
+                _ => MemoryVisibility::Unspecified as i32,
+            },
+            payload_schema: provider.payload_schema().to_string(),
+            media_type: provider.media_type().to_string(),
+        })
+        .collect();
     NodeRegistration {
         node_id: catalog.node_id().to_string(),
         local_systems,
@@ -378,6 +551,8 @@ fn registration_from_readiness(
         resources,
         metadata: Default::default(),
         node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        state_exports,
+        memory_providers,
     }
 }
 
@@ -964,6 +1139,8 @@ mod tests {
                 ],
                 sensors: Vec::new(),
                 artifacts,
+                state_exports: Vec::new(),
+                memory_providers: Vec::new(),
             },
             std::path::Path::new("."),
         )
@@ -1055,6 +1232,51 @@ mod tests {
         ));
     }
 
+    /// State samples split deterministically across both record-count and byte limits.
+    #[test]
+    fn state_observation_batches_respect_protocol_bounds() {
+        let count_limited = (0..65)
+            .map(|index| crate::StateExportFact {
+                export_id: format!("state-{index:02}"),
+                value: serde_json::json!(true),
+                source_observed_at_ms: None,
+                confidence_millionths: None,
+            })
+            .collect();
+        let batches = state_observation_batches(count_limited);
+        assert_eq!(batches.iter().map(Vec::len).collect::<Vec<_>>(), [64, 1]);
+
+        let byte_limited = (0..9)
+            .map(|index| crate::StateExportFact {
+                export_id: format!("payload-{index}"),
+                value: serde_json::json!("x".repeat(60 * 1024)),
+                source_observed_at_ms: Some(index),
+                confidence_millionths: Some(500_000),
+            })
+            .collect();
+        let batches = state_observation_batches(byte_limited);
+        assert_eq!(batches.iter().map(Vec::len).collect::<Vec<_>>(), [8, 1]);
+        assert!(batches.iter().all(|batch| {
+            batch
+                .iter()
+                .map(|observation| observation.json_value.len())
+                .sum::<usize>()
+                <= MAX_STATE_BATCH_BYTES
+        }));
+    }
+
+    /// Oversized public facts fail closed before transport if a caller bypasses local mapping.
+    #[test]
+    fn state_observation_batches_drop_oversized_fact() {
+        let batches = state_observation_batches(vec![crate::StateExportFact {
+            export_id: "oversized".to_string(),
+            value: serde_json::json!("x".repeat(domain::MAX_STATE_PAYLOAD_BYTES)),
+            source_observed_at_ms: None,
+            confidence_millionths: None,
+        }]);
+        assert!(batches.is_empty());
+    }
+
     /// Resource IDs are an unordered semantic set for execution identity.
     #[tokio::test]
     async fn execution_identity_canonicalizes_resource_order() {
@@ -1069,7 +1291,7 @@ mod tests {
             }) as Arc<dyn LocalDriver>],
         )
         .expect("engine initializes");
-        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -1114,7 +1336,7 @@ mod tests {
             }) as Arc<dyn LocalDriver>],
         )
         .expect("engine initializes");
-        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-timeout".to_string(),
             group_id: "group-a".to_string(),
@@ -1139,7 +1361,7 @@ mod tests {
             .expect("timeout evidence exists");
         assert_eq!(
             event.phase,
-            integration::grpc::v0_2::ExecutionPhase::Unknown
+            integration::grpc::v0_3::ExecutionPhase::Unknown
         );
         let journal =
             crate::ExecutionJournal::open(crate::journal_path(engine.catalog().state_directory()))
@@ -1181,7 +1403,7 @@ mod tests {
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(
-                    integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
+                    integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
                         grpc_service,
                     ),
                 )
@@ -1244,8 +1466,8 @@ mod tests {
             RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
         };
         use integration::GrpcIntegrationService;
-        use integration::grpc::v0_2::CanonicalInvocation;
-        use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+        use integration::grpc::v0_3::CanonicalInvocation;
+        use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
         use orchestration::{IntegrationRuntimeBridge, RemoteExecutionStatus};
         use state::InMemorySharedNodeState;
         use testkit::InMemoryEventLog;
@@ -1282,7 +1504,7 @@ mod tests {
         let registration = DomainRegistration::new_with_contracts(
             NodeId::new("dog-a").expect("node valid"),
             LocalRuntime::new("configured-runtime", "1").expect("runtime valid"),
-            NodeContractVersion::new(integration::grpc::v0_2::NODE_CONTRACT_VERSION)
+            NodeContractVersion::new(integration::grpc::v0_3::NODE_CONTRACT_VERSION)
                 .expect("contract version valid"),
             vec![Capability::new(CapabilityKind::Mobility, true)],
             vec![contract.clone()],
@@ -1531,7 +1753,7 @@ mod tests {
         )
         .expect("engine reopens journal");
         engine.recover().expect("ambiguous execution is fenced");
-        let competing = integration::grpc::v0_2::CanonicalInvocation {
+        let competing = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -1610,10 +1832,10 @@ mod tests {
         assert_eq!(event.execution_id, "handle-recovered");
         assert_eq!(
             event.phase,
-            integration::grpc::v0_2::ExecutionPhase::Started
+            integration::grpc::v0_3::ExecutionPhase::Started
         );
 
-        let competing = integration::grpc::v0_2::CanonicalInvocation {
+        let competing = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-b".to_string(),
             group_id: "group-a".to_string(),
@@ -1786,7 +2008,7 @@ mod tests {
             "restart must not status-poll a completed local execution and freeze the source again"
         );
 
-        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "build-map".to_string(),
             group_id: "group-a".to_string(),
@@ -1834,8 +2056,8 @@ mod tests {
             ContentDigest, MapArtifactManifest, MapArtifactRef, MapId, MapRevisionId,
             MapRevisionSelector, MissionId, NodeId, SpatialAnchorId, TimestampMs,
         };
-        use integration::grpc::v0_2::scalar_value::Value as Scalar;
-        use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, ScalarValue};
+        use integration::grpc::v0_3::scalar_value::Value as Scalar;
+        use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ScalarValue};
         use sha2::Digest;
         use std::collections::HashMap;
         use std::sync::atomic::AtomicUsize;

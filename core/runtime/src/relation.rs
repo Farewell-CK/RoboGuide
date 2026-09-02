@@ -225,6 +225,34 @@ impl RuntimeExecutionManager {
             .collect()
     }
 
+    /// Acknowledges Control reconciliation for a relation whose endpoints are coordinated again.
+    ///
+    /// Relation fences are intentionally latched across later observations.  Recovery or rebind
+    /// code must explicitly acknowledge the repaired relation before target progression is
+    /// permitted again.
+    pub fn acknowledge_relation_reconciliation(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        relation_id: &ExecutionRelationId,
+    ) -> Result<(), crate::ExecutionRuntimeError> {
+        let key = (group_id.clone(), relation_id.clone());
+        if !self.relations.contains_key(&key) {
+            return Err(crate::ExecutionRuntimeError::ReconciliationRequired(
+                format!("unknown execution relation {relation_id} in Group {group_id}"),
+            ));
+        }
+        let satisfied = self.relations.get(&key).is_some_and(|relation| {
+            self.derive_relation_state(relation) == ExecutionRelationState::Satisfied
+        });
+        if !satisfied {
+            return Err(crate::ExecutionRuntimeError::ReconciliationRequired(
+                format!("execution relation {relation_id} is not satisfied"),
+            ));
+        }
+        self.relation_fences.remove(&key);
+        Ok(())
+    }
+
     /// Confirms Runtime retained exactly the relations in one restored MissionPlan.
     pub fn validate_relations(
         &self,
@@ -326,7 +354,6 @@ impl RuntimeExecutionManager {
         let source_execution_id = self.active_executions.get(&relation.source_key()).cloned();
         let target_execution_id = self.active_executions.get(&relation.target_key()).cloned();
         if current == ExecutionRelationState::Satisfied {
-            self.relation_fences.remove(key);
             if let Some(target_execution_id) = &target_execution_id {
                 self.relation_proofs
                     .insert(key.clone(), target_execution_id.clone());
@@ -615,8 +642,16 @@ mod tests {
             .expect("replacement acceptance records");
         let snapshot = &runtime.relation_snapshots(&group_id)[0];
         assert_eq!(snapshot.state(), ExecutionRelationState::Satisfied);
-        assert!(!snapshot.reconciliation_required());
+        assert!(snapshot.reconciliation_required());
         assert_eq!(snapshot.source_execution_id(), Some("attempt-source-2"));
+
+        runtime
+            .acknowledge_relation_reconciliation(
+                &group_id,
+                &ExecutionRelationId::new("safety-guards-navigation").expect("relation valid"),
+            )
+            .expect("Control recovery explicitly acknowledges the repaired relation");
+        assert!(!runtime.relation_snapshots(&group_id)[0].reconciliation_required());
 
         let late_old_fact = runtime
             .observe_execution(

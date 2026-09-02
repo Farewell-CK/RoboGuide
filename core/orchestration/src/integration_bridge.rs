@@ -4,25 +4,30 @@ use control::ControlPlane;
 use domain::{
     Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
     ExecutionCommand, ExecutionValue, LeaseId, LocalRuntime, LocalSystemDescriptor, LocalSystemId,
-    NodeContractVersion, NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus,
-    Resource, ResourceId, ResourceKind, SensorDescriptor, SensorId, TimestampMs,
+    MemoryKind, MemoryProviderDescriptor, MemoryScope, MemoryVisibility, NodeContractVersion,
+    NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus, Resource, ResourceId,
+    ResourceKind, SensorDescriptor, SensorId, StateExportDescriptor, StateObjectClass,
+    StateObjectRef, StateRecord, StateSemantic, StateSource, TimestampMs,
 };
-use integration::grpc::v0_2::node_message::Message as NodePayload;
-use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
+use integration::grpc::v0_3::node_message::Message as NodePayload;
+use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
 use integration::{GrpcNodeEvent, GrpcNodeRouter};
-use ports::{EventSink, SharedNodeStateWriter};
+use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordWriter};
 use runtime::{
     ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
     RuntimeRelationSnapshot,
 };
-use state::InMemorySharedNodeState;
+use state::{InMemorySharedNodeState, StateRecordProjection};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 8 records Runtime relation specifications, live states, proofs, and fences.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
+/// Version 9 adds source-aware State records while accepting one-step v8 migration.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
+
+/// Immediately previous checkpoint accepted for one-step migration.
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -79,11 +84,14 @@ impl ObservedTaskOutcome {
 }
 
 /// Live composition state consuming Integration events and routing Runtime commands.
-pub struct IntegrationRuntimeBridge<E> {
+#[derive(Clone)]
+pub struct IntegrationRuntimeBridge<E: Clone> {
     /// Existing Control authority for node leases and registration.
     control: ControlPlane,
     /// Shared Node State updated by remote facts.
     state: InMemorySharedNodeState,
+    /// Source-aware State records kept separate from typed authority projections.
+    state_records: StateRecordProjection,
     /// Existing domain event sink used by Runtime/Control.
     events: E,
     /// Current formal gRPC Node routes.
@@ -103,6 +111,9 @@ struct ControllerCheckpoint {
     control: control::ControlCheckpoint,
     /// Shared reported node facts; local receive/liveness times are rebased on restore.
     nodes: Vec<domain::NodeStateSnapshot>,
+    /// Independently attributed State channels; absent in v8 checkpoints.
+    #[serde(default)]
+    state_records: Vec<StateRecord>,
     /// Runtime-owned live execution contexts and continuity state.
     runtime: RuntimeExecutionCheckpoint,
 }
@@ -121,7 +132,7 @@ struct ReceivedExecutionFact<'a> {
     reason: &'a str,
 }
 
-impl<E: EventSink> IntegrationRuntimeBridge<E> {
+impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     /// Creates the composition bridge around existing core authorities.
     pub fn new(
         control: ControlPlane,
@@ -132,6 +143,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         Self {
             control,
             state,
+            state_records: StateRecordProjection::new(),
             events,
             router,
             runtime: RuntimeExecutionManager::new(),
@@ -145,6 +157,7 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
             schema: CONTROLLER_CHECKPOINT_SCHEMA.to_string(),
             control: self.control.checkpoint(),
             nodes: self.state.snapshots(),
+            state_records: self.state_records.snapshots(),
             runtime: self.runtime.checkpoint(),
         };
         serde_json::to_string(&checkpoint)
@@ -163,7 +176,10 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     ) -> Result<Self, IntegrationRuntimeError> {
         let checkpoint: ControllerCheckpoint = serde_json::from_str(checkpoint_json)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
-        if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA {
+        if !matches!(
+            checkpoint.schema.as_str(),
+            CONTROLLER_CHECKPOINT_SCHEMA | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
+        ) {
             return Err(IntegrationRuntimeError::Checkpoint(format!(
                 "unsupported controller checkpoint schema {}",
                 checkpoint.schema
@@ -172,11 +188,15 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         let control = ControlPlane::restore(checkpoint.control)?;
         let state = InMemorySharedNodeState::restore(checkpoint.nodes, restored_at)
             .map_err(IntegrationRuntimeError::Checkpoint)?;
+        let state_records =
+            StateRecordProjection::restore_rebased(checkpoint.state_records, restored_at)
+                .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         let runtime = RuntimeExecutionManager::restore(checkpoint.runtime)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         Ok(Self {
             control,
             state,
+            state_records,
             events,
             router,
             runtime,
@@ -215,61 +235,104 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
                 )?;
             }
             GrpcNodeEvent::NodeMessage {
-                node_id, message, ..
-            } => match message.message {
-                Some(NodePayload::Heartbeat(heartbeat)) => {
-                    let node_id = NodeId::new(node_id)?;
-                    let lease_id = LeaseId::new(heartbeat.lease_id)?;
-                    let status = status_from_wire(heartbeat.status.as_ref(), received_at)?;
-                    self.control.accept_heartbeat(
-                        &mut self.state,
-                        NodeHeartbeat::new(node_id, lease_id, status),
-                        received_at,
-                        15_000,
-                        correlation_id,
-                        &mut self.events,
-                    )?;
+                node_id,
+                session_id,
+                message,
+            } => {
+                // Direct composition callers may replay a protocol fact without a live gRPC
+                // route.  When a route exists, however, the session fence is authoritative and
+                // stale or expired sessions must be ignored.
+                let current = if self
+                    .router
+                    .has_session(&node_id)
+                    .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                {
+                    self.router
+                        .session_is_current(&node_id, &session_id)
+                        .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                } else {
+                    true
+                };
+                if !current {
+                    return Ok(());
                 }
-                Some(NodePayload::ExecutionEvent(event)) => self.consume_execution(
-                    ReceivedExecutionFact {
-                        node_id: &node_id,
-                        execution_id: &event.execution_id,
-                        sequence: event.sequence,
-                        phase: event.phase,
-                        reason: &event.reason,
-                    },
-                    received_at,
-                    correlation_id,
-                )?,
-                Some(NodePayload::ExecutionSnapshot(snapshot)) => self.consume_execution(
-                    ReceivedExecutionFact {
-                        node_id: &node_id,
-                        execution_id: &snapshot.execution_id,
-                        sequence: snapshot.last_sequence,
-                        phase: snapshot.phase,
-                        reason: &snapshot.reason,
-                    },
-                    received_at,
-                    correlation_id,
-                )?,
-                Some(NodePayload::RegistrationUpdate(update)) => {
-                    let registration =
-                        registration_from_wire(update.registration.ok_or_else(|| {
-                            IntegrationRuntimeError::Protocol(
-                                "registration update is empty".to_string(),
-                            )
-                        })?)?;
-                    self.control.update_node_registration(
-                        &mut self.state,
-                        registration,
+                match message.message {
+                    Some(NodePayload::Heartbeat(heartbeat)) => {
+                        let node_id = NodeId::new(node_id)?;
+                        let lease_id = LeaseId::new(heartbeat.lease_id)?;
+                        let status = status_from_wire(heartbeat.status.as_ref(), received_at)?;
+                        self.control.accept_heartbeat(
+                            &mut self.state,
+                            NodeHeartbeat::new(node_id, lease_id, status),
+                            received_at,
+                            15_000,
+                            correlation_id,
+                            &mut self.events,
+                        )?;
+                    }
+                    Some(NodePayload::ExecutionEvent(event)) => self.consume_execution(
+                        ReceivedExecutionFact {
+                            node_id: &node_id,
+                            execution_id: &event.execution_id,
+                            sequence: event.sequence,
+                            phase: event.phase,
+                            reason: &event.reason,
+                        },
                         received_at,
                         correlation_id,
-                        &mut self.events,
-                    )?;
+                    )?,
+                    Some(NodePayload::ExecutionSnapshot(snapshot)) => self.consume_execution(
+                        ReceivedExecutionFact {
+                            node_id: &node_id,
+                            execution_id: &snapshot.execution_id,
+                            sequence: snapshot.last_sequence,
+                            phase: snapshot.phase,
+                            reason: &snapshot.reason,
+                        },
+                        received_at,
+                        correlation_id,
+                    )?,
+                    Some(NodePayload::RegistrationUpdate(update)) => {
+                        let registration =
+                            registration_from_wire(update.registration.ok_or_else(|| {
+                                IntegrationRuntimeError::Protocol(
+                                    "registration update is empty".to_string(),
+                                )
+                            })?)?;
+                        self.control.update_node_registration(
+                            &mut self.state,
+                            registration,
+                            received_at,
+                            correlation_id,
+                            &mut self.events,
+                        )?;
+                    }
+                    Some(NodePayload::StateObservationBatch(batch)) => {
+                        self.consume_state_observations(
+                            &node_id,
+                            &session_id,
+                            batch.sequence,
+                            batch.observations,
+                            received_at,
+                            correlation_id,
+                        )?;
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
-            GrpcNodeEvent::Unavailable { node_id, .. } => {
+            }
+            GrpcNodeEvent::Unavailable {
+                node_id,
+                session_id: _,
+            } => {
+                // A delayed disconnect from an old route must never make a newer session
+                // appear unreachable.
+                if self
+                    .router
+                    .has_session(&node_id)
+                    .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                {
+                    return Ok(());
+                }
                 self.state.record_node_liveness(
                     &NodeId::new(node_id)?,
                     domain::NodeLivenessObservation::new(
@@ -453,6 +516,10 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
     pub const fn state_mut(&mut self) -> &mut InMemorySharedNodeState {
         &mut self.state
     }
+    /// Returns independently attributed State records without cross-source fusion.
+    pub const fn state_records(&self) -> &StateRecordProjection {
+        &self.state_records
+    }
     /// Returns current remote execution status.
     pub fn execution_status(&self, execution_id: &str) -> Option<RemoteExecutionStatus> {
         self.runtime
@@ -530,6 +597,17 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         self.runtime.relation_snapshots(group_id)
     }
 
+    /// Applies an explicit Control recovery acknowledgement to one satisfied relation.
+    pub fn acknowledge_relation_reconciliation(
+        &mut self,
+        group_id: &domain::ExecutionGroupId,
+        relation_id: &domain::ExecutionRelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.runtime
+            .acknowledge_relation_reconciliation(group_id, relation_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
     /// Drains canonical Runtime transitions for application-level lifecycle handling.
     pub fn take_runtime_events(&mut self) -> Vec<ExecutionEvent> {
         self.runtime_events.drain(..).collect()
@@ -600,6 +678,85 @@ impl<E: EventSink> IntegrationRuntimeBridge<E> {
         for event in runtime_events {
             append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
             self.runtime_events.push_back(event);
+        }
+        Ok(())
+    }
+
+    /// Converts one accepted protocol batch into an atomic State projection update and evidence.
+    fn consume_state_observations(
+        &mut self,
+        node_id: &str,
+        session_id: &str,
+        sequence: u64,
+        observations: Vec<integration::grpc::v0_3::StateObservation>,
+        received_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        let node_id = NodeId::new(node_id)?;
+        let registration = self
+            .state
+            .node(&node_id)
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol(
+                    "State observations require a registered node".to_string(),
+                )
+            })?
+            .registration();
+        let exports = registration
+            .state_exports()
+            .iter()
+            .map(|export| (export.export_id(), export))
+            .collect::<BTreeMap<_, _>>();
+        let records = observations
+            .into_iter()
+            .map(|observation| {
+                let export = exports.get(observation.export_id.as_str()).ok_or_else(|| {
+                    IntegrationRuntimeError::Protocol(format!(
+                        "State observation references undeclared export {}",
+                        observation.export_id
+                    ))
+                })?;
+                let value = serde_json::from_slice(&observation.json_value).map_err(|error| {
+                    IntegrationRuntimeError::Protocol(format!(
+                        "State observation JSON is invalid: {error}"
+                    ))
+                })?;
+                StateRecord::new_with_source_epoch(
+                    export.object().clone(),
+                    export.semantic(),
+                    StateSource::Node {
+                        node_id: node_id.clone(),
+                        local_system_id: export.local_system_id().clone(),
+                    },
+                    export.export_id(),
+                    export.payload_schema(),
+                    value,
+                    observation
+                        .has_source_observed_at
+                        .then(|| TimestampMs::new(observation.source_observed_at_ms)),
+                    received_at,
+                    export.valid_for_ms(),
+                    observation
+                        .has_confidence
+                        .then_some(observation.confidence_millionths),
+                    Some(session_id.to_string()),
+                    sequence,
+                )
+                .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>, IntegrationRuntimeError>>()?;
+        let mut candidate = self.state_records.clone();
+        for record in &records {
+            candidate.record_state(record.clone())?;
+        }
+        self.state_records = candidate;
+        for record in records {
+            self.events.append(
+                received_at,
+                correlation_id,
+                None,
+                EventPayload::StateRecordObserved { record },
+            );
         }
         Ok(())
     }
@@ -718,6 +875,16 @@ fn remote_status(status: ExecutionStatus) -> RemoteExecutionStatus {
 fn registration_from_wire(
     wire: NodeRegistration,
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
+    let state_exports = wire
+        .state_exports
+        .iter()
+        .map(state_export_from_wire)
+        .collect::<Result<Vec<_>, _>>()?;
+    let memory_providers = wire
+        .memory_providers
+        .iter()
+        .map(memory_provider_from_wire)
+        .collect::<Result<Vec<_>, _>>()?;
     let local_systems = wire
         .local_systems
         .into_iter()
@@ -797,13 +964,110 @@ fn registration_from_wire(
             sensors,
             resources,
             resource_owners,
-        )?,
+        )?
+        .with_state_memory_exports(state_exports, memory_providers)?,
     )
+}
+
+/// Converts one wire State export through the node-owned authority invariants.
+fn state_export_from_wire(
+    wire: &integration::grpc::v0_3::StateExportDescriptor,
+) -> Result<StateExportDescriptor, IntegrationRuntimeError> {
+    let object_class = match integration::grpc::v0_3::StateObjectClass::try_from(wire.object_class)
+    {
+        Ok(integration::grpc::v0_3::StateObjectClass::Node) => StateObjectClass::Node,
+        Ok(integration::grpc::v0_3::StateObjectClass::World) => StateObjectClass::World,
+        Ok(integration::grpc::v0_3::StateObjectClass::Roboguide) => StateObjectClass::RoboGuide,
+        _ => {
+            return Err(IntegrationRuntimeError::Protocol(
+                "unknown State object class".to_string(),
+            ));
+        }
+    };
+    let semantic = match integration::grpc::v0_3::StateSemantic::try_from(wire.semantic) {
+        Ok(integration::grpc::v0_3::StateSemantic::Reported) => StateSemantic::Reported,
+        Ok(integration::grpc::v0_3::StateSemantic::Observed) => StateSemantic::Observed,
+        Ok(integration::grpc::v0_3::StateSemantic::Desired) => StateSemantic::Desired,
+        Ok(integration::grpc::v0_3::StateSemantic::Committed) => StateSemantic::Committed,
+        Ok(integration::grpc::v0_3::StateSemantic::Derived) => StateSemantic::Derived,
+        Ok(integration::grpc::v0_3::StateSemantic::Belief) => StateSemantic::Belief,
+        _ => {
+            return Err(IntegrationRuntimeError::Protocol(
+                "unknown State semantic".to_string(),
+            ));
+        }
+    };
+    Ok(StateExportDescriptor::new(
+        wire.export_id.clone(),
+        LocalSystemId::new(wire.local_system_id.clone())?,
+        StateObjectRef::new(
+            object_class,
+            wire.object_type.clone(),
+            wire.object_id.clone(),
+        )?,
+        semantic,
+        wire.payload_schema.clone(),
+        wire.valid_for_ms,
+    )?)
+}
+
+/// Converts one wire Memory provider without creating a new storage authority.
+fn memory_provider_from_wire(
+    wire: &integration::grpc::v0_3::MemoryProviderDescriptor,
+) -> Result<MemoryProviderDescriptor, IntegrationRuntimeError> {
+    let kind = match integration::grpc::v0_3::MemoryKind::try_from(wire.kind) {
+        Ok(integration::grpc::v0_3::MemoryKind::Execution) => MemoryKind::Execution,
+        Ok(integration::grpc::v0_3::MemoryKind::Spatial) => MemoryKind::Spatial,
+        Ok(integration::grpc::v0_3::MemoryKind::Semantic) => MemoryKind::Semantic,
+        Ok(integration::grpc::v0_3::MemoryKind::Experience) => MemoryKind::Experience,
+        Ok(integration::grpc::v0_3::MemoryKind::Artifact) => MemoryKind::Artifact,
+        _ => {
+            return Err(IntegrationRuntimeError::Protocol(
+                "unknown Memory kind".to_string(),
+            ));
+        }
+    };
+    let scope = match integration::grpc::v0_3::MemoryScopeKind::try_from(wire.scope) {
+        Ok(integration::grpc::v0_3::MemoryScopeKind::Local) => MemoryScope::Local,
+        Ok(integration::grpc::v0_3::MemoryScopeKind::ExecutionGroup) => {
+            MemoryScope::ExecutionGroup(domain::ExecutionGroupId::new(
+                wire.execution_group_id.clone(),
+            )?)
+        }
+        Ok(integration::grpc::v0_3::MemoryScopeKind::Global) => MemoryScope::Global,
+        _ => {
+            return Err(IntegrationRuntimeError::Protocol(
+                "unknown Memory scope".to_string(),
+            ));
+        }
+    };
+    let visibility = match integration::grpc::v0_3::MemoryVisibility::try_from(wire.visibility) {
+        Ok(integration::grpc::v0_3::MemoryVisibility::Discoverable) => {
+            MemoryVisibility::Discoverable
+        }
+        Ok(integration::grpc::v0_3::MemoryVisibility::Exchangeable) => {
+            MemoryVisibility::Exchangeable
+        }
+        _ => {
+            return Err(IntegrationRuntimeError::Protocol(
+                "unknown Memory visibility".to_string(),
+            ));
+        }
+    };
+    Ok(MemoryProviderDescriptor::new(
+        wire.provider_id.clone(),
+        LocalSystemId::new(wire.local_system_id.clone())?,
+        kind,
+        scope,
+        visibility,
+        wire.payload_schema.clone(),
+        wire.media_type.clone(),
+    )?)
 }
 
 /// Converts current protocol health into Domain health.
 fn status_from_wire(
-    status: Option<&integration::grpc::v0_2::NodeStatus>,
+    status: Option<&integration::grpc::v0_3::NodeStatus>,
     observed_at: TimestampMs,
 ) -> Result<NodeStatus, IntegrationRuntimeError> {
     let status = status.ok_or_else(|| {
@@ -873,7 +1137,7 @@ fn invocation_from_command(command: &ExecutionCommand) -> CanonicalInvocation {
 }
 /// Converts one transport-neutral scalar.
 fn scalar(value: &ExecutionValue) -> ScalarValue {
-    use integration::grpc::v0_2::scalar_value::Value;
+    use integration::grpc::v0_3::scalar_value::Value;
     ScalarValue {
         value: Some(match value {
             ExecutionValue::Bool(value) => Value::BoolValue(*value),
@@ -891,6 +1155,8 @@ pub enum IntegrationRuntimeError {
     Control(control::ControlError),
     /// Shared State rejected a fact.
     State(ports::SharedStateError),
+    /// Source-aware State rejected an ordering or conflict invariant.
+    StateRecord(ports::StateRecordError),
     /// Domain conversion failed.
     Domain(domain::DomainError),
     /// gRPC router rejected a command.
@@ -908,6 +1174,7 @@ impl Display for IntegrationRuntimeError {
         match self {
             Self::Control(error) => error.fmt(f),
             Self::State(error) => error.fmt(f),
+            Self::StateRecord(error) => error.fmt(f),
             Self::Domain(error) => error.fmt(f),
             Self::Route(error) => error.fmt(f),
             Self::Protocol(reason) => f.write_str(reason),
@@ -929,6 +1196,12 @@ impl From<ports::SharedStateError> for IntegrationRuntimeError {
         Self::State(value)
     }
 }
+impl From<ports::StateRecordError> for IntegrationRuntimeError {
+    /// Preserves source-aware State projection failures at the composition boundary.
+    fn from(value: ports::StateRecordError) -> Self {
+        Self::StateRecord(value)
+    }
+}
 impl From<domain::DomainError> for IntegrationRuntimeError {
     fn from(value: domain::DomainError) -> Self {
         Self::Domain(value)
@@ -943,10 +1216,10 @@ impl From<tonic::Status> for IntegrationRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use integration::grpc::v0_2::{
+    use integration::grpc::v0_3::{
         Capability as WireCapability, LocalRuntime as WireRuntime, LocalSystemDescriptor,
     };
-    use ports::SharedNodeStateReader;
+    use ports::{SharedNodeStateReader, StateRecordReader};
     use testkit::InMemoryEventLog;
 
     /// Builds one complete MissionPlan so integration tests use the production Group authority.
@@ -1092,6 +1365,37 @@ mod tests {
         assert_eq!(restored.relation_snapshots(&group_id).len(), 1);
     }
 
+    /// The immediately previous checkpoint migrates with an empty State-record projection.
+    #[test]
+    fn v8_checkpoint_migrates_missing_state_records_once() {
+        let bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let mut checkpoint: serde_json::Value = serde_json::from_str(
+            &bridge
+                .checkpoint_json()
+                .expect("current checkpoint serializes"),
+        )
+        .expect("current checkpoint is JSON");
+        checkpoint["schema"] = serde_json::json!(PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA);
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint is an object")
+            .remove("state_records");
+
+        let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+            &checkpoint.to_string(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+            TimestampMs::new(1),
+        )
+        .expect("previous checkpoint migrates");
+        assert!(restored.state_records().records().is_empty());
+    }
+
     /// Integration cannot create a relation registry beside an absent Control Group.
     #[test]
     fn relation_registration_requires_existing_control_group() {
@@ -1150,7 +1454,9 @@ mod tests {
                         sensors: Vec::new(),
                         resources: Vec::new(),
                         metadata: std::collections::HashMap::new(),
-                        node_contract_version: "roboguide.node.v0.2".to_string(),
+                        node_contract_version: "roboguide.node.v0.3".to_string(),
+                        state_exports: Vec::new(),
+                        memory_providers: Vec::new(),
                     },
                 },
                 TimestampMs::new(0),
@@ -1173,12 +1479,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_2::Heartbeat {
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
                             session_id: "session-1".to_string(),
                             lease_id: "lease-1".to_string(),
                             sequence: 1,
-                            status: Some(integration::grpc::v0_2::NodeStatus {
+                            status: Some(integration::grpc::v0_3::NodeStatus {
                                 health: "degraded".to_string(),
                                 detail: String::new(),
                             }),
@@ -1203,9 +1509,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_3::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            integration::grpc::v0_2::RegistrationUpdate {
+                            integration::grpc::v0_3::RegistrationUpdate {
                                 session_id: "session-1".to_string(),
                                 sequence: 2,
                                 registration: Some(NodeRegistration {
@@ -1227,7 +1533,9 @@ mod tests {
                                     sensors: Vec::new(),
                                     resources: Vec::new(),
                                     metadata: std::collections::HashMap::new(),
-                                    node_contract_version: "roboguide.node.v0.2".to_string(),
+                                    node_contract_version: "roboguide.node.v0.3".to_string(),
+                                    state_exports: Vec::new(),
+                                    memory_providers: Vec::new(),
                                 }),
                             },
                         )),
@@ -1245,6 +1553,223 @@ mod tests {
         bridge
             .checkpoint_json()
             .expect("registered node owner maps must checkpoint");
+    }
+
+    /// State observations persist independently and do not mutate health or Control authority.
+    #[test]
+    fn state_observations_are_evidence_without_health_or_control_side_effects() {
+        let router = GrpcNodeRouter::default();
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            router,
+        );
+        let correlation = CorrelationId::new("state-observation").expect("correlation is valid");
+        bridge
+            .consume(
+                GrpcNodeEvent::Registered {
+                    session_id: "session-state".to_string(),
+                    lease_id: "lease-state".to_string(),
+                    registration: NodeRegistration {
+                        node_id: "cane-a".to_string(),
+                        local_systems: vec![LocalSystemDescriptor {
+                            id: "safety".to_string(),
+                            runtime: Some(WireRuntime {
+                                name: "safety-runtime".to_string(),
+                                version: "1".to_string(),
+                            }),
+                            metadata: Default::default(),
+                        }],
+                        capabilities: Vec::new(),
+                        sensors: Vec::new(),
+                        resources: Vec::new(),
+                        metadata: Default::default(),
+                        node_contract_version: "roboguide.node.v0.3".to_string(),
+                        state_exports: vec![integration::grpc::v0_3::StateExportDescriptor {
+                            export_id: "hazard-state".to_string(),
+                            local_system_id: "safety".to_string(),
+                            object_class: integration::grpc::v0_3::StateObjectClass::World as i32,
+                            object_type: "hazard".to_string(),
+                            object_id: "crossing-a".to_string(),
+                            semantic: integration::grpc::v0_3::StateSemantic::Observed as i32,
+                            payload_schema: "example.hazard/v1".to_string(),
+                            valid_for_ms: 1_000,
+                        }],
+                        memory_providers: Vec::new(),
+                    },
+                },
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("registration is accepted");
+        let node_id = NodeId::new("cane-a").expect("node id is valid");
+        let lease_before = bridge
+            .control()
+            .node_lease(&node_id)
+            .expect("registration creates a Control lease")
+            .clone();
+
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "cane-a".to_string(),
+                    session_id: "session-state".to_string(),
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::StateObservationBatch(
+                            integration::grpc::v0_3::StateObservationBatch {
+                                session_id: "session-state".to_string(),
+                                sequence: 1,
+                                observations: vec![integration::grpc::v0_3::StateObservation {
+                                    export_id: "hazard-state".to_string(),
+                                    json_value: br#"{"present":true}"#.to_vec(),
+                                    has_source_observed_at: true,
+                                    source_observed_at_ms: 500_000,
+                                    has_confidence: true,
+                                    confidence_millionths: 950_000,
+                                }],
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("State observation is accepted as evidence");
+
+        assert_eq!(bridge.state_records().records().len(), 1);
+        let record = &bridge.state_records().records()[0];
+        assert_eq!(record.received_at(), TimestampMs::new(2));
+        assert_eq!(record.source_observed_at(), Some(TimestampMs::new(500_000)));
+        assert_eq!(
+            bridge
+                .state()
+                .node(&node_id)
+                .expect("registered node remains visible")
+                .reported_status()
+                .health(),
+            NodeHealth::Offline
+        );
+        assert_eq!(
+            bridge
+                .control()
+                .node_lease(&node_id)
+                .expect("Control lease remains present"),
+            &lease_before
+        );
+        assert!(bridge.events.contains_payload(|payload| matches!(
+            payload,
+            EventPayload::StateRecordObserved { record }
+                if record.key().channel_id() == "hazard-state"
+        )));
+
+        let checkpoint = bridge.checkpoint_json().expect("State record checkpoints");
+        let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+            &checkpoint,
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+            TimestampMs::new(3),
+        )
+        .expect("State record restores");
+        let restored_record = &restored.state_records().records()[0];
+        assert_eq!(restored_record.received_at(), TimestampMs::new(3));
+        assert_eq!(
+            restored_record.source_observed_at(),
+            record.source_observed_at()
+        );
+    }
+
+    /// A new Node session may restart its management sequence in the same receive millisecond.
+    #[test]
+    fn state_observation_reconnect_epoch_accepts_reset_sequence() {
+        let router = GrpcNodeRouter::default();
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            router,
+        );
+        let correlation = CorrelationId::new("state-reconnect").expect("correlation is valid");
+        bridge
+            .consume(
+                GrpcNodeEvent::Registered {
+                    session_id: "session-old".to_string(),
+                    lease_id: "lease-old".to_string(),
+                    registration: NodeRegistration {
+                        node_id: "cane-a".to_string(),
+                        local_systems: vec![LocalSystemDescriptor {
+                            id: "safety".to_string(),
+                            runtime: Some(WireRuntime {
+                                name: "safety-runtime".to_string(),
+                                version: "1".to_string(),
+                            }),
+                            metadata: Default::default(),
+                        }],
+                        capabilities: Vec::new(),
+                        sensors: Vec::new(),
+                        resources: Vec::new(),
+                        metadata: Default::default(),
+                        node_contract_version: "roboguide.node.v0.3".to_string(),
+                        state_exports: vec![integration::grpc::v0_3::StateExportDescriptor {
+                            export_id: "hazard-state".to_string(),
+                            local_system_id: "safety".to_string(),
+                            object_class: integration::grpc::v0_3::StateObjectClass::World as i32,
+                            object_type: "hazard".to_string(),
+                            object_id: "crossing-a".to_string(),
+                            semantic: integration::grpc::v0_3::StateSemantic::Observed as i32,
+                            payload_schema: "example.hazard/v1".to_string(),
+                            valid_for_ms: 1_000,
+                        }],
+                        memory_providers: Vec::new(),
+                    },
+                },
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("registration is accepted");
+        for (session_id, sequence, present) in
+            [("session-old", 99, false), ("session-new", 1, true)]
+        {
+            bridge
+                .consume(
+                    GrpcNodeEvent::NodeMessage {
+                        node_id: "cane-a".to_string(),
+                        session_id: session_id.to_string(),
+                        message: integration::grpc::v0_3::NodeMessage {
+                            message: Some(NodePayload::StateObservationBatch(
+                                integration::grpc::v0_3::StateObservationBatch {
+                                    session_id: session_id.to_string(),
+                                    sequence,
+                                    observations: vec![integration::grpc::v0_3::StateObservation {
+                                        export_id: "hazard-state".to_string(),
+                                        json_value: serde_json::to_vec(
+                                            &serde_json::json!({"present": present}),
+                                        )
+                                        .expect("State value serializes"),
+                                        has_source_observed_at: false,
+                                        source_observed_at_ms: 0,
+                                        has_confidence: false,
+                                        confidence_millionths: 0,
+                                    }],
+                                },
+                            )),
+                        },
+                    },
+                    TimestampMs::new(2),
+                    &correlation,
+                )
+                .expect("current session State observation is accepted");
+        }
+
+        let record = bridge
+            .state_records()
+            .records()
+            .into_iter()
+            .next()
+            .expect("one latest State record remains");
+        assert_eq!(record.source_epoch(), Some("session-new"));
+        assert_eq!(record.sequence(), 1);
+        assert_eq!(record.value(), &serde_json::json!({"present": true}));
     }
 
     /// Parses hierarchical canonical contracts with the same last-dot rule as Node Config.
@@ -1292,7 +1817,9 @@ mod tests {
             sensors: Vec::new(),
             resources: Vec::new(),
             metadata: Default::default(),
-            node_contract_version: "roboguide.node.v0.2".to_string(),
+            node_contract_version: "roboguide.node.v0.3".to_string(),
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         })
         .expect("registration converts");
         let build = parse_contract("spatial.map.build@v0").expect("build contract parses");
@@ -1335,7 +1862,9 @@ mod tests {
             sensors: Vec::new(),
             resources: Vec::new(),
             metadata: Default::default(),
-            node_contract_version: "roboguide.node.v0.2".to_string(),
+            node_contract_version: "roboguide.node.v0.3".to_string(),
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         };
         let mut bridge = IntegrationRuntimeBridge::new(
             ControlPlane::new(),
@@ -1360,12 +1889,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_2::Heartbeat {
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
                             session_id: "session-a".to_string(),
                             lease_id: "lease-a".to_string(),
                             sequence: 1,
-                            status: Some(integration::grpc::v0_2::NodeStatus {
+                            status: Some(integration::grpc::v0_3::NodeStatus {
                                 health: "online".to_string(),
                                 detail: String::new(),
                             }),
@@ -1405,9 +1934,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_3::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            integration::grpc::v0_2::RegistrationUpdate {
+                            integration::grpc::v0_3::RegistrationUpdate {
                                 session_id: "session-a".to_string(),
                                 sequence: 2,
                                 registration: Some(wire_registration(true)),
@@ -1467,9 +1996,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_3::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            integration::grpc::v0_2::ExecutionSnapshot {
+                            integration::grpc::v0_3::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 3,
@@ -1488,9 +2017,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_3::NodeMessage {
                         message: Some(NodePayload::ExecutionEvent(
-                            integration::grpc::v0_2::ExecutionEvent {
+                            integration::grpc::v0_3::ExecutionEvent {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 sequence: 2,
@@ -1681,9 +2210,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_2::NodeMessage {
+                    message: integration::grpc::v0_3::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            integration::grpc::v0_2::ExecutionSnapshot {
+                            integration::grpc::v0_3::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 1,
@@ -1745,7 +2274,9 @@ mod tests {
                         sensors: Vec::new(),
                         resources: Vec::new(),
                         metadata: Default::default(),
-                        node_contract_version: "roboguide.node.v0.2".to_string(),
+                        node_contract_version: "roboguide.node.v0.3".to_string(),
+                        state_exports: Vec::new(),
+                        memory_providers: Vec::new(),
                     },
                 },
                 TimestampMs::new(100),
@@ -2256,9 +2787,9 @@ mod tests {
         GrpcNodeEvent::NodeMessage {
             node_id: node_id.to_string(),
             session_id: "session-test".to_string(),
-            message: integration::grpc::v0_2::NodeMessage {
+            message: integration::grpc::v0_3::NodeMessage {
                 message: Some(NodePayload::ExecutionSnapshot(
-                    integration::grpc::v0_2::ExecutionSnapshot {
+                    integration::grpc::v0_3::ExecutionSnapshot {
                         session_id: "session-test".to_string(),
                         execution_id: execution_id.to_string(),
                         last_sequence: sequence,

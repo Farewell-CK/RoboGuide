@@ -6,7 +6,7 @@
 
 | ID | 问题 | 需要回答的核心内容 |
 | --- | --- | --- |
-| Q1 | State Authority | Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；哪些状态必须保留 authoritative owner |
+| Q1 | State Authority | 已有 source-aware federation 之上，Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；冲突如何由显式 provider 归约 |
 | Q2 | Spatial Authority | Map、Pose、World Model 如何建立共同空间关系和系统级 reference authority |
 | Q3 | Control Topology | 集中式 Control Plane、层级控制和 Federation 的适用边界 |
 | Q4 | Execution Group Authority | Mission-level Group、TaskExecution ownership、Context semantics 与成员节点权威如何划分 |
@@ -40,7 +40,19 @@ Spatial v0 的已知后续工作：
 - Replica evidence v0 只有 Node/Mission 维度，下一版应补充 consumer `TaskRef`、execution
   identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体 TaskExecution。
 - Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
-  identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
+identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
+
+### Q1 实现切片：Federated State and Selective Memory v0.1
+
+[`ADR-0024`](decisions/0024-federated-state-and-selective-memory.md) 已建立 Node/World/RoboGuide
+对象、六类 State semantic、source/channel/time/TTL/confidence，以及对 Mission、Control、
+Shared Node State、Runtime/Orchestration projection 的只读 federation。Node Config v0.5 和
+Protocol v0.3 支持选择性 Reported/Observed push；State observation 不自动触发 recovery。
+
+同一切片建立五类 Memory 的 provider discovery、immutable manifest catalog 和基于现有 CAS
+的 selective exchange evidence。它解决共同上层语义与 local ownership，不关闭 Q1：Belief
+provider、fusion/conflict policy、允许哪些 Belief 影响 Control、访问控制、retention/GC、
+多 Controller replication 和通用 Node Memory workflow 仍需场景证据。
 
 ## MVP 定义待决事项
 
@@ -73,7 +85,7 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7
-复用 Node Protocol v0.2 的 `RegistrationUpdate`，其 v0.4 config、精确 contract readiness 和
+复用 Node Protocol v0.3 的 `RegistrationUpdate`，其 v0.5 config、精确 contract readiness 和
 后续 Matching 传播已实现。双狗配置和 Robonix adapter 已按历史现场证据接入 exact ROS
 service discovery probe，但仍需全新真机故障注入。RT-G8 已建立独立结构化合同、Node journal
 持久化接口、Artifact transition 与 State projection；Node completion extraction 和真实 adapter

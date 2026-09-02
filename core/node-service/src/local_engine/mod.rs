@@ -11,7 +11,8 @@ use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    NodeServiceConfig, ResourceConfig, SensorConfig, WorkflowConfig, WorkflowStepConfig,
+    MemoryProviderConfig, NodeServiceConfig, ResourceConfig, SensorConfig, StateExportConfig,
+    WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -28,6 +29,8 @@ pub const CONFIG_SCHEMA_V0_2: &str = "roboguide.node-config/v0.2";
 pub const CONFIG_SCHEMA_V0_3: &str = "roboguide.node-config/v0.3";
 /// Schema identity requiring an exact readiness observation for every capability.
 pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
+/// Schema identity adding selective State exports and Memory providers over Protocol v0.3.
+pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -38,6 +41,8 @@ type CompiledLocalSystems = (
 /// Immutable startup-validated local integration catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledLocalCatalog {
+    /// Accepted node-config schema identity retained for conformance policy.
+    schema: String,
     /// Stable Node identity.
     node_id: String,
     /// Remote RoboGuide Server endpoint.
@@ -58,6 +63,10 @@ pub struct CompiledLocalCatalog {
     resources: BTreeMap<String, CompiledResource>,
     /// Sensors by stable identity.
     sensors: BTreeMap<String, CompiledSensor>,
+    /// Selective source-aware State channels by node-wide export identity.
+    state_exports: BTreeMap<String, CompiledStateExport>,
+    /// Selective Memory discovery/exchange providers by node-wide identity.
+    memory_providers: BTreeMap<String, CompiledMemoryProvider>,
     /// Optional independent Spatial Memory artifact data-plane configuration.
     artifacts: Option<CompiledArtifactService>,
 }
@@ -131,6 +140,69 @@ pub struct LocalHealthFact {
     pub state: LocalHealthState,
     /// Local descriptive detail.
     pub detail: String,
+}
+
+/// Immutable fixed local State sampling operation and semantic declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledStateExport {
+    /// Node-wide export identity.
+    id: String,
+    /// Local-system owner.
+    owner: String,
+    /// Node or world object class.
+    object_class: String,
+    /// Domain-specific object category.
+    object_type: String,
+    /// Stable object identity.
+    object_id: String,
+    /// Reported or observed source meaning.
+    semantic: String,
+    /// Versioned JSON value schema.
+    payload_schema: String,
+    /// Receive-relative validity period.
+    valid_for_ms: u64,
+    /// Period between local samples.
+    interval_ms: u64,
+    /// Fixed local observation operation; the deployment facade must keep it side-effect free.
+    step: CompiledWorkflowStep,
+    /// Response-relative JSON value pointer.
+    value_pointer: String,
+    /// Optional response-relative source timestamp pointer.
+    source_observed_at_pointer: Option<String>,
+    /// Optional response-relative confidence pointer.
+    confidence_pointer: Option<String>,
+}
+
+/// One successful local State sample ready for a protocol observation batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateExportFact {
+    /// Node-wide export identity.
+    pub export_id: String,
+    /// Bounded structured value.
+    pub value: serde_json::Value,
+    /// Optional source-local timestamp in milliseconds.
+    pub source_observed_at_ms: Option<u64>,
+    /// Optional confidence in millionths.
+    pub confidence_millionths: Option<u32>,
+}
+
+/// Immutable Memory provider declaration without a local storage implementation requirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledMemoryProvider {
+    /// Node-wide provider identity.
+    id: String,
+    /// Local-system owner.
+    owner: String,
+    /// Generic Memory kind.
+    kind: String,
+    /// Default local/global sharing scope.
+    scope: String,
+    /// Discoverable or exchangeable policy.
+    visibility: String,
+    /// Versioned provider payload schema.
+    payload_schema: String,
+    /// Artifact media type when bytes are offered.
+    media_type: String,
 }
 
 /// Immutable exact-capability readiness check and state projection.
@@ -354,17 +426,21 @@ impl CompiledLocalCatalog {
     ) -> Result<Self, CatalogError> {
         let supports_artifacts = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4
+            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
         );
-        let requires_readiness = config.schema == CONFIG_SCHEMA_V0_4;
+        let requires_readiness = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
+        );
+        let supports_state_memory = config.schema == CONFIG_SCHEMA_V0_5;
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4
+                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
             ),
             "schema",
             format!(
-                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, or `{CONFIG_SCHEMA_V0_4}`"
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, or `{CONFIG_SCHEMA_V0_5}`"
             ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
@@ -395,6 +471,15 @@ impl CompiledLocalCatalog {
             "must contain at least one local connection",
         )?;
         let health_checks = compile_health_checks(health_configs, &local_systems, &connections)?;
+        require(
+            supports_state_memory
+                || (config.state_exports.is_empty() && config.memory_providers.is_empty()),
+            "state_exports",
+            format!("State and Memory declarations require schema `{CONFIG_SCHEMA_V0_5}`"),
+        )?;
+        let state_exports =
+            compile_state_exports(config.state_exports, &local_systems, &connections)?;
+        let memory_providers = compile_memory_providers(config.memory_providers, &local_systems)?;
         let resources = compile_resources(config.resources, &local_systems)?;
         let sensors = compile_sensors(config.sensors, &local_systems)?;
         let capabilities = compile_capabilities(
@@ -418,6 +503,7 @@ impl CompiledLocalCatalog {
         let artifacts = compile_artifacts(config.artifacts, config_directory)?;
 
         Ok(Self {
+            schema: config.schema,
             node_id: config.node_id,
             server_endpoint: config.server_endpoint,
             state_directory,
@@ -428,8 +514,15 @@ impl CompiledLocalCatalog {
             capabilities,
             resources,
             sensors,
+            state_exports,
+            memory_providers,
             artifacts,
         })
+    }
+
+    /// Returns the accepted versioned node-config schema identity.
+    pub fn schema(&self) -> &str {
+        &self.schema
     }
 
     /// Returns the stable node identity.
@@ -480,6 +573,16 @@ impl CompiledLocalCatalog {
     /// Returns sensors in stable lexical identity order.
     pub const fn sensors(&self) -> &BTreeMap<String, CompiledSensor> {
         &self.sensors
+    }
+
+    /// Returns selective State channels in deterministic export identity order.
+    pub const fn state_exports(&self) -> &BTreeMap<String, CompiledStateExport> {
+        &self.state_exports
+    }
+
+    /// Returns selective Memory providers in deterministic provider identity order.
+    pub const fn memory_providers(&self) -> &BTreeMap<String, CompiledMemoryProvider> {
+        &self.memory_providers
     }
 
     /// Returns optional startup-validated Spatial Memory artifact configuration.
@@ -590,6 +693,145 @@ impl CompiledHealthCheck {
             .map(value_to_reason)
             .unwrap_or_default();
         Ok(LocalHealthFact { state, detail })
+    }
+}
+
+impl CompiledStateExport {
+    /// Returns the node-wide export identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the local-system owner.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the State object class spelling.
+    pub fn object_class(&self) -> &str {
+        &self.object_class
+    }
+
+    /// Returns the domain-specific object category.
+    pub fn object_type(&self) -> &str {
+        &self.object_type
+    }
+
+    /// Returns the stable object identity.
+    pub fn object_id(&self) -> &str {
+        &self.object_id
+    }
+
+    /// Returns the State semantic spelling.
+    pub fn semantic(&self) -> &str {
+        &self.semantic
+    }
+
+    /// Returns the JSON value schema.
+    pub fn payload_schema(&self) -> &str {
+        &self.payload_schema
+    }
+
+    /// Returns the receive-relative validity period.
+    pub const fn valid_for_ms(&self) -> u64 {
+        self.valid_for_ms
+    }
+
+    /// Returns the configured sample interval.
+    pub const fn interval_ms(&self) -> u64 {
+        self.interval_ms
+    }
+
+    /// Returns the fixed local sampling operation.
+    pub const fn step(&self) -> &CompiledWorkflowStep {
+        &self.step
+    }
+
+    /// Maps one completed local response into a bounded source-aware State fact.
+    pub fn map(&self, context: &WorkflowContext) -> Result<StateExportFact, MappingError> {
+        let response_pointer = format!("/steps/{}", escape_pointer_segment(self.step.id()));
+        let response = context
+            .as_json()
+            .pointer(&response_pointer)
+            .ok_or(MappingError::MissingSource(response_pointer))?;
+        let value = response
+            .pointer(&self.value_pointer)
+            .cloned()
+            .ok_or_else(|| MappingError::MissingSource(self.value_pointer.clone()))?;
+        if serde_json::to_vec(&value)
+            .map_err(|_| MappingError::InvalidFunctionArguments("state JSON".to_string()))?
+            .len()
+            > domain::MAX_STATE_PAYLOAD_BYTES
+        {
+            return Err(MappingError::InvalidFunctionArguments(
+                "state payload exceeds 64 KiB".to_string(),
+            ));
+        }
+        let source_observed_at_ms = self
+            .source_observed_at_pointer
+            .as_ref()
+            .map(|pointer| {
+                response
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| MappingError::MissingSource(pointer.clone()))
+            })
+            .transpose()?;
+        let confidence_millionths = self
+            .confidence_pointer
+            .as_ref()
+            .map(|pointer| {
+                let confidence = response
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_f64)
+                    .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    .ok_or_else(|| MappingError::MissingSource(pointer.clone()))?;
+                Ok::<u32, MappingError>((confidence * 1_000_000.0).round() as u32)
+            })
+            .transpose()?;
+        Ok(StateExportFact {
+            export_id: self.id.clone(),
+            value,
+            source_observed_at_ms,
+            confidence_millionths,
+        })
+    }
+}
+
+impl CompiledMemoryProvider {
+    /// Returns the node-wide provider identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the local-system owner.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the Memory kind spelling.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    /// Returns the default scope spelling.
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    /// Returns the discovery/exchange visibility spelling.
+    pub fn visibility(&self) -> &str {
+        &self.visibility
+    }
+
+    /// Returns the provider payload schema.
+    pub fn payload_schema(&self) -> &str {
+        &self.payload_schema
+    }
+
+    /// Returns the provider content media type.
+    pub fn media_type(&self) -> &str {
+        &self.media_type
     }
 }
 
@@ -1280,6 +1522,169 @@ fn compile_health_checks(
         "every local system must have one health check",
     )?;
     Ok(checks)
+}
+
+/// Compiles selective fixed State sampling operations without granting lifecycle authority.
+fn compile_state_exports(
+    configs: Vec<StateExportConfig>,
+    systems: &BTreeMap<String, CompiledLocalSystem>,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<BTreeMap<String, CompiledStateExport>, CatalogError> {
+    let mut exports = BTreeMap::new();
+    for config in configs {
+        validate_identity(&config.id, "state_exports.id")?;
+        require(
+            systems.contains_key(&config.owner),
+            format!("state_exports.{}.owner", config.id),
+            format!("unknown local system `{}`", config.owner),
+        )?;
+        require(
+            matches!(config.object_class.as_str(), "node" | "world"),
+            format!("state_exports.{}.object_class", config.id),
+            "must be node or world",
+        )?;
+        require(
+            matches!(config.semantic.as_str(), "reported" | "observed"),
+            format!("state_exports.{}.semantic", config.id),
+            "must be reported or observed",
+        )?;
+        validate_identity(&config.object_type, "state_exports.object_type")?;
+        validate_identity(&config.object_id, "state_exports.object_id")?;
+        validate_identity(&config.payload_schema, "state_exports.payload_schema")?;
+        require(
+            config.valid_for_ms > 0,
+            format!("state_exports.{}.valid_for_ms", config.id),
+            "must be positive",
+        )?;
+        require(
+            config.interval_ms >= 100,
+            format!("state_exports.{}.interval_ms", config.id),
+            "must be at least 100ms",
+        )?;
+        let field = format!("state_exports.{}", config.id);
+        validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
+        validate_state_export_operation(&config.step.operation, &field)?;
+        if config
+            .step
+            .request
+            .bindings
+            .iter()
+            .any(|binding| contains_pointer_expression(&binding.value))
+        {
+            return Err(validation(
+                format!("{field}.step"),
+                "State sampling requests must use deployment constants only",
+            ));
+        }
+        for pointer in [
+            Some(&config.value_pointer),
+            config.source_observed_at_pointer.as_ref(),
+            config.confidence_pointer.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+                step: field.clone(),
+                source,
+            })?;
+        }
+        let mut step_ids = BTreeSet::new();
+        let mut steps =
+            compile_steps(vec![config.step], &config.owner, connections, &mut step_ids)?;
+        let id = config.id.clone();
+        let export = CompiledStateExport {
+            id: config.id,
+            owner: config.owner,
+            object_class: config.object_class,
+            object_type: config.object_type,
+            object_id: config.object_id,
+            semantic: config.semantic,
+            payload_schema: config.payload_schema,
+            valid_for_ms: config.valid_for_ms,
+            interval_ms: config.interval_ms,
+            step: steps
+                .pop()
+                .expect("one State export step compiles into one step"),
+            value_pointer: config.value_pointer,
+            source_observed_at_pointer: config.source_observed_at_pointer,
+            confidence_pointer: config.confidence_pointer,
+        };
+        insert_unique(&mut exports, id, export, "state_exports.id")?;
+    }
+    Ok(exports)
+}
+
+/// Restricts periodic State sampling to operations that are mechanically read-only.
+fn validate_state_export_operation(
+    operation: &LocalOperationConfig,
+    field: &str,
+) -> Result<(), CatalogError> {
+    match operation {
+        LocalOperationConfig::Http { method, .. } if method == "GET" => Ok(()),
+        LocalOperationConfig::Http { .. } => Err(validation(
+            format!("{field}.step.operation"),
+            "State export HTTP operations must use GET",
+        )),
+        LocalOperationConfig::GrpcUnary { .. }
+        | LocalOperationConfig::GrpcServerStream { .. }
+        | LocalOperationConfig::McpTool { .. } => Err(validation(
+            format!("{field}.step.operation"),
+            "State export gRPC and MCP operations require an explicit read-only contract and are not enabled in v0.1",
+        )),
+    }
+}
+
+/// Compiles provider metadata while preserving local storage and exchange ownership.
+fn compile_memory_providers(
+    configs: Vec<MemoryProviderConfig>,
+    systems: &BTreeMap<String, CompiledLocalSystem>,
+) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
+    let mut providers = BTreeMap::new();
+    for config in configs {
+        validate_identity(&config.id, "memory_providers.id")?;
+        require(
+            systems.contains_key(&config.owner),
+            format!("memory_providers.{}.owner", config.id),
+            format!("unknown local system `{}`", config.owner),
+        )?;
+        require(
+            matches!(
+                config.kind.as_str(),
+                "execution" | "spatial" | "semantic" | "experience" | "artifact"
+            ),
+            format!("memory_providers.{}.kind", config.id),
+            "must be execution, spatial, semantic, experience, or artifact",
+        )?;
+        require(
+            matches!(config.scope.as_str(), "local" | "global"),
+            format!("memory_providers.{}.scope", config.id),
+            "must be local or global",
+        )?;
+        require(
+            matches!(config.visibility.as_str(), "discoverable" | "exchangeable"),
+            format!("memory_providers.{}.visibility", config.id),
+            "must be discoverable or exchangeable",
+        )?;
+        validate_identity(&config.payload_schema, "memory_providers.payload_schema")?;
+        require(
+            !config.media_type.trim().is_empty(),
+            format!("memory_providers.{}.media_type", config.id),
+            "must not be empty",
+        )?;
+        let id = config.id.clone();
+        let provider = CompiledMemoryProvider {
+            id: config.id,
+            owner: config.owner,
+            kind: config.kind,
+            scope: config.scope,
+            visibility: config.visibility,
+            payload_schema: config.payload_schema,
+            media_type: config.media_type,
+        };
+        insert_unique(&mut providers, id, provider, "memory_providers.id")?;
+    }
+    Ok(providers)
 }
 
 /// Returns whether an expression reads dynamic invocation or prior workflow context.
@@ -2466,6 +2871,8 @@ mod tests {
                 metadata: BTreeMap::new(),
             }],
             artifacts: None,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         }
     }
 

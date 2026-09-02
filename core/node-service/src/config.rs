@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.4 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.5 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -45,6 +45,66 @@ pub struct NodeServiceConfig {
     /// Node Protocol contract.
     #[serde(default)]
     pub artifacts: Option<ArtifactServiceConfig>,
+    /// Selective periodically sampled State channels introduced by node-config/v0.5.
+    #[serde(default)]
+    pub state_exports: Vec<StateExportConfig>,
+    /// Selective Memory discovery and exchange providers introduced by node-config/v0.5.
+    #[serde(default)]
+    pub memory_providers: Vec<MemoryProviderConfig>,
+}
+
+/// One fixed periodically sampled State channel owned by a local system.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateExportConfig {
+    /// Node-wide export identity.
+    pub id: String,
+    /// Local system that owns the source operation.
+    pub owner: String,
+    /// Semantic object class: `node` or `world`.
+    pub object_class: String,
+    /// Domain-specific object category.
+    pub object_type: String,
+    /// Stable object identity.
+    pub object_id: String,
+    /// Source meaning: `reported` or `observed`.
+    pub semantic: String,
+    /// Versioned JSON payload schema.
+    pub payload_schema: String,
+    /// Receive-relative validity period.
+    pub valid_for_ms: u64,
+    /// Period between local samples.
+    pub interval_ms: u64,
+    /// Fixed local observation operation used for sampling.
+    pub step: WorkflowStepConfig,
+    /// JSON Pointer locating the exported value in the step response.
+    pub value_pointer: String,
+    /// Optional JSON Pointer locating a source-local timestamp in milliseconds.
+    #[serde(default)]
+    pub source_observed_at_pointer: Option<String>,
+    /// Optional JSON Pointer locating confidence in the inclusive range zero through one.
+    #[serde(default)]
+    pub confidence_pointer: Option<String>,
+}
+
+/// One Memory discovery/exchange provider owned by a heterogeneous local system.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryProviderConfig {
+    /// Node-wide provider identity.
+    pub id: String,
+    /// Local system that retains semantic and storage ownership.
+    pub owner: String,
+    /// Kind: execution, spatial, semantic, experience, or artifact.
+    pub kind: String,
+    /// Default scope: local or global; manifests may later narrow to an Execution Group.
+    pub scope: String,
+    /// Visibility: discoverable or exchangeable.
+    pub visibility: String,
+    /// Versioned schema of provider metadata or content.
+    pub payload_schema: String,
+    /// Content media type when the provider offers Artifact-backed bytes.
+    pub media_type: String,
 }
 
 /// Node-local configuration for the independent Spatial Memory artifact data plane.

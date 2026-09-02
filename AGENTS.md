@@ -15,10 +15,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `docs/images/` stores diagrams.
 - `core/` contains maintained Rust responsibility modules; `apps/` contains runnable
   composition roots.
-- `core/state/` implements deterministic Shared Node State, Allocation State v0.1, and the
-  Distributed Spatial Memory v0.1 catalog projection behind transport-neutral ports. Spatial
-  catalog metadata is rebuildable evidence; map blobs never live in State, Runtime checkpoints,
-  or the Node Protocol.
+- `core/state/` implements deterministic Shared Node State, Allocation State v0.1,
+  source-aware State records, and generic/Spatial Memory catalog projections behind
+  transport-neutral ports. Catalog metadata is rebuildable evidence; Memory blobs never live in
+  State, Runtime checkpoints, or the Node Protocol.
+- State is not a Global Truth store. Records distinguish Node/World/RoboGuide objects and
+  Desired/Committed/Reported/Observed/Derived/Belief semantics, retain source/channel/time/TTL,
+  and never collapse independent sources implicitly. The Controller State API is a read-only
+  federation over existing authorities.
+- Memory is separate from realtime State. Execution, Spatial, Semantic, Experience, and Artifact
+  manifests retain local ownership and use shared discovery plus selective CAS-backed exchange;
+  discoverable metadata may remain content-local and no full replication is implied.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
@@ -59,7 +66,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
 - `core/artifact-store/` contains the filesystem implementation of the transport-neutral
   ArtifactBlobStore port; it stores opaque bytes and does not own map, task, or execution policy.
-- `core/integration/` owns the formal gRPC Node Protocol v0.2 transport;
+- `core/integration/` owns the formal gRPC Node Protocol v0.3 transport;
   `core/node-service/` owns node-side lifecycle, configuration, durable execution
   continuity, and the declarative Local Integration Engine.
 - `core/integration/` contains only formal Node Protocol wire/session/router code;
@@ -67,10 +74,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
   checkpoint acceptance, not transport receipt. Integration waits on an application completion
   envelope but never makes the Control/State/Runtime decision itself.
-- Node config v0.4 requires one fixed readiness observation per exact canonical
+- Node config v0.5 requires one fixed readiness observation per exact canonical
   capability. Node Service observes before Register and emits complete RegistrationUpdate
   snapshots on change; Integration preserves exact readiness, State stores it, and Control
-  consumes it only for later eligibility decisions. v0.2/v0.3 static readiness is legacy.
+  consumes it only for later eligibility decisions. It also declares fixed State exports and
+  Memory providers; v0.2-v0.4 configs normalize those declarations to empty.
+- Node Protocol v0.3 carries complete State/Memory provider snapshots and bounded periodic State
+  observation batches. Sampling failure only causes staleness and never changes health,
+  readiness, execution lifecycle, or recovery. The v0.2 endpoint is rejection-only.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
   Robonix map adapter); these adapters own vendor calls and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.
@@ -82,7 +93,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.
-- `apps/real-node-smoke/` probes the formal Node Protocol v0.2 handshake by default; its explicit
+- `apps/real-node-smoke/` probes the formal Node Protocol v0.3 handshake by default; its explicit
   `--simulate-execute` mode submits a synthetic Mission through the Controller HTTP API, emits only
   synthetic lifecycle facts after formal dispatch, uses a session-unique capability contract so it
   cannot select an existing Node, and never performs hardware I/O.
@@ -90,7 +101,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references
   may be carried as opaque intent parameters, while digest verification and local staging belong
-  to Node Service and the independent Artifact data plane. Node Protocol v0.2 remains unchanged.
+  to Node Service and the independent Artifact data plane. Node Protocol never carries map bytes.
 - Strong localization verification uses
   `roboguide.localization-verification-evidence/v0.1`. Node journal persistence precedes remote
   delivery, Artifact HTTP records the evidence transition, and State distinguishes strong

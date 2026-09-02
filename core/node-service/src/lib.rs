@@ -24,16 +24,16 @@ pub use config::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
-    LocalSystemConfig, NodeServiceConfig, RequestBindingConfig, RequestMappingConfig,
-    ResourceConfig, SensorConfig, ValueExpressionConfig, ValueFunction, WorkflowConfig,
-    WorkflowStepConfig,
+    LocalSystemConfig, MemoryProviderConfig, NodeServiceConfig, RequestBindingConfig,
+    RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig, ValueExpressionConfig,
+    ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
 pub use conformance::{
     CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
     ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
-    LifecycleConformanceInvariant, NODE_SERVICE_IMPLEMENTATION_GUARANTEES,
-    SHARED_LIFECYCLE_CONFORMANCE, StepConformance, WorkflowConformance, compile_extension_config,
-    compile_extension_config_json,
+    LifecycleConformanceInvariant, MemoryProviderConformance,
+    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance,
+    StepConformance, WorkflowConformance, compile_extension_config, compile_extension_config_json,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,
@@ -52,11 +52,12 @@ pub use local_engine::http_driver::HttpDriver;
 pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowContext};
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
-    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CapabilityReadinessFact,
-    CatalogError, CompiledArtifactService, CompiledCapability, CompiledCapabilityReadiness,
-    CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem,
-    CompiledResource, CompiledSensor, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact,
-    LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
+    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
+    CapabilityReadinessFact, CatalogError, CompiledArtifactService, CompiledCapability,
+    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
+    CompiledLocalSystem, CompiledMemoryProvider, CompiledResource, CompiledSensor,
+    CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState,
+    MappedExecutionFact, MappedExecutionPhase, StateExportFact,
 };
 pub use service::{NodeService, NodeServiceError};
 

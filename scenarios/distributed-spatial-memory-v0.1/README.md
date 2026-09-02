@@ -10,7 +10,8 @@
 `Published`，以及 consumer Node 的 `Staged → Imported → Verified` evidence。
 
 [`dog-a-node-v0.1.toml`](dog-a-node-v0.1.toml) 和
-[`dog-b-node-v0.1.toml`](dog-b-node-v0.1.toml) 是该场景的 Node Config v0.4 部署输入。
+[`dog-b-node-v0.1.toml`](dog-b-node-v0.1.toml) 是该场景的 Node Config v0.5 部署输入，
+并声明 readiness State export 与 exchangeable Spatial Memory provider。
 两者都显式注册 `spatial.map.build@v0`、`spatial.map.publish@v0`、
 `spatial.map.import@v0` 和 `spatial.localization.verify@v0`，但 artifact binding 保持非对称：
 dog-a 只构建 `map-a/r1`、消费 `map-b/r1`，dog-b 则相反。不要用通用

@@ -1,5 +1,8 @@
 # ADR-0016：Distributed Spatial Memory Artifact Plane
 
+> ADR-0024 将当前 wire 升级为 Node Protocol v0.3，并把 typed map catalog 作为 generic
+> Memory discovery 的强类型 adapter；地图 bytes 仍不进入 Node Protocol。
+
 - 状态：Accepted for Distributed Spatial Memory v0
 - 日期：2026-08-26
 

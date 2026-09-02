@@ -39,7 +39,7 @@ impl Clock for VirtualClock {
 }
 
 /// An in-memory immutable event log used by deterministic tests and demos.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryEventLog {
     /// Immutable event records in append order.
     records: Vec<EventRecord>,

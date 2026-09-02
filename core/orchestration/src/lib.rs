@@ -94,7 +94,7 @@ impl From<ControlError> for OrchestrationError {
 }
 
 /// Deterministic Phase 1 Mission execution authority.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MissionOrchestrator {
     /// Accepted Missions keyed independently from Task-local identity.
     executions: BTreeMap<MissionId, MissionExecution>,

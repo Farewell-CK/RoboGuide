@@ -46,7 +46,9 @@ Runtime 为每个 accepted relation 维护以下 live state：
 
 `Pending` 用于吸收正常 dispatch/acceptance 竞态，不立即触发恢复。`Violated` 和 `Unknown` 会
 产生持久化 `coordination required` evidence，并设置 reconciliation fence。关系重新变为
-`Satisfied` 后可以清除该 relation fence；`Dormant` 不得悄悄清除已经观察到的违例。
+`Satisfied` 只代表当前端点事实恢复，不能自动清除已经观察到的违例；必须由 Control/应用
+恢复流程显式确认 reconciliation（Runtime `acknowledge_relation_reconciliation`）后才解除
+fence。`Dormant` 同样不得悄悄清除已经观察到的违例。
 
 ### Runtime、progression 与 recovery
 

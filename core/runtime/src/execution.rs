@@ -216,7 +216,7 @@ impl Display for ExecutionRuntimeError {
 impl std::error::Error for ExecutionRuntimeError {}
 
 /// Live Runtime authority for stable distributed execution identities and facts.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RuntimeExecutionManager {
     /// Dispatched committed execution contexts.
     pub(crate) executions: BTreeMap<String, ExecutionContext>,

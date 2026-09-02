@@ -2,16 +2,16 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-//! Explicit smoke probe for the formal RoboGuide Node Protocol v0.2.
+//! Explicit smoke probe for the formal RoboGuide Node Protocol v0.3.
 //!
 //! The program acts as a small protocol participant: it registers a synthetic node,
 //! sends one heartbeat, and optionally simulates one server-issued Execute. It never
 //! calls a Local EAIOS or performs a physical action.
 
-use integration::grpc::v0_2::node_message::Message as NodePayload;
-use integration::grpc::v0_2::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
-use integration::grpc::v0_2::server_message::Message as ServerPayload;
-use integration::grpc::v0_2::{
+use integration::grpc::v0_3::node_message::Message as NodePayload;
+use integration::grpc::v0_3::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
+use integration::grpc::v0_3::server_message::Message as ServerPayload;
+use integration::grpc::v0_3::{
     Capability, ExecutionEvent, ExecutionPhase, Heartbeat, Hello, LocalRuntime,
     LocalSystemDescriptor, NODE_CONTRACT_VERSION, NodeMessage, NodeRegistration, NodeStatus,
     PROTOCOL_VERSION, Register, Resource, ServerMessage,
@@ -182,7 +182,7 @@ async fn run(options: SmokeOptions) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds a valid synthetic registration accepted by the v0.2 server validator.
+/// Builds a valid synthetic registration accepted by the v0.3 server validator.
 fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistration {
     NodeRegistration {
         node_id: node_id.to_string(),
@@ -210,6 +210,8 @@ fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistrat
         }],
         metadata: Default::default(),
         node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        state_exports: Vec::new(),
+        memory_providers: Vec::new(),
     }
 }
 

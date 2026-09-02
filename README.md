@@ -51,12 +51,13 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
   不绑定 NodeId 的 execution-time cross-role relation；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
-- `core/state` 已实现 Shared Node State、Allocation State v0.1 和 SQLite WAL evidence
-  envelope；Control 通过 transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
+- `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
+  通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过
+  transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
-  默认 probe formal Node Protocol v0.2，显式 `--simulate-execute` 经 Controller synthetic
+  默认 probe formal Node Protocol v0.3，显式 `--simulate-execute` 经 Controller synthetic
   Mission 触发正式 dispatch 后只发送合成生命周期事实；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
@@ -77,6 +78,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   [`ADR-0022`](docs/decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 记录。
 - Node Protocol `Registered`/`Ack` 只在 Controller authority 与 durable checkpoint 接受事实后
   返回，见 [`ADR-0023`](docs/decisions/0023-application-accepted-node-protocol-facts.md)。
+- source-aware State federation 与 selective Memory ownership/exchange 见
+  [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -189,8 +192,9 @@ SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式
 Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integration Engine 负责
 将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
-正式 gRPC Node Protocol v0.2 支持一个 Node 聚合多个 Local System，所有 Capability、
-Sensor 和 Resource 都保留唯一 owner；Execute 携带 Control 已 Commit 的 resource IDs。
+正式 gRPC Node Protocol v0.3 支持一个 Node 聚合多个 Local System，所有 Capability、
+Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
+已 Commit 的 resource IDs。
 `execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
 
 旧同步 HTTP NodeGateway、HTTP wire DTO 和早期 configured command backend 已全部退役；它们
@@ -199,10 +203,11 @@ journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/int
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
 合同见
-[`contracts/node/v0.2/`](contracts/node/v0.2/)。Node config v0.4 为每个 exact canonical
-contract 增加固定 readiness observation，并通过现有 RegistrationUpdate 更新后续 Matching；
-v0.2/v0.3 的静态 ready 兼容行为不满足真机稳定门槛。配置合同见
-[`contracts/node/v0.4/`](contracts/node/v0.4/README.md)。
+[`contracts/node/v0.5/`](contracts/node/v0.5/README.md)。Node config v0.5 为每个 exact
+canonical contract 提供固定 readiness observation，并增加选择性的 State export 与 Memory
+provider declaration；通过完整 RegistrationUpdate snapshot 更新后续 Matching 和 discovery。
+v0.2-v0.4 配置仍可解析为空 State/Memory declaration，但不满足当前 extension conformance；
+Node Protocol v0.2 endpoint 只返回明确迁移错误。
 
 设备扩展的离线合同、真实配置样例和开发者路径见
 [`docs/extensions/device-extension-conformance-v0.1.md`](docs/extensions/device-extension-conformance-v0.1.md)。
@@ -259,7 +264,7 @@ Observe → Update → Fuse → Believe
 
 Shared Belief 是带有 Source、Timestamp、Freshness、Uncertainty 和冲突信息的决策视图，不等于绝对 Ground Truth。Memory 按 Local、Execution Group、Global 三种作用域管理，不要求全部全局同步。
 
-当前代码只实现 **State & Memory Plane — Slice v0.1: Shared Node State**：
+当前代码从 Shared Node State 起步，并已扩展为多个彼此分权的 slice：
 
 ```text
 Runtime / Local EAIOS facade observation -> Shared Node State -> Control decision
@@ -305,9 +310,29 @@ Bound/RecoveryPending 的 Group reservation。Scheduler v0.1 当前不读取 All
 未来 Scheduler v0.2 即使使用该 view，也仍须由 Commit 重新检查 authority。该边界记录在
 [`ADR-0005`](docs/decisions/0005-allocation-state-projection-authority.md)。
 
-这不是完整的 State & Memory Plane。除下述地图 Artifact slice 外，Execution Group State
-Projection、通用 Physical/Spatial State、Shared Belief、Provenance/uncertainty fusion、
-Persistence/Replication、State Authority resolution 和 Lease ownership resolution 均未实现。
+当前新增 **Source-aware State v0.1**。共同模型显式区分 `Node`、`World`、`RoboGuide`
+对象，以及 `Desired`、`Committed`、`Reported`、`Observed`、`Derived`、`Belief` 语义；记录
+保留 source、channel、payload schema、source-local time、RoboGuide receive time、TTL 和
+可选 confidence。不同来源不会互相覆盖，State 不自动制造 Global Truth 或 Belief。
+
+Controller 的 `/v1/state/providers` 与 `/v1/state/records` 是只读 federation：Desired 从
+accepted MissionPlan 读取，Committed 从 Control 读取，Reported/Observed 从 Shared Node
+State 和声明 channel 读取，Derived 从 Runtime/Orchestration projection 读取。这个统一视图
+不改变原 authority，也不提供通用写接口。Node Config v0.5 通过固定、只读 workflow 周期采样
+选择性 State；失败只让旧值自然变 stale，不改变 health/readiness 或自动触发 recovery。
+
+当前同时实现 **Selective Memory Catalog v0.1**。Execution、Spatial、Semantic、Experience、
+Artifact 五类 immutable Memory revision 都可以发布和发现；owner 保持在本地系统或明确的
+RoboGuide component。Discoverable 可只暴露 metadata，Exchangeable 必须引用现有 Artifact
+CAS 中通过 digest/size 校验的 bytes。Consumer 显式选择 revision 并记录
+Staged/Imported/Rejected evidence，不做全量复制或 P2P。合同见
+[`contracts/state/v0.1`](contracts/state/v0.1/README.md)、
+[`contracts/memory/v0.1`](contracts/memory/v0.1/README.md) 和
+[`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
+
+这仍不是完整 State & Memory Plane。可驱动 Control 的 Shared Belief/fusion policy、完整
+Execution/Task/Group 历史 projection、多 Controller replication/HA、访问控制、retention/GC
+和通用 Node Memory workflow automation 仍未实现。
 
 当前新增 **State & Memory Plane — Distributed Spatial Memory v0.1**：地图以不可变
 `MapId`/`MapRevisionId` + SHA-256 digest manifest 形式记录在 Catalog projection，bytes 由
@@ -319,7 +344,7 @@ Task handoff 或 Node Protocol payload。实现边界与非目标见
 强 localization verification 使用独立 evidence 合同，State 明确区分带完整 evidence 的
 strong verification 与旧 `has_map=true` smoke fact；合同见
 [`localization-evidence-v0.1`](contracts/spatial/localization-evidence-v0.1/README.md)。
-双狗 Node Config 已迁移到 v0.4，Robonix deployment adapter 通过固定、只读 ROS service
+双狗 Node Config 已迁移到 v0.5，Robonix deployment adapter 通过固定、只读 ROS service
 discovery command 分别观测 mapping/localization exact-contract readiness；这不等价于强
 localization evidence，也不能替代全新真机故障注入。
 用于 Artifact HTTP 寻址的 `MapId`/`MapRevisionId` 统一限制为 path-safe ASCII
@@ -377,7 +402,7 @@ Detect → Reconcile → Adapt
 
 恢复目标不是盲目重放旧命令，而是在当前物理世界中恢复任务进展，并且只升级到必要层级。
 
-## 启动 Node Protocol v0.2
+## 启动 Node Protocol v0.3
 
 Server 使用正式 gRPC bidirectional streaming：
 
@@ -395,8 +420,12 @@ cargo run -p integration-server -- \
   127.0.0.1:8090 ./var/artifacts
 curl http://127.0.0.1:8080/healthz
 curl 'http://127.0.0.1:8080/v1/events?limit=100&after=0'
+curl http://127.0.0.1:8080/v1/state/providers
+curl 'http://127.0.0.1:8080/v1/state/records?object_class=world&include_stale=false'
+curl http://127.0.0.1:8080/v1/memory/providers
 curl http://127.0.0.1:8090/healthz
 curl http://127.0.0.1:8090/v1/maps
+curl http://127.0.0.1:8090/v1/memories
 # 查询已接收的 execution 状态；取消只会发出 Node Cancel 请求
 curl http://127.0.0.1:8080/v1/executions/<execution-id>
 curl -X POST http://127.0.0.1:8080/v1/executions/<execution-id>/cancel
@@ -420,7 +449,7 @@ cargo run -p integration-server -- \
 fail-closed，不能悄悄退回通用 Matching。
 
 Control HTTP 不绕过 Control 修改 reservation；独立 Artifact HTTP 只写不可变 CAS bytes 和
-Spatial Memory evidence，不驱动 Task/Group lifecycle。身份认证与传输安全不在当前切片
+Memory catalog/replica evidence，不驱动 Task/Group lifecycle。身份认证与传输安全不在当前切片
 范围内。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
 会恢复 Control/State/Runtime projection；Spatial evidence 会在同一事务中 carry-forward 该
 checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission
@@ -467,7 +496,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission/v0.2/ + v0.3/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
-│   ├── node/v0.2/ + v0.3/ + v0.4/
+│   ├── node/v0.2/ ... v0.5/
+│   ├── state/v0.1/
+│   ├── memory/v0.1/
 │   ├── spatial/v0.1/
 │   └── spatial/localization-evidence-v0.1/
 ├── mission/
@@ -482,13 +513,13 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── tools/
 │   └── quality/
 ├── core/
-│   ├── domain/              # core values + allocation/spatial domain modules
+│   ├── domain/              # core values + allocation/state/memory domain modules
 │   ├── ports/               # transport-neutral core ports
-│   ├── state/               # node/allocation/spatial catalog projections
+│   ├── state/               # node/allocation/source-aware state/memory projections
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
 │   ├── artifact-store/      # filesystem ArtifactBlobStore implementation
-│   ├── integration/         # formal gRPC Node Protocol v0.2 wire/session/router
+│   ├── integration/         # formal gRPC Node Protocol v0.3 wire/session/router
 │   ├── orchestration/       # Controller Mission orchestration + IntegrationRuntimeBridge composition
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
@@ -539,7 +570,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0020-execution-coordination-relations.md
     │   ├── 0021-device-extension-boundary-conformance.md
     │   ├── 0022-retire-legacy-adapters-and-isolate-artifact-store.md
-    │   └── 0023-application-accepted-node-protocol-facts.md
+    │   ├── 0023-application-accepted-node-protocol-facts.md
+    │   └── 0024-federated-state-and-selective-memory.md
     ├── extensions/
     │   └── device-extension-conformance-v0.1.md
     └── images/
@@ -549,9 +581,10 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ```
 
 当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node State、
-Allocation State v0.1、Node terminal execution 到 Group lifecycle 推进、SQLite evidence
-envelope 和 controller projection checkpoint restore 已实现，但完整 State & Memory Plane
-（event-sourced replay、Task/Group 历史 projection、复制）和 MVP Definition 均未完成；
+Allocation State v0.1、source-aware State federation、selective Memory catalog、Node terminal
+execution 到 Group lifecycle 推进、SQLite evidence envelope 和 controller projection
+checkpoint restore 已实现，但完整 State & Memory Plane（Belief/fusion、Task/Group 历史
+projection、跨 Controller 复制）和 MVP Definition 均未完成；
 完整 MVP 的测试、适配器和仿真环境尚未完成。
 
 双机器狗 Spatial Memory 的 Phase 1 真机验收定义现处于 `In Review`，见

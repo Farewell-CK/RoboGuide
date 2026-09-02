@@ -104,6 +104,11 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         } => Some(target_task_ref),
         EventPayload::MapLocalizationEvidenceRecorded { evidence } => Some(evidence.task_ref()),
         EventPayload::MapArtifactDeclared { .. }
+        | EventPayload::StateRecordObserved { .. }
+        | EventPayload::MemoryManifestPublished { .. }
+        | EventPayload::MemoryArtifactStaged { .. }
+        | EventPayload::MemoryArtifactImported { .. }
+        | EventPayload::MemoryArtifactRejected { .. }
         | EventPayload::MapArtifactPublished { .. }
         | EventPayload::MapArtifactStaged { .. }
         | EventPayload::MapArtifactImported { .. }

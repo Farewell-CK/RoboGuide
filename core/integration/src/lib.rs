@@ -2,7 +2,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-//! Formal RoboGuide Node Protocol v0.2 transport boundary.
+//! Formal RoboGuide Node Protocol v0.3 transport boundary.
 //!
 //! Integration owns generated tonic gRPC streaming, concurrent Node sessions,
 //! lease fencing, NodeId command routes, and wire validation/conversion. Controller
@@ -13,6 +13,6 @@ pub mod grpc;
 mod grpc_server;
 
 pub use grpc_server::{
-    GrpcIntegrationService, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
-    GrpcNodeRouter,
+    GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion,
+    GrpcNodeEventDelivery, GrpcNodeRouter,
 };

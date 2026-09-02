@@ -16,9 +16,11 @@ mod context;
 mod execution;
 mod execution_relation;
 mod localization_evidence;
+mod memory;
 mod mission_plan;
 mod node_registration;
 mod spatial_memory;
+mod state_model;
 mod task_execution;
 
 pub use actor::{ActorBinding, MissionActor};
@@ -35,11 +37,20 @@ pub use localization_evidence::{
     LOCALIZATION_EVIDENCE_SCHEMA_V0_1, LocalizationFrames, LocalizationVerificationEvidence,
     PoseQualityComparison, PoseQualityEvidence,
 };
+pub use memory::{
+    MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest, MemoryArtifactRef, MemoryId, MemoryKind,
+    MemoryOwner, MemoryProviderDescriptor, MemoryReplicaSnapshot, MemoryReplicaStatus,
+    MemoryRevisionId, MemoryScope, MemorySelector, MemoryVisibility,
+};
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
     MapReplicaSnapshot, MapReplicaStatus, MapRevisionId, MapRevisionSelector, MapRevisionSnapshot,
     MapRevisionStatus, SPATIAL_MEMORY_SCHEMA_V0_1, SpatialAnchorId,
+};
+pub use state_model::{
+    MAX_STATE_PAYLOAD_BYTES, STATE_RECORD_SCHEMA_V0_1, StateExportDescriptor, StateObjectClass,
+    StateObjectRef, StateRecord, StateRecordKey, StateSemantic, StateSource,
 };
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 
@@ -60,6 +71,9 @@ pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
 
 /// Version identifier implemented by the aggregate Local Integration Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_2: &str = "roboguide.node.v0.2";
+
+/// Version identifier carrying selective State and Memory provider declarations.
+pub const NODE_CONTRACT_VERSION_V0_3: &str = "roboguide.node.v0.3";
 
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +103,16 @@ pub enum DomainError {
         /// Stable diagnostic reason suitable for State and adapter evidence.
         reason: String,
     },
+    /// A State record or export declaration violated its semantic contract.
+    InvalidState {
+        /// Stable diagnostic reason suitable for adapter and API evidence.
+        reason: String,
+    },
+    /// A Memory manifest, provider, or replica violated its semantic contract.
+    InvalidMemory {
+        /// Stable diagnostic reason suitable for catalog and adapter evidence.
+        reason: String,
+    },
 }
 
 impl Display for DomainError {
@@ -104,6 +128,8 @@ impl Display for DomainError {
             Self::InvalidSpatialMemory { reason } => {
                 write!(formatter, "invalid spatial memory value: {reason}")
             }
+            Self::InvalidState { reason } => write!(formatter, "invalid state value: {reason}"),
+            Self::InvalidMemory { reason } => write!(formatter, "invalid memory value: {reason}"),
         }
     }
 }
@@ -208,6 +234,11 @@ impl NodeContractVersion {
     /// Returns the aggregate Local Integration Node Contract version.
     pub fn v0_2() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_2.to_string())
+    }
+
+    /// Returns the contract version carrying State and Memory extension declarations.
+    pub fn v0_3() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_3.to_string())
     }
 }
 
@@ -1291,6 +1322,12 @@ pub struct NodeRegistration {
     /// Unique local-system owner of each node-wide resource.
     #[serde(with = "resource_owner_map_serde")]
     resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+    /// Selective source-aware State channels exposed by configured local systems.
+    #[serde(default)]
+    state_exports: Vec<StateExportDescriptor>,
+    /// Selective Memory discovery and exchange providers exposed by local systems.
+    #[serde(default)]
+    memory_providers: Vec<MemoryProviderDescriptor>,
 }
 
 /// Encodes structured capability-contract owner keys as checkpoint-safe records.
@@ -1481,6 +1518,8 @@ impl NodeRegistration {
                 .map(|resource| (resource.id().clone(), LocalSystemId("default".to_string())))
                 .collect(),
             resources,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         }
     }
 
@@ -1606,7 +1645,62 @@ impl NodeRegistration {
             sensors,
             resources,
             resource_owners,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         })
+    }
+
+    /// Adds validated selective State and Memory declarations to an aggregate registration.
+    ///
+    /// Existing constructors deliberately produce empty declarations so legacy checkpoints and
+    /// in-process callers retain their prior behavior until a v0.3 adapter opts in.
+    pub fn with_state_memory_exports(
+        mut self,
+        state_exports: Vec<StateExportDescriptor>,
+        memory_providers: Vec<MemoryProviderDescriptor>,
+    ) -> Result<Self, DomainError> {
+        let owners = self
+            .local_systems
+            .iter()
+            .map(LocalSystemDescriptor::id)
+            .collect::<BTreeSet<_>>();
+        let export_ids = state_exports
+            .iter()
+            .map(StateExportDescriptor::export_id)
+            .collect::<BTreeSet<_>>();
+        let provider_ids = memory_providers
+            .iter()
+            .map(MemoryProviderDescriptor::provider_id)
+            .collect::<BTreeSet<_>>();
+        if export_ids.len() != state_exports.len() {
+            return Err(DomainError::InvalidState {
+                reason: "node state export identities must be unique".to_string(),
+            });
+        }
+        if provider_ids.len() != memory_providers.len() {
+            return Err(DomainError::InvalidMemory {
+                reason: "node memory provider identities must be unique".to_string(),
+            });
+        }
+        if state_exports
+            .iter()
+            .any(|descriptor| !owners.contains(descriptor.local_system_id()))
+        {
+            return Err(DomainError::InvalidState {
+                reason: "node state export references an unknown local system owner".to_string(),
+            });
+        }
+        if memory_providers
+            .iter()
+            .any(|descriptor| !owners.contains(descriptor.local_system_id()))
+        {
+            return Err(DomainError::InvalidMemory {
+                reason: "node memory provider references an unknown local system owner".to_string(),
+            });
+        }
+        self.state_exports = state_exports;
+        self.memory_providers = memory_providers;
+        Ok(self)
     }
 
     /// Returns the logical node identity.
@@ -1684,6 +1778,16 @@ impl NodeRegistration {
     /// Returns exact readiness facts in deterministic contract order.
     pub const fn capability_readiness(&self) -> &BTreeMap<CapabilityContractRef, bool> {
         &self.capability_readiness
+    }
+
+    /// Returns the selective State channels declared by this node.
+    pub fn state_exports(&self) -> &[StateExportDescriptor] {
+        &self.state_exports
+    }
+
+    /// Returns the selective Memory providers declared by this node.
+    pub fn memory_providers(&self) -> &[MemoryProviderDescriptor] {
+        &self.memory_providers
     }
 
     /// Returns all node sensors in stable declaration order.
@@ -1907,6 +2011,39 @@ impl ExecutionCommand {
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// A source-aware State record was durably accepted for projection.
+    StateRecordObserved {
+        /// Bounded record retaining source, semantic, receive time, and freshness.
+        record: StateRecord,
+    },
+    /// A generic immutable Memory manifest became discoverable.
+    MemoryManifestPublished {
+        /// Immutable metadata; content bytes remain in the Artifact data plane.
+        manifest: MemoryArtifactManifest,
+    },
+    /// A node staged one generic Memory artifact after digest verification.
+    MemoryArtifactStaged {
+        /// Immutable Memory revision staged by the node.
+        manifest: MemoryArtifactManifest,
+        /// Node that owns the local staging cache.
+        node_id: NodeId,
+    },
+    /// A node imported one generic Memory artifact into a local heterogeneous store.
+    MemoryArtifactImported {
+        /// Immutable Memory revision imported by the node.
+        manifest: MemoryArtifactManifest,
+        /// Node that owns the local imported representation.
+        node_id: NodeId,
+    },
+    /// A node rejected generic Memory staging or import.
+    MemoryArtifactRejected {
+        /// Immutable Memory revision involved in the failed exchange.
+        manifest: MemoryArtifactManifest,
+        /// Node that rejected the operation.
+        node_id: NodeId,
+        /// Stable diagnostic retained as evidence.
+        reason: String,
+    },
     /// A map revision manifest was declared before its bytes were published.
     MapArtifactDeclared {
         /// Immutable map manifest retained by the catalog.

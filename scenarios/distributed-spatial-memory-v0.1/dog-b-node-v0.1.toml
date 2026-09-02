@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.4"
+schema = "roboguide.node-config/v0.5"
 node_id = "dog-b"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "../../artifacts/distributed-spatial-memory-v0.1/dog-b/node-state"
@@ -81,6 +81,39 @@ id = "dog-b-spatial-compute"
 kind = "compute"
 capacity = 1
 owner = "spatial-runtime"
+
+[[state_exports]]
+id = "spatial-readiness-summary"
+owner = "spatial-runtime"
+object_class = "node"
+object_type = "spatial-runtime"
+object_id = "dog-b"
+semantic = "reported"
+payload_schema = "roboguide.example.spatial-readiness/v0.1"
+valid_for_ms = 15000
+interval_ms = 5000
+value_pointer = "/capabilities"
+
+[state_exports.step]
+id = "observe-spatial-state"
+connection = "spatial-readiness-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[state_exports.step.request]
+base = {}
+
+[[memory_providers]]
+id = "spatial-maps"
+owner = "spatial-runtime"
+kind = "spatial"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.map-manifest/v0.1"
+media_type = "application/vnd.roboguide.spatial-map"
 
 [[capabilities]]
 contract = "spatial.map.build@v0"
