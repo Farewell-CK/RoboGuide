@@ -120,21 +120,34 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startTalking() async {
     if (_micActive || _state != _ConnState.connected) return;
     _recorder ??= fs.FlutterSoundRecorder();
-    await _recorder!.openRecorder();
+    try {
+      await _recorder!.openRecorder();
+    } catch (e) {
+      // Most common cause: RECORD_AUDIO runtime permission not granted.
+      _appendLog('openRecorder failed (mic permission?): $e');
+      return;
+    }
     final sink = StreamController<List<Int16List>>();
     _recSub = sink.stream.listen((chunks) {
       for (final chunk in chunks) {
         _spp.write(Uint8List.view(chunk.buffer));
       }
     });
-    await _recorder!.startRecorder(
-      codec: fs.Codec.pcm16,
-      toStreamInt16: sink,
-      sampleRate: _sampleRate,
-      numChannels: _channels,
-      enableNoiseSuppression: true,
-      enableEchoCancellation: true,
-    );
+    try {
+      await _recorder!.startRecorder(
+        codec: fs.Codec.pcm16,
+        toStreamInt16: sink,
+        sampleRate: _sampleRate,
+        numChannels: _channels,
+        enableNoiseSuppression: true,
+        enableEchoCancellation: true,
+      );
+    } catch (e) {
+      await _recSub?.cancel();
+      _recSub = null;
+      _appendLog('startRecorder failed: $e');
+      return;
+    }
     setState(() => _micActive = true);
   }
 

@@ -27,15 +27,23 @@ class MainActivity : FlutterActivity() {
         )
         sppPlugin.startListening()
 
-        // Request runtime bluetooth permission on API 31+ (needed for connect()).
+        // Request runtime permissions on API 31+.
+        // BLUETOOTH_SCAN/CONNECT are needed for connect(); RECORD_AUDIO is
+        // needed later by the PTT recorder (flutter_sound). Asking together
+        // here avoids a silent permission failure when Hold-to-Talk starts.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val wanted = mutableListOf<String>()
             if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                wanted.add(Manifest.permission.BLUETOOTH_SCAN)
+                wanted.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                wanted.add(Manifest.permission.RECORD_AUDIO)
+            }
+            if (wanted.isNotEmpty()) {
                 ActivityCompat.requestPermissions(
                     this,
-                    arrayOf(
-                        Manifest.permission.BLUETOOTH_SCAN,
-                        Manifest.permission.BLUETOOTH_CONNECT,
-                    ),
+                    wanted.toTypedArray(),
                     REQUEST_BT_PERMISSION,
                 )
             }
