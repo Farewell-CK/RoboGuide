@@ -34,16 +34,39 @@ class HomePage extends StatefulWidget {
 
 enum _ConnState { disconnected, connecting, connected, error }
 
+class _ConversationTurn {
+  final String id;
+  final DateTime startedAt;
+  String userText;
+  String assistantText;
+  String state;
+  String error;
+
+  _ConversationTurn({required this.id})
+      : startedAt = DateTime.now(),
+        userText = '',
+        assistantText = '',
+        state = 'recording',
+        error = '';
+}
+
 class _HomePageState extends State<HomePage> {
   final _spp = BluetoothSpp();
   fs.FlutterSoundRecorder? _recorder;
   fs.FlutterSoundPlayer? _player;
   StreamSubscription<List<Int16List>>? _recSub;
+  StreamSubscription<SppControlEvent>? _controlSub;
 
   List<Map<String, dynamic>> _devices = [];
+  final List<_ConversationTurn> _turns = [];
+  _ConversationTurn? _activeTurn;
   String? _selectedMac;
   _ConnState _state = _ConnState.disconnected;
   bool _micActive = false;
+  String _audioState = 'idle';
+  int _sentAudioBytes = 0;
+  int _receivedAudioBytes = 0;
+  Future<void> _playQueue = Future<void>.value();
   String _log = '';
 
   static const int _sampleRate = 16000;
@@ -53,7 +76,11 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     // subscribe to received bytes -> play
-    _spp.onData.listen((data) => _playPcm(data));
+    _spp.onData.listen((data) {
+      _receivedAudioBytes += data.length;
+      _playQueue = _playQueue.then((_) => _playPcm(data));
+    });
+    _controlSub = _spp.onControl.listen(_handleControl);
     _loadDevices();
   }
 
@@ -78,6 +105,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _recSub?.cancel();
+    _controlSub?.cancel();
     _spp.dispose();
     _recorder?.closeRecorder();
     _player?.closePlayer();
@@ -119,18 +147,28 @@ class _HomePageState extends State<HomePage> {
   // ── PTT: capture microphone PCM and send over Bluetooth SPP ─────────
   Future<void> _startTalking() async {
     if (_micActive || _state != _ConnState.connected) return;
+    final turn = _ConversationTurn(id: DateTime.now().microsecondsSinceEpoch.toString());
+    setState(() {
+      _activeTurn = turn;
+      _turns.insert(0, turn);
+      _audioState = 'starting microphone';
+    });
     _recorder ??= fs.FlutterSoundRecorder();
     try {
       await _recorder!.openRecorder();
     } catch (e) {
-      // Most common cause: RECORD_AUDIO runtime permission not granted.
       _appendLog('openRecorder failed (mic permission?): $e');
+      setState(() { turn.state = 'error'; turn.error = 'Microphone permission/initialization failed'; _audioState = 'error'; });
       return;
     }
     final sink = StreamController<List<Int16List>>();
     _recSub = sink.stream.listen((chunks) {
       for (final chunk in chunks) {
-        _spp.write(Uint8List.view(chunk.buffer));
+        final bytes = Uint8List.view(chunk.buffer);
+        _sentAudioBytes += bytes.length;
+        _spp.writeAudio(bytes).catchError((e) {
+          _appendLog('audio write failed: $e');
+        });
       }
     });
     try {
@@ -146,23 +184,23 @@ class _HomePageState extends State<HomePage> {
       await _recSub?.cancel();
       _recSub = null;
       _appendLog('startRecorder failed: $e');
+      setState(() { turn.state = 'error'; turn.error = 'Microphone start failed'; _audioState = 'error'; });
       return;
     }
-    setState(() => _micActive = true);
+    setState(() { _micActive = true; _audioState = 'recording'; });
   }
 
   Future<void> _stopTalking() async {
     if (!_micActive) return;
-    setState(() => _micActive = false);
+    setState(() { _micActive = false; _audioState = 'finishing'; });
     await _recSub?.cancel();
     _recSub = null;
-    try {
-      await _recorder?.stopRecorder();
-    } catch (_) {}
-    // signal end-of-utterance
-    try {
-      await _spp.write(Uint8List.fromList('{"type":"mic_end"}'.codeUnits));
-    } catch (_) {}
+    try { await _recorder?.stopRecorder(); } catch (_) {}
+    try { await _spp.writeControl({'type': 'mic_end'}); } catch (e) { _appendLog('mic_end failed: $e'); }
+    final turn = _activeTurn;
+    if (turn != null && turn.state == 'recording') {
+      setState(() { turn.state = 'recognizing'; _audioState = 'recognizing'; });
+    }
   }
 
   Future<void> _playPcm(Uint8List frame) async {
@@ -179,8 +217,55 @@ class _HomePageState extends State<HomePage> {
         );
       }
       await _player!.feedUint8FromStream(frame);
-    } catch (_) {}
+      if (mounted && _activeTurn != null && _activeTurn!.state != 'done') {
+        setState(() { _activeTurn!.state = 'playing'; _audioState = 'playing'; });
+      }
+    } catch (e) {
+      _appendLog('playback failed: $e');
+      if (mounted && _activeTurn != null) {
+        setState(() { _activeTurn!.state = 'error'; _activeTurn!.error = 'Speaker playback failed'; _audioState = 'error'; });
+      }
+    }
   }
+
+  void _handleControl(SppControlEvent event) {
+    final value = event.value;
+    if (value['type'] != 'voice_event') return;
+    final kind = (value['event_kind'] as num?)?.toInt() ?? -1;
+    final text = value['text'] as String? ?? '';
+    final status = value['status'] as String? ?? '';
+    final error = value['error'] as String? ?? '';
+    final turn = _activeTurn;
+    if (turn == null) return;
+    setState(() {
+      switch (kind) {
+        case 0:
+          turn.state = 'recording'; _audioState = 'recording'; break;
+        case 1:
+          turn.state = 'recording'; _audioState = 'recording'; break;
+        case 2:
+          turn.state = 'recognizing'; _audioState = 'recognizing'; break;
+        case 4:
+          if (text.isNotEmpty) turn.userText = text;
+          turn.state = 'thinking'; _audioState = 'thinking'; break;
+        case 6:
+          if (text.isNotEmpty) turn.assistantText += text;
+          turn.state = 'thinking'; _audioState = 'thinking'; break;
+        case 7:
+          turn.state = 'playing'; _audioState = 'playing'; break;
+        case 8:
+          turn.state = 'playing'; _audioState = 'playing'; break;
+        case 9:
+          turn.state = 'done'; _audioState = 'idle'; _activeTurn = null; break;
+        case 10:
+          turn.state = 'error'; turn.error = error.isNotEmpty ? error : status; _audioState = 'error'; break;
+      }
+      if (kind == 4 && text.isNotEmpty && turn.userText.isEmpty) turn.userText = text;
+    });
+  }
+
+  void _clearTurns() => setState(() { _turns.clear(); _activeTurn = null; });
+  void _removeTurn(_ConversationTurn turn) => setState(() { _turns.remove(turn); if (_activeTurn == turn) _activeTurn = null; });
 
   @override
   Widget build(BuildContext context) {
@@ -222,32 +307,47 @@ class _HomePageState extends State<HomePage> {
               label: Text(connected ? 'Disconnect' : 'Connect'),
             ),
             const SizedBox(height: 12),
-            _StatusCard(state: _state, micActive: _micActive),
-            const SizedBox(height: 16),
+            _StatusCard(
+              state: _state,
+              micActive: _micActive,
+              audioState: _audioState,
+              sentBytes: _sentAudioBytes,
+              receivedBytes: _receivedAudioBytes,
+            ),
+            const SizedBox(height: 12),
             _PttButton(
               enabled: connected,
               talking: _micActive,
               onPressStart: _startTalking,
               onPressEnd: _stopTalking,
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black12,
-                  borderRadius: BorderRadius.circular(8),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text('会话记录', style: Theme.of(context).textTheme.titleMedium),
+                const Spacer(),
+                TextButton(
+                  onPressed: _turns.isEmpty ? null : _clearTurns,
+                  child: const Text('清空'),
                 ),
-                child: SingleChildScrollView(
-                  reverse: true,
-                  child: Text(
-                    _log.isEmpty ? 'log empty' : _log,
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                  ),
-                ),
-              ),
+              ],
             ),
+            Expanded(
+              child: _turns.isEmpty
+                  ? const Center(child: Text('暂无会话，按住下方按钮开始说话'))
+                  : ListView.builder(
+                      itemCount: _turns.length,
+                      itemBuilder: (context, index) {
+                        final turn = _turns[index];
+                        return _TurnCard(turn: turn, onDelete: () => _removeTurn(turn));
+                      },
+                    ),
+            ),
+            if (_log.isNotEmpty)
+              SizedBox(
+                height: 58,
+                child: Text(_log, style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
+              ),
           ],
         ),
       ),
@@ -258,7 +358,10 @@ class _HomePageState extends State<HomePage> {
 class _StatusCard extends StatelessWidget {
   final _ConnState state;
   final bool micActive;
-  const _StatusCard({required this.state, required this.micActive});
+  final String audioState;
+  final int sentBytes;
+  final int receivedBytes;
+  const _StatusCard({required this.state, required this.micActive, required this.audioState, required this.sentBytes, required this.receivedBytes});
 
   @override
   Widget build(BuildContext context) {
@@ -281,9 +384,9 @@ class _StatusCard extends StatelessWidget {
           children: [
             Icon(Icons.circle, size: 12, color: color),
             const SizedBox(width: 6),
-            Text('Bridge: $label',
-                style: Theme.of(context).textTheme.titleMedium),
-            const Spacer(),
+            Text('Bridge: $label', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(width: 12),
+            Expanded(child: Text('$audioState  TX ${sentBytes}B / RX ${receivedBytes}B', style: const TextStyle(fontSize: 11))),
             if (micActive)
               const Chip(
                 label: Text('MIC ACTIVE'),
@@ -292,6 +395,35 @@ class _StatusCard extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TurnCard extends StatelessWidget {
+  final _ConversationTurn turn;
+  final VoidCallback onDelete;
+  const _TurnCard({required this.turn, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final time = '${turn.startedAt.hour.toString().padLeft(2, '0')}:${turn.startedAt.minute.toString().padLeft(2, '0')}';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Text(time, style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(width: 8),
+            Chip(label: Text(turn.state), visualDensity: VisualDensity.compact),
+            const Spacer(),
+            IconButton(onPressed: onDelete, icon: const Icon(Icons.delete_outline), tooltip: '删除会话'),
+          ]),
+          if (turn.userText.isNotEmpty) Text('你：${turn.userText}'),
+          if (turn.assistantText.isNotEmpty) Text('机器人：${turn.assistantText}'),
+          if (turn.userText.isEmpty && turn.assistantText.isEmpty) const Text('正在等待语音结果…'),
+          if (turn.error.isNotEmpty) Text(turn.error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ]),
       ),
     );
   }

@@ -1,28 +1,59 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
+
+import 'spp_protocol.dart';
+
+/// A decoded control event received from Thor.
+class SppControlEvent {
+  final Map<String, dynamic> value;
+  const SppControlEvent(this.value);
+}
+
 /// Thin Flutter wrapper over the native Android Bluetooth SPP plugin.
-///
-/// MethodChannel 'roboguide/bluetooth_spp' for control,
-/// EventChannel  'roboguide/bluetooth_spp/events' for received bytes.
+/// The native channel can deliver arbitrary Bluetooth chunks; this class
+/// reassembles RGAD/RGCT frames before exposing audio and control streams.
 class BluetoothSpp {
-  static const MethodChannel _method =
-      MethodChannel('roboguide/bluetooth_spp');
-  static const EventChannel _events =
-      EventChannel('roboguide/bluetooth_spp/events');
+  static const MethodChannel _method = MethodChannel('roboguide/bluetooth_spp');
+  static const EventChannel _events = EventChannel('roboguide/bluetooth_spp/events');
 
   final _dataCtrl = StreamController<Uint8List>.broadcast();
+  final _controlCtrl = StreamController<SppControlEvent>.broadcast();
+  final _rxFramer = SppFramer();
   late final StreamSubscription _sub;
 
   BluetoothSpp() {
     _sub = _events.receiveBroadcastStream().listen((event) {
-      if (event is List<int>) {
-        _dataCtrl.add(Uint8List.fromList(event));
+      if (event is Uint8List) {
+        _consume(event);
+      } else if (event is List) {
+        _consume(Uint8List.fromList(event.cast<int>()));
       }
     }, onDone: () => _dataCtrl.addError('connection closed'));
   }
 
+  void _consume(Uint8List bytes) {
+    _rxFramer.add(bytes);
+    for (final frame in _rxFramer.takeFrames()) {
+      if (frame.type == SppFrameType.audio) {
+        _dataCtrl.add(frame.payload);
+      } else {
+        try {
+          final value = jsonDecodeUtf8(frame.payload);
+          if (value is Map<String, dynamic>) {
+            _controlCtrl.add(SppControlEvent(value));
+          }
+        } catch (_) {
+          // Ignore malformed control events; the audio stream remains alive.
+        }
+      }
+    }
+  }
+
   Stream<Uint8List> get onData => _dataCtrl.stream;
+  Stream<SppControlEvent> get onControl => _controlCtrl.stream;
 
   /// Return the list of bonded (paired) Bluetooth devices.
   Future<List<Map<String, dynamic>>> pairedDevices() async {
@@ -52,12 +83,25 @@ class BluetoothSpp {
     return ok ?? false;
   }
 
-  Future<void> write(Uint8List data) async {
-    await _method.invokeMethod('write', {'bytes': data});
+  /// Send a framed PCM payload to Thor.
+  Future<void> writeAudio(Uint8List data) async {
+    await _method.invokeMethod('write', {'bytes': SppFramer.encodeAudio(data)});
+  }
+
+  /// Send a framed JSON control message to Thor.
+  Future<void> writeControl(Map<String, dynamic> value) async {
+    await _method.invokeMethod('write', {'bytes': SppFramer.encodeControl(value)});
   }
 
   void dispose() {
     _sub.cancel();
     _dataCtrl.close();
+    _controlCtrl.close();
   }
+}
+
+Map<String, dynamic> jsonDecodeUtf8(Uint8List bytes) {
+  final value = jsonDecode(String.fromCharCodes(bytes));
+  if (value is! Map) throw const FormatException('control payload is not an object');
+  return value.cast<String, dynamic>();
 }
