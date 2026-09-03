@@ -142,7 +142,11 @@
         "visibility": { "enum": ["discoverable", "exchangeable"] },
         "payload_schema": { "$ref": "#/$defs/nonBlankString" },
         "media_type": { "$ref": "#/$defs/nonBlankString" },
-        "storage_directory": { "type": "string", "minLength": 1 },
+        "storage_directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "RoboGuide Node manifest-ledger, controlled export-handoff, and workflow-free reference-backend directory; never the Local EAIOS storage location"
+        },
         "discover": { "$ref": "#/$defs/memoryWorkflow" },
         "export": { "$ref": "#/$defs/memoryWorkflow" },
         "import": { "$ref": "#/$defs/memoryWorkflow" }
@@ -158,7 +162,10 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/workflowStep" }
         },
-        "manifests_pointer": { "$ref": "#/$defs/jsonPointer" },
+        "manifests_pointer": {
+          "$ref": "#/$defs/jsonPointer",
+          "description": "Provider-authorized publish-eligible immutable Memory manifests; not all Local EAIOS Memory."
+        },
         "artifact_path_pointer": { "$ref": "#/$defs/jsonPointer" }
       }
     },

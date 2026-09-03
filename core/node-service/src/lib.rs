@@ -60,7 +60,7 @@ pub use local_engine::{
     CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
     LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase, StateExportFact,
 };
-pub use memory::{FilesystemMemoryProvider, LocalMemoryProvider, MemoryProviderError, MemoryQuery};
+pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};
 
 #[cfg(test)]

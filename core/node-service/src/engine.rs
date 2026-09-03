@@ -4,10 +4,10 @@ use crate::local_engine::driver::{DriverKind, LocalDriver};
 use crate::{
     ArtifactError, ArtifactFinalizationKind, ArtifactOperationConfig, ArtifactProvenance,
     ArtifactStager, CapabilityReadinessFact, CompiledCapability, CompiledLocalCatalog,
-    ExecutionJournal, ExecutionSpec, FilesystemMemoryProvider, JournalError, JournalExecution,
-    JournalStatus, LocalHealthState, LocalMemoryProvider, MappedExecutionFact,
-    MappedExecutionPhase, MemoryQuery, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact,
-    PreparedArtifactRecord, ReplicaEvidenceStatus, StateExportFact, WorkflowContext,
+    ExecutionJournal, ExecutionSpec, FilesystemMemoryLedger, JournalError, JournalExecution,
+    JournalStatus, LocalHealthState, LocalMemoryLedger, MappedExecutionFact, MappedExecutionPhase,
+    MemoryQuery, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact, PreparedArtifactRecord,
+    ReplicaEvidenceStatus, StateExportFact, WorkflowContext,
 };
 use domain::{
     LocalSystemId, MapArtifactManifest, MemoryArtifactManifest, MissionId, NodeId, TaskId, TaskRef,
@@ -90,8 +90,8 @@ struct EngineInner {
     events: broadcast::Sender<LocalExecutionEvent>,
     /// Optional Spatial Memory artifact stager configured independently of Node Protocol.
     artifact_stager: Option<ArtifactStager>,
-    /// Local semantic Memory providers keyed by deployment identity.
-    memory_providers: BTreeMap<String, Arc<dyn LocalMemoryProvider>>,
+    /// Node-side ledgers keyed by configured Local Memory Provider identity.
+    memory_ledgers: BTreeMap<String, Arc<dyn LocalMemoryLedger>>,
 }
 
 /// Configuration-owned artifact operation reused by validated execution directives.
@@ -134,15 +134,15 @@ impl LocalIntegrationEngine {
                 ));
             }
         }
-        let mut memory_providers: BTreeMap<String, Arc<dyn LocalMemoryProvider>> = BTreeMap::new();
+        let mut memory_ledgers: BTreeMap<String, Arc<dyn LocalMemoryLedger>> = BTreeMap::new();
         for descriptor in catalog
             .memory_providers()
             .values()
             .filter(|provider| provider.operational())
         {
-            let provider = FilesystemMemoryProvider::open(descriptor.clone())
+            let ledger = FilesystemMemoryLedger::open(descriptor.clone())
                 .map_err(|error| EngineError::Memory(error.to_string()))?;
-            memory_providers.insert(descriptor.id().to_string(), Arc::new(provider));
+            memory_ledgers.insert(descriptor.id().to_string(), Arc::new(ledger));
         }
         for connection in catalog.connections().values() {
             if !driver_map.contains_key(&connection.driver_kind()) {
@@ -163,7 +163,7 @@ impl LocalIntegrationEngine {
                 artifact_finalizations_in_flight: Mutex::new(BTreeSet::new()),
                 events,
                 artifact_stager,
-                memory_providers,
+                memory_ledgers,
             }),
         })
     }
@@ -181,7 +181,13 @@ impl LocalIntegrationEngine {
         self.inner.artifact_stager.as_ref()
     }
 
-    /// Discovers Memory metadata through a provider-local index or configured workflow.
+    /// Returns the provider-authorized publish-eligible Memory set.
+    ///
+    /// A configured Local EAIOS workflow is the semantic authority for this set; its response is
+    /// not interpreted as all Memory available in the local system. RoboGuide only validates the
+    /// immutable manifest shape, applies the explicit query and live-scope safety filter, and
+    /// returns the resulting metadata for the publication mechanism. When no workflow exists,
+    /// the Node ledger is used only as the documented reference-backend fallback.
     pub async fn discover_memories(
         &self,
         provider_id: &str,
@@ -189,9 +195,9 @@ impl LocalIntegrationEngine {
         mut invocation: serde_json::Value,
     ) -> Result<Vec<MemoryArtifactManifest>, EngineError> {
         validate_memory_query_scope(query, &invocation)?;
-        let provider = self
+        let ledger = self
             .inner
-            .memory_providers
+            .memory_ledgers
             .get(provider_id)
             .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
             .clone();
@@ -200,7 +206,7 @@ impl LocalIntegrationEngine {
             .memory_providers()
             .get(provider_id)
             .and_then(|p| p.discover());
-        let mut manifests = if let Some(workflow) = workflow {
+        let manifests = if let Some(workflow) = workflow {
             if let Some(object) = invocation.as_object_mut() {
                 object.insert(
                     "memory_query".to_string(),
@@ -217,29 +223,11 @@ impl LocalIntegrationEngine {
             })?;
             serde_json::from_value(value.clone()).map_err(EngineError::Json)?
         } else {
-            provider
-                .discover(query)
+            ledger
+                .discover_recorded(query)
                 .map_err(|error| EngineError::Memory(error.to_string()))?
         };
-        for manifest in &manifests {
-            manifest
-                .validate()
-                .map_err(|error| EngineError::Memory(error.to_string()))?;
-        }
-        manifests.retain(|manifest| {
-            query.matches(manifest) && memory_scope_visible_in_context(manifest, &invocation)
-        });
-        manifests.sort_by(|left, right| left.selector().cmp(right.selector()));
-        if manifests
-            .windows(2)
-            .any(|pair| pair[0].selector() == pair[1].selector() && pair[0] != pair[1])
-        {
-            return Err(EngineError::Memory(
-                "Memory discovery returned conflicting immutable manifests".to_string(),
-            ));
-        }
-        manifests.dedup();
-        Ok(manifests)
+        accept_provider_discovery(manifests, query, &invocation)
     }
 
     /// Exports one immutable Memory manifest through local provider authority.
@@ -251,9 +239,9 @@ impl LocalIntegrationEngine {
     ) -> Result<Option<PathBuf>, EngineError> {
         validate_memory_operation_scope(manifest, &invocation)?;
         self.validate_memory_export(provider_id, manifest)?;
-        let provider = self
+        let ledger = self
             .inner
-            .memory_providers
+            .memory_ledgers
             .get(provider_id)
             .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
             .clone();
@@ -281,13 +269,13 @@ impl LocalIntegrationEngine {
                     .ok_or_else(|| {
                         EngineError::Memory(format!("export response missing path `{pointer}`"))
                     })?;
-                let provider_root =
+                let handoff_root =
                     self.catalog().memory_providers()[provider_id].storage_directory();
-                artifact_path = Some(resolve_memory_export_path(provider_root, relative_path)?);
+                artifact_path = Some(resolve_memory_export_path(handoff_root, relative_path)?);
             }
         }
-        provider
-            .export(manifest)
+        ledger
+            .record_export(manifest)
             .map_err(|error| EngineError::Memory(error.to_string()))?;
         Ok(artifact_path)
     }
@@ -384,7 +372,7 @@ impl LocalIntegrationEngine {
         Ok(())
     }
 
-    /// Imports one CAS-verified immutable Memory artifact into a provider-owned local store.
+    /// Imports through EAIOS authority or the workflow-free filesystem reference backend.
     async fn import_memory(
         &self,
         provider_id: &str,
@@ -393,18 +381,18 @@ impl LocalIntegrationEngine {
         invocation: serde_json::Value,
     ) -> Result<(), EngineError> {
         validate_memory_operation_scope(manifest, &invocation)?;
-        let provider = self
+        let ledger = self
             .inner
-            .memory_providers
+            .memory_ledgers
             .get(provider_id)
             .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
             .clone();
-        if let Some(workflow) = self
+        let workflow = self
             .catalog()
             .memory_providers()
             .get(provider_id)
-            .and_then(|p| p.import())
-        {
+            .and_then(|provider| provider.import());
+        if let Some(workflow) = workflow {
             let mut value = invocation;
             if let Some(object) = value.as_object_mut() {
                 object.insert(
@@ -419,8 +407,9 @@ impl LocalIntegrationEngine {
             let mut context = WorkflowContext::new(value);
             self.run_steps(workflow.steps(), &mut context).await?;
         }
-        provider
-            .import(manifest, staged_artifact)
+        let reference_artifact = workflow.is_none().then_some(staged_artifact);
+        ledger
+            .record_import(manifest, reference_artifact)
             .map_err(|error| EngineError::Memory(error.to_string()))
     }
 
@@ -440,15 +429,11 @@ impl LocalIntegrationEngine {
         })?;
         let node_id = NodeId::new(self.catalog().node_id().to_string())
             .map_err(|error| EngineError::Memory(error.to_string()))?;
-        let provider = self
-            .inner
-            .memory_providers
-            .get(provider_id)
-            .ok_or_else(|| {
-                EngineError::Memory(format!("unknown memory provider `{provider_id}`"))
-            })?;
-        let existing = provider
-            .discover(&MemoryQuery {
+        let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {
+            EngineError::Memory(format!("unknown memory provider `{provider_id}`"))
+        })?;
+        let existing = ledger
+            .discover_recorded(&MemoryQuery {
                 selector: Some(manifest.selector().clone()),
                 ..MemoryQuery::default()
             })
@@ -460,7 +445,7 @@ impl LocalIntegrationEngine {
             .is_some_and(|existing| existing != manifest)
         {
             return Err(EngineError::Configuration(
-                "selector already names different immutable Memory in the local provider"
+                "selector already names different immutable Memory in the Node-side ledger"
                     .to_string(),
             ));
         }
@@ -1717,6 +1702,37 @@ impl LocalIntegrationEngine {
     }
 }
 
+/// Validates and bounds the exact publish-eligible set returned by one Memory provider.
+///
+/// This function deliberately has no ledger lookup or promotion behavior: every returned
+/// manifest must originate in the provider response. The query and live-scope checks are
+/// RoboGuide safety filters, not a sharing-selection policy.
+fn accept_provider_discovery(
+    mut manifests: Vec<MemoryArtifactManifest>,
+    query: &MemoryQuery,
+    invocation: &serde_json::Value,
+) -> Result<Vec<MemoryArtifactManifest>, EngineError> {
+    for manifest in &manifests {
+        manifest
+            .validate()
+            .map_err(|error| EngineError::Memory(error.to_string()))?;
+    }
+    manifests.retain(|manifest| {
+        query.matches(manifest) && memory_scope_visible_in_context(manifest, invocation)
+    });
+    manifests.sort_by(|left, right| left.selector().cmp(right.selector()));
+    if manifests
+        .windows(2)
+        .any(|pair| pair[0].selector() == pair[1].selector() && pair[0] != pair[1])
+    {
+        return Err(EngineError::Memory(
+            "Memory discovery returned conflicting immutable manifests".to_string(),
+        ));
+    }
+    manifests.dedup();
+    Ok(manifests)
+}
+
 /// Requires concrete ExecutionGroup Memory to match the live operation context.
 fn validate_memory_operation_scope(
     manifest: &MemoryArtifactManifest,
@@ -1785,7 +1801,7 @@ const fn memory_kind_name(kind: domain::MemoryKind) -> &'static str {
     }
 }
 
-/// Resolves a provider response path without allowing it to escape the configured local root.
+/// Resolves an EAIOS export handoff path within the configured Node-managed root.
 fn resolve_memory_export_path(
     root: &std::path::Path,
     relative: &str,
@@ -1798,14 +1814,15 @@ fn resolve_memory_export_path(
             .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
         return Err(EngineError::Memory(
-            "Memory export path must be a traversal-free provider-relative path".to_string(),
+            "Memory export path must be relative to the Node-managed handoff root".to_string(),
         ));
     }
     let canonical_root = std::fs::canonicalize(root).map_err(EngineError::Io)?;
     let candidate = std::fs::canonicalize(root.join(relative)).map_err(EngineError::Io)?;
     if !candidate.starts_with(&canonical_root) || !candidate.is_file() {
         return Err(EngineError::Memory(
-            "Memory export path escapes the provider root or is not a regular file".to_string(),
+            "Memory export path escapes the Node-managed handoff root or is not a regular file"
+                .to_string(),
         ));
     }
     Ok(candidate)
@@ -2284,7 +2301,7 @@ pub enum EngineError {
     Driver(crate::DriverError),
     /// Spatial Memory artifact staging configuration or transfer failed.
     Artifact(ArtifactError),
-    /// Local semantic Memory provider failed; callers may retry or fence independently.
+    /// Local EAIOS Memory workflow or Node ledger failed; callers may retry or fence independently.
     Memory(String),
     /// Canonical JSON encoding or decoding failed.
     Json(serde_json::Error),
@@ -2564,20 +2581,59 @@ mod artifact_directive_tests {
         ));
     }
 
-    /// A provider response cannot select bytes outside its configured storage root.
+    /// Discovery acceptance returns only provider-supplied publish-eligible manifests.
     #[test]
-    fn memory_export_path_is_confined_to_provider_root() {
+    fn provider_discovery_does_not_promote_unreturned_memory() {
+        let manifest = MemoryArtifactManifest::new(
+            domain::MemorySelector::new(
+                domain::MemoryId::new("provider-memory").expect("memory id is valid"),
+                domain::MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            domain::MemoryKind::Experience,
+            "provider",
+            domain::MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("memory").expect("local system id is valid"),
+            },
+            domain::MemoryScope::Global,
+            domain::MemoryVisibility::Discoverable,
+            "example.experience/v1",
+            "application/json",
+            None,
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest is valid");
+        let accepted = accept_provider_discovery(
+            vec![manifest.clone()],
+            &MemoryQuery::default(),
+            &serde_json::json!({}),
+        )
+        .expect("provider response is accepted");
+        assert_eq!(accepted, vec![manifest]);
+        assert!(
+            accept_provider_discovery(Vec::new(), &MemoryQuery::default(), &serde_json::json!({}),)
+                .expect("empty provider response is accepted")
+                .is_empty()
+        );
+    }
+
+    /// An EAIOS response cannot select bytes outside its configured Node handoff root.
+    #[test]
+    fn memory_export_path_is_confined_to_node_handoff_root() {
         let directory = tempfile::tempdir().expect("temporary directory exists");
-        let provider_root = directory.path().join("provider");
-        std::fs::create_dir_all(&provider_root).expect("provider root creates");
-        std::fs::write(provider_root.join("map.bin"), b"map").expect("provider output writes");
+        let handoff_root = directory.path().join("handoff");
+        std::fs::create_dir_all(&handoff_root).expect("handoff root creates");
+        std::fs::write(handoff_root.join("map.bin"), b"map").expect("EAIOS output writes");
         assert_eq!(
-            resolve_memory_export_path(&provider_root, "map.bin")
-                .expect("provider-relative output resolves"),
-            std::fs::canonicalize(provider_root.join("map.bin")).expect("output canonicalizes")
+            resolve_memory_export_path(&handoff_root, "map.bin")
+                .expect("handoff-relative output resolves"),
+            std::fs::canonicalize(handoff_root.join("map.bin")).expect("output canonicalizes")
         );
         assert!(matches!(
-            resolve_memory_export_path(&provider_root, "../outside.bin"),
+            resolve_memory_export_path(&handoff_root, "../outside.bin"),
             Err(EngineError::Memory(_))
         ));
     }

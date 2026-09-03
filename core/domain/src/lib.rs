@@ -38,10 +38,16 @@ pub use localization_evidence::{
     PoseQualityComparison, PoseQualityEvidence,
 };
 pub use memory::{
-    MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest, MemoryArtifactRef, MemoryId, MemoryKind,
-    MemoryOwner, MemoryProviderDescriptor, MemoryReplicaSnapshot, MemoryReplicaStatus,
-    MemoryRevisionId, MemoryScope, MemoryScopeLimit, MemorySelector, MemoryVisibility,
+    LEGACY_MEMORY_CONSUMER_PROVIDER_ID, MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest,
+    MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner, MemoryProviderDescriptor,
+    MemoryReplicaSnapshot, MemoryReplicaStatus, MemoryRevisionId, MemoryScope, MemoryScopeLimit,
+    MemorySelector, MemoryVisibility,
 };
+
+/// Supplies the conservative identity used only when decoding pre-v7 replica evidence.
+fn legacy_memory_consumer_provider_id() -> String {
+    LEGACY_MEMORY_CONSUMER_PROVIDER_ID.to_string()
+}
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
@@ -2027,6 +2033,9 @@ pub enum EventPayload {
         manifest: MemoryArtifactManifest,
         /// Node that owns the local staging cache.
         node_id: NodeId,
+        /// Exact node-local provider receiving the staged revision.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
     },
     /// A node imported one generic Memory artifact into a local heterogeneous store.
     MemoryArtifactImported {
@@ -2034,6 +2043,9 @@ pub enum EventPayload {
         manifest: MemoryArtifactManifest,
         /// Node that owns the local imported representation.
         node_id: NodeId,
+        /// Exact node-local provider owning the imported representation.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
     },
     /// A node rejected generic Memory staging or import.
     MemoryArtifactRejected {
@@ -2041,6 +2053,9 @@ pub enum EventPayload {
         manifest: MemoryArtifactManifest,
         /// Node that rejected the operation.
         node_id: NodeId,
+        /// Exact node-local provider that rejected the operation.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
         /// Stable diagnostic retained as evidence.
         reason: String,
     },

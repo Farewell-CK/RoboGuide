@@ -78,7 +78,23 @@ Memory v0.1 支持 `Execution`、`Spatial`、`Semantic`、`Experience`、`Artifa
 `Local`、`ExecutionGroup`、`Global` scope。每个 immutable revision 的 manifest 保存 owner、
 provider、scope、visibility、schema、provenance 和可选 Artifact reference。
 
-- `Discoverable` 可只发布 metadata，内容继续留在 owner 本地；
+Scope、Visibility、Placement 是三个正交概念：
+
+| 概念 | 回答的问题 | v0.1 权威表示 |
+| --- | --- | --- |
+| Scope | 哪些逻辑主体可以消费该 Memory 的语义 | immutable `manifest.scope` |
+| Visibility | metadata 是否可发现、content 是否允许被提供用于交换 | immutable `manifest.visibility` |
+| Placement | shared CAS 或 Node/provider 本地 bytes 可用性证据 | `manifest.artifact` 表示 shared CAS；`(NodeId, ConsumerProviderId, status)` 表示本地 placement attempt |
+
+Visibility 不扩大 Scope，Placement 也不改写 Scope 或 ownership。`Local + Discoverable` 合法：
+其他 Node 可以知道 revision 存在，但不能跨 Node 消费或导入内容。`Local + Exchangeable` 只允许
+owner Node 内 provider 之间交换；`ExecutionGroup/Global + Exchangeable` 才可能在 scope admission
+通过后形成跨 Node replica。manifest owner 表示 semantic authority，不表示 bytes 只能有一个副本。
+Artifact reference 表示经过验证的共享 CAS content identity/availability，不表示某个 Node 或
+provider 已经持有本地副本，也不暴露 CAS backend 物理拓扑；后者的 `Staged/Imported` 只能来自
+replica evidence，`Rejected` 是 negative evidence。provider 的内部路径和存储拓扑不进入共享合同。
+
+- `Discoverable` 可只发布 metadata，内容不对 catalog consumer 提供交换；
 - `Exchangeable` 必须引用已存在、digest/size 验证通过的 immutable CAS bytes；
 - Catalog 是可重建发现与 replica evidence，不转移 semantic ownership；
 - 交换由消费者显式选择 revision 并通过现有 Artifact data plane pull，不做全量复制或 P2P；
@@ -91,7 +107,9 @@ localization evidence 和 map-specific validation；统一 `/v1/memories` 只提
 Memory 共用 selector namespace，禁止同一 identity/revision 在两个 catalog 中产生歧义。
 
 Node-owned manifest 进入 catalog 前必须匹配当前完整 registration snapshot 中的 owner、provider、
-kind、scope、visibility、payload schema 和 media type；replica evidence 只能引用已注册 Node。
+kind、scope、visibility、payload schema 和 media type；replica evidence 必须引用已注册 Node 上
+exact compatible consumer provider，durable identity 为
+`(MemorySelector, NodeId, ConsumerProviderId)`。
 通用 Memory mutation 还必须携带成对的 Node/session identity：manifest 只能由其 owner Node 的
 当前 active、未过期 session 发布，replica evidence 只能由所记录 replica Node 的当前 session
 发布；重连、lease 过期或 Node 不匹配时必须在写入 event log 前拒绝。它是框架内部 ownership

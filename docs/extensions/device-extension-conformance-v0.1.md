@@ -41,9 +41,12 @@ metadata-only Memory provider 配置启动，v0.2-v0.4 仍可解析为
   fail-closed 为 unavailable；
 - 每个 State export 固定 owner、Node/World object、Reported/Observed semantic、schema、TTL、
   sampling interval 和固定 observation workflow；每个 Memory provider 固定 owner、五类 kind、scope、
-  visibility、schema 和 media type；v0.6 可再声明固定 discover/export/import workflow；
-- Memory conformance 分开报告 `local_backend` 与 `shared_data_plane`，本地 workflow 存在不等于
-  已配置共享 Catalog/Artifact exchange；
+  visibility、schema 和 media type；v0.6 可再声明固定 discover/export/import workflow。`discover`
+  workflow 返回的必须是 provider 已授权 RoboGuide 发布的 publish-eligible manifest 集合，不能
+  把 Local EAIOS 的全部 Memory 暴露给 Node Service；Node 只执行 publication mechanism；
+- Memory conformance 为 v0.1 兼容保留 `local_backend` 字段，但它只表示 Node manifest
+  ledger/reference fallback 可用，不表示真实 EAIOS authority；独立 workflow flags 表示 EAIOS
+  operation routes，`shared_data_plane` 表示 Catalog/Artifact exchange；
 - connection endpoint、HTTP method/path、gRPC service/method/descriptor 或 MCP tool
   由配置固定，网络 `ExecutionIntent` 不能改写；
 - execute、status、cancel 都是非空、有序 workflow，local handle 只能来自 execute

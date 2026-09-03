@@ -1,6 +1,6 @@
 # 架构与实现待决事项
 
-本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。
+本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。当前架构语义以 V2 README 和已接受 ADR 为准；历史 DOCX 不是后续演进的 source of truth。
 
 ## V2 开放架构问题
 
@@ -37,8 +37,9 @@ Spatial v0 的已知后续工作：
 - 真机部署需要版本化的 Local EAIOS/Robonix/ROS mapping 和完整的
   `build -> prepare-output -> publish -> stage -> import -> verify` system test；当前场景
   只提供配置驱动的 Node fixture 和外部 HTTP workflow 假设。
-- Replica evidence v0 只有 Node/Mission 维度，下一版应补充 consumer `TaskRef`、execution
-  identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体 TaskExecution。
+- Generic Memory replica evidence 已包含 exact consumer provider；下一版仍应补充 consumer
+  `TaskRef`、execution identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体
+  TaskExecution。
 - Generic Memory 需要独立设计 Controller -> Node selective-import command，包括 exact consumer
   provider/revision、application-accepted durable ACK、重试 fence 和可选 ExecutionGroup 关联；在
   该协议冻结前不得由 discovery 自动触发全量复制，也不得借普通 Execute 隐式改变 Task lifecycle。
@@ -57,7 +58,8 @@ Protocol v0.3 支持选择性 Reported/Observed push；State observation 不自�
 provider、fusion/conflict policy、允许哪些 Belief 影响 Control、访问控制、retention/GC、
 多 Controller replication 仍需场景证据。通用 Node Memory workflow 已由
 [`ADR-0025`](decisions/0025-memory-provider-backend-and-workflow.md) 的 v0.6 provider
-discover/export/import 与 filesystem/JSONL 参考 backend 补齐，但真实 EAIOS adapter 仍需现场证据。
+discover/export/import workflow 与 filesystem/JSONL Node ledger/reference fallback 补齐；真实
+EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场证据。
 
 ## MVP 定义待决事项
 
@@ -106,7 +108,9 @@ dispatch intent、Runtime attempt history 和 Mission-level recovery transaction
 或 RT-G9。hazard/距离/速度等条件事实、relation composition 和硬实时 actuation 需要独立合同、
 现场时序证据与安全决策，不能用自由字符串表达式提前固化。
 
-## 开发 Bootstrap 提案
+## 历史 Bootstrap 提案
+
+以下内容保留早期开发基线的上下文；已经被后续 ADR 和当前实现取代的条目不再表示开放决策。
 
 - 提议使用 Rust 实现 Domain、Control、Runtime 和 State 核心，Python 承载 Mission
   Intelligence、模型、仿真和研究型 Adapter；
@@ -126,7 +130,11 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 ## 延后的实现选型
 
 - Capability Schema、Contract 字段、类型系统和版本兼容策略；
-- 节点接入采用 Agent、Adapter、SDK、Plugin 或 ROS Bridge；
+- 节点接入的当前正式边界已由 [`ADR-0010`](decisions/0010-single-node-service-local-integration-engine.md)、
+  [`ADR-0021`](decisions/0021-device-extension-boundary-conformance.md) 和
+  [`ADR-0022`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 固定为单一
+  `roboguide-node`、声明式 Local Integration Engine 与 deployment-owned Local EAIOS facade；
+  Agent、SDK、Plugin、ROS Bridge 等仅是 facade 内部实现选择，不再是 RoboGuide core 的待决接入架构。
 - Control Plane 的进程划分、Leader Election、高可用与一致性算法；
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；

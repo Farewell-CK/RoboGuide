@@ -249,10 +249,12 @@ impl NodeService {
         })
     }
 
-    /// Periodically discovers provider-owned metadata and publishes selected Memory via CAS.
+    /// Periodically publishes the provider-authorized Memory set via the Artifact data plane.
     ///
-    /// ExecutionGroup-scoped items are intentionally excluded here: they require the concrete
-    /// live invocation context and must use the explicit engine operation from execution logic.
+    /// `discover` is the provider's publish-eligibility decision. Node Service performs only the
+    /// publication mechanism and mechanical safety checks; it does not promote or select from all
+    /// Local EAIOS Memory. ExecutionGroup-scoped items are excluded because complete distributed
+    /// Group authorization/handoff is not part of the current Node Protocol.
     fn spawn_memory_exports(&self, session_id: String) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
@@ -276,7 +278,7 @@ impl NodeService {
                         "node_id": engine.catalog().node_id(),
                         "provider_id": provider_id,
                     });
-                    let manifests = match engine
+                    let publish_eligible_manifests = match engine
                         .discover_memories(
                             &provider_id,
                             &crate::MemoryQuery::default(),
@@ -290,7 +292,7 @@ impl NodeService {
                             continue;
                         }
                     };
-                    for manifest in manifests {
+                    for manifest in publish_eligible_manifests {
                         if matches!(manifest.scope(), domain::MemoryScope::ExecutionGroup(_)) {
                             continue;
                         }

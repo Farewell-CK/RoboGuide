@@ -1,7 +1,8 @@
 //! Discoverable immutable Memory metadata shared above heterogeneous local stores.
 //!
-//! Manifests expose ownership, scope, provenance, and optional content-addressed bytes. They do
-//! not require local implementations to share a database or storage format.
+//! Manifests expose ownership, semantic consumption scope, discovery/exchange visibility,
+//! provenance, and optional content-addressed bytes. Provider-qualified replica evidence records
+//! node-local placement separately. Local implementations need not share a database or format.
 
 use crate::{
     ContentDigest, DomainError, ExecutionGroupId, LocalSystemId, MissionId, NodeId, TaskRef,
@@ -12,6 +13,12 @@ use std::fmt::{Display, Formatter};
 
 /// Version identifier for the first generic Memory catalog manifest.
 pub const MEMORY_MANIFEST_SCHEMA_V0_1: &str = "roboguide.memory-manifest/v0.1";
+
+/// Explicit identity assigned when replaying v6 replica evidence that predates provider identity.
+///
+/// The leading `~` is outside the provider-id grammar, so no current provider can collide with
+/// this conservative migration bucket.
+pub const LEGACY_MEMORY_CONSUMER_PROVIDER_ID: &str = "~legacy-v6-unknown";
 
 /// Classifies a durable or discoverable Memory item by its primary use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -29,7 +36,9 @@ pub enum MemoryKind {
     Artifact,
 }
 
-/// Limits where a Memory item's meaning is intended to be consumed.
+/// Limits which logical consumers may use a Memory item's meaning.
+///
+/// Scope neither controls catalog discovery nor records where content bytes are stored.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -37,19 +46,19 @@ pub enum MemoryKind {
     rename_all = "snake_case"
 )]
 pub enum MemoryScope {
-    /// Meaning is local to the owning node and is discoverable only by explicit policy.
+    /// Meaning may be consumed only within the owning node.
     Local,
-    /// Meaning is shared among participants of one execution group.
+    /// Meaning may be consumed only by participants of one exact execution group.
     ExecutionGroup(ExecutionGroupId),
-    /// Meaning is not restricted to one current execution group.
+    /// Meaning may be consumed by any otherwise-admitted logical consumer.
     Global,
 }
 
-/// Static upper bound declared by a provider independently of any live execution identity.
+/// Static semantic-scope upper bound declared independently of live execution identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryScopeLimit {
-    /// Provider outputs may only remain local.
+    /// Provider outputs may only be consumed within their owning node.
     Local,
     /// Provider outputs may use any supported Memory scope.
     Global,
@@ -84,13 +93,15 @@ impl<'de> Deserialize<'de> for MemoryScopeLimit {
     }
 }
 
-/// Declares whether catalog discovery also permits content exchange.
+/// Declares catalog discovery and content-exchange policy independently of semantic scope.
+///
+/// Visibility never broadens [`MemoryScope`] and does not assert node-local byte placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryVisibility {
     /// Metadata may be discovered but content is not offered for exchange.
     Discoverable,
-    /// Metadata and immutable content may be exchanged through the Artifact data plane.
+    /// Metadata is discoverable and immutable content may be exchanged, subject to scope.
     Exchangeable,
 }
 
@@ -200,7 +211,7 @@ impl Display for MemorySelector {
 pub enum MemoryOwner {
     /// A configured local system retains semantic ownership.
     Node {
-        /// Node through which the owner is discoverable.
+        /// Node hosting the semantic owner.
         node_id: NodeId,
         /// Actual local-system owner.
         local_system_id: LocalSystemId,
@@ -212,7 +223,10 @@ pub enum MemoryOwner {
     },
 }
 
-/// Resolved immutable bytes offered through the Artifact data plane.
+/// Content identity for immutable bytes offered through the Artifact data plane.
+///
+/// This reference proves neither a node-local provider import nor physical storage placement;
+/// those are represented by [`MemoryReplicaSnapshot`] evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryArtifactRef {
     /// Content-addressed immutable bytes.
@@ -250,9 +264,9 @@ pub struct MemoryProviderDescriptor {
     local_system_id: LocalSystemId,
     /// Memory kind exposed by this provider declaration.
     kind: MemoryKind,
-    /// Static provider maximum without a live execution identity.
+    /// Static semantic-scope maximum without a live execution identity.
     scope: MemoryScopeLimit,
-    /// Maximum discovery/exchange visibility offered by the provider.
+    /// Maximum discovery/exchange policy offered by the provider.
     visibility: MemoryVisibility,
     /// Versioned manifest payload schema produced or consumed by this provider.
     payload_schema: String,
@@ -304,7 +318,7 @@ impl MemoryProviderDescriptor {
         self.kind
     }
 
-    /// Returns the static provider maximum without carrying a runtime group identity.
+    /// Returns the static semantic-scope maximum without carrying a runtime group identity.
     pub const fn max_scope(&self) -> MemoryScopeLimit {
         self.scope
     }
@@ -420,15 +434,15 @@ pub struct MemoryArtifactManifest {
     provider_id: String,
     /// Semantic owner; discovery never transfers ownership.
     owner: MemoryOwner,
-    /// Intended sharing scope.
+    /// Semantic consumption scope, independent of discovery and placement.
     scope: MemoryScope,
-    /// Discovery and exchange policy.
+    /// Discovery and exchange policy, which cannot broaden semantic scope.
     visibility: MemoryVisibility,
     /// Versioned schema interpreting the Memory content or metadata.
     payload_schema: String,
     /// Media type of artifact content when present.
     media_type: String,
-    /// Optional content-addressed immutable bytes.
+    /// Optional shared Artifact content identity, not node-local placement evidence.
     artifact: Option<MemoryArtifactRef>,
     /// Optional Mission provenance.
     source_mission_id: Option<MissionId>,
@@ -546,7 +560,7 @@ impl MemoryArtifactManifest {
         &self.owner
     }
 
-    /// Returns the sharing scope.
+    /// Returns the semantic consumption scope.
     pub const fn scope(&self) -> &MemoryScope {
         &self.scope
     }
@@ -566,7 +580,7 @@ impl MemoryArtifactManifest {
         &self.media_type
     }
 
-    /// Returns immutable content metadata when the owner offers bytes for exchange.
+    /// Returns shared content identity when the owner offers bytes for exchange.
     pub const fn artifact(&self) -> Option<&MemoryArtifactRef> {
         self.artifact.as_ref()
     }
@@ -604,13 +618,15 @@ pub enum MemoryReplicaStatus {
     Rejected,
 }
 
-/// Rebuildable evidence of one node-local Memory replica.
+/// Rebuildable placement evidence for one provider-qualified node-local Memory replica.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryReplicaSnapshot {
     /// Immutable Memory revision represented by the replica.
     selector: MemorySelector,
-    /// Node that owns the local replica.
+    /// Node reporting this local placement lifecycle.
     node_id: NodeId,
+    /// Exact node-local provider whose placement attempt produced this evidence.
+    consumer_provider_id: String,
     /// Latest monotonic replica status.
     status: MemoryReplicaStatus,
     /// RoboGuide-local receive time of the latest evidence.
@@ -621,20 +637,26 @@ pub struct MemoryReplicaSnapshot {
 
 impl MemoryReplicaSnapshot {
     /// Creates a replica snapshot projected from accepted evidence.
-    pub const fn new(
+    pub fn new(
         selector: MemorySelector,
         node_id: NodeId,
+        consumer_provider_id: impl Into<String>,
         status: MemoryReplicaStatus,
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DomainError> {
+        let consumer_provider_id = consumer_provider_id.into();
+        if consumer_provider_id != LEGACY_MEMORY_CONSUMER_PROVIDER_ID {
+            validate_identifier(&consumer_provider_id, "Memory consumer provider id")?;
+        }
+        Ok(Self {
             selector,
             node_id,
+            consumer_provider_id,
             status,
             observed_at,
             rejection_reason,
-        }
+        })
     }
 
     /// Returns the immutable Memory selector.
@@ -642,9 +664,14 @@ impl MemoryReplicaSnapshot {
         &self.selector
     }
 
-    /// Returns the node that owns the replica.
+    /// Returns the node reporting this local placement lifecycle.
     pub const fn node_id(&self) -> &NodeId {
         &self.node_id
+    }
+
+    /// Returns the exact node-local provider represented by this placement evidence.
+    pub fn consumer_provider_id(&self) -> &str {
+        &self.consumer_provider_id
     }
 
     /// Returns the latest replica lifecycle.
@@ -698,9 +725,9 @@ fn invalid_memory(reason: impl Into<String>) -> DomainError {
 mod tests {
     use super::*;
 
-    /// Discoverable metadata may remain local without advertising bytes.
+    /// Local scope and discoverable visibility are independent and need no shared bytes.
     #[test]
-    fn discoverable_memory_can_be_metadata_only() {
+    fn local_discoverable_memory_can_be_metadata_only() {
         let manifest = MemoryArtifactManifest::new(
             MemorySelector::new(
                 MemoryId::new("experience-a").expect("memory id should be valid"),
@@ -723,6 +750,8 @@ mod tests {
             TimestampMs::new(1),
         )
         .expect("metadata-only manifest should be valid");
+        assert_eq!(manifest.scope(), &MemoryScope::Local);
+        assert_eq!(manifest.visibility(), MemoryVisibility::Discoverable);
         assert!(manifest.artifact().is_none());
     }
 
@@ -1022,5 +1051,51 @@ mod tests {
             ),
             Err(DomainError::InvalidMemory { .. })
         ));
+    }
+
+    /// Local exchange may change provider placement while remaining on the semantic owner Node.
+    #[test]
+    fn provider_admits_same_node_local_import_into_another_provider() {
+        let owner_node = NodeId::new("dog-a").expect("owner node id should be valid");
+        let provider = MemoryProviderDescriptor::new(
+            "consumer",
+            LocalSystemId::new("memory-b").expect("local system id should be valid"),
+            MemoryKind::Experience,
+            MemoryScopeLimit::Global,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+        )
+        .expect("provider should be valid");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("local-lesson").expect("memory id should be valid"),
+                MemoryRevisionId::new("r1").expect("revision id should be valid"),
+            ),
+            MemoryKind::Experience,
+            "producer",
+            MemoryOwner::Node {
+                node_id: owner_node.clone(),
+                local_system_id: LocalSystemId::new("memory-a")
+                    .expect("local system id should be valid"),
+            },
+            MemoryScope::Local,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("a".repeat(64)).expect("digest should be valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest should be valid");
+
+        provider
+            .admit_import(&manifest, &owner_node)
+            .expect("another provider on the owner Node may import Local Memory");
     }
 }

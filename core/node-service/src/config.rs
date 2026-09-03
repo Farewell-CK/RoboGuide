@@ -105,7 +105,7 @@ pub struct MemoryProviderConfig {
     pub payload_schema: String,
     /// Content media type when the provider offers Artifact-backed bytes.
     pub media_type: String,
-    /// Optional provider-local storage root, resolved below the node state directory.
+    /// Optional Node ledger/reference-backend root, resolved below the node state directory.
     #[serde(default)]
     pub storage_directory: Option<std::path::PathBuf>,
     /// Optional provider-local discovery workflow.
@@ -126,7 +126,10 @@ pub struct MemoryWorkflowConfig {
     /// Ordered local driver steps; repeated immutable selectors must be idempotent.
     #[serde(default)]
     pub steps: Vec<WorkflowStepConfig>,
-    /// JSON Pointer to an array of manifests in the final response (discover only).
+    /// JSON Pointer to the provider-authorized publish-eligible manifest set (discover only).
+    ///
+    /// The response must contain only immutable Memory that this provider has explicitly
+    /// authorized RoboGuide to publish. It is not an enumeration of all Local EAIOS Memory.
     #[serde(default)]
     pub manifests_pointer: Option<String>,
     /// JSON Pointer to a provider-storage-relative artifact path (export only).

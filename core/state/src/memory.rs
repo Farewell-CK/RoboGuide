@@ -1,4 +1,4 @@
-//! Rebuildable catalog projection for generic Memory manifests and replicas.
+//! Rebuildable catalog projection for generic Memory manifests and placement evidence.
 
 use domain::{
     EventPayload, EventRecord, MemoryArtifactManifest, MemoryReplicaSnapshot, MemoryReplicaStatus,
@@ -8,12 +8,15 @@ use ports::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
 use std::collections::BTreeMap;
 
 /// Generic Memory metadata projection; immutable content remains in Artifact storage.
+///
+/// Manifest scope and visibility remain semantic policy. Replica snapshots are accepted evidence
+/// of provider-local placement and do not change either manifest property.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryCatalogProjection {
     /// Immutable manifests in deterministic selector order.
     manifests: BTreeMap<MemorySelector, MemoryArtifactManifest>,
-    /// Per-node exchange evidence in deterministic selector and node order.
-    replicas: BTreeMap<MemorySelector, BTreeMap<NodeId, MemoryReplicaSnapshot>>,
+    /// Per-provider exchange evidence in deterministic selector, node, and provider order.
+    replicas: BTreeMap<MemorySelector, BTreeMap<(NodeId, String), MemoryReplicaSnapshot>>,
 }
 
 impl MemoryCatalogProjection {
@@ -64,11 +67,12 @@ impl MemoryCatalogProjection {
         Ok(())
     }
 
-    /// Applies one node-local replica update after validating manifest identity and ordering.
+    /// Applies one provider-local replica update after validating manifest identity and ordering.
     fn set_replica(
         &mut self,
         manifest: &MemoryArtifactManifest,
         node_id: &NodeId,
+        consumer_provider_id: &str,
         status: MemoryReplicaStatus,
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
@@ -91,19 +95,20 @@ impl MemoryCatalogProjection {
                 manifest.selector()
             )));
         }
+        let identity = (node_id.clone(), consumer_provider_id.to_string());
         if let Some(current) = self
             .replicas
             .get(manifest.selector())
-            .and_then(|replicas| replicas.get(node_id))
+            .and_then(|replicas| replicas.get(&identity))
         {
             if observed_at < current.observed_at() {
                 return Err(MemoryCatalogError::InvalidReplicaTransition(format!(
-                    "older replica evidence for node {node_id}"
+                    "older replica evidence for node {node_id} provider {consumer_provider_id}"
                 )));
             }
             if !valid_transition(current.status(), status) {
                 return Err(MemoryCatalogError::InvalidReplicaTransition(format!(
-                    "cannot move node {node_id} from {:?} to {status:?}",
+                    "cannot move node {node_id} provider {consumer_provider_id} from {:?} to {status:?}",
                     current.status()
                 )));
             }
@@ -112,23 +117,23 @@ impl MemoryCatalogProjection {
             MemoryReplicaStatus::Staged | MemoryReplicaStatus::Rejected
         ) {
             return Err(MemoryCatalogError::InvalidReplicaTransition(format!(
-                "node {node_id} must stage {} before import",
+                "node {node_id} provider {consumer_provider_id} must stage {} before import",
                 manifest.selector()
             )));
         }
+        let snapshot = MemoryReplicaSnapshot::new(
+            manifest.selector().clone(),
+            node_id.clone(),
+            consumer_provider_id,
+            status,
+            observed_at,
+            rejection_reason,
+        )
+        .map_err(|error| MemoryCatalogError::InvalidReplicaTransition(error.to_string()))?;
         self.replicas
             .entry(manifest.selector().clone())
             .or_default()
-            .insert(
-                node_id.clone(),
-                MemoryReplicaSnapshot::new(
-                    manifest.selector().clone(),
-                    node_id.clone(),
-                    status,
-                    observed_at,
-                    rejection_reason,
-                ),
-            );
+            .insert(identity, snapshot);
         Ok(())
     }
 }
@@ -144,7 +149,7 @@ impl MemoryCatalogReader for MemoryCatalogProjection {
         self.manifests.values().cloned().collect()
     }
 
-    /// Returns node-local replicas in deterministic node order.
+    /// Returns provider-local replicas in deterministic node/provider order.
     fn memory_replicas(&self, selector: &MemorySelector) -> Vec<MemoryReplicaSnapshot> {
         self.replicas
             .get(selector)
@@ -167,16 +172,26 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
     ) -> Result<(), MemoryCatalogError> {
         match payload {
             EventPayload::MemoryManifestPublished { manifest } => self.publish(manifest),
-            EventPayload::MemoryArtifactStaged { manifest, node_id } => self.set_replica(
+            EventPayload::MemoryArtifactStaged {
                 manifest,
                 node_id,
+                consumer_provider_id,
+            } => self.set_replica(
+                manifest,
+                node_id,
+                consumer_provider_id,
                 MemoryReplicaStatus::Staged,
                 timestamp,
                 None,
             ),
-            EventPayload::MemoryArtifactImported { manifest, node_id } => self.set_replica(
+            EventPayload::MemoryArtifactImported {
                 manifest,
                 node_id,
+                consumer_provider_id,
+            } => self.set_replica(
+                manifest,
+                node_id,
+                consumer_provider_id,
                 MemoryReplicaStatus::Imported,
                 timestamp,
                 None,
@@ -184,10 +199,12 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
             EventPayload::MemoryArtifactRejected {
                 manifest,
                 node_id,
+                consumer_provider_id,
                 reason,
             } => self.set_replica(
                 manifest,
                 node_id,
+                consumer_provider_id,
                 MemoryReplicaStatus::Rejected,
                 timestamp,
                 Some(reason.clone()),
@@ -269,6 +286,7 @@ mod tests {
                 &EventPayload::MemoryArtifactStaged {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             )
             .expect("staging should apply");
@@ -278,6 +296,7 @@ mod tests {
                 &EventPayload::MemoryArtifactImported {
                     manifest: manifest.clone(),
                     node_id,
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             )
             .expect("import should apply");
@@ -285,6 +304,10 @@ mod tests {
         assert_eq!(
             projection.memory_replicas(manifest.selector())[0].status(),
             MemoryReplicaStatus::Imported
+        );
+        assert_eq!(
+            projection.memory_replicas(manifest.selector())[0].consumer_provider_id(),
+            "execution-consumer"
         );
     }
 
@@ -307,6 +330,7 @@ mod tests {
                 &EventPayload::MemoryArtifactImported {
                     manifest,
                     node_id: NodeId::new("dog-b").expect("node should be valid"),
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             ),
             Err(MemoryCatalogError::InvalidReplicaTransition(_))
@@ -331,6 +355,7 @@ mod tests {
                 EventPayload::MemoryArtifactStaged {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             ),
             (
@@ -338,6 +363,7 @@ mod tests {
                 EventPayload::MemoryArtifactImported {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             ),
         ] {
@@ -351,6 +377,7 @@ mod tests {
                 &EventPayload::MemoryArtifactRejected {
                     manifest,
                     node_id,
+                    consumer_provider_id: "execution-consumer".to_string(),
                     reason: "later request was invalid".to_string(),
                 },
             ),
@@ -394,9 +421,70 @@ mod tests {
                 &EventPayload::MemoryArtifactStaged {
                     manifest: discoverable,
                     node_id: NodeId::new("dog-b").expect("node id should be valid"),
+                    consumer_provider_id: "execution-consumer".to_string(),
                 },
             ),
             Err(MemoryCatalogError::InvalidReplicaTransition(_))
         ));
+    }
+
+    /// Two providers on one Node retain independent lifecycle and deterministic identity.
+    #[test]
+    fn projection_isolates_replicas_by_consumer_provider() {
+        let manifest = manifest();
+        let node_id = NodeId::new("dog-b").expect("node should be valid");
+        let mut projection = MemoryCatalogProjection::new();
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(1),
+                &EventPayload::MemoryManifestPublished {
+                    manifest: manifest.clone(),
+                },
+            )
+            .expect("manifest should publish");
+        for (timestamp, provider_id) in [(2, "archive-a"), (3, "archive-b")] {
+            projection
+                .apply_memory_payload(
+                    TimestampMs::new(timestamp),
+                    &EventPayload::MemoryArtifactStaged {
+                        manifest: manifest.clone(),
+                        node_id: node_id.clone(),
+                        consumer_provider_id: provider_id.to_string(),
+                    },
+                )
+                .expect("each provider should stage independently");
+        }
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(4),
+                &EventPayload::MemoryArtifactImported {
+                    manifest: manifest.clone(),
+                    node_id,
+                    consumer_provider_id: "archive-a".to_string(),
+                },
+            )
+            .expect("one provider should import independently");
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(5),
+                &EventPayload::MemoryArtifactRejected {
+                    manifest: manifest.clone(),
+                    node_id: NodeId::new("dog-b").expect("node should be valid"),
+                    consumer_provider_id: "archive-b".to_string(),
+                    reason: "provider-local rejection".to_string(),
+                },
+            )
+            .expect("the other provider should reject independently");
+
+        let replicas = projection.memory_replicas(manifest.selector());
+        assert_eq!(replicas.len(), 2);
+        assert_eq!(replicas[0].consumer_provider_id(), "archive-a");
+        assert_eq!(replicas[0].status(), MemoryReplicaStatus::Imported);
+        assert_eq!(replicas[1].consumer_provider_id(), "archive-b");
+        assert_eq!(replicas[1].status(), MemoryReplicaStatus::Rejected);
+        assert_eq!(
+            replicas[1].rejection_reason(),
+            Some("provider-local rejection")
+        );
     }
 }

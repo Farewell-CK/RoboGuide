@@ -207,7 +207,7 @@ pub struct CompiledMemoryProvider {
     media_type: String,
     /// Whether node-config/v0.6 enables local backend operations.
     operational: bool,
-    /// Provider-local storage root.
+    /// Node ledger, controlled export handoff, and reference-backend root.
     storage_directory: PathBuf,
     /// Optional discovery workflow.
     discover: Option<CompiledMemoryWorkflow>,
@@ -222,7 +222,7 @@ pub struct CompiledMemoryProvider {
 pub struct CompiledMemoryWorkflow {
     /// Ordered local driver steps.
     steps: Vec<CompiledWorkflowStep>,
-    /// Optional response pointer to discovered manifests.
+    /// Optional response pointer to the provider-authorized publish-eligible manifest set.
     manifests_pointer: Option<String>,
     /// Optional response pointer to an exported artifact path.
     artifact_path_pointer: Option<String>,
@@ -870,12 +870,12 @@ impl CompiledMemoryProvider {
         &self.media_type
     }
 
-    /// Returns whether this provider has the v0.6 Local Memory Provider backend enabled.
+    /// Returns whether v0.6 enables the Node ledger and operational provider workflow facade.
     pub const fn operational(&self) -> bool {
         self.operational
     }
 
-    /// Returns the provider-local storage root.
+    /// Returns the Node ledger and workflow-free reference-backend root.
     pub fn storage_directory(&self) -> &Path {
         &self.storage_directory
     }
@@ -1784,7 +1784,7 @@ fn compile_memory_providers(
                     && !existing.starts_with(&storage_directory)
             }),
             format!("memory_providers.{}.storage_directory", config.id),
-            "must not equal, contain, or be contained by another provider storage root",
+            "must not equal, contain, or be contained by another Memory ledger root",
         )?;
         storage_roots.insert(storage_directory.clone());
         let discover = compile_memory_workflow(
@@ -3119,7 +3119,7 @@ mod tests {
         });
     }
 
-    /// v0.6 compiles provider-owned storage and all three fixed-route Memory workflows.
+    /// v0.6 compiles the Node ledger/handoff root and all fixed EAIOS Memory workflows.
     #[test]
     fn compiles_v0_6_memory_provider_workflows() {
         let directory = tempfile::tempdir().expect("temporary directory exists");
@@ -3270,8 +3270,8 @@ mod tests {
 
     /// The reference backend is local, idempotent, and queryable without central replication.
     #[test]
-    fn filesystem_memory_provider_round_trips_jsonl_metadata() {
-        use crate::{FilesystemMemoryProvider, LocalMemoryProvider, MemoryQuery};
+    fn filesystem_memory_ledger_round_trips_jsonl_metadata() {
+        use crate::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryQuery};
         use domain::{
             ContentDigest, LocalSystemId, MemoryArtifactManifest, MemoryArtifactRef, MemoryId,
             MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope, MemorySelector,
@@ -3293,7 +3293,7 @@ mod tests {
             export: None,
             import: None,
         };
-        let provider = FilesystemMemoryProvider::open(descriptor.clone()).expect("provider opens");
+        let ledger = FilesystemMemoryLedger::open(descriptor.clone()).expect("ledger opens");
         let manifest = MemoryArtifactManifest::new(
             MemorySelector::new(
                 MemoryId::new("map-a").expect("memory id is valid"),
@@ -3319,12 +3319,12 @@ mod tests {
             TimestampMs::new(1),
         )
         .expect("manifest is valid");
-        provider.export(&manifest).expect("manifest exports");
-        provider
-            .export(&manifest)
-            .expect("same export is idempotent");
-        let found = provider
-            .discover(&MemoryQuery {
+        ledger.record_export(&manifest).expect("manifest records");
+        ledger
+            .record_export(&manifest)
+            .expect("same record is idempotent");
+        let found = ledger
+            .discover_recorded(&MemoryQuery {
                 selector: Some(manifest.selector().clone()),
                 kind: Some(MemoryKind::Spatial),
                 scope: Some(MemoryScope::Global),
@@ -3332,17 +3332,67 @@ mod tests {
                 payload_schema: Some("example.map/v1".to_string()),
                 owner: Some(manifest.owner().clone()),
             })
-            .expect("manifest discovers");
+            .expect("recorded manifest discovers");
         assert_eq!(found, vec![manifest.clone()]);
         std::fs::remove_file(descriptor.storage_directory().join("manifests.jsonl"))
             .expect("derived index removes");
-        drop(provider);
-        let reopened = FilesystemMemoryProvider::open(descriptor).expect("provider reopens");
+        drop(ledger);
+        let ledger_root = descriptor.storage_directory().to_path_buf();
+        let reopened = FilesystemMemoryLedger::open(descriptor).expect("ledger reopens");
         assert_eq!(
             reopened
-                .discover(&MemoryQuery::default())
-                .expect("index rebuilds from semantic objects"),
+                .discover_recorded(&MemoryQuery::default())
+                .expect("index rebuilds from ledger objects"),
             vec![manifest]
+        );
+
+        let reference_manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("map-b").expect("memory id is valid"),
+                MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            MemoryKind::Spatial,
+            "remote-maps",
+            MemoryOwner::Node {
+                node_id: NodeId::new("node-b").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("maps").expect("system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.map/v1",
+            "application/octet-stream",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("b".repeat(64)).expect("digest is valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(2),
+        )
+        .expect("reference manifest is valid");
+        assert!(matches!(
+            reopened.record_import(&reference_manifest, None),
+            Err(crate::MemoryLedgerError::Configuration(_))
+        ));
+        let staged = directory.path().join("staged-map.bin");
+        std::fs::write(&staged, b"b").expect("staged reference bytes write");
+        reopened
+            .record_import(&reference_manifest, Some(&staged))
+            .expect("workflow-free reference backend imports bytes");
+        let reference_blob = format!(
+            "{}.blob",
+            reference_manifest
+                .artifact()
+                .expect("reference manifest carries bytes")
+                .content_digest()
+                .as_str()
+                .replace(':', "_")
+        );
+        assert_eq!(
+            std::fs::read(ledger_root.join(reference_blob))
+                .expect("reference bytes remain available"),
+            b"b"
         );
     }
 

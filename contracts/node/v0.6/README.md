@@ -15,18 +15,29 @@ readiness, execution lifecycle, or recovery; the last accepted record instead be
 Each `memory_providers` entry declares local ownership, one of the Execution, Spatial, Semantic,
 Experience, or Artifact kinds, maximum local/global scope, discoverable/exchangeable visibility,
 payload schema, and media type. Optional `discover`, `export`, and `import` steps use the same
-startup-fixed HTTP, dynamic gRPC, or MCP routes as capability workflows. The reference provider
-keeps immutable semantic manifest objects in a provider-local filesystem and rebuilds a JSONL
-metadata index from them; another EAIOS may retain any internal representation. Exchangeable
-content uses the existing digest-verified Artifact data plane;
+startup-fixed HTTP, dynamic gRPC, or MCP routes as capability workflows. Those workflows form the
+Local Memory Provider integration boundary; the real EAIOS retains semantic and backend-storage
+authority and may use any internal representation. The `discover` workflow response is the exact
+provider-authorized publish-eligible manifest set, not all Memory known to the Local EAIOS.
+
+Every operational v0.6 declaration also has a RoboGuide Node-side filesystem manifest ledger for
+idempotency and deterministic fallback discovery. It stores immutable manifest objects and rebuilds
+a JSONL metadata index from them. When a real import workflow is configured, a successful import
+records only the manifest in this ledger and does not create a second payload copy. If an operation
+has no workflow, the same component acts as the reference backend fallback and may retain bytes.
+The configured `storage_directory` names this Node ledger, controlled export handoff, and reference
+fallback, never the EAIOS store.
+Exchangeable content uses the existing digest-verified Artifact data plane;
 discoverable records may be metadata-only.
-`discover` alone returns a manifest array pointer, `export` alone may return a provider-relative
+`discover` alone returns a manifest array pointer, `export` alone may return a handoff-relative
 artifact path pointer, and `import` has no result pointer; incompatible combinations fail startup
 validation.
 
 Provider scope is a static upper bound. A concrete `ExecutionGroup` scope is taken only from a live
 execution operation and must match its `group_id`; it is never node configuration. Discovery is
-provider-local and deterministic. Publishing is proactive, while import is selective and records
+provider-local and deterministic. Node Service only validates and mechanically publishes the set
+returned by that provider; it does not promote or select additional Memory. Publishing is proactive,
+while import is selective and records
 staged/imported/rejected catalog evidence without changing Runtime or Task lifecycle.
 An export workflow returns only a traversal-free path relative to its configured provider storage
 root; it cannot select an arbitrary host file.
@@ -36,10 +47,13 @@ workflow must not create a second semantic Memory revision or duplicate non-idem
 The public selective-import path always verifies Artifact digest and size before invoking the
 provider workflow. A retry first checks the provider-owned immutable selector, so a completed local
 import is not repeated merely to reconstruct transfer state. Each replica mutation names the exact
-local consumer provider, and accepted evidence cannot regress from Imported to Rejected.
+local consumer provider; durable identity and idempotency are scoped by revision, Node, and provider,
+and accepted evidence cannot regress from Imported to Rejected.
 
-Conformance reports `local_backend` and `shared_data_plane` independently. Workflow declarations
-without a shared Artifact/catalog endpoint remain inspectable local metadata, not a claim that
+For v0.1 wire compatibility, conformance still reports the Node ledger/reference-fallback capability
+as `local_backend`; it does not assert Local EAIOS authority. The separate workflow flags report
+configured EAIOS operation routes, and `shared_data_plane` reports Artifact/catalog availability.
+Workflow declarations without a shared endpoint remain inspectable local metadata, not a claim that
 publication or exchange can run.
 Consumer selection and a durable Controller-to-Node import command remain outside Protocol v0.3;
 the node never turns discovery into implicit full replication.

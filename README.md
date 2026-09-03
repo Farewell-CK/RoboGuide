@@ -2,7 +2,7 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
-当前架构 source of truth 是 [`RoboGuide_Architecture_Baseline_V2.docx`](docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx)。V2 描述系统职责、协议语义、关键闭环和架构约束，但不固化 Schema、API、中间件或具体算法。V1.1 作为历史基线保留。
+当前架构 source of truth 是 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md) 及其引用的已接受 ADR。它们记录当前实现对应的职责、协议语义、关键闭环和架构约束；原始 [`RoboGuide_Architecture_Baseline_V2.docx`](docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx) 仅保留为最初 V2 基线快照，可能落后于后续演进。V1.1 作为历史基线保留。
 
 ## V2 总体架构
 
@@ -15,6 +15,10 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 RoboGuide 统一感知系统状态、物理世界状态和具身能力状态，并联合调度 Capability、Compute、Space、Time，使机器人、感知设备、交互终端、边缘算力和基础设施节点能够持续完成复杂现实任务。
 
 它不是单纯的多机器人 Scheduler，也不以中央控制替代节点本地自治。RoboGuide 持续管理资源抽象、状态、任务与执行生命周期、跨节点协调以及故障恢复。
+
+State & Memory Plane 中，Memory Scope（语义消费边界）、Visibility（发现/交换策略）与
+Placement（Node/provider 本地副本证据）彼此独立；例如 `Local + Discoverable` 允许共享目录发现，
+但不允许跨 Node 消费内容。Artifact 引用只标识不可变 bytes，不代表本地 provider 已导入。
 
 ### 前期 MVP
 
@@ -328,7 +332,9 @@ State 和声明 channel 读取，Derived 从 Runtime/Orchestration projection �
 Artifact 五类 immutable Memory revision 都可以发布和发现；owner 保持在本地系统或明确的
 RoboGuide component。Discoverable 可只暴露 metadata，Exchangeable 必须引用现有 Artifact
 CAS 中通过 digest/size 校验的 bytes。Consumer 显式选择 revision 并记录
-Staged/Imported/Rejected evidence，不做全量复制或 P2P。合同见
+Staged/Imported/Rejected evidence；replica durable identity 保留 exact
+`(MemorySelector, NodeId, ConsumerProviderId)`，同一 Node 的多个 Local EAIOS 不会互相覆盖。
+系统不做全量复制或 P2P。合同见
 [`contracts/state/v0.1`](contracts/state/v0.1/README.md)、
 [`contracts/memory/v0.1`](contracts/memory/v0.1/README.md) 和
 [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
@@ -339,6 +345,12 @@ Execution/Task/Group 历史 projection、多 Controller replication/HA、访问�
 selective-import command 仍未实现。通用 Node Memory provider workflow、filesystem/JSONL 参考
 backend 和显式 data-plane CAS exchange operation 已由 ADR-0025 实现；Node 不会因为 discovery
 结果自动复制 Memory。
+
+这里的 Local Memory Provider 是统一操作合同：配置的 HTTP/gRPC/MCP workflow 把调用交给真实
+EAIOS，EAIOS 保留 Memory semantic 与 backend storage authority。Node 内部
+`FilesystemMemoryLedger` 只保存用于幂等和发现的 immutable manifest，并由这些对象重建 JSONL
+index；只有未配置相应 workflow 时，它才作为 reference backend fallback 保留 payload bytes。
+`storage_directory` 因此不是 EAIOS 数据库或厂商存储路径。
 
 当前新增 **State & Memory Plane — Distributed Spatial Memory v0.1**：地图以不可变
 `MapId`/`MapRevisionId` + SHA-256 digest manifest 形式记录在 Catalog projection，bytes 由

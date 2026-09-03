@@ -84,7 +84,7 @@ reference transport 和 configured command bridge 已
 | Artifact Store | filesystem CAS、digest/path safety、分块上传和端口实现 | Map/Task/Group 状态、Control commitment、设备 workflow |
 | Integration | formal gRPC Node Protocol、session/lease fencing、Node router 和 wire conversion | Control/State/Runtime composition、Local How 与调度选择 |
 | Controller composition | `core/orchestration` 中把 Node Protocol facts 接到 Control/State/Runtime 的 bridge | transport framing、Local EAIOS endpoint 或 reservation policy |
-| Node Service | 单一节点服务、声明式 Local Integration Engine 和 durable journal | 每种 EAIOS 的代码插件或独立 RoboGuide 服务 |
+| Node Service | 单一节点服务、声明式 Local Integration Engine、durable journal 与 Memory manifest ledger/reference fallback | 每种 EAIOS 的代码插件、真实 EAIOS Memory semantic/storage authority 或独立 RoboGuide 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
 | Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | Node assignment、Commit、Group/Runtime execution lifecycle |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
@@ -354,7 +354,20 @@ node/local-system 或 RoboGuide owner、Local/ExecutionGroup/Global scope、
 Discoverable/Exchangeable visibility、schema、media type、provenance 和可选 Artifact ref。
 Discoverable 允许 metadata-only；Exchangeable 必须引用已经由 filesystem CAS 重验 digest
 和 size 的 bytes。replica mutation 由 exact consumer provider 做 admission，只允许 Staged 后
-Imported/Rejected 的保守 evidence 转换；Imported 不可回退为 Rejected。
+Imported/Rejected 的保守 evidence 转换；durable key 为
+`(MemorySelector, NodeId, ConsumerProviderId)`，Imported 不可回退为 Rejected。
+
+Local Memory Provider 是由声明和可选 HTTP/gRPC/MCP workflow 实现的统一操作合同。真实 EAIOS
+保留 semantic/storage authority；`LocalMemoryLedger` 只记录 workflow 成功后的 immutable manifest，
+用于幂等和 fallback discovery，`FilesystemMemoryLedger` 的 JSONL index 可由 manifest objects
+重建。配置真实 import workflow 时 ledger 不复制 payload bytes；缺少 workflow 时它才作为
+reference backend fallback。`storage_directory` 只是 ledger/fallback 与受控 export handoff root，
+不得解释为 EAIOS backend path。
+
+实现和 API 不得混淆 Scope、Visibility 与 Placement：Scope 是 logical consumer boundary，
+Visibility 是 discovery/exchange policy，Placement 只来自 provider-qualified replica evidence。
+`Local + Discoverable` 必须可发布和查询但不可跨 Node import；Artifact ref 不得被解释为某个
+Node/provider 已完成 staging 或 import，也不暴露 provider 内部物理路径。
 
 Controller 的 `/v1/memory/providers` 发现声明 owner；Artifact HTTP 提供通用
 publish/list/detail/replica endpoints，五类 Memory 共用一套目录语义。
@@ -385,9 +398,10 @@ staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 sym
 
 `core/state::SqliteEventLog` 提供 SQLite WAL-backed immutable event envelope。它保存
 `event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
-和 `domain.EventPayload.json/v6` 版本化 JSON payload，供 Integration Server 的事件查询使用；
-读取路径保留 v2-v5 兼容。v6 增加 source-aware State 与 generic Memory catalog/replica
-evidence；v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
+和 `domain.EventPayload.json/v7` 版本化 JSON payload，供 Integration Server 的事件查询使用；
+读取路径保留 v2-v6 兼容。v7 为 generic Memory replica 补充 consumer provider identity，缺少
+该字段的 v6 历史 evidence 保守归入 reserved legacy bucket；v6 增加 source-aware State 与 generic
+Memory catalog/replica evidence，v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
 外层 `roboguide.controller-checkpoint/v10` 包含内层 v9
 Control/Shared Node/State records/Runtime projection；

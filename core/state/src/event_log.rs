@@ -27,8 +27,11 @@ const EVENT_PAYLOAD_SCHEMA_V4: &str = "domain.EventPayload.json/v4";
 /// Current JSON payload codec including execution coordination relation evidence.
 const EVENT_PAYLOAD_SCHEMA_V5: &str = "domain.EventPayload.json/v5";
 
-/// Current JSON payload codec including source-aware State and generic Memory evidence.
+/// JSON payload codec including source-aware State and generic Memory evidence.
 const EVENT_PAYLOAD_SCHEMA_V6: &str = "domain.EventPayload.json/v6";
+
+/// Current JSON payload codec including provider-qualified generic Memory replica identity.
+const EVENT_PAYLOAD_SCHEMA_V7: &str = "domain.EventPayload.json/v7";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -454,6 +457,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V4 => Ok(4),
         EVENT_PAYLOAD_SCHEMA_V5 => Ok(5),
         EVENT_PAYLOAD_SCHEMA_V6 => Ok(6),
+        EVENT_PAYLOAD_SCHEMA_V7 => Ok(7),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -467,11 +471,33 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
-        EventPayload::StateRecordObserved { .. }
-        | EventPayload::MemoryManifestPublished { .. }
-        | EventPayload::MemoryArtifactStaged { .. }
-        | EventPayload::MemoryArtifactImported { .. }
-        | EventPayload::MemoryArtifactRejected { .. } => 6,
+        EventPayload::MemoryArtifactStaged {
+            consumer_provider_id,
+            ..
+        }
+        | EventPayload::MemoryArtifactImported {
+            consumer_provider_id,
+            ..
+        }
+        | EventPayload::MemoryArtifactRejected {
+            consumer_provider_id,
+            ..
+        } => {
+            if consumer_provider_id == domain::LEGACY_MEMORY_CONSUMER_PROVIDER_ID {
+                if version >= 7 {
+                    return Err(SqliteEventLogError::Codec(
+                        "event payload schema v7 requires Memory consumer provider identity"
+                            .to_string(),
+                    ));
+                }
+                6
+            } else {
+                7
+            }
+        }
+        EventPayload::StateRecordObserved { .. } | EventPayload::MemoryManifestPublished { .. } => {
+            6
+        }
         EventPayload::ExecutionRelationRegistered { .. }
         | EventPayload::ExecutionRelationStateChanged { .. }
         | EventPayload::ExecutionRelationReconciliationRequired { .. } => 5,
@@ -555,7 +581,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V6,
+                    EVENT_PAYLOAD_SCHEMA_V7,
                     payload_json,
                 ],
             )
@@ -644,10 +670,13 @@ mod tests {
     use domain::{
         ContentDigest, CorrelationId, EventPayload, ExecutionGroupId, LocalSystemId,
         LocalizationFrames, LocalizationVerificationEvidence, MapArtifactManifest, MapArtifactRef,
-        MapId, MapRevisionId, MapRevisionSelector, MissionId, NodeId, PoseQualityComparison,
-        PoseQualityEvidence, RoleId, SpatialAnchorId, StateObjectClass, StateObjectRef,
-        StateRecord, StateSemantic, StateSource, TaskId, TaskRef, TimestampMs,
+        MapId, MapRevisionId, MapRevisionSelector, MemoryArtifactManifest, MemoryArtifactRef,
+        MemoryId, MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope, MemorySelector,
+        MemoryVisibility, MissionId, NodeId, PoseQualityComparison, PoseQualityEvidence, RoleId,
+        SpatialAnchorId, StateObjectClass, StateObjectRef, StateRecord, StateSemantic, StateSource,
+        TaskId, TaskRef, TimestampMs,
     };
+    use ports::MemoryCatalogReader;
     use tempfile::tempdir;
 
     /// Builds one valid map manifest shared by payload-version compatibility tests.
@@ -758,6 +787,44 @@ mod tests {
         }
     }
 
+    /// Builds one generic exchangeable Memory manifest for v6/v7 compatibility tests.
+    fn generic_memory_manifest() -> MemoryArtifactManifest {
+        MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("history-a").expect("Memory id is valid"),
+                MemoryRevisionId::new("r1").expect("Memory revision is valid"),
+            ),
+            MemoryKind::Execution,
+            "history-producer",
+            MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("producer Node id is valid"),
+                local_system_id: LocalSystemId::new("history").expect("local system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.history/v1",
+            "application/json",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("b".repeat(64)).expect("digest is valid"),
+                10,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(50),
+        )
+        .expect("Memory manifest is valid")
+    }
+
+    /// Builds one v7 provider-qualified replica payload.
+    fn memory_replica_payload(consumer_provider_id: &str) -> EventPayload {
+        EventPayload::MemoryArtifactStaged {
+            manifest: generic_memory_manifest(),
+            node_id: NodeId::new("dog-b").expect("consumer Node id is valid"),
+            consumer_provider_id: consumer_provider_id.to_string(),
+        }
+    }
+
     /// WAL storage survives reopening and preserves causal envelope fields.
     #[test]
     fn sqlite_event_log_survives_reopen() {
@@ -784,7 +851,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V6);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V7);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
@@ -941,6 +1008,132 @@ mod tests {
         assert!(matches!(
             log.decoded_events(),
             Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v6")
+        ));
+    }
+
+    /// v6 replica evidence replays into an explicit legacy provider bucket without guessing.
+    #[test]
+    fn event_decoder_migrates_v6_replica_without_provider_identity() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-memory-v6.sqlite3");
+        let correlation = CorrelationId::new("memory-v6").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        let manifest = generic_memory_manifest();
+        log.append(
+            TimestampMs::new(50),
+            &correlation,
+            None,
+            EventPayload::MemoryManifestPublished {
+                manifest: manifest.clone(),
+            },
+        );
+        log.append(
+            TimestampMs::new(51),
+            &correlation,
+            None,
+            memory_replica_payload("archive-a"),
+        );
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&log.events().expect("events are readable")[1].payload_json)
+                .expect("replica payload is JSON");
+        payload["MemoryArtifactStaged"]
+            .as_object_mut()
+            .expect("replica variant is an object")
+            .remove("consumer_provider_id");
+        let payload = serde_json::to_string(&payload).expect("legacy payload serializes");
+        let connection = log
+            .connection
+            .lock()
+            .expect("event connection lock is available");
+        connection
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V6],
+            )
+            .expect("manifest marker changes to v6");
+        connection
+            .execute(
+                "UPDATE events SET payload_schema = ?1, payload_json = ?2 WHERE sequence = 2",
+                rusqlite::params![EVENT_PAYLOAD_SCHEMA_V6, payload],
+            )
+            .expect("replica row becomes a historical v6 fixture");
+        drop(connection);
+
+        let decoded = log.decoded_events().expect("v6 Memory evidence decodes");
+        let projection = crate::MemoryCatalogProjection::from_events(decoded)
+            .expect("v6 Memory evidence replays");
+        let replicas = projection.memory_replicas(manifest.selector());
+        assert_eq!(replicas.len(), 1);
+        assert_eq!(
+            replicas[0].consumer_provider_id(),
+            domain::LEGACY_MEMORY_CONSUMER_PROVIDER_ID
+        );
+    }
+
+    /// A v6 marker cannot claim provider-qualified replica evidence introduced by codec v7.
+    #[test]
+    fn event_decoder_rejects_provider_qualified_replica_under_v6_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-memory-v7.sqlite3");
+        let correlation = CorrelationId::new("memory-v7").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(50),
+            &correlation,
+            None,
+            memory_replica_payload("archive-a"),
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V6],
+            )
+            .expect("fixture marker changes to v6");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v7")
+        ));
+    }
+
+    /// A v7 row cannot use the v6 migration default to conceal a missing provider identity.
+    #[test]
+    fn event_decoder_rejects_missing_provider_identity_under_v7_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory
+            .path()
+            .join("events-memory-v7-missing-provider.sqlite3");
+        let correlation = CorrelationId::new("memory-v7-missing").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(50),
+            &correlation,
+            None,
+            memory_replica_payload("archive-a"),
+        );
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&log.events().expect("events are readable")[0].payload_json)
+                .expect("replica payload is JSON");
+        payload["MemoryArtifactStaged"]
+            .as_object_mut()
+            .expect("replica variant is an object")
+            .remove("consumer_provider_id");
+        let payload = serde_json::to_string(&payload).expect("invalid v7 fixture serializes");
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_json = ?1 WHERE sequence = 1",
+                [payload],
+            )
+            .expect("fixture removes provider identity");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason))
+                if reason.contains("v7 requires Memory consumer provider identity")
         ));
     }
 

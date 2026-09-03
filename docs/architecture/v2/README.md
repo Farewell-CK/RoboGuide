@@ -176,16 +176,37 @@ Memory 与实时 State 分离。v0.1 支持 Execution、Spatial、Semantic、Exp
 owner、provider、visibility、schema、provenance、可选 CAS reference 和 node-local replica
 evidence，但不取得本地 Memory 的 semantic ownership。
 
-节点侧 `LocalMemoryProvider` 是类似 VFS 的统一语义边界。参考实现使用 provider-local filesystem
-与 JSONL metadata index；Index 可重建且不是新的 authority。Node 主动 export，消费者对明确
-revision 选择性 import。ExecutionGroup 是 manifest 的 live scope，由 ExecutionCommand 的逻辑
-`group_id` 注入并校验，不是 static provider config，因此 Node failure/rebind 不改变其语义。
+Scope、Visibility、Placement 必须分开解释：Scope 决定谁可语义消费；Visibility 决定 metadata
+发现和 content exchange policy；Placement 是哪个 Node/provider 已 staging/import 的 evidence。
+因此 `Local + Discoverable` 合法，其他 Node 可看到 metadata 但不可消费内容；Artifact reference
+只表示已验证的共享 CAS content identity/availability，不表示 Node-local placement。manifest owner
+是 semantic authority，实际副本由 `(NodeId, ConsumerProviderId, status)` evidence 表示。
+
+节点侧 Local Memory Provider 是类似 VFS 的统一操作合同，不是统一存储实现。配置的
+HTTP/dynamic gRPC/MCP workflow 是真实 EAIOS adapter boundary，真实 EAIOS 保留 Memory semantic
+和 backend-storage authority。Node 内部 `LocalMemoryLedger`/`FilesystemMemoryLedger` 只保存用于
+幂等与 fallback discovery 的 immutable manifest，并从中重建 JSONL index；真实 import workflow
+成功后 ledger 不复制 payload bytes。缺少 workflow 时同一 filesystem 组件才作为 reference
+backend fallback。配置的 `storage_directory` 只属于该 ledger/fallback 和受控 export handoff，
+不是 EAIOS 存储位置。
+
+其中 `discover` workflow 返回的是 provider 已授权 RoboGuide 发布的 publish-eligible
+immutable Memory 集合，不是 Local EAIOS 的全部 Memory。Node Service 只负责传递查询/上下文、
+做 manifest/scope 校验并执行 export、Artifact upload 和 publication mechanism，不拥有
+Memory promotion 或 sharing selection policy；未配置 workflow 时才使用已记录 manifest 的
+reference fallback。
+
+Node 主动 export，消费者对明确 revision 选择性 import。ExecutionGroup 是 manifest 的 live
+scope，由 invocation 的逻辑 `group_id` 做本地一致性校验，不是 static provider config；当前并未
+形成 Controller-to-Node distributed Group-scoped authorization/handoff，不能把本地校验描述为完整
+的跨 restart/rebind authority。
 
 Memory、Artifact 与 Index 三者不合并：Memory 解释 owner/kind/scope/schema/provenance，Artifact
 Store 只保存 digest-addressed opaque bytes，Index 只加速本地 metadata retrieval。Runtime 不成为
 Memory DB，State 不保存 Memory blob；provider/CAS/catalog failure 只形成 retry/fence evidence，
 不直接终结 Task 或 Mission。Replica mutation 必须由接收 Node 的 exact consumer provider 通过
-admission，且 Imported evidence 不可被后续失败尝试降级。当前 Node Protocol 尚不包含
+admission；durable identity 为 `(MemorySelector, NodeId, ConsumerProviderId)`，同一 Node 的多个
+provider 不互相覆盖，且 Imported evidence 不可被后续失败尝试降级。当前 Node Protocol 尚不包含
 selective-import command，显式 consumer selection 与 durable command acceptance 仍是后续协议
 工作，不能用自动全量拉取替代。
 

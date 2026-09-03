@@ -232,7 +232,7 @@ impl ArtifactCatalog {
             .map(|projection| projection.memory(selector))
     }
 
-    /// Reads generic Memory replica evidence in deterministic node order.
+    /// Reads generic Memory replica evidence in deterministic node/provider order.
     fn memory_replicas(
         &self,
         selector: &MemorySelector,
@@ -256,21 +256,7 @@ impl ArtifactCatalog {
         admission: &dyn MemoryProviderAdmission,
         publisher: Option<&MemoryPublicationIdentity>,
     ) -> Result<(), HttpError> {
-        self.append_with_admission(payload, Some((admission, publisher, None)))
-    }
-
-    /// Appends replica evidence with an exact consumer provider under the shared write gate.
-    fn append_memory_replica(
-        &self,
-        payload: EventPayload,
-        admission: &dyn MemoryProviderAdmission,
-        publisher: Option<&MemoryPublicationIdentity>,
-        consumer_provider_id: &str,
-    ) -> Result<(), HttpError> {
-        self.append_with_admission(
-            payload,
-            Some((admission, publisher, Some(consumer_provider_id))),
-        )
+        self.append_with_admission(payload, Some((admission, publisher)))
     }
 
     /// Serializes optional Memory admission with Controller registration updates and persistence.
@@ -280,7 +266,6 @@ impl ArtifactCatalog {
         admission: Option<(
             &dyn MemoryProviderAdmission,
             Option<&MemoryPublicationIdentity>,
-            Option<&str>,
         )>,
     ) -> Result<(), HttpError> {
         let _write_guard = self
@@ -288,8 +273,8 @@ impl ArtifactCatalog {
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
-        if let Some((admission, publisher, consumer_provider_id)) = admission {
-            admit_memory_payload(&payload, admission, publisher, consumer_provider_id)?;
+        if let Some((admission, publisher)) = admission {
+            admit_memory_payload(&payload, admission, publisher)?;
         }
         let timestamp = self.next_timestamp()?;
         let mut projection = self
@@ -383,7 +368,6 @@ fn admit_memory_payload(
     payload: &EventPayload,
     admission: &dyn MemoryProviderAdmission,
     publisher: Option<&MemoryPublicationIdentity>,
-    consumer_provider_id: Option<&str>,
 ) -> Result<(), HttpError> {
     match payload {
         EventPayload::MemoryManifestPublished { manifest } => {
@@ -399,19 +383,24 @@ fn admit_memory_payload(
                 .admit_publisher(publisher, node_id)
                 .map_err(HttpError::forbidden)
         }
-        EventPayload::MemoryArtifactStaged { manifest, node_id }
-        | EventPayload::MemoryArtifactImported { manifest, node_id }
+        EventPayload::MemoryArtifactStaged {
+            manifest,
+            node_id,
+            consumer_provider_id,
+        }
+        | EventPayload::MemoryArtifactImported {
+            manifest,
+            node_id,
+            consumer_provider_id,
+        }
         | EventPayload::MemoryArtifactRejected {
-            manifest, node_id, ..
+            manifest,
+            node_id,
+            consumer_provider_id,
+            ..
         } => {
             admission
-                .admit_replica(
-                    node_id,
-                    consumer_provider_id.ok_or_else(|| {
-                        HttpError::internal("replica admission lacks a consumer provider identity")
-                    })?,
-                    manifest,
-                )
+                .admit_replica(node_id, consumer_provider_id, manifest)
                 .map_err(HttpError::forbidden)?;
             admission
                 .admit_publisher(publisher, node_id)
@@ -936,14 +925,17 @@ fn record_memory_replica(
         "staged" => EventPayload::MemoryArtifactStaged {
             manifest: input.manifest,
             node_id,
+            consumer_provider_id,
         },
         "imported" => EventPayload::MemoryArtifactImported {
             manifest: input.manifest,
             node_id,
+            consumer_provider_id,
         },
         "rejected" => EventPayload::MemoryArtifactRejected {
             manifest: input.manifest,
             node_id,
+            consumer_provider_id,
             reason: input
                 .reason
                 .unwrap_or_else(|| "rejected by node".to_string()),
@@ -954,12 +946,7 @@ fn record_memory_replica(
             ));
         }
     };
-    catalog.append_memory_replica(
-        payload,
-        memory_admission,
-        request.memory_publisher.as_ref(),
-        &consumer_provider_id,
-    )?;
+    catalog.append_memory(payload, memory_admission, request.memory_publisher.as_ref())?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"status": input.status}),
@@ -2285,7 +2272,7 @@ mod tests {
             bytes.len() as u64,
         );
         let replica = serde_json::to_vec(&serde_json::json!({
-            "manifest": execution,
+            "manifest": execution.clone(),
             "node_id": "dog-b",
             "consumer_provider_id": "execution-consumer",
             "status": "staged",
@@ -2300,6 +2287,43 @@ mod tests {
                     "POST",
                     "/v1/memories/execution-a/revisions/r1/replicas",
                     &replica,
+                    true,
+                ),
+            )
+            .await,
+            "202 Accepted",
+        );
+        response_body(
+            &request_once(
+                &store,
+                &catalog,
+                &uploads,
+                raw_request(
+                    "POST",
+                    "/v1/memories/execution-a/revisions/r1/replicas",
+                    &replica,
+                    true,
+                ),
+            )
+            .await,
+            "202 Accepted",
+        );
+        let second_replica = serde_json::to_vec(&serde_json::json!({
+            "manifest": execution.clone(),
+            "node_id": "dog-b",
+            "consumer_provider_id": "secondary-consumer",
+            "status": "staged",
+        }))
+        .expect("second provider replica request serializes");
+        response_body(
+            &request_once(
+                &store,
+                &catalog,
+                &uploads,
+                raw_request(
+                    "POST",
+                    "/v1/memories/execution-a/revisions/r1/replicas",
+                    &second_replica,
                     true,
                 ),
             )
@@ -2327,12 +2351,29 @@ mod tests {
         .await;
         let detail: serde_json::Value = serde_json::from_slice(&response_body(&detail, "200 OK"))
             .expect("Memory detail response is JSON");
+        assert_eq!(detail["replicas"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            detail["replicas"][0]["consumer_provider_id"],
+            "execution-consumer"
+        );
         assert_eq!(detail["replicas"][0]["status"], "staged");
+        assert_eq!(
+            detail["replicas"][1]["consumer_provider_id"],
+            "secondary-consumer"
+        );
+        let replayed = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("provider-qualified replicas replay");
+        let replicas = replayed
+            .memory_replicas(execution.selector())
+            .expect("replayed replicas are readable");
+        assert_eq!(replicas.len(), 2);
+        assert_eq!(replicas[0].consumer_provider_id(), "execution-consumer");
+        assert_eq!(replicas[1].consumer_provider_id(), "secondary-consumer");
     }
 
-    /// Node A publishes CAS-backed Spatial Memory and Node B selectively imports it locally.
+    /// Node A publishes bytes and Node B's EAIOS workflow remains the imported-storage authority.
     #[tokio::test]
-    async fn local_memory_provider_cross_node_data_plane_exchange_is_integrated() {
+    async fn local_eaios_memory_workflow_cross_node_exchange_is_integrated() {
         use node_service::{
             BoxDriverFuture, CompiledDriverRequest, DriverKind, DriverResponse, LocalDriver,
             LocalIntegrationEngine, MemoryQuery, NodeServiceConfig,
@@ -2478,6 +2519,9 @@ mod tests {
         .expect("Node B config decodes");
         let compiled = node_service::CompiledLocalCatalog::compile(config, directory.path())
             .expect("Node B catalog compiles");
+        let node_ledger_root = compiled.memory_providers()["local-spatial"]
+            .storage_directory()
+            .to_path_buf();
         let imports = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let engine = LocalIntegrationEngine::new(
             compiled,
@@ -2519,6 +2563,13 @@ mod tests {
             .memory_cache_path(manifest.selector());
         assert_eq!(std::fs::read(&staged).expect("staged bytes read"), bytes);
         assert_eq!(imports.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(node_ledger_root.join("manifests.jsonl").is_file());
+        assert!(
+            !node_ledger_root
+                .join(format!("{}.blob", digest.replace(':', "_")))
+                .exists(),
+            "real EAIOS workflow imports must not create a second Node-ledger payload copy"
+        );
         std::fs::remove_file(&staged).expect("test removes transfer cache after local import");
         engine
             .exchange_memory(

@@ -141,8 +141,11 @@ pub struct MemoryProviderConformance {
     pub kind: String,
     /// Discoverable or exchangeable policy.
     pub visibility: String,
-    /// Whether node-config/v0.6 enables the provider-local reference backend and operations.
-    pub local_backend: bool,
+    /// Whether node-config/v0.6 enables the Node ledger/reference fallback.
+    ///
+    /// Serialized as the v0.1-compatible `local_backend`; it does not claim EAIOS authority.
+    #[serde(rename = "local_backend")]
+    pub node_ledger: bool,
     /// Whether a shared Artifact/catalog endpoint is available for publication and exchange.
     pub shared_data_plane: bool,
     /// Whether a provider-local discovery workflow is configured.
@@ -392,7 +395,7 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
                 owner: provider.owner().to_string(),
                 kind: provider.kind().to_string(),
                 visibility: provider.visibility().to_string(),
-                local_backend: provider.operational(),
+                node_ledger: provider.operational(),
                 shared_data_plane: catalog.artifact_service().is_some(),
                 discovery_workflow: provider.discover().is_some(),
                 export_workflow: provider.export().is_some(),
@@ -558,7 +561,7 @@ mod tests {
             report
                 .memory_providers
                 .iter()
-                .all(|provider| provider.local_backend && !provider.shared_data_plane),
+                .all(|provider| provider.node_ledger && !provider.shared_data_plane),
             "conformance distinguishes local workflows from shared exchange readiness"
         );
     }
@@ -648,6 +651,15 @@ cancel = []
         assert!(json.contains("roboguide.extension-conformance/v0.1"));
         assert!(!json.contains("Authorization"));
         assert!(!json.contains("controller_password"));
+
+        let memory_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/extension-conformance-v0.1/node.toml");
+        let memory_json =
+            compile_extension_config_json(&memory_path).expect("Memory report serializes");
+        let memory_report: serde_json::Value =
+            serde_json::from_str(&memory_json).expect("Memory report JSON parses");
+        assert_eq!(memory_report["memory_providers"][0]["local_backend"], true);
+        assert!(memory_report["memory_providers"][0]["node_ledger"].is_null());
     }
 
     /// Invalid TOML diagnostics never echo a secret-bearing source line into local or CI logs.

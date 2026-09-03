@@ -26,9 +26,21 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Memory is separate from realtime State. Execution, Spatial, Semantic, Experience, and Artifact
   manifests retain local ownership and use shared discovery plus selective CAS-backed exchange;
   discoverable metadata may remain content-local and no full replication is implied.
-- Generic replica mutations name an exact compatible consumer provider before evidence is accepted,
-  and accepted evidence remains monotonic after Imported. Node Protocol v0.3 has no durable
-  selective-import command; discovery never authorizes automatic replication.
+- Memory Scope, Visibility, and Placement are independent: Scope limits semantic consumers,
+  Visibility governs catalog discovery/content exchange, and Placement is provider-qualified replica
+  evidence. `Local + Discoverable` is valid; visibility never broadens scope, and an Artifact
+  reference never proves node-local placement.
+- Configured Memory workflows are the Local Memory Provider integration boundary; a real EAIOS
+  retains semantic and backend-storage authority. `FilesystemMemoryLedger` is only the RoboGuide
+  Node immutable-manifest ledger, rebuildable JSONL index, and workflow-free reference fallback;
+  configured EAIOS imports do not copy payload bytes into that ledger.
+- Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
+  event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
+  monotonic after Imported. Node Protocol v0.3 has no durable selective-import command; discovery
+  never authorizes automatic replication.
+- ExecutionGroup-scoped Memory currently has a domain model and Node-local invocation validation
+  only. Do not claim or implement complete distributed Group authorization/handoff until its
+  Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is

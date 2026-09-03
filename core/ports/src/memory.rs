@@ -44,7 +44,7 @@ pub trait MemoryCatalogReader {
     /// Returns every known manifest in deterministic selector order.
     fn memories(&self) -> Vec<MemoryArtifactManifest>;
 
-    /// Returns node-local replicas for one selector in deterministic node order.
+    /// Returns provider-local placement evidence in deterministic node/provider order.
     fn memory_replicas(&self, selector: &MemorySelector) -> Vec<MemoryReplicaSnapshot>;
 }
 
