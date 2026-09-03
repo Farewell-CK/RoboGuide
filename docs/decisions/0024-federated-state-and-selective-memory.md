@@ -1,5 +1,8 @@
 # ADR-0024: Federated State and Selective Memory
 
+> ADR-0025 保留本 ADR 的 State/Memory authority 边界，并将当前 Node Config baseline 升级为
+> v0.6，补充 provider-local discover/export/import workflow、参考 backend 和 scope 修正。
+
 - 状态：Accepted
 - 日期：2026-09-02
 - 影响范围：Domain、State、Ports、Integration、Node Service、Controller composition、Artifact data plane
@@ -60,7 +63,7 @@ Mission intent 不能修改 endpoint、方法、对象或 schema；部署 facade
 无副作用，离线 conformance 不宣称能够证明这一外部行为。采样失败只会让上一条记录自然过期，不改变 Node
 health、capability readiness、execution lifecycle，也不触发恢复。
 
-Memory provider declaration 固定 owner、kind、默认 scope、最大 visibility、payload schema
+Memory provider declaration 固定 owner、kind、最大 scope、最大 visibility、payload schema
 和 media type。它描述 discovery/exchange contract，不要求本地存储实现一致。v0.2-v0.4
 配置仍可解析，并归一化为空 State/Memory declaration；v0.5 是当前 Extension Conformance
 baseline。

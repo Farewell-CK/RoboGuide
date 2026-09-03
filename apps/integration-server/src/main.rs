@@ -104,18 +104,35 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             .map_err(|error| error.to_string())
     }
 
-    /// Requires replica evidence to name a node known to Shared Node State.
-    fn admit_replica_node(&self, node_id: &domain::NodeId) -> Result<(), String> {
+    /// Requires replica evidence to name one compatible provider on the receiving node.
+    fn admit_replica(
+        &self,
+        node_id: &domain::NodeId,
+        consumer_provider_id: &str,
+        manifest: &domain::MemoryArtifactManifest,
+    ) -> Result<(), String> {
         let controller = self
             .controller
             .lock()
             .map_err(|_| "Controller registration State is unavailable".to_string())?;
-        controller
+        let registration = controller
             .bridge
             .state()
             .node(node_id)
-            .map(|_| ())
-            .ok_or_else(|| format!("Memory replica node {node_id} is not registered"))
+            .ok_or_else(|| format!("Memory replica node {node_id} is not registered"))?
+            .registration();
+        let provider = registration
+            .memory_providers()
+            .iter()
+            .find(|provider| provider.provider_id() == consumer_provider_id)
+            .ok_or_else(|| {
+                format!(
+                    "Memory consumer provider {consumer_provider_id} is not declared by node {node_id}"
+                )
+            })?;
+        provider
+            .admit_import(manifest, node_id)
+            .map_err(|error| error.to_string())
     }
 
     /// Requires the declared publisher to own the active, unexpired route for the expected Node.

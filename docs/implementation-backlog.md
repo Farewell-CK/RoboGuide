@@ -39,6 +39,9 @@ Spatial v0 的已知后续工作：
   只提供配置驱动的 Node fixture 和外部 HTTP workflow 假设。
 - Replica evidence v0 只有 Node/Mission 维度，下一版应补充 consumer `TaskRef`、execution
   identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体 TaskExecution。
+- Generic Memory 需要独立设计 Controller -> Node selective-import command，包括 exact consumer
+  provider/revision、application-accepted durable ACK、重试 fence 和可选 ExecutionGroup 关联；在
+  该协议冻结前不得由 discovery 自动触发全量复制，也不得借普通 Execute 隐式改变 Task lifecycle。
 - Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
 identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
 
@@ -52,7 +55,9 @@ Protocol v0.3 支持选择性 Reported/Observed push；State observation 不自�
 同一切片建立五类 Memory 的 provider discovery、immutable manifest catalog 和基于现有 CAS
 的 selective exchange evidence。它解决共同上层语义与 local ownership，不关闭 Q1：Belief
 provider、fusion/conflict policy、允许哪些 Belief 影响 Control、访问控制、retention/GC、
-多 Controller replication 和通用 Node Memory workflow 仍需场景证据。
+多 Controller replication 仍需场景证据。通用 Node Memory workflow 已由
+[`ADR-0025`](decisions/0025-memory-provider-backend-and-workflow.md) 的 v0.6 provider
+discover/export/import 与 filesystem/JSONL 参考 backend 补齐，但真实 EAIOS adapter 仍需现场证据。
 
 ## MVP 定义待决事项
 

@@ -6,6 +6,8 @@
 > `Registered`/`Ack` 必须在 Controller durable acceptance 后发送。
 > ADR-0024 将当前 Extension Conformance baseline 升级为 Node Config v0.5 和 Node Protocol
 > v0.3，并增加选择性 State/Memory 声明；本 ADR 保留 v0.4 决策时点。
+> ADR-0025 将当前 Extension Conformance baseline 升级为 Node Config v0.6；Node Protocol
+> 仍为 v0.3，并增加 provider-local discover/export/import workflow 与参考 backend。
 
 - 状态：Accepted
 - 日期：2026-09-01

@@ -117,9 +117,10 @@ Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP wo
 ### Device Extension Conformance v0.1
 
 设备扩展的唯一正式机制是 `core/node-service` 内的 Local Integration Engine。新 Local EAIOS
-只需部署自己的 HTTP、dynamic gRPC 或 MCP facade，并在 Node Config v0.5 中声明固定
+只需部署自己的 HTTP、dynamic gRPC 或 MCP facade，并在 Node Config v0.6 中声明固定
 connection、唯一 capability owner、exact readiness、execute/status/cancel workflow、受限
-request mapping、状态映射、required resources，以及选择性的 State export/Memory provider；
+request mapping、状态映射、required resources，以及选择性的 State export/Memory provider
+与 discover/export/import workflow；v0.5 provider 保持 metadata-only 兼容；
 不得在 RoboGuide core 增加厂商分支。
 `core/integration` 只负责 formal Node Protocol wire/session/router，Controller 的
 `IntegrationRuntimeBridge` 位于 `core/orchestration`。完整可验证路径和真实配置样例见
@@ -352,13 +353,15 @@ Semantic、Experience、Artifact 五类 immutable revision metadata。manifest �
 node/local-system 或 RoboGuide owner、Local/ExecutionGroup/Global scope、
 Discoverable/Exchangeable visibility、schema、media type、provenance 和可选 Artifact ref。
 Discoverable 允许 metadata-only；Exchangeable 必须引用已经由 filesystem CAS 重验 digest
-和 size 的 bytes。replica evidence 只允许 Staged 后 Imported/Rejected 的保守转换。
+和 size 的 bytes。replica mutation 由 exact consumer provider 做 admission，只允许 Staged 后
+Imported/Rejected 的保守 evidence 转换；Imported 不可回退为 Rejected。
 
 Controller 的 `/v1/memory/providers` 发现声明 owner；Artifact HTTP 提供通用
 publish/list/detail/replica endpoints，五类 Memory 共用一套目录语义。
 typed Spatial map projection 通过 read adapter 出现在统一 discovery 结果中；map schema 的
-发布仍必须走 `/v1/maps`，避免复制 anchor/localization authority。当前交换是 consumer
-选择 revision 后通过现有 Artifact data plane pull，不做全量复制或 P2P。合同见
+发布仍必须走 `/v1/maps`，避免复制 anchor/localization authority。当前 exchange engine
+operation 要求调用方明确给出 revision，再通过现有 Artifact data plane pull，不做全量复制或
+P2P；Controller -> Node durable import command 尚未冻结。合同见
 [`contracts/memory/v0.1`](../../contracts/memory/v0.1/README.md)。
 
 当前切片仍不是完整 State & Memory Plane。以下内容延后：

@@ -141,6 +141,16 @@ pub struct MemoryProviderConformance {
     pub kind: String,
     /// Discoverable or exchangeable policy.
     pub visibility: String,
+    /// Whether node-config/v0.6 enables the provider-local reference backend and operations.
+    pub local_backend: bool,
+    /// Whether a shared Artifact/catalog endpoint is available for publication and exchange.
+    pub shared_data_plane: bool,
+    /// Whether a provider-local discovery workflow is configured.
+    pub discovery_workflow: bool,
+    /// Whether a provider-local export workflow is configured.
+    pub export_workflow: bool,
+    /// Whether a provider-local import workflow is configured.
+    pub import_workflow: bool,
 }
 
 /// One Node Service implementation guarantee shared by every supported local driver family.
@@ -238,7 +248,7 @@ pub struct ExtensionConformanceReport {
 pub struct ConformanceChecks {
     /// Every canonical contract has one owner.
     pub unique_capability_owner: bool,
-    /// v0.5 configurations have one exact readiness workflow per contract.
+    /// v0.6 configurations have one exact readiness workflow per contract.
     pub exact_readiness: bool,
     /// All endpoint, method, service, and tool selections are fixed.
     pub fixed_routes: bool,
@@ -248,7 +258,7 @@ pub struct ConformanceChecks {
     pub execution_state_mapping: bool,
     /// Every required resource exists and belongs to the capability owner.
     pub required_resources: bool,
-    /// State and Memory exposure is explicit, owner-scoped, and schema v0.5 validated.
+    /// State and Memory exposure is explicit, owner-scoped, and schema v0.6 validated.
     pub selective_state_memory: bool,
 }
 
@@ -257,12 +267,13 @@ pub fn compile_extension_config(
     path: &Path,
 ) -> Result<ExtensionConformanceReport, ConformanceError> {
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
-    if config.schema() != crate::CONFIG_SCHEMA_V0_5 {
+    if config.schema() != crate::CONFIG_SCHEMA_V0_6 {
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: "schema".to_string(),
             code: "state-memory-contract-required".to_string(),
-            message: "Extension Conformance v0.1 requires node-config/v0.5 State/Memory semantics"
-                .to_string(),
+            message:
+                "Extension Conformance v0.1 requires node-config/v0.6 Memory workflow semantics"
+                    .to_string(),
         }));
     }
     if let Some(capability) = config
@@ -273,7 +284,7 @@ pub fn compile_extension_config(
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: format!("capabilities.{}.readiness", capability.contract()),
             code: "readiness-required".to_string(),
-            message: "Extension Conformance v0.1 requires node-config/v0.5 exact readiness"
+            message: "Extension Conformance v0.1 requires node-config/v0.6 exact readiness"
                 .to_string(),
         }));
     }
@@ -381,6 +392,11 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
                 owner: provider.owner().to_string(),
                 kind: provider.kind().to_string(),
                 visibility: provider.visibility().to_string(),
+                local_backend: provider.operational(),
+                shared_data_plane: catalog.artifact_service().is_some(),
+                discovery_workflow: provider.discover().is_some(),
+                export_workflow: provider.export().is_some(),
+                import_workflow: provider.import().is_some(),
             })
             .collect(),
         checks: ConformanceChecks {
@@ -538,6 +554,13 @@ mod tests {
             assert!(capability.workflow.local_handle_mapped);
             assert!(capability.workflow.execution_state_mapped);
         }
+        assert!(
+            report
+                .memory_providers
+                .iter()
+                .all(|provider| provider.local_backend && !provider.shared_data_plane),
+            "conformance distinguishes local workflows from shared exchange readiness"
+        );
     }
 
     /// Invalid authored files return a path-bearing diagnostic instead of a transport error.
@@ -548,7 +571,7 @@ mod tests {
         std::fs::write(
             &path,
             r#"
-schema = "roboguide.node-config/v0.5"
+schema = "roboguide.node-config/v0.6"
 node_id = "node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "state"
@@ -597,7 +620,7 @@ cancel = []
         ));
     }
 
-    /// Conformance rejects a v0.5 workflow that cannot distinguish every execution phase.
+    /// Conformance rejects a v0.6 workflow that cannot distinguish every execution phase.
     #[test]
     fn incomplete_execution_state_mapping_is_diagnostic() {
         let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml");
@@ -635,7 +658,7 @@ cancel = []
         std::fs::write(
             &path,
             concat!(
-                "schema = \"roboguide.node-config/v0.5\"\n",
+                "schema = \"roboguide.node-config/v0.6\"\n",
                 "controller_password = \"TOP_SECRET_VALUE\"\n",
             ),
         )

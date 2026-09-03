@@ -205,7 +205,6 @@ fn valid_transition(current: MemoryReplicaStatus, incoming: MemoryReplicaStatus)
             | (MemoryReplicaStatus::Staged, MemoryReplicaStatus::Imported)
             | (MemoryReplicaStatus::Staged, MemoryReplicaStatus::Rejected)
             | (MemoryReplicaStatus::Imported, MemoryReplicaStatus::Imported)
-            | (MemoryReplicaStatus::Imported, MemoryReplicaStatus::Rejected)
             | (MemoryReplicaStatus::Rejected, MemoryReplicaStatus::Rejected)
     )
 }
@@ -308,6 +307,51 @@ mod tests {
                 &EventPayload::MemoryArtifactImported {
                     manifest,
                     node_id: NodeId::new("dog-b").expect("node should be valid"),
+                },
+            ),
+            Err(MemoryCatalogError::InvalidReplicaTransition(_))
+        ));
+    }
+
+    /// A later failed attempt cannot erase durable evidence that the replica was imported.
+    #[test]
+    fn projection_rejects_imported_to_rejected_regression() {
+        let manifest = manifest();
+        let node_id = NodeId::new("dog-b").expect("node should be valid");
+        let mut projection = MemoryCatalogProjection::new();
+        for (timestamp, payload) in [
+            (
+                1,
+                EventPayload::MemoryManifestPublished {
+                    manifest: manifest.clone(),
+                },
+            ),
+            (
+                2,
+                EventPayload::MemoryArtifactStaged {
+                    manifest: manifest.clone(),
+                    node_id: node_id.clone(),
+                },
+            ),
+            (
+                3,
+                EventPayload::MemoryArtifactImported {
+                    manifest: manifest.clone(),
+                    node_id: node_id.clone(),
+                },
+            ),
+        ] {
+            projection
+                .apply_memory_payload(TimestampMs::new(timestamp), &payload)
+                .expect("setup transition should apply");
+        }
+        assert!(matches!(
+            projection.apply_memory_payload(
+                TimestampMs::new(4),
+                &EventPayload::MemoryArtifactRejected {
+                    manifest,
+                    node_id,
+                    reason: "later request was invalid".to_string(),
                 },
             ),
             Err(MemoryCatalogError::InvalidReplicaTransition(_))

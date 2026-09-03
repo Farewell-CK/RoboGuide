@@ -79,7 +79,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - Node Protocol `Registered`/`Ack` 只在 Controller authority 与 durable checkpoint 接受事实后
   返回，见 [`ADR-0023`](docs/decisions/0023-application-accepted-node-protocol-facts.md)。
 - source-aware State federation 与 selective Memory ownership/exchange 见
-  [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
+  [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)；node-config/v0.6
+  provider backend、discover/export/import workflow 与 scope 边界见
+  [`ADR-0025`](docs/decisions/0025-memory-provider-backend-and-workflow.md)。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -203,9 +205,10 @@ journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/int
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
 合同见
-[`contracts/node/v0.5/`](contracts/node/v0.5/README.md)。Node config v0.5 为每个 exact
+[`contracts/node/v0.6/`](contracts/node/v0.6/README.md)。Node config v0.6 为每个 exact
 canonical contract 提供固定 readiness observation，并增加选择性的 State export 与 Memory
-provider declaration；通过完整 RegistrationUpdate snapshot 更新后续 Matching 和 discovery。
+provider declaration 和固定 discover/export/import workflow；通过完整 RegistrationUpdate
+snapshot 更新后续 Matching 和 discovery。v0.5 provider 仍可作为 metadata-only 配置启动；
 v0.2-v0.4 配置仍可解析为空 State/Memory declaration，但不满足当前 extension conformance；
 Node Protocol v0.2 endpoint 只返回明确迁移错误。
 
@@ -318,7 +321,7 @@ Bound/RecoveryPending 的 Group reservation。Scheduler v0.1 当前不读取 All
 Controller 的 `/v1/state/providers` 与 `/v1/state/records` 是只读 federation：Desired 从
 accepted MissionPlan 读取，Committed 从 Control 读取，Reported/Observed 从 Shared Node
 State 和声明 channel 读取，Derived 从 Runtime/Orchestration projection 读取。这个统一视图
-不改变原 authority，也不提供通用写接口。Node Config v0.5 通过固定、只读 workflow 周期采样
+不改变原 authority，也不提供通用写接口。Node Config v0.6 通过固定、只读 workflow 周期采样
 选择性 State；失败只让旧值自然变 stale，不改变 health/readiness 或自动触发 recovery。
 
 当前同时实现 **Selective Memory Catalog v0.1**。Execution、Spatial、Semantic、Experience、
@@ -332,7 +335,10 @@ Staged/Imported/Rejected evidence，不做全量复制或 P2P。合同见
 
 这仍不是完整 State & Memory Plane。可驱动 Control 的 Shared Belief/fusion policy、完整
 Execution/Task/Group 历史 projection、多 Controller replication/HA、访问控制、retention/GC
-和通用 Node Memory workflow automation 仍未实现。
+以及面向具体 Mission 的 consumer selection/prefetch policy、Controller 到 Node 的 durable
+selective-import command 仍未实现。通用 Node Memory provider workflow、filesystem/JSONL 参考
+backend 和显式 data-plane CAS exchange operation 已由 ADR-0025 实现；Node 不会因为 discovery
+结果自动复制 Memory。
 
 当前新增 **State & Memory Plane — Distributed Spatial Memory v0.1**：地图以不可变
 `MapId`/`MapRevisionId` + SHA-256 digest manifest 形式记录在 Catalog projection，bytes 由
@@ -496,7 +502,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission/v0.2/ + v0.3/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
-│   ├── node/v0.2/ ... v0.5/
+│   ├── node/v0.2/ ... v0.6/
 │   ├── state/v0.1/
 │   ├── memory/v0.1/
 │   ├── spatial/v0.1/

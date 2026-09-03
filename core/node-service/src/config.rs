@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.5 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.6 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -88,7 +88,7 @@ pub struct StateExportConfig {
 }
 
 /// One Memory discovery/exchange provider owned by a heterogeneous local system.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryProviderConfig {
     /// Node-wide provider identity.
@@ -97,7 +97,7 @@ pub struct MemoryProviderConfig {
     pub owner: String,
     /// Kind: execution, spatial, semantic, experience, or artifact.
     pub kind: String,
-    /// Default scope: local or global; manifests may later narrow to an Execution Group.
+    /// Maximum scope: local or global; an Execution Group scope is injected per operation.
     pub scope: String,
     /// Visibility: discoverable or exchangeable.
     pub visibility: String,
@@ -105,6 +105,33 @@ pub struct MemoryProviderConfig {
     pub payload_schema: String,
     /// Content media type when the provider offers Artifact-backed bytes.
     pub media_type: String,
+    /// Optional provider-local storage root, resolved below the node state directory.
+    #[serde(default)]
+    pub storage_directory: Option<std::path::PathBuf>,
+    /// Optional provider-local discovery workflow.
+    #[serde(default)]
+    pub discover: Option<MemoryWorkflowConfig>,
+    /// Optional provider-local export workflow.
+    #[serde(default)]
+    pub export: Option<MemoryWorkflowConfig>,
+    /// Optional provider-local import workflow.
+    #[serde(default)]
+    pub import: Option<MemoryWorkflowConfig>,
+}
+
+/// Declarative workflow hook for one heterogeneous Memory provider operation.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryWorkflowConfig {
+    /// Ordered local driver steps; repeated immutable selectors must be idempotent.
+    #[serde(default)]
+    pub steps: Vec<WorkflowStepConfig>,
+    /// JSON Pointer to an array of manifests in the final response (discover only).
+    #[serde(default)]
+    pub manifests_pointer: Option<String>,
+    /// JSON Pointer to a provider-storage-relative artifact path (export only).
+    #[serde(default)]
+    pub artifact_path_pointer: Option<String>,
 }
 
 /// Node-local configuration for the independent Spatial Memory artifact data plane.

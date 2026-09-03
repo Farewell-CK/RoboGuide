@@ -4,7 +4,7 @@ use control::ControlPlane;
 use domain::{
     Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
     ExecutionCommand, ExecutionValue, LeaseId, LocalRuntime, LocalSystemDescriptor, LocalSystemId,
-    MemoryKind, MemoryProviderDescriptor, MemoryScope, MemoryVisibility, NodeContractVersion,
+    MemoryKind, MemoryProviderDescriptor, MemoryScopeLimit, MemoryVisibility, NodeContractVersion,
     NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus, Resource, ResourceId,
     ResourceKind, SensorDescriptor, SensorId, StateExportDescriptor, StateObjectClass,
     StateObjectRef, StateRecord, StateSemantic, StateSource, TimestampMs,
@@ -1028,13 +1028,13 @@ fn memory_provider_from_wire(
         }
     };
     let scope = match integration::grpc::v0_3::MemoryScopeKind::try_from(wire.scope) {
-        Ok(integration::grpc::v0_3::MemoryScopeKind::Local) => MemoryScope::Local,
+        Ok(integration::grpc::v0_3::MemoryScopeKind::Local) => MemoryScopeLimit::Local,
         Ok(integration::grpc::v0_3::MemoryScopeKind::ExecutionGroup) => {
-            MemoryScope::ExecutionGroup(domain::ExecutionGroupId::new(
-                wire.execution_group_id.clone(),
-            )?)
+            return Err(IntegrationRuntimeError::Protocol(
+                "Memory provider scope cannot contain an execution Group identity".to_string(),
+            ));
         }
-        Ok(integration::grpc::v0_3::MemoryScopeKind::Global) => MemoryScope::Global,
+        Ok(integration::grpc::v0_3::MemoryScopeKind::Global) => MemoryScopeLimit::Global,
         _ => {
             return Err(IntegrationRuntimeError::Protocol(
                 "unknown Memory scope".to_string(),
@@ -1779,6 +1779,27 @@ mod tests {
         assert_eq!(contract.namespace(), "spatial.map");
         assert_eq!(contract.name(), "build");
         assert_eq!(contract.to_string(), "spatial.map.build@v0");
+    }
+
+    /// Wire conversion cannot reintroduce a live Group identity into static provider metadata.
+    #[test]
+    fn memory_provider_conversion_rejects_execution_group_scope() {
+        let wire = integration::grpc::v0_3::MemoryProviderDescriptor {
+            provider_id: "experience".to_string(),
+            local_system_id: "memory".to_string(),
+            kind: integration::grpc::v0_3::MemoryKind::Experience as i32,
+            scope: integration::grpc::v0_3::MemoryScopeKind::ExecutionGroup as i32,
+            execution_group_id: "group-a".to_string(),
+            visibility: integration::grpc::v0_3::MemoryVisibility::Discoverable as i32,
+            payload_schema: "example.experience/v1".to_string(),
+            media_type: "application/json".to_string(),
+        };
+
+        assert!(matches!(
+            memory_provider_from_wire(&wire),
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("cannot contain an execution Group")
+        ));
     }
 
     /// Conversion preserves exact readiness when sibling contracts share a coarse kind.

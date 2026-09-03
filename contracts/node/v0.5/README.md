@@ -12,7 +12,7 @@ Sampling failure does not change node health, capability
 readiness, execution lifecycle, or recovery; the last accepted record instead becomes stale.
 
 Each `memory_providers` entry declares local ownership, one of the Execution, Spatial, Semantic,
-Experience, or Artifact kinds, default local/global scope, discoverable/exchangeable visibility,
+Experience, or Artifact kinds, maximum local/global scope, discoverable/exchangeable visibility,
 payload schema, and media type. This is a discovery contract, not a requirement that local EAIOS
 implementations share a database. Exchangeable content uses the existing digest-verified Artifact
 data plane; discoverable records may be metadata-only.
@@ -23,5 +23,7 @@ checkpoint acceptance semantics. The v0.2 gRPC endpoint is retained only to retu
 `FailedPrecondition` migration diagnostic.
 
 Node configs v0.2 through v0.4 remain parseable and normalize to empty State/Memory declarations,
-but v0.5 is the current extension baseline. Existing typed map bindings remain the first strong
-Spatial Memory workflow and retain localization evidence rules.
+while v0.5 remains bootable as the metadata-only Memory-provider compatibility level. The current
+extension baseline and executable provider workflow contract are defined by
+[`../v0.6/`](../v0.6/README.md). Existing typed map bindings remain the first strong Spatial Memory
+workflow and retain localization evidence rules.

@@ -45,6 +45,45 @@ pub enum MemoryScope {
     Global,
 }
 
+/// Static upper bound declared by a provider independently of any live execution identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MemoryScopeLimit {
+    /// Provider outputs may only remain local.
+    Local,
+    /// Provider outputs may use any supported Memory scope.
+    Global,
+}
+
+/// Historical provider-scope encoding accepted only while restoring existing checkpoints.
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "execution_group_id",
+    rename_all = "snake_case"
+)]
+enum PersistedMemoryScopeLimit {
+    /// Historical or current local maximum.
+    Local,
+    /// Historical static Group scope removed by node-config/v0.6.
+    ExecutionGroup(ExecutionGroupId),
+    /// Historical or current global maximum.
+    Global,
+}
+
+impl<'de> Deserialize<'de> for MemoryScopeLimit {
+    /// Restores local/global scope and fail-closes historical static Group scope to Local.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(
+            match PersistedMemoryScopeLimit::deserialize(deserializer)? {
+                PersistedMemoryScopeLimit::Local => Self::Local,
+                PersistedMemoryScopeLimit::ExecutionGroup(_legacy_group) => Self::Local,
+                PersistedMemoryScopeLimit::Global => Self::Global,
+            },
+        )
+    }
+}
+
 /// Declares whether catalog discovery also permits content exchange.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -211,8 +250,8 @@ pub struct MemoryProviderDescriptor {
     local_system_id: LocalSystemId,
     /// Memory kind exposed by this provider declaration.
     kind: MemoryKind,
-    /// Default semantic sharing scope for provider outputs.
-    scope: MemoryScope,
+    /// Static provider maximum without a live execution identity.
+    scope: MemoryScopeLimit,
     /// Maximum discovery/exchange visibility offered by the provider.
     visibility: MemoryVisibility,
     /// Versioned manifest payload schema produced or consumed by this provider.
@@ -228,7 +267,7 @@ impl MemoryProviderDescriptor {
         provider_id: impl Into<String>,
         local_system_id: LocalSystemId,
         kind: MemoryKind,
-        scope: MemoryScope,
+        scope: MemoryScopeLimit,
         visibility: MemoryVisibility,
         payload_schema: impl Into<String>,
         media_type: impl Into<String>,
@@ -265,9 +304,9 @@ impl MemoryProviderDescriptor {
         self.kind
     }
 
-    /// Returns the provider's default scope.
-    pub const fn scope(&self) -> &MemoryScope {
-        &self.scope
+    /// Returns the static provider maximum without carrying a runtime group identity.
+    pub const fn max_scope(&self) -> MemoryScopeLimit {
+        self.scope
     }
 
     /// Returns the maximum offered visibility.
@@ -287,6 +326,7 @@ impl MemoryProviderDescriptor {
 
     /// Validates that one Node-owned manifest stays within this provider declaration.
     pub fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), DomainError> {
+        manifest.validate()?;
         let MemoryOwner::Node {
             local_system_id, ..
         } = manifest.owner()
@@ -305,14 +345,9 @@ impl MemoryProviderDescriptor {
                 "Memory manifest does not match its registered provider owner/kind/schema/media type",
             ));
         }
-        let scope_allowed = match self.scope() {
-            MemoryScope::Local => matches!(manifest.scope(), MemoryScope::Local),
-            MemoryScope::ExecutionGroup(provider_group) => match manifest.scope() {
-                MemoryScope::Local => true,
-                MemoryScope::ExecutionGroup(manifest_group) => manifest_group == provider_group,
-                MemoryScope::Global => false,
-            },
-            MemoryScope::Global => true,
+        let scope_allowed = match self.max_scope() {
+            MemoryScopeLimit::Local => matches!(manifest.scope(), MemoryScope::Local),
+            MemoryScopeLimit::Global => true,
         };
         if !scope_allowed {
             return Err(invalid_memory(
@@ -324,6 +359,48 @@ impl MemoryProviderDescriptor {
         {
             return Err(invalid_memory(
                 "Memory manifest exceeds its registered provider visibility",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates an exchangeable remote manifest against this provider's consumer contract.
+    ///
+    /// Import admission deliberately ignores the remote semantic owner and producer provider id:
+    /// those identify provenance, while this descriptor identifies the receiving local system.
+    pub fn admit_import(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        consumer_node_id: &NodeId,
+    ) -> Result<(), DomainError> {
+        manifest.validate()?;
+        if self.visibility != MemoryVisibility::Exchangeable
+            || manifest.visibility() != MemoryVisibility::Exchangeable
+            || self.kind != manifest.kind()
+            || self.payload_schema != manifest.payload_schema()
+            || self.media_type != manifest.media_type()
+        {
+            return Err(invalid_memory(
+                "Memory import does not match the consumer provider kind/schema/media/visibility",
+            ));
+        }
+        let scope_allowed = match self.max_scope() {
+            MemoryScopeLimit::Local => matches!(manifest.scope(), MemoryScope::Local),
+            MemoryScopeLimit::Global => true,
+        };
+        if !scope_allowed {
+            return Err(invalid_memory(
+                "Memory import exceeds the consumer provider maximum scope",
+            ));
+        }
+        if matches!(manifest.scope(), MemoryScope::Local)
+            && !matches!(
+                manifest.owner(),
+                MemoryOwner::Node { node_id, .. } if node_id == consumer_node_id
+            )
+        {
+            return Err(invalid_memory(
+                "Local Memory cannot be imported by a different node",
             ));
         }
         Ok(())
@@ -763,7 +840,7 @@ mod tests {
             "experience-provider",
             LocalSystemId::new("memory").expect("local system id should be valid"),
             MemoryKind::Experience,
-            MemoryScope::Global,
+            MemoryScopeLimit::Global,
             MemoryVisibility::Exchangeable,
             "example.experience/v1",
             "application/json",
@@ -777,7 +854,7 @@ mod tests {
             "experience-provider",
             LocalSystemId::new("memory").expect("local system id should be valid"),
             MemoryKind::Experience,
-            MemoryScope::Global,
+            MemoryScopeLimit::Global,
             MemoryVisibility::Discoverable,
             "example.experience/v1",
             "application/json",
@@ -785,6 +862,164 @@ mod tests {
         .expect("provider should be valid");
         assert!(matches!(
             discoverable.admit_manifest(&manifest),
+            Err(DomainError::InvalidMemory { .. })
+        ));
+    }
+
+    /// Global provider scope admits a live Group without embedding that Group in static config.
+    #[test]
+    fn provider_scope_is_not_a_static_group_binding() {
+        let provider = MemoryProviderDescriptor::new(
+            "experience-provider",
+            LocalSystemId::new("memory").expect("local system id should be valid"),
+            MemoryKind::Experience,
+            MemoryScopeLimit::Global,
+            MemoryVisibility::Discoverable,
+            "example.experience/v1",
+            "application/json",
+        )
+        .expect("provider should be valid");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("lesson-a").expect("memory id should be valid"),
+                MemoryRevisionId::new("r1").expect("revision id should be valid"),
+            ),
+            MemoryKind::Experience,
+            "experience-provider",
+            MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id should be valid"),
+                local_system_id: LocalSystemId::new("memory")
+                    .expect("local system id should be valid"),
+            },
+            MemoryScope::ExecutionGroup(
+                ExecutionGroupId::new("live-group").expect("group id should be valid"),
+            ),
+            MemoryVisibility::Discoverable,
+            "example.experience/v1",
+            "application/json",
+            None,
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest should be valid");
+
+        assert_eq!(provider.max_scope(), MemoryScopeLimit::Global);
+        provider
+            .admit_manifest(&manifest)
+            .expect("any live group remains within the provider upper bound");
+    }
+
+    /// Existing checkpoints normalize a historical provider Group scope without retaining its id.
+    #[test]
+    fn provider_scope_migrates_historical_execution_group_encoding() {
+        let scope: MemoryScopeLimit = serde_json::from_value(serde_json::json!({
+            "kind": "execution_group",
+            "execution_group_id": "legacy-group"
+        }))
+        .expect("historical provider scope should migrate");
+
+        assert_eq!(scope, MemoryScopeLimit::Local);
+        assert_eq!(
+            serde_json::to_value(scope).expect("current scope should serialize"),
+            serde_json::json!({"kind": "local"})
+        );
+    }
+
+    /// Consumer admission checks exchange semantics without claiming remote producer ownership.
+    #[test]
+    fn provider_admits_compatible_remote_import() {
+        let provider = MemoryProviderDescriptor::new(
+            "consumer",
+            LocalSystemId::new("memory-b").expect("local system id should be valid"),
+            MemoryKind::Experience,
+            MemoryScopeLimit::Global,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+        )
+        .expect("provider should be valid");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("lesson-a").expect("memory id should be valid"),
+                MemoryRevisionId::new("r1").expect("revision id should be valid"),
+            ),
+            MemoryKind::Experience,
+            "producer",
+            MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id should be valid"),
+                local_system_id: LocalSystemId::new("memory-a")
+                    .expect("local system id should be valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("a".repeat(64)).expect("digest should be valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest should be valid");
+
+        provider
+            .admit_import(
+                &manifest,
+                &NodeId::new("dog-b").expect("consumer node id should be valid"),
+            )
+            .expect("compatible remote memory should be admitted");
+    }
+
+    /// Local scope cannot cross the producer Node boundary even through an exchangeable provider.
+    #[test]
+    fn provider_rejects_cross_node_local_import() {
+        let provider = MemoryProviderDescriptor::new(
+            "consumer",
+            LocalSystemId::new("memory-b").expect("local system id should be valid"),
+            MemoryKind::Experience,
+            MemoryScopeLimit::Global,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+        )
+        .expect("provider should be valid");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("local-lesson").expect("memory id should be valid"),
+                MemoryRevisionId::new("r1").expect("revision id should be valid"),
+            ),
+            MemoryKind::Experience,
+            "producer",
+            MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("producer node id should be valid"),
+                local_system_id: LocalSystemId::new("memory-a")
+                    .expect("local system id should be valid"),
+            },
+            MemoryScope::Local,
+            MemoryVisibility::Exchangeable,
+            "example.experience/v1",
+            "application/json",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("a".repeat(64)).expect("digest should be valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest should be valid");
+
+        assert!(matches!(
+            provider.admit_import(
+                &manifest,
+                &NodeId::new("dog-b").expect("consumer node id should be valid")
+            ),
             Err(DomainError::InvalidMemory { .. })
         ));
     }

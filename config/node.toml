@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.5"
+schema = "roboguide.node-config/v0.6"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"

@@ -40,7 +40,7 @@ pub use localization_evidence::{
 pub use memory::{
     MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest, MemoryArtifactRef, MemoryId, MemoryKind,
     MemoryOwner, MemoryProviderDescriptor, MemoryReplicaSnapshot, MemoryReplicaStatus,
-    MemoryRevisionId, MemoryScope, MemorySelector, MemoryVisibility,
+    MemoryRevisionId, MemoryScope, MemoryScopeLimit, MemorySelector, MemoryVisibility,
 };
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use spatial_memory::{

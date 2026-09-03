@@ -29,18 +29,21 @@ checkpoint schema；`core/orchestration` 只把 transport fact 接到既有 auth
 ## 离线 conformance
 
 `roboguide-node` 的配置编译器先整体校验并冻结配置，再允许进程连接任何 endpoint。版本
-`roboguide.node-config/v0.5` 是 Extension Conformance 的当前版本；v0.2-v0.4 仍可解析为
+`roboguide.node-config/v0.6` 是 Extension Conformance 的当前版本；v0.5 仍可作为
+metadata-only Memory provider 配置启动，v0.2-v0.4 仍可解析为
 空 State/Memory declaration，但不满足当前 conformance。Node Protocol v0.2 endpoint 只返回
 明确迁移诊断，不再接受 session。
 
 成功编译只证明以下静态部署不变量：
 
 - 每个 canonical `namespace.name@version` 只有一个 local-system owner；
-- v0.5 每个 exact capability 都有独立 readiness probe，未知值、超时或 probe failure
+- v0.5/v0.6 每个 exact capability 都有独立 readiness probe，未知值、超时或 probe failure
   fail-closed 为 unavailable；
 - 每个 State export 固定 owner、Node/World object、Reported/Observed semantic、schema、TTL、
   sampling interval 和固定 observation workflow；每个 Memory provider 固定 owner、五类 kind、scope、
-  visibility、schema 和 media type；
+  visibility、schema 和 media type；v0.6 可再声明固定 discover/export/import workflow；
+- Memory conformance 分开报告 `local_backend` 与 `shared_data_plane`，本地 workflow 存在不等于
+  已配置共享 Catalog/Artifact exchange；
 - connection endpoint、HTTP method/path、gRPC service/method/descriptor 或 MCP tool
   由配置固定，网络 `ExecutionIntent` 不能改写；
 - execute、status、cancel 都是非空、有序 workflow，local handle 只能来自 execute

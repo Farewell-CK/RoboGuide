@@ -26,6 +26,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Memory is separate from realtime State. Execution, Spatial, Semantic, Experience, and Artifact
   manifests retain local ownership and use shared discovery plus selective CAS-backed exchange;
   discoverable metadata may remain content-local and no full replication is implied.
+- Generic replica mutations name an exact compatible consumer provider before evidence is accepted,
+  and accepted evidence remains monotonic after Imported. Node Protocol v0.3 has no durable
+  selective-import command; discovery never authorizes automatic replication.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
@@ -74,11 +77,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
   checkpoint acceptance, not transport receipt. Integration waits on an application completion
   envelope but never makes the Control/State/Runtime decision itself.
-- Node config v0.5 requires one fixed readiness observation per exact canonical
+- Node config v0.6 requires one fixed readiness observation per exact canonical
   capability. Node Service observes before Register and emits complete RegistrationUpdate
   snapshots on change; Integration preserves exact readiness, State stores it, and Control
   consumes it only for later eligibility decisions. It also declares fixed State exports and
-  Memory providers; v0.2-v0.4 configs normalize those declarations to empty.
+  Memory providers and optional provider-local discover/export/import workflows; v0.2-v0.4
+  configs normalize those declarations to empty and v0.5 providers remain metadata-only.
 - Node Protocol v0.3 carries complete State/Memory provider snapshots and bounded periodic State
   observation batches. Sampling failure only causes staleness and never changes health,
   readiness, execution lifecycle, or recovery. The v0.2 endpoint is rejection-only.

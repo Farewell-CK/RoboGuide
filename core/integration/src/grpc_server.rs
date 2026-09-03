@@ -856,21 +856,17 @@ fn validate_registration(registration: &crate::grpc::v0_3::NodeRegistration) -> 
     let mut provider_ids = BTreeSet::new();
     for provider in &registration.memory_providers {
         require_known_owner(&provider.local_system_id, &local_system_ids)?;
-        let group_scope_valid = match provider.scope {
-            2 => !provider.execution_group_id.trim().is_empty(),
-            1 | 3 => provider.execution_group_id.is_empty(),
-            _ => false,
-        };
+        let scope_valid = matches!(provider.scope, 1 | 3) && provider.execution_group_id.is_empty();
         if provider.provider_id.trim().is_empty()
             || !provider_ids.insert(provider.provider_id.as_str())
             || !matches!(provider.kind, 1..=5)
-            || !group_scope_valid
+            || !scope_valid
             || !matches!(provider.visibility, 1 | 2)
             || provider.payload_schema.trim().is_empty()
             || provider.media_type.trim().is_empty()
         {
             return Err(Status::invalid_argument(
-                "Memory providers must have unique identities, known kinds/scopes/visibility, and nonblank schemas",
+                "Memory providers must have unique identities, local/global maximum scope, known kinds/visibility, and nonblank schemas",
             ));
         }
     }
@@ -947,6 +943,46 @@ fn require_known_owner(owner: &str, known: &BTreeSet<&str>) -> Result<(), Status
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Registration accepts static local/global provider maxima and rejects a concrete Group scope.
+    #[test]
+    fn registration_rejects_execution_group_memory_provider_scope() {
+        let mut registration = crate::grpc::v0_3::NodeRegistration {
+            node_id: "dog-a".to_string(),
+            local_systems: vec![crate::grpc::v0_3::LocalSystemDescriptor {
+                id: "memory".to_string(),
+                runtime: Some(crate::grpc::v0_3::LocalRuntime {
+                    name: "memory-runtime".to_string(),
+                    version: "1".to_string(),
+                }),
+                metadata: Default::default(),
+            }],
+            capabilities: Vec::new(),
+            sensors: Vec::new(),
+            resources: Vec::new(),
+            metadata: Default::default(),
+            node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+            state_exports: Vec::new(),
+            memory_providers: vec![crate::grpc::v0_3::MemoryProviderDescriptor {
+                provider_id: "experience".to_string(),
+                local_system_id: "memory".to_string(),
+                kind: crate::grpc::v0_3::MemoryKind::Experience as i32,
+                scope: crate::grpc::v0_3::MemoryScopeKind::Global as i32,
+                execution_group_id: String::new(),
+                visibility: crate::grpc::v0_3::MemoryVisibility::Discoverable as i32,
+                payload_schema: "example.experience/v1".to_string(),
+                media_type: "application/json".to_string(),
+            }],
+        };
+        validate_registration(&registration).expect("global provider maximum should be valid");
+
+        registration.memory_providers[0].scope =
+            crate::grpc::v0_3::MemoryScopeKind::ExecutionGroup as i32;
+        registration.memory_providers[0].execution_group_id = "group-a".to_string();
+        let error = validate_registration(&registration)
+            .expect_err("static execution Group provider scope should be rejected");
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
 
     /// Builds one registered-export set for State batch validation tests.
     fn state_exports() -> BTreeSet<String> {

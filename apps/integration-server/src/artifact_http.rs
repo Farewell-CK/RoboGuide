@@ -43,8 +43,13 @@ pub trait MemoryProviderAdmission: Send + Sync {
     /// Validates that one manifest is covered by a current provider declaration.
     fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), String>;
 
-    /// Validates that one replica reporter is a currently registered node.
-    fn admit_replica_node(&self, node_id: &NodeId) -> Result<(), String>;
+    /// Validates that one replica reporter has the named compatible consumer provider.
+    fn admit_replica(
+        &self,
+        node_id: &NodeId,
+        consumer_provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<(), String>;
 
     /// Validates that one write was issued by the active session of its semantic Node owner.
     fn admit_publisher(
@@ -251,7 +256,21 @@ impl ArtifactCatalog {
         admission: &dyn MemoryProviderAdmission,
         publisher: Option<&MemoryPublicationIdentity>,
     ) -> Result<(), HttpError> {
-        self.append_with_admission(payload, Some((admission, publisher)))
+        self.append_with_admission(payload, Some((admission, publisher, None)))
+    }
+
+    /// Appends replica evidence with an exact consumer provider under the shared write gate.
+    fn append_memory_replica(
+        &self,
+        payload: EventPayload,
+        admission: &dyn MemoryProviderAdmission,
+        publisher: Option<&MemoryPublicationIdentity>,
+        consumer_provider_id: &str,
+    ) -> Result<(), HttpError> {
+        self.append_with_admission(
+            payload,
+            Some((admission, publisher, Some(consumer_provider_id))),
+        )
     }
 
     /// Serializes optional Memory admission with Controller registration updates and persistence.
@@ -261,6 +280,7 @@ impl ArtifactCatalog {
         admission: Option<(
             &dyn MemoryProviderAdmission,
             Option<&MemoryPublicationIdentity>,
+            Option<&str>,
         )>,
     ) -> Result<(), HttpError> {
         let _write_guard = self
@@ -268,8 +288,8 @@ impl ArtifactCatalog {
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
-        if let Some((admission, publisher)) = admission {
-            admit_memory_payload(&payload, admission, publisher)?;
+        if let Some((admission, publisher, consumer_provider_id)) = admission {
+            admit_memory_payload(&payload, admission, publisher, consumer_provider_id)?;
         }
         let timestamp = self.next_timestamp()?;
         let mut projection = self
@@ -363,6 +383,7 @@ fn admit_memory_payload(
     payload: &EventPayload,
     admission: &dyn MemoryProviderAdmission,
     publisher: Option<&MemoryPublicationIdentity>,
+    consumer_provider_id: Option<&str>,
 ) -> Result<(), HttpError> {
     match payload {
         EventPayload::MemoryManifestPublished { manifest } => {
@@ -384,10 +405,13 @@ fn admit_memory_payload(
             manifest, node_id, ..
         } => {
             admission
-                .admit_manifest(manifest)
-                .map_err(HttpError::forbidden)?;
-            admission
-                .admit_replica_node(node_id)
+                .admit_replica(
+                    node_id,
+                    consumer_provider_id.ok_or_else(|| {
+                        HttpError::internal("replica admission lacks a consumer provider identity")
+                    })?,
+                    manifest,
+                )
                 .map_err(HttpError::forbidden)?;
             admission
                 .admit_publisher(publisher, node_id)
@@ -907,6 +931,7 @@ fn record_memory_replica(
         .map_err(map_cas_error)?;
     let node_id =
         NodeId::new(input.node_id).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let consumer_provider_id = input.consumer_provider_id;
     let payload = match input.status.as_str() {
         "staged" => EventPayload::MemoryArtifactStaged {
             manifest: input.manifest,
@@ -929,7 +954,12 @@ fn record_memory_replica(
             ));
         }
     };
-    catalog.append_memory(payload, memory_admission, request.memory_publisher.as_ref())?;
+    catalog.append_memory_replica(
+        payload,
+        memory_admission,
+        request.memory_publisher.as_ref(),
+        &consumer_provider_id,
+    )?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"status": input.status}),
@@ -1411,6 +1441,8 @@ struct MemoryReplicaInput {
     manifest: MemoryArtifactManifest,
     /// Node reporting local staging/import evidence.
     node_id: String,
+    /// Exact receiving provider admitted by the replica Node registration.
+    consumer_provider_id: String,
     /// Monotonic generic replica transition.
     status: String,
     /// Optional rejection diagnostic.
@@ -1866,7 +1898,12 @@ mod tests {
         }
 
         /// Accepts fixture replica nodes whose transition semantics are tested by the projection.
-        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
+        fn admit_replica(
+            &self,
+            _node_id: &NodeId,
+            _consumer_provider_id: &str,
+            _manifest: &MemoryArtifactManifest,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -1890,7 +1927,12 @@ mod tests {
         }
 
         /// Rejects every fixture replica reporter as unregistered.
-        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
+        fn admit_replica(
+            &self,
+            _node_id: &NodeId,
+            _consumer_provider_id: &str,
+            _manifest: &MemoryArtifactManifest,
+        ) -> Result<(), String> {
             Err("fixture replica node is not registered".to_string())
         }
 
@@ -1913,9 +1955,16 @@ mod tests {
             Ok(())
         }
 
-        /// Accepts registered-node semantics so this fixture isolates publisher fencing.
-        fn admit_replica_node(&self, _node_id: &NodeId) -> Result<(), String> {
-            Ok(())
+        /// Requires the exact consumer provider independently of producer ownership.
+        fn admit_replica(
+            &self,
+            _node_id: &NodeId,
+            consumer_provider_id: &str,
+            _manifest: &MemoryArtifactManifest,
+        ) -> Result<(), String> {
+            (consumer_provider_id == "fixture-consumer")
+                .then_some(())
+                .ok_or_else(|| "fixture consumer provider is incompatible".to_string())
         }
 
         /// Requires the semantic owner and fixture current session to match exactly.
@@ -2238,6 +2287,7 @@ mod tests {
         let replica = serde_json::to_vec(&serde_json::json!({
             "manifest": execution,
             "node_id": "dog-b",
+            "consumer_provider_id": "execution-consumer",
             "status": "staged",
         }))
         .expect("replica request serializes");
@@ -2278,6 +2328,231 @@ mod tests {
         let detail: serde_json::Value = serde_json::from_slice(&response_body(&detail, "200 OK"))
             .expect("Memory detail response is JSON");
         assert_eq!(detail["replicas"][0]["status"], "staged");
+    }
+
+    /// Node A publishes CAS-backed Spatial Memory and Node B selectively imports it locally.
+    #[tokio::test]
+    async fn local_memory_provider_cross_node_data_plane_exchange_is_integrated() {
+        use node_service::{
+            BoxDriverFuture, CompiledDriverRequest, DriverKind, DriverResponse, LocalDriver,
+            LocalIntegrationEngine, MemoryQuery, NodeServiceConfig,
+        };
+
+        /// Fake heterogeneous Local EAIOS driver used by Node B's configured import workflow.
+        struct NoopHttpDriver {
+            /// Counts actual provider import calls.
+            imports: Arc<std::sync::atomic::AtomicUsize>,
+        }
+
+        impl LocalDriver for NoopHttpDriver {
+            /// Identifies the configured local HTTP route family.
+            fn kind(&self) -> DriverKind {
+                DriverKind::Http
+            }
+
+            /// Returns one terminal response if a workflow is unexpectedly exercised.
+            fn invoke<'a>(&'a self, request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
+                if let CompiledDriverRequest::Http { path, body, .. } = request
+                    && path == "/memory/import"
+                {
+                    assert_eq!(body["manifest"]["selector"]["memory_id"], "provider-map-a");
+                    assert!(body["staged_path"].as_str().is_some());
+                    self.imports
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                Box::pin(async {
+                    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+                    sender
+                        .send(Ok(node_service::DriverEvent {
+                            sequence: 1,
+                            payload: serde_json::json!({"state": "READY", "run_id": "noop"}),
+                            terminal: true,
+                        }))
+                        .await
+                        .expect("test receiver remains available");
+                    Ok(DriverResponse { events: receiver })
+                })
+            }
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let store =
+            FileSystemArtifactStore::new(directory.path().join("cas")).expect("CAS initializes");
+        let event_log =
+            SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+        seed_controller_checkpoint(&event_log);
+        let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+            .expect("catalog replays");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("artifact listener binds");
+        let address = listener.local_addr().expect("listener has address");
+        let server = tokio::spawn(serve_artifact_http(
+            listener,
+            store.clone(),
+            catalog.clone(),
+            Arc::new(AllowTestMemoryAdmission),
+        ));
+        let endpoint = format!("http://{address}");
+        let client = node_service::ArtifactClient::new(&endpoint, 4, 1024, 1_000, 1_000)
+            .expect("Artifact client config is valid");
+        let bytes = b"cross-node-spatial-memory";
+        let source = directory.path().join("node-a-map.bin");
+        std::fs::write(&source, bytes).expect("Node A source writes");
+        let digest = digest_bytes(bytes);
+        let manifest = fixture_memory_manifest(
+            "provider-map-a",
+            MemoryKind::Spatial,
+            &digest,
+            bytes.len() as u64,
+        );
+        let wrong_reference = MemoryArtifactRef::new(
+            ContentDigest::new("f".repeat(64)).expect("wrong digest is structurally valid"),
+            bytes.len() as u64,
+        );
+        assert!(matches!(
+            client.upload_memory_file(&source, &wrong_reference).await,
+            Err(node_service::ArtifactError::DigestMismatch { .. })
+        ));
+        assert!(
+            !store
+                .contains(&digest)
+                .expect("failed preflight must leave no CAS blob")
+        );
+        client
+            .upload_memory_file(
+                &source,
+                manifest
+                    .artifact()
+                    .expect("exchangeable manifest has bytes"),
+            )
+            .await
+            .expect("Node A uploads CAS bytes");
+        client
+            .publish_memory_manifest(
+                &manifest,
+                &NodeId::new("dog-a").expect("Node A id is valid"),
+                "session-a",
+            )
+            .await
+            .expect("Node A publishes Memory metadata");
+
+        let config: NodeServiceConfig = serde_json::from_value(serde_json::json!({
+            "schema": "roboguide.node-config/v0.6",
+            "node_id": "dog-b",
+            "server_endpoint": "http://127.0.0.1:1",
+            "state_directory": directory.path().join("node-b-state"),
+            "local_systems": [{
+                "id": "memory",
+                "runtime_name": "fixture-memory",
+                "runtime_version": "1",
+                "health": {
+                    "step": {"id": "health", "connection": "local", "operation": {"kind": "http", "method": "GET", "path": "/health"}},
+                    "state_pointer": "/state", "online": ["READY"], "degraded": ["DEGRADED"], "offline": ["OFFLINE"]
+                }
+            }],
+            "connections": [{"driver": "http", "id": "local", "local_system": "memory", "endpoint": "http://127.0.0.1:2", "timeout_ms": 1000}],
+            "capabilities": [{
+                "contract": "memory.import@v1", "kind": "compute", "owner": "memory",
+                "readiness": {"step": {"id": "ready", "connection": "local", "operation": {"kind": "http", "method": "GET", "path": "/ready"}}, "state_pointer": "/state", "ready": ["READY"], "unavailable": ["OFFLINE"]},
+                "workflow": {
+                    "execute": [{"id": "execute", "connection": "local", "operation": {"kind": "http", "method": "POST", "path": "/execute"}}],
+                    "status": [{"id": "status", "connection": "local", "operation": {"kind": "http", "method": "GET", "path": "/status"}}],
+                    "cancel": [{"id": "cancel", "connection": "local", "operation": {"kind": "http", "method": "POST", "path": "/cancel"}}],
+                    "local_handle": {"kind": "pointer", "pointer": "/steps/execute/run_id"},
+                    "execution_state": {"state_pointer": "/steps/status/state", "accepted": ["ACCEPTED"], "running": ["RUNNING"], "completed": ["COMPLETED"], "failed": ["FAILED"], "cancelled": ["CANCELLED"]}
+                }
+            }],
+            "artifacts": {"endpoint": endpoint, "cache_directory": "artifact-cache", "max_artifact_bytes": 1024, "chunk_size_bytes": 4, "connect_timeout_ms": 1000, "read_timeout_ms": 1000},
+            "memory_providers": [{
+                "id": "local-spatial", "owner": "memory", "kind": "spatial", "scope": "global", "visibility": "exchangeable", "payload_schema": "example.memory/v1", "media_type": "application/octet-stream", "storage_directory": "memory-index",
+                "import": {"steps": [{
+                    "id": "import-memory", "connection": "local", "operation": {"kind": "http", "method": "POST", "path": "/memory/import"},
+                    "request": {"base": {}, "bindings": [
+                        {"target": "/manifest", "value": {"kind": "pointer", "pointer": "/invocation/memory_manifest"}},
+                        {"target": "/staged_path", "value": {"kind": "pointer", "pointer": "/invocation/staged_artifact"}}
+                    ]}
+                }]}
+            }]
+        }))
+        .expect("Node B config decodes");
+        let compiled = node_service::CompiledLocalCatalog::compile(config, directory.path())
+            .expect("Node B catalog compiles");
+        let imports = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let engine = LocalIntegrationEngine::new(
+            compiled,
+            vec![Arc::new(NoopHttpDriver {
+                imports: Arc::clone(&imports),
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("Node B engine starts");
+        let incompatible = fixture_memory_manifest(
+            "semantic-memory-a",
+            MemoryKind::Semantic,
+            &digest,
+            bytes.len() as u64,
+        );
+        assert!(matches!(
+            engine
+                .exchange_memory(
+                    "local-spatial",
+                    &incompatible,
+                    "session-b",
+                    serde_json::json!({}),
+                )
+                .await,
+            Err(node_service::EngineError::Configuration(_))
+        ));
+        assert_eq!(imports.load(std::sync::atomic::Ordering::SeqCst), 0);
+        engine
+            .exchange_memory(
+                "local-spatial",
+                &manifest,
+                "session-b",
+                serde_json::json!({}),
+            )
+            .await
+            .expect("Node B selectively imports verified bytes");
+        let staged = engine
+            .artifact_stager()
+            .expect("Artifact data plane is configured")
+            .memory_cache_path(manifest.selector());
+        assert_eq!(std::fs::read(&staged).expect("staged bytes read"), bytes);
+        assert_eq!(imports.load(std::sync::atomic::Ordering::SeqCst), 1);
+        std::fs::remove_file(&staged).expect("test removes transfer cache after local import");
+        engine
+            .exchange_memory(
+                "local-spatial",
+                &manifest,
+                "session-b",
+                serde_json::json!({}),
+            )
+            .await
+            .expect("same selective import is retry-idempotent");
+        assert_eq!(imports.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(
+            !staged.exists(),
+            "provider-owned import retry must not reconstruct the transfer cache"
+        );
+        assert_eq!(
+            engine
+                .discover_memories(
+                    "local-spatial",
+                    &MemoryQuery::default(),
+                    serde_json::json!({}),
+                )
+                .await
+                .expect("Node B local index discovers import"),
+            vec![manifest.clone()]
+        );
+        assert_eq!(
+            catalog
+                .memory_replicas(manifest.selector())
+                .expect("replica evidence reads")[0]
+                .status(),
+            domain::MemoryReplicaStatus::Imported
+        );
+        server.abort();
     }
 
     /// Exchangeable Memory publication fails closed when referenced CAS bytes are absent.
@@ -2439,6 +2714,7 @@ mod tests {
         let replica = serde_json::to_vec(&serde_json::json!({
             "manifest": manifest,
             "node_id": "dog-b",
+            "consumer_provider_id": "fixture-consumer",
             "status": "staged",
         }))
         .expect("replica request serializes");
@@ -2459,6 +2735,29 @@ mod tests {
                 .memory_replicas(manifest.selector())
                 .expect("replicas remain readable")
                 .is_empty()
+        );
+        let wrong_provider_replica = serde_json::to_vec(&serde_json::json!({
+            "manifest": manifest,
+            "node_id": "dog-b",
+            "consumer_provider_id": "wrong-provider",
+            "status": "staged",
+        }))
+        .expect("replica request serializes");
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &test_uploads(),
+                raw_memory_request(
+                    replica_path,
+                    &wrong_provider_replica,
+                    "dog-b",
+                    "session-current",
+                ),
+                Arc::new(FixtureSessionMemoryAdmission),
+            )
+            .await,
+            "403 Forbidden",
         );
         response_body(
             &request_once_with_admission(
@@ -2871,9 +3170,9 @@ mod tests {
         assert_eq!(registry.active_bytes, 0);
     }
 
-    /// Exercises upload, finalize, publish, bodyless GET, blob streaming, and replica evidence.
+    /// Exercises Node A map export through Node B import and strong localization verification.
     #[tokio::test]
-    async fn artifact_http_round_trip_is_bidirectional_catalog_flow() {
+    async fn spatial_map_cross_node_exchange_reaches_strong_verification() {
         let directory = tempfile::tempdir().expect("temporary directory exists");
         let store = FileSystemArtifactStore::new(directory.path()).expect("CAS initializes");
         let event_path = directory.path().join("events.sqlite3");

@@ -789,6 +789,7 @@ dependencies = [
  "control",
  "domain",
  "integration",
+ "node-service",
  "orchestration",
  "ports",
  "runtime",

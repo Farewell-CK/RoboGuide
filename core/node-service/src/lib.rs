@@ -14,6 +14,7 @@ mod conformance;
 mod engine;
 mod journal;
 mod local_engine;
+mod memory;
 mod service;
 
 pub use artifact::{
@@ -24,9 +25,9 @@ pub use config::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
-    LocalSystemConfig, MemoryProviderConfig, NodeServiceConfig, RequestBindingConfig,
-    RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig, ValueExpressionConfig,
-    ValueFunction, WorkflowConfig, WorkflowStepConfig,
+    LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig,
+    RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig,
+    ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
 pub use conformance::{
     CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
@@ -53,12 +54,13 @@ pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowCo
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
-    CapabilityReadinessFact, CatalogError, CompiledArtifactService, CompiledCapability,
-    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
-    CompiledLocalSystem, CompiledMemoryProvider, CompiledResource, CompiledSensor,
-    CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState,
-    MappedExecutionFact, MappedExecutionPhase, StateExportFact,
+    CONFIG_SCHEMA_V0_6, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
+    CompiledCapability, CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck,
+    CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryProvider, CompiledMemoryWorkflow,
+    CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
+    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase, StateExportFact,
 };
+pub use memory::{FilesystemMemoryProvider, LocalMemoryProvider, MemoryProviderError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};
 
 #[cfg(test)]

@@ -160,11 +160,12 @@ State 不自动执行 last-writer-wins 跨来源覆盖，也不自动把 Observa
 命名的 provider。查询 facade 不成为新的写入 authority，也不绕过 Control、Runtime 或
 Mission lifecycle。
 
-Node Config v0.5 允许不同 EAIOS 选择性声明 State exports 和 Memory providers。State export
+Node Config v0.6 允许不同 EAIOS 选择性声明 State exports 和 Memory providers。State export
 固定 local-system owner、对象、Reported/Observed 语义、schema、TTL、采样周期和本地
 observation workflow；采样失败只让旧记录变 stale。部署 facade 必须保证 observation
-无副作用，离线配置检查不能替代运行时验证。Memory provider 只声明发现与最大交换能力，不要求
-底层数据库、文件布局或厂商接口统一。Node Protocol v0.3 携带完整声明 snapshot 和有界
+无副作用，离线配置检查不能替代运行时验证。Memory provider 声明静态最大 scope，并可用固定
+HTTP、dynamic gRPC 或 MCP workflow 实现 discovery/export/import；底层数据库、文件布局和厂商
+接口保持异构。v0.5 provider 仍可作为 metadata-only 配置启动。Node Protocol v0.3 携带完整声明 snapshot 和有界
 `StateObservationBatch`，沿用 application-accepted durable ACK；v0.2 endpoint 已退役并明确
 返回迁移错误。
 
@@ -174,6 +175,19 @@ Memory 与实时 State 分离。v0.1 支持 Execution、Spatial、Semantic、Exp
 五类 immutable Memory revision，以及 Local、Execution Group、Global scope。Catalog 保存
 owner、provider、visibility、schema、provenance、可选 CAS reference 和 node-local replica
 evidence，但不取得本地 Memory 的 semantic ownership。
+
+节点侧 `LocalMemoryProvider` 是类似 VFS 的统一语义边界。参考实现使用 provider-local filesystem
+与 JSONL metadata index；Index 可重建且不是新的 authority。Node 主动 export，消费者对明确
+revision 选择性 import。ExecutionGroup 是 manifest 的 live scope，由 ExecutionCommand 的逻辑
+`group_id` 注入并校验，不是 static provider config，因此 Node failure/rebind 不改变其语义。
+
+Memory、Artifact 与 Index 三者不合并：Memory 解释 owner/kind/scope/schema/provenance，Artifact
+Store 只保存 digest-addressed opaque bytes，Index 只加速本地 metadata retrieval。Runtime 不成为
+Memory DB，State 不保存 Memory blob；provider/CAS/catalog failure 只形成 retry/fence evidence，
+不直接终结 Task 或 Mission。Replica mutation 必须由接收 Node 的 exact consumer provider 通过
+admission，且 Imported evidence 不可被后续失败尝试降级。当前 Node Protocol 尚不包含
+selective-import command，显式 consumer selection 与 durable command acceptance 仍是后续协议
+工作，不能用自动全量拉取替代。
 
 `Discoverable` Memory 可以只有 metadata；`Exchangeable` Memory 必须引用已经通过 digest
 与 size 校验的 Artifact CAS bytes。消费者按明确 revision 选择性 pull，并记录
@@ -242,7 +256,7 @@ How 与 Local Safety 属于 deployment-owned `integrations/` facade。
 多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行
 状态下自动切换本地系统或重放动作。
 
-Extension Conformance v0.1 复用 Node Service 的配置编译器，要求 Node Config v0.5 为每个
+Extension Conformance v0.1 复用 Node Service 的配置编译器，要求 Node Config v0.6 为每个
 exact capability 声明 readiness，并离线验证唯一 owner、固定 endpoint/method/service/tool、
 受限 request mapping、execution state mapping、required resources 与选择性 State/Memory
 声明。验证不联系 Controller

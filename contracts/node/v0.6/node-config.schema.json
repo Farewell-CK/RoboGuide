@@ -1,0 +1,1050 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/node/v0.6/node-config.schema.json",
+  "title": "RoboGuide Node Service configuration v0.6",
+  "description": "Strict declarative configuration for one roboguide-node process, local workflows, selective State exports, Memory providers, and the independent Artifact data plane.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "node_id",
+    "server_endpoint",
+    "state_directory",
+    "local_systems",
+    "connections",
+    "capabilities"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "roboguide.node-config/v0.6"
+    },
+    "node_id": {
+      "$ref": "#/$defs/nonBlankString"
+    },
+    "server_endpoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_directory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reconnect_delay_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "default": 1000
+    },
+    "local_systems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/localSystem"
+      }
+    },
+    "connections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/connection"
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    },
+    "resources": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/sensor"
+      }
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts"
+    },
+    "state_exports": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/stateExport"
+      }
+    },
+    "memory_providers": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/memoryProvider"
+      }
+    }
+  },
+  "$defs": {
+    "stateExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "object_class",
+        "object_type",
+        "object_id",
+        "semantic",
+        "payload_schema",
+        "valid_for_ms",
+        "interval_ms",
+        "step",
+        "value_pointer"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "owner": { "$ref": "#/$defs/nonBlankString" },
+        "object_class": { "enum": ["node", "world"] },
+        "object_type": { "$ref": "#/$defs/nonBlankString" },
+        "object_id": { "$ref": "#/$defs/nonBlankString" },
+        "semantic": { "enum": ["reported", "observed"] },
+        "payload_schema": { "$ref": "#/$defs/nonBlankString" },
+        "valid_for_ms": { "type": "integer", "minimum": 1 },
+        "interval_ms": { "type": "integer", "minimum": 100 },
+        "step": { "$ref": "#/$defs/workflowStep" },
+        "value_pointer": { "$ref": "#/$defs/jsonPointer" },
+        "source_observed_at_pointer": { "$ref": "#/$defs/jsonPointer" },
+        "confidence_pointer": { "$ref": "#/$defs/jsonPointer" }
+      }
+    },
+    "memoryProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "kind",
+        "scope",
+        "visibility",
+        "payload_schema",
+        "media_type"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "owner": { "$ref": "#/$defs/nonBlankString" },
+        "kind": { "enum": ["execution", "spatial", "semantic", "experience", "artifact"] },
+        "scope": { "enum": ["local", "global"] },
+        "visibility": { "enum": ["discoverable", "exchangeable"] },
+        "payload_schema": { "$ref": "#/$defs/nonBlankString" },
+        "media_type": { "$ref": "#/$defs/nonBlankString" },
+        "storage_directory": { "type": "string", "minLength": 1 },
+        "discover": { "$ref": "#/$defs/memoryWorkflow" },
+        "export": { "$ref": "#/$defs/memoryWorkflow" },
+        "import": { "$ref": "#/$defs/memoryWorkflow" }
+      }
+    },
+    "memoryWorkflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/workflowStep" }
+        },
+        "manifests_pointer": { "$ref": "#/$defs/jsonPointer" },
+        "artifact_path_pointer": { "$ref": "#/$defs/jsonPointer" }
+      }
+    },
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "jsonPointer": {
+      "type": "string",
+      "pattern": "^(?:|(?:/(?:[^~/]|~[01])*)+)$"
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "localSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "runtime_name",
+        "runtime_version",
+        "health"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "runtime_name": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "runtime_version": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "health": {
+          "$ref": "#/$defs/localSystemHealth"
+        },
+        "metadata": {
+          "$ref": "#/$defs/stringMap",
+          "default": {}
+        }
+      }
+    },
+    "localSystemHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "state_pointer",
+        "online",
+        "degraded",
+        "offline"
+      ],
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/workflowStep"
+        },
+        "state_pointer": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "detail_pointer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/jsonPointer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "online": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "degraded": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "offline": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "credentialSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "env"
+      ],
+      "properties": {
+        "env": {
+          "$ref": "#/$defs/nonBlankString"
+        }
+      }
+    },
+    "credentialMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/nonBlankString"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/credentialSource"
+      }
+    },
+    "connection": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/httpConnection"
+        },
+        {
+          "$ref": "#/$defs/grpcConnection"
+        },
+        {
+          "$ref": "#/$defs/mcpConnection"
+        }
+      ]
+    },
+    "httpConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "driver",
+        "id",
+        "local_system",
+        "endpoint"
+      ],
+      "properties": {
+        "driver": {
+          "const": "http"
+        },
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "local_system": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "default": 5000
+        },
+        "headers": {
+          "$ref": "#/$defs/credentialMap",
+          "default": {}
+        }
+      }
+    },
+    "grpcConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "driver",
+        "id",
+        "local_system",
+        "endpoint"
+      ],
+      "properties": {
+        "driver": {
+          "const": "grpc"
+        },
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "local_system": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "descriptor_set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reflection": {
+          "type": "boolean",
+          "default": false
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "default": 5000
+        },
+        "metadata": {
+          "$ref": "#/$defs/credentialMap",
+          "default": {}
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "descriptor_set"
+          ],
+          "properties": {
+            "descriptor_set": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reflection": {
+              "const": false
+            }
+          }
+        },
+        {
+          "required": [
+            "reflection"
+          ],
+          "properties": {
+            "descriptor_set": {
+              "type": "null"
+            },
+            "reflection": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "mcpConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "driver",
+        "id",
+        "local_system",
+        "endpoint"
+      ],
+      "properties": {
+        "driver": {
+          "const": "mcp"
+        },
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "local_system": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "default": 5000
+        },
+        "headers": {
+          "$ref": "#/$defs/credentialMap",
+          "default": {}
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "kind",
+        "owner",
+        "readiness",
+        "workflow"
+      ],
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 5,
+          "pattern": "^.+\\..+@[^@]+$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "mobility",
+            "transport",
+            "compute",
+            "observation"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "required_resources": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonBlankString"
+          }
+        },
+        "local_locks": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonBlankString"
+          }
+        },
+        "artifact_operation": {
+          "type": "string",
+          "enum": [
+            "prepare-output",
+            "publish",
+            "import",
+            "verify"
+          ]
+        },
+        "readiness": {
+          "$ref": "#/$defs/capabilityReadiness"
+        },
+        "workflow": {
+          "$ref": "#/$defs/workflow"
+        }
+      }
+    },
+    "capabilityReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "state_pointer",
+        "ready",
+        "unavailable"
+      ],
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/workflowStep"
+        },
+        "state_pointer": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "detail_pointer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/jsonPointer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ready": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "unavailable": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execute",
+        "status",
+        "cancel",
+        "local_handle",
+        "execution_state"
+      ],
+      "properties": {
+        "execute": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/workflowStep"
+          }
+        },
+        "status": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/workflowStep"
+          }
+        },
+        "cancel": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/workflowStep"
+          }
+        },
+        "local_handle": {
+          "$ref": "#/$defs/valueExpression"
+        },
+        "poll_interval_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "default": 250
+        },
+        "execution_state": {
+          "$ref": "#/$defs/executionState"
+        }
+      }
+    },
+    "workflowStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "connection",
+        "operation"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "connection": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "operation": {
+          "$ref": "#/$defs/localOperation"
+        },
+        "request": {
+          "$ref": "#/$defs/requestMapping",
+          "default": {
+            "base": {},
+            "bindings": []
+          }
+        }
+      }
+    },
+    "localOperation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/httpOperation"
+        },
+        {
+          "$ref": "#/$defs/grpcUnaryOperation"
+        },
+        {
+          "$ref": "#/$defs/grpcServerStreamOperation"
+        },
+        {
+          "$ref": "#/$defs/mcpToolOperation"
+        }
+      ]
+    },
+    "httpOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "method",
+        "path"
+      ],
+      "properties": {
+        "kind": {
+          "const": "http"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "not": {
+            "pattern": "[{}$?#]|\\.\\."
+          }
+        }
+      }
+    },
+    "grpcUnaryOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "service",
+        "method"
+      ],
+      "properties": {
+        "kind": {
+          "const": "grpc_unary"
+        },
+        "service": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.\\-/]+$"
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+$"
+        }
+      }
+    },
+    "grpcServerStreamOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "service",
+        "method"
+      ],
+      "properties": {
+        "kind": {
+          "const": "grpc_server_stream"
+        },
+        "service": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.\\-/]+$"
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+$"
+        }
+      }
+    },
+    "mcpToolOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "tool"
+      ],
+      "properties": {
+        "kind": {
+          "const": "mcp_tool"
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.\\-/]+$"
+        }
+      }
+    },
+    "requestMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "default": {}
+        },
+        "bindings": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/requestBinding"
+          }
+        }
+      }
+    },
+    "requestBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "value"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "value": {
+          "$ref": "#/$defs/valueExpression"
+        }
+      }
+    },
+    "valueExpression": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pointerExpression"
+        },
+        {
+          "$ref": "#/$defs/constantExpression"
+        },
+        {
+          "$ref": "#/$defs/functionExpression"
+        }
+      ]
+    },
+    "pointerExpression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "pointer"
+      ],
+      "properties": {
+        "kind": {
+          "const": "pointer"
+        },
+        "pointer": {
+          "$ref": "#/$defs/jsonPointer"
+        }
+      }
+    },
+    "constantExpression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "const": "constant"
+        },
+        "value": {}
+      }
+    },
+    "functionExpression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "function",
+        "arguments"
+      ],
+      "properties": {
+        "kind": {
+          "const": "function"
+        },
+        "function": {
+          "type": "string",
+          "enum": [
+            "to_string",
+            "to_integer",
+            "to_float",
+            "to_boolean",
+            "quaternion_from_yaw"
+          ]
+        },
+        "arguments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/valueExpression"
+          }
+        }
+      }
+    },
+    "executionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_pointer",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "properties": {
+        "state_pointer": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "reason_pointer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/jsonPointer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accepted": {
+          "$ref": "#/$defs/stateValues",
+          "default": []
+        },
+        "running": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "completed": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "failed": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "cancelled": {
+          "$ref": "#/$defs/nonEmptyStateValues"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "stateValues": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonBlankString"
+      }
+    },
+    "nonEmptyStateValues": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonBlankString"
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "capacity",
+        "owner"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "space",
+            "compute",
+            "time"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "owner": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "metadata": {
+          "$ref": "#/$defs/stringMap",
+          "default": {}
+        }
+      }
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "owner"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "owner": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "metadata": {
+          "$ref": "#/$defs/stringMap",
+          "default": {}
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "cache_directory"],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://[^\\s]+$"
+        },
+        "cache_directory": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "max_artifact_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "default": 4294967296
+        },
+        "chunk_size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824,
+          "default": 1048576
+        },
+        "connect_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "default": 5000
+        },
+        "read_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "default": 30000
+        },
+        "input_bindings": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactInputBinding"
+          }
+        },
+        "output_bindings": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactOutputBinding"
+          }
+        }
+      }
+    },
+    "artifactInputBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "map_id", "revision_id", "target_path"],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonBlankString"},
+        "map_id": {"$ref": "#/$defs/mapPathId"},
+        "revision_id": {"$ref": "#/$defs/mapPathId"},
+        "content_digest": {
+          "type": ["string", "null"],
+          "pattern": "^(?:sha256:)?[0-9a-f]{64}$"
+        },
+        "target_path": {
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "artifactOutputBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "map_id",
+        "revision_id",
+        "source_path",
+        "media_type",
+        "format_name",
+        "format_version",
+        "root_frame",
+        "coordinate_convention",
+        "spatial_anchor_id"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonBlankString"},
+        "map_id": {"$ref": "#/$defs/mapPathId"},
+        "revision_id": {"$ref": "#/$defs/mapPathId"},
+        "source_path": {"$ref": "#/$defs/relativePath"},
+        "media_type": {"$ref": "#/$defs/nonBlankString"},
+        "format_name": {"$ref": "#/$defs/nonBlankString"},
+        "format_version": {"$ref": "#/$defs/nonBlankString"},
+        "root_frame": {"$ref": "#/$defs/nonBlankString"},
+        "coordinate_convention": {"$ref": "#/$defs/nonBlankString"},
+        "spatial_anchor_id": {"$ref": "#/$defs/nonBlankString"},
+        "resolution_meters": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
+    },
+    "mapPathId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    }
+  }
+}

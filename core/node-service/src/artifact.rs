@@ -11,8 +11,8 @@ use crate::{
 use bytes::Bytes;
 use domain::{
     ContentDigest, LocalizationVerificationEvidence, MapArtifactManifest, MapArtifactRef, MapId,
-    MapRevisionId, MapRevisionSelector, MapRevisionStatus, MissionId, NodeId, SpatialAnchorId,
-    TaskId, TaskRef, TimestampMs,
+    MapRevisionId, MapRevisionSelector, MapRevisionStatus, MemoryArtifactManifest, MemorySelector,
+    MissionId, NodeId, SpatialAnchorId, TaskId, TaskRef, TimestampMs,
 };
 use reqwest::{Client, StatusCode, Url};
 use serde_json::Value;
@@ -292,6 +292,126 @@ impl ArtifactClient {
         })
     }
 
+    /// Fetches one generic Memory manifest and replica evidence from the shared catalog.
+    pub async fn fetch_memory_manifest(
+        &self,
+        selector: &MemorySelector,
+    ) -> Result<(MemoryArtifactManifest, Value), ArtifactError> {
+        validate_segment(selector.memory_id().as_str(), "memory_id")?;
+        validate_segment(selector.revision_id().as_str(), "revision_id")?;
+        let endpoint = self.path(&[
+            "v1",
+            "memories",
+            selector.memory_id().as_str(),
+            "revisions",
+            selector.revision_id().as_str(),
+        ])?;
+        let response = self.client.get(endpoint.clone()).send().await?;
+        ensure_success(&response, &endpoint)?;
+        let body = response.json::<Value>().await?;
+        let manifest = serde_json::from_value(
+            body.get("manifest")
+                .cloned()
+                .unwrap_or_else(|| body.clone()),
+        )?;
+        Ok((manifest, body))
+    }
+
+    /// Publishes generic Memory metadata with the active Node/session identity.
+    pub async fn publish_memory_manifest(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        node_id: &NodeId,
+        session_id: &str,
+    ) -> Result<(), ArtifactError> {
+        let selector = manifest.selector();
+        let endpoint = self.path(&[
+            "v1",
+            "memories",
+            selector.memory_id().as_str(),
+            "revisions",
+            selector.revision_id().as_str(),
+        ])?;
+        if self.memory_publication_already_exists(manifest).await? {
+            return Ok(());
+        }
+        let response = self
+            .client
+            .post(endpoint.clone())
+            .header("X-RoboGuide-Node-Id", node_id.as_str())
+            .header("X-RoboGuide-Session-Id", session_id)
+            .json(manifest)
+            .send()
+            .await
+            .map_err(|error| ArtifactError::remote_outcome_unknown("memory publication", error))?;
+        if response.status() == StatusCode::CONFLICT {
+            return if self.memory_publication_already_exists(manifest).await? {
+                Ok(())
+            } else {
+                Err(ArtifactError::Status {
+                    status: response.status(),
+                    endpoint: endpoint.to_string(),
+                })
+            };
+        }
+        ensure_success(&response, &endpoint)
+    }
+
+    /// Checks whether a generic catalog selector already contains exactly this manifest.
+    async fn memory_publication_already_exists(
+        &self,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<bool, ArtifactError> {
+        match self.fetch_memory_manifest(manifest.selector()).await {
+            Ok((existing, _)) => Ok(existing == *manifest),
+            Err(ArtifactError::Status {
+                status: StatusCode::NOT_FOUND,
+                ..
+            }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Records generic Memory staged/imported/rejected evidence through the shared catalog.
+    pub async fn record_memory_replica(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        node_id: &NodeId,
+        session_id: &str,
+        consumer_provider_id: &str,
+        status: &str,
+        reason: Option<&str>,
+    ) -> Result<(), ArtifactError> {
+        let selector = manifest.selector();
+        let endpoint = self.path(&[
+            "v1",
+            "memories",
+            selector.memory_id().as_str(),
+            "revisions",
+            selector.revision_id().as_str(),
+            "replicas",
+        ])?;
+        let payload = serde_json::json!({
+            "manifest": manifest,
+            "node_id": node_id.as_str(),
+            "consumer_provider_id": consumer_provider_id,
+            "status": status,
+            "reason": reason,
+        });
+        let response = self
+            .client
+            .post(endpoint.clone())
+            .header("X-RoboGuide-Node-Id", node_id.as_str())
+            .header("X-RoboGuide-Session-Id", session_id)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|error| {
+                ArtifactError::remote_outcome_unknown("memory replica evidence", error)
+            })?;
+        ensure_success(&response, &endpoint)
+    }
+
     /// Publishes one typed immutable manifest after the artifact bytes are available.
     ///
     /// This is deliberately separate from [`Self::upload_file`]: uploading bytes only places
@@ -460,6 +580,50 @@ impl ArtifactClient {
         metadata: &ArtifactOutputBindingConfig,
         source: &Path,
     ) -> Result<ArtifactOutput, ArtifactError> {
+        let (digest, byte_size, upload_id) = self.upload_blob(source).await?;
+        Ok(ArtifactOutput {
+            binding_id: metadata.id.clone(),
+            map_id: metadata.map_id.clone(),
+            revision_id: metadata.revision_id.clone(),
+            content_digest: digest,
+            byte_size,
+            upload_id,
+        })
+    }
+
+    /// Uploads opaque bytes and verifies they match a Memory artifact reference.
+    pub async fn upload_memory_file(
+        &self,
+        source: &Path,
+        expected: &domain::MemoryArtifactRef,
+    ) -> Result<(), ArtifactError> {
+        let mut source_file = open_regular_file(source).await?;
+        let (preflight_digest, preflight_size) = digest_open_file(
+            &mut source_file,
+            self.chunk_size_bytes,
+            self.max_artifact_bytes,
+        )
+        .await?;
+        if preflight_digest != expected.content_digest().as_str() {
+            return Err(ArtifactError::DigestMismatch {
+                expected: expected.content_digest().as_str().to_string(),
+                actual: preflight_digest,
+            });
+        }
+        if preflight_size != expected.byte_size() {
+            return Err(ArtifactError::SizeMismatch {
+                expected: expected.byte_size(),
+                actual: preflight_size,
+            });
+        }
+        source_file.seek(SeekFrom::Start(0)).await?;
+        self.upload_open_blob(source_file, preflight_digest, preflight_size)
+            .await?;
+        Ok(())
+    }
+
+    /// Streams one opaque local file into the content-addressed Artifact store.
+    async fn upload_blob(&self, source: &Path) -> Result<(String, u64, String), ArtifactError> {
         let mut source_file = open_regular_file(source).await?;
         let (digest, byte_size) = digest_open_file(
             &mut source_file,
@@ -468,6 +632,16 @@ impl ArtifactClient {
         )
         .await?;
         source_file.seek(SeekFrom::Start(0)).await?;
+        self.upload_open_blob(source_file, digest, byte_size).await
+    }
+
+    /// Uploads and finalizes bytes from an already hashed, rewound regular-file handle.
+    async fn upload_open_blob(
+        &self,
+        source_file: tokio::fs::File,
+        digest: String,
+        byte_size: u64,
+    ) -> Result<(String, u64, String), ArtifactError> {
         let create_endpoint = self.path(&["v1", "artifact-uploads"])?;
         let upload_id = new_upload_id();
         let create_payload = serde_json::json!({"upload_id": upload_id});
@@ -515,14 +689,7 @@ impl ArtifactClient {
             .await
             .map_err(|error| ArtifactError::remote_outcome_unknown("upload finalization", error))?;
         ensure_success(&response, &finalize_endpoint)?;
-        Ok(ArtifactOutput {
-            binding_id: metadata.id.clone(),
-            map_id: metadata.map_id.clone(),
-            revision_id: metadata.revision_id.clone(),
-            content_digest: digest,
-            byte_size,
-            upload_id,
-        })
+        Ok((digest, byte_size, upload_id))
     }
 
     /// Builds a URL by appending escaped path segments to the configured endpoint.
@@ -640,6 +807,80 @@ impl ArtifactStager {
             client,
             cache_directory,
         })
+    }
+
+    /// Downloads and verifies a generic Memory artifact into the node-owned cache.
+    pub async fn stage_memory_input(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        destination: &Path,
+    ) -> Result<(), ArtifactError> {
+        let artifact = manifest.artifact().ok_or_else(|| {
+            ArtifactError::Configuration("metadata-only Memory cannot be staged".to_string())
+        })?;
+        self.client
+            .download_digest(
+                artifact.content_digest().as_str(),
+                destination,
+                artifact.byte_size(),
+            )
+            .await
+    }
+
+    /// Returns a provider-independent cache path for one immutable Memory selector.
+    pub fn memory_cache_path(&self, selector: &MemorySelector) -> PathBuf {
+        self.cache_directory
+            .join("memory")
+            .join(selector.memory_id().as_str())
+            .join(format!("{}.blob", selector.revision_id().as_str()))
+    }
+
+    /// Publishes generic Memory metadata using the active Node Protocol session identity.
+    pub async fn publish_memory(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        node_id: &NodeId,
+        session_id: &str,
+    ) -> Result<(), ArtifactError> {
+        self.client
+            .publish_memory_manifest(manifest, node_id, session_id)
+            .await
+    }
+
+    /// Uploads provider-produced opaque bytes and verifies the declared Memory reference.
+    pub async fn upload_memory_output(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        source: &Path,
+    ) -> Result<(), ArtifactError> {
+        let artifact = manifest.artifact().ok_or_else(|| {
+            ArtifactError::Configuration(
+                "exchangeable Memory lacks an artifact reference".to_string(),
+            )
+        })?;
+        self.client.upload_memory_file(source, artifact).await
+    }
+
+    /// Records generic Memory replica evidence using the active Node Protocol session identity.
+    pub async fn record_memory_replica(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        node_id: &NodeId,
+        session_id: &str,
+        consumer_provider_id: &str,
+        status: &str,
+        reason: Option<&str>,
+    ) -> Result<(), ArtifactError> {
+        self.client
+            .record_memory_replica(
+                manifest,
+                node_id,
+                session_id,
+                consumer_provider_id,
+                status,
+                reason,
+            )
+            .await
     }
 
     /// Builds a stager from a startup-validated compiled artifact service.

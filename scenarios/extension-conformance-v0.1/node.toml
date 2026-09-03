@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.5"
+schema = "roboguide.node-config/v0.6"
 node_id = "extension-demo-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
@@ -104,6 +104,54 @@ scope = "global"
 visibility = "exchangeable"
 payload_schema = "roboguide.example.spatial-asset/v0.1"
 media_type = "application/octet-stream"
+storage_directory = "memory/spatial-assets"
+
+[memory_providers.discover]
+manifests_pointer = "/steps/discover-spatial/manifests"
+
+[[memory_providers.discover.steps]]
+id = "discover-spatial"
+connection = "demo-health-http"
+
+[memory_providers.discover.steps.operation]
+kind = "http"
+method = "GET"
+path = "/memory/spatial"
+
+[memory_providers.export]
+artifact_path_pointer = "/steps/export-spatial/path"
+
+[[memory_providers.export.steps]]
+id = "export-spatial"
+connection = "demo-health-http"
+
+[memory_providers.export.steps.operation]
+kind = "http"
+method = "POST"
+path = "/memory/spatial/export"
+
+[[memory_providers.export.steps.request.bindings]]
+target = "/manifest"
+value = { kind = "pointer", pointer = "/invocation/memory_manifest" }
+
+[memory_providers.import]
+
+[[memory_providers.import.steps]]
+id = "import-spatial"
+connection = "demo-health-http"
+
+[memory_providers.import.steps.operation]
+kind = "http"
+method = "POST"
+path = "/memory/spatial/import"
+
+[[memory_providers.import.steps.request.bindings]]
+target = "/manifest"
+value = { kind = "pointer", pointer = "/invocation/memory_manifest" }
+
+[[memory_providers.import.steps.request.bindings]]
+target = "/staged_path"
+value = { kind = "pointer", pointer = "/invocation/staged_artifact" }
 
 [[memory_providers]]
 id = "semantic-models"

@@ -11,8 +11,8 @@ use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    MemoryProviderConfig, NodeServiceConfig, ResourceConfig, SensorConfig, StateExportConfig,
-    WorkflowConfig, WorkflowStepConfig,
+    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, ResourceConfig, SensorConfig,
+    StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -31,6 +31,8 @@ pub const CONFIG_SCHEMA_V0_3: &str = "roboguide.node-config/v0.3";
 pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
 /// Schema identity adding selective State exports and Memory providers over Protocol v0.3.
 pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
+/// Schema identity adding executable heterogeneous Memory provider workflows.
+pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -187,7 +189,7 @@ pub struct StateExportFact {
 }
 
 /// Immutable Memory provider declaration without a local storage implementation requirement.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledMemoryProvider {
     /// Node-wide provider identity.
     id: String,
@@ -195,7 +197,7 @@ pub struct CompiledMemoryProvider {
     owner: String,
     /// Generic Memory kind.
     kind: String,
-    /// Default local/global sharing scope.
+    /// Maximum local/global sharing scope.
     scope: String,
     /// Discoverable or exchangeable policy.
     visibility: String,
@@ -203,6 +205,27 @@ pub struct CompiledMemoryProvider {
     payload_schema: String,
     /// Artifact media type when bytes are offered.
     media_type: String,
+    /// Whether node-config/v0.6 enables local backend operations.
+    operational: bool,
+    /// Provider-local storage root.
+    storage_directory: PathBuf,
+    /// Optional discovery workflow.
+    discover: Option<CompiledMemoryWorkflow>,
+    /// Optional export workflow.
+    export: Option<CompiledMemoryWorkflow>,
+    /// Optional import workflow.
+    import: Option<CompiledMemoryWorkflow>,
+}
+
+/// Startup-validated Memory provider workflow.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryWorkflow {
+    /// Ordered local driver steps.
+    steps: Vec<CompiledWorkflowStep>,
+    /// Optional response pointer to discovered manifests.
+    manifests_pointer: Option<String>,
+    /// Optional response pointer to an exported artifact path.
+    artifact_path_pointer: Option<String>,
 }
 
 /// Immutable exact-capability readiness check and state projection.
@@ -426,21 +449,28 @@ impl CompiledLocalCatalog {
     ) -> Result<Self, CatalogError> {
         let supports_artifacts = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
+            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
+            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
         );
-        let supports_state_memory = config.schema == CONFIG_SCHEMA_V0_5;
+        let supports_state_memory = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+        );
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5
+                CONFIG_SCHEMA_V0_2
+                    | CONFIG_SCHEMA_V0_3
+                    | CONFIG_SCHEMA_V0_4
+                    | CONFIG_SCHEMA_V0_5
+                    | CONFIG_SCHEMA_V0_6
             ),
             "schema",
             format!(
-                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, or `{CONFIG_SCHEMA_V0_5}`"
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, or `{CONFIG_SCHEMA_V0_6}`"
             ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
@@ -479,7 +509,13 @@ impl CompiledLocalCatalog {
         )?;
         let state_exports =
             compile_state_exports(config.state_exports, &local_systems, &connections)?;
-        let memory_providers = compile_memory_providers(config.memory_providers, &local_systems)?;
+        let memory_providers = compile_memory_providers(
+            config.memory_providers,
+            &local_systems,
+            &connections,
+            &state_directory,
+            config.schema == CONFIG_SCHEMA_V0_6,
+        )?;
         let resources = compile_resources(config.resources, &local_systems)?;
         let sensors = compile_sensors(config.sensors, &local_systems)?;
         let capabilities = compile_capabilities(
@@ -814,7 +850,7 @@ impl CompiledMemoryProvider {
         &self.kind
     }
 
-    /// Returns the default scope spelling.
+    /// Returns the maximum scope spelling.
     pub fn scope(&self) -> &str {
         &self.scope
     }
@@ -832,6 +868,48 @@ impl CompiledMemoryProvider {
     /// Returns the provider content media type.
     pub fn media_type(&self) -> &str {
         &self.media_type
+    }
+
+    /// Returns whether this provider has the v0.6 Local Memory Provider backend enabled.
+    pub const fn operational(&self) -> bool {
+        self.operational
+    }
+
+    /// Returns the provider-local storage root.
+    pub fn storage_directory(&self) -> &Path {
+        &self.storage_directory
+    }
+
+    /// Returns the optional discovery workflow.
+    pub const fn discover(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.discover.as_ref()
+    }
+
+    /// Returns the optional export workflow.
+    pub const fn export(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.export.as_ref()
+    }
+
+    /// Returns the optional import workflow.
+    pub const fn import(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.import.as_ref()
+    }
+}
+
+impl CompiledMemoryWorkflow {
+    /// Returns ordered provider-local workflow steps.
+    pub fn steps(&self) -> &[CompiledWorkflowStep] {
+        &self.steps
+    }
+
+    /// Returns the optional response pointer containing manifests.
+    pub fn manifests_pointer(&self) -> Option<&str> {
+        self.manifests_pointer.as_deref()
+    }
+
+    /// Returns the optional response pointer containing an artifact path.
+    pub fn artifact_path_pointer(&self) -> Option<&str> {
+        self.artifact_path_pointer.as_deref()
     }
 }
 
@@ -1639,8 +1717,12 @@ fn validate_state_export_operation(
 fn compile_memory_providers(
     configs: Vec<MemoryProviderConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
+    connections: &BTreeMap<String, CompiledConnection>,
+    state_directory: &Path,
+    supports_workflows: bool,
 ) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
     let mut providers = BTreeMap::new();
+    let mut storage_roots: BTreeSet<PathBuf> = BTreeSet::new();
     for config in configs {
         validate_identity(&config.id, "memory_providers.id")?;
         require(
@@ -1668,9 +1750,74 @@ fn compile_memory_providers(
         )?;
         validate_identity(&config.payload_schema, "memory_providers.payload_schema")?;
         require(
+            !supports_workflows || config.payload_schema != domain::SPATIAL_MEMORY_SCHEMA_V0_1,
+            format!("memory_providers.{}.payload_schema", config.id),
+            "v0.6 generic workflows cannot claim the dedicated typed map and localization-verification schema",
+        )?;
+        require(
             !config.media_type.trim().is_empty(),
             format!("memory_providers.{}.media_type", config.id),
             "must not be empty",
+        )?;
+        require(
+            supports_workflows
+                || (config.discover.is_none()
+                    && config.export.is_none()
+                    && config.import.is_none()
+                    && config.storage_directory.is_none()),
+            format!("memory_providers.{}", config.id),
+            format!("Memory workflows require schema `{CONFIG_SCHEMA_V0_6}`"),
+        )?;
+        let storage_directory = match config.storage_directory.as_deref() {
+            Some(path) => {
+                validate_relative_artifact_path(
+                    path,
+                    &format!("memory_providers.{}.storage_directory", config.id),
+                )?;
+                resolve_path(state_directory, path)
+            }
+            None => state_directory.join("memory").join(&config.id),
+        };
+        require(
+            storage_roots.iter().all(|existing| {
+                !storage_directory.starts_with(existing)
+                    && !existing.starts_with(&storage_directory)
+            }),
+            format!("memory_providers.{}.storage_directory", config.id),
+            "must not equal, contain, or be contained by another provider storage root",
+        )?;
+        storage_roots.insert(storage_directory.clone());
+        let discover = compile_memory_workflow(
+            config.discover,
+            &config.id,
+            &config.owner,
+            connections,
+            "discover",
+        )?;
+        let export = compile_memory_workflow(
+            config.export,
+            &config.id,
+            &config.owner,
+            connections,
+            "export",
+        )?;
+        let import = compile_memory_workflow(
+            config.import,
+            &config.id,
+            &config.owner,
+            connections,
+            "import",
+        )?;
+        require(
+            config.visibility != "exchangeable"
+                || export
+                    .as_ref()
+                    .is_none_or(|workflow| workflow.artifact_path_pointer().is_some()),
+            format!(
+                "memory_providers.{}.export.artifact_path_pointer",
+                config.id
+            ),
+            "is required for an exchangeable provider export workflow",
         )?;
         let id = config.id.clone();
         let provider = CompiledMemoryProvider {
@@ -1681,10 +1828,86 @@ fn compile_memory_providers(
             visibility: config.visibility,
             payload_schema: config.payload_schema,
             media_type: config.media_type,
+            operational: supports_workflows,
+            storage_directory,
+            discover,
+            export,
+            import,
         };
         insert_unique(&mut providers, id, provider, "memory_providers.id")?;
     }
     Ok(providers)
+}
+
+/// Compiles one optional Memory workflow using the same fixed local routing as capabilities.
+fn compile_memory_workflow(
+    config: Option<MemoryWorkflowConfig>,
+    provider_id: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+    operation: &str,
+) -> Result<Option<CompiledMemoryWorkflow>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    require(
+        !config.steps.is_empty(),
+        format!("memory_providers.{provider_id}.{operation}.steps"),
+        "must contain at least one step",
+    )?;
+    validate_step_sources(
+        &config.steps,
+        false,
+        &format!("memory_providers.{provider_id}.{operation}.steps"),
+    )?;
+    let steps = compile_steps(config.steps, owner, connections, &mut BTreeSet::new())?;
+    if let Some(pointer) = &config.manifests_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: format!("memory_providers.{provider_id}.{operation}"),
+            source,
+        })?;
+    }
+    if let Some(pointer) = &config.artifact_path_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: format!("memory_providers.{provider_id}.{operation}"),
+            source,
+        })?;
+    }
+    match operation {
+        "discover" => {
+            require(
+                config.manifests_pointer.is_some(),
+                format!("memory_providers.{provider_id}.discover.manifests_pointer"),
+                "is required for discovery",
+            )?;
+            require(
+                config.artifact_path_pointer.is_none(),
+                format!("memory_providers.{provider_id}.discover.artifact_path_pointer"),
+                "is not valid for discovery",
+            )?;
+        }
+        "export" => require(
+            config.manifests_pointer.is_none(),
+            format!("memory_providers.{provider_id}.export.manifests_pointer"),
+            "is not valid for export",
+        )?,
+        "import" => require(
+            config.manifests_pointer.is_none() && config.artifact_path_pointer.is_none(),
+            format!("memory_providers.{provider_id}.import"),
+            "does not accept result pointers",
+        )?,
+        _ => {
+            return Err(validation(
+                format!("memory_providers.{provider_id}.{operation}"),
+                "unknown Memory provider operation",
+            ));
+        }
+    }
+    Ok(Some(CompiledMemoryWorkflow {
+        steps,
+        manifests_pointer: config.manifests_pointer,
+        artifact_path_pointer: config.artifact_path_pointer,
+    }))
 }
 
 /// Returns whether an expression reads dynamic invocation or prior workflow context.
@@ -2874,6 +3097,253 @@ mod tests {
             state_exports: Vec::new(),
             memory_providers: Vec::new(),
         }
+    }
+
+    /// Adds the exact readiness declaration required by node-config/v0.4 and later.
+    fn add_readiness(config: &mut NodeServiceConfig) {
+        config.capabilities[0].readiness = Some(CapabilityReadinessConfig {
+            step: WorkflowStepConfig {
+                id: "read-readiness".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".to_string(),
+                    path: "/capabilities/reach-region".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            state_pointer: "/state".to_string(),
+            detail_pointer: Some("/detail".to_string()),
+            ready: vec!["READY".to_string()],
+            unavailable: vec!["UNAVAILABLE".to_string()],
+            case_sensitive: false,
+        });
+    }
+
+    /// v0.6 compiles provider-owned storage and all three fixed-route Memory workflows.
+    #[test]
+    fn compiles_v0_6_memory_provider_workflows() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        let workflow = |id: &str, path: &str| MemoryWorkflowConfig {
+            steps: vec![WorkflowStepConfig {
+                id: id.to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "POST".to_string(),
+                    path: path.to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            }],
+            manifests_pointer: None,
+            artifact_path_pointer: None,
+        };
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "maps".to_string(),
+            owner: "motion".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: "example.map/v1".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            storage_directory: Some(PathBuf::from("maps")),
+            discover: Some(MemoryWorkflowConfig {
+                manifests_pointer: Some("/steps/discover/manifests".to_string()),
+                ..workflow("discover", "/memory/discover")
+            }),
+            export: Some(MemoryWorkflowConfig {
+                artifact_path_pointer: Some("/steps/export/path".to_string()),
+                ..workflow("export", "/memory/export")
+            }),
+            import: Some(workflow("import", "/memory/import")),
+        }];
+        let catalog = CompiledLocalCatalog::compile(config, directory.path())
+            .expect("v0.6 provider workflows compile");
+        let provider = &catalog.memory_providers()["maps"];
+        assert!(provider.discover().is_some());
+        assert!(provider.export().is_some());
+        assert!(provider.import().is_some());
+        assert_eq!(
+            provider.storage_directory(),
+            directory.path().join("state/maps")
+        );
+    }
+
+    /// v0.5 remains metadata-only and rejects executable provider workflow declarations.
+    #[test]
+    fn v0_5_rejects_memory_provider_workflows() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_5.to_string();
+        add_readiness(&mut config);
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "lessons".to_string(),
+            owner: "motion".to_string(),
+            kind: "experience".to_string(),
+            scope: "global".to_string(),
+            visibility: "discoverable".to_string(),
+            payload_schema: "example.experience/v1".to_string(),
+            media_type: "application/json".to_string(),
+            storage_directory: None,
+            discover: Some(MemoryWorkflowConfig {
+                steps: vec![WorkflowStepConfig {
+                    id: "discover".to_string(),
+                    connection: "motion-http".to_string(),
+                    operation: LocalOperationConfig::Http {
+                        method: "GET".to_string(),
+                        path: "/memory".to_string(),
+                    },
+                    request: RequestMappingConfig::default(),
+                }],
+                manifests_pointer: Some("/steps/discover/manifests".to_string()),
+                artifact_path_pointer: None,
+            }),
+            export: None,
+            import: None,
+        }];
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. }) if field == "memory_providers.lessons"
+        ));
+    }
+
+    /// Provider-local backends cannot overlap and thereby cross semantic ownership boundaries.
+    #[test]
+    fn rejects_nested_memory_provider_storage_roots() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        let provider = |id: &str, storage: &str| MemoryProviderConfig {
+            id: id.to_string(),
+            owner: "motion".to_string(),
+            kind: "semantic".to_string(),
+            scope: "global".to_string(),
+            visibility: "discoverable".to_string(),
+            payload_schema: "example.semantic/v1".to_string(),
+            media_type: "application/json".to_string(),
+            storage_directory: Some(PathBuf::from(storage)),
+            discover: None,
+            export: None,
+            import: None,
+        };
+        config.memory_providers = vec![
+            provider("semantic-a", "memory"),
+            provider("semantic-b", "memory/nested"),
+        ];
+
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "memory_providers.semantic-b.storage_directory"
+        ));
+    }
+
+    /// Generic provider configuration cannot claim the strongly verified Spatial map schema.
+    #[test]
+    fn rejects_typed_spatial_schema_in_generic_memory_provider() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "maps".to_string(),
+            owner: "motion".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: domain::SPATIAL_MEMORY_SCHEMA_V0_1.to_string(),
+            media_type: "application/octet-stream".to_string(),
+            storage_directory: None,
+            discover: None,
+            export: None,
+            import: None,
+        }];
+
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "memory_providers.maps.payload_schema"
+        ));
+    }
+
+    /// The reference backend is local, idempotent, and queryable without central replication.
+    #[test]
+    fn filesystem_memory_provider_round_trips_jsonl_metadata() {
+        use crate::{FilesystemMemoryProvider, LocalMemoryProvider, MemoryQuery};
+        use domain::{
+            ContentDigest, LocalSystemId, MemoryArtifactManifest, MemoryArtifactRef, MemoryId,
+            MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope, MemorySelector,
+            MemoryVisibility, NodeId, TimestampMs,
+        };
+
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = CompiledMemoryProvider {
+            id: "maps".to_string(),
+            owner: "maps".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: "example.map/v1".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            operational: true,
+            storage_directory: directory.path().join("provider"),
+            discover: None,
+            export: None,
+            import: None,
+        };
+        let provider = FilesystemMemoryProvider::open(descriptor.clone()).expect("provider opens");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("map-a").expect("memory id is valid"),
+                MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            MemoryKind::Spatial,
+            "maps",
+            MemoryOwner::Node {
+                node_id: NodeId::new("node-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("maps").expect("system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.map/v1",
+            "application/octet-stream",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("a".repeat(64)).expect("digest is valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest is valid");
+        provider.export(&manifest).expect("manifest exports");
+        provider
+            .export(&manifest)
+            .expect("same export is idempotent");
+        let found = provider
+            .discover(&MemoryQuery {
+                selector: Some(manifest.selector().clone()),
+                kind: Some(MemoryKind::Spatial),
+                scope: Some(MemoryScope::Global),
+                provider_id: Some("maps".to_string()),
+                payload_schema: Some("example.map/v1".to_string()),
+                owner: Some(manifest.owner().clone()),
+            })
+            .expect("manifest discovers");
+        assert_eq!(found, vec![manifest.clone()]);
+        std::fs::remove_file(descriptor.storage_directory().join("manifests.jsonl"))
+            .expect("derived index removes");
+        drop(provider);
+        let reopened = FilesystemMemoryProvider::open(descriptor).expect("provider reopens");
+        assert_eq!(
+            reopened
+                .discover(&MemoryQuery::default())
+                .expect("index rebuilds from semantic objects"),
+            vec![manifest]
+        );
     }
 
     /// Catalog compiles multiple local systems and all generic driver configurations.
