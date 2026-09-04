@@ -53,6 +53,7 @@ class _ConversationTurn {
 class _HomePageState extends State<HomePage> {
   final _spp = BluetoothSpp();
   fs.FlutterSoundRecorder? _recorder;
+  bool _recorderOpened = false;
   fs.FlutterSoundPlayer? _player;
   StreamSubscription<List<Int16List>>? _recSub;
   StreamSubscription<SppControlEvent>? _controlSub;
@@ -128,7 +129,7 @@ class _HomePageState extends State<HomePage> {
     _recSub?.cancel();
     _controlSub?.cancel();
     _spp.dispose();
-    _recorder?.closeRecorder();
+    _recorder?.closeRecorder().catchError((e) => debugPrint('[PTT] closeRecorder failed: $e'));
     _player?.closePlayer();
     super.dispose();
   }
@@ -174,13 +175,36 @@ class _HomePageState extends State<HomePage> {
       _turns.insert(0, turn);
       _audioState = 'starting microphone';
     });
+    // P0 fix (root cause of "second utterance freezes at recognizing"):
+    // recorder lifecycle is open -> (start -> stop) * N -> close. Never call
+    // openRecorder() a second time on the same FlutterSoundRecorder instance:
+    // flutter_sound 9.x can throw "already initialized" and the second PTT
+    // then sends no audio, leaving the phone stuck at 'recognizing'.
+    debugPrint('[PTT] _startTalking micActive=$_micActive conn=$_state');
     _recorder ??= fs.FlutterSoundRecorder();
-    try {
-      await _recorder!.openRecorder();
-    } catch (e) {
-      _appendLog('openRecorder failed (mic permission?): $e');
-      setState(() { turn.state = 'error'; turn.error = 'Microphone permission/initialization failed'; _audioState = 'error'; });
-      return;
+    if (!_recorderOpened) {
+      try {
+        await _recorder!.openRecorder();
+        _recorderOpened = true;
+        debugPrint('[PTT] openRecorder: OK');
+      } catch (e) {
+        debugPrint('[PTT] openRecorder failed: $e');
+        // Retry once with a fresh instance to recover from any half-init state.
+        try { await _recorder!.closeRecorder(); } catch (_) {}
+        _recorder = fs.FlutterSoundRecorder();
+        try {
+          await _recorder!.openRecorder();
+          _recorderOpened = true;
+          debugPrint('[PTT] openRecorder retry: OK');
+        } catch (e2) {
+          debugPrint('[PTT] openRecorder retry failed: $e2');
+          _appendLog('openRecorder failed (mic permission?): $e2');
+          setState(() { turn.state = 'error'; turn.error = 'Microphone permission/initialization failed'; _audioState = 'error'; });
+          return;
+        }
+      }
+    } else {
+      debugPrint('[PTT] openRecorder: already open, skip reopen');
     }
     final sink = StreamController<List<Int16List>>();
     _recSub = sink.stream.listen((chunks) {
@@ -193,6 +217,7 @@ class _HomePageState extends State<HomePage> {
       }
     });
     try {
+      debugPrint('[PTT] startRecorder: calling');
       await _recorder!.startRecorder(
         codec: fs.Codec.pcm16,
         toStreamInt16: sink,
@@ -201,10 +226,12 @@ class _HomePageState extends State<HomePage> {
         enableNoiseSuppression: true,
         enableEchoCancellation: true,
       );
+      debugPrint('[PTT] startRecorder: OK');
     } catch (e) {
       await _recSub?.cancel();
       _recSub = null;
       _appendLog('startRecorder failed: $e');
+      debugPrint('[PTT] startRecorder FAILED: $e');
       setState(() { turn.state = 'error'; turn.error = 'Microphone start failed'; _audioState = 'error'; });
       return;
     }
@@ -213,10 +240,16 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _stopTalking() async {
     if (!_micActive) return;
+    debugPrint('[PTT] _stopTalking: stopping recorder');
     setState(() { _micActive = false; _audioState = 'finishing'; });
     await _recSub?.cancel();
     _recSub = null;
-    try { await _recorder?.stopRecorder(); } catch (_) {}
+    try {
+      await _recorder?.stopRecorder();
+      debugPrint('[PTT] stopRecorder: OK');
+    } catch (e) {
+      debugPrint('[PTT] stopRecorder FAILED: $e');
+    }
     try { await _spp.writeControl({'type': 'mic_end'}); } catch (e) { _appendLog('mic_end failed: $e'); }
     final turn = _activeTurn;
     if (turn != null && turn.state == 'recording') {
