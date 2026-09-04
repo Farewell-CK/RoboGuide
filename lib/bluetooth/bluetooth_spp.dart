@@ -101,7 +101,9 @@ class BluetoothSpp {
 }
 
 Map<String, dynamic> jsonDecodeUtf8(Uint8List bytes) {
-  final value = jsonDecode(String.fromCharCodes(bytes));
+  // UTF-8 decode, NOT String.fromCharCodes (which maps each byte to a code
+  // unit and mangles multi-byte CJK into mojibake like '½½□').
+  final value = jsonDecode(utf8.decode(bytes));
   if (value is! Map) throw const FormatException('control payload is not an object');
   return value.cast<String, dynamic>();
 }

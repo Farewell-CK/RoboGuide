@@ -79,9 +79,30 @@ class _HomePageState extends State<HomePage> {
     _spp.onData.listen((data) {
       _receivedAudioBytes += data.length;
       _playQueue = _playQueue.then((_) => _playPcm(data));
-    });
+    }, onDone: _onStreamClosed, onError: (_) => _onStreamClosed());
     _controlSub = _spp.onControl.listen(_handleControl);
     _loadDevices();
+  }
+
+  void _onStreamClosed() {
+    if (!mounted) return;
+    // Bluetooth link dropped (or app disconnected): never leave a turn
+    // stuck in 'recognizing'/'playing' forever.
+    final turn = _activeTurn;
+    if (turn != null) {
+      setState(() {
+        turn.state = 'error';
+        turn.error = '连接已断开';
+        _audioState = 'idle';
+        _activeTurn = null;
+      });
+    } else if (mounted) {
+      setState(() => _audioState = 'idle');
+    }
+    if (_state != _ConnState.disconnected) {
+      setState(() => _state = _ConnState.disconnected);
+      _appendLog('bluetooth link closed');
+    }
   }
 
   Future<void> _loadDevices() async {
@@ -279,6 +300,7 @@ class _HomePageState extends State<HomePage> {
           children: [
             DropdownButtonFormField<String>(
               initialValue: _selectedMac,
+              isExpanded: true,
               items: _devices
                   .map((d) => DropdownMenuItem(
                         value: d['address'] as String,
@@ -379,20 +401,34 @@ class _StatusCard extends StatelessWidget {
     };
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.circle, size: 12, color: color),
-            const SizedBox(width: 6),
-            Text('Bridge: $label', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(width: 12),
-            Expanded(child: Text('$audioState  TX ${sentBytes}B / RX ${receivedBytes}B', style: const TextStyle(fontSize: 11))),
-            if (micActive)
-              const Chip(
-                label: Text('MIC ACTIVE'),
-                backgroundColor: Colors.redAccent,
-                labelStyle: TextStyle(color: Colors.white, fontSize: 11),
+            Row(children: [
+              Icon(Icons.circle, size: 12, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Bridge: $label',
+                  style: Theme.of(context).textTheme.titleMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              if (micActive)
+                const Chip(
+                  label: Text('MIC ACTIVE'),
+                  backgroundColor: Colors.redAccent,
+                  labelStyle: TextStyle(color: Colors.white, fontSize: 11),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ]),
+            const SizedBox(height: 2),
+            Text(
+              '$audioState  TX ${sentBytes}B / RX ${receivedBytes}B',
+              style: const TextStyle(fontSize: 11),
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
