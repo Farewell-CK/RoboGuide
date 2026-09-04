@@ -25,10 +25,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
 
-/// Immediately previous wrapper accepted for one-step State checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
+/// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";

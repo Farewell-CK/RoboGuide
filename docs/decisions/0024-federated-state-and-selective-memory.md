@@ -126,6 +126,8 @@ exact compatible consumer provider，durable identity 为
 Controller inner checkpoint 升级为 v9，保存 source-aware State records；outer server checkpoint
 升级为 v10。两者只接受上一个版本进行一步迁移，旧 checkpoint 的新增字段按空 projection
 恢复。Memory catalog 由 durable event evidence replay，不进入 Runtime checkpoint。
+ADR-0026 后续为 coordination Context 与 peer lifecycle 将 inner/outer marker 分别升级到
+v10/v11；此处的 v9/v10 保留为本 ADR 引入 State projection 时的历史版本。
 
 ## 后果
 

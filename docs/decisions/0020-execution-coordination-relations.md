@@ -91,6 +91,15 @@ correlation 与 physical attempt identity，完整 supersede/history 仍是 RT-G
 - Integration checkpoint 升级为 v8，外层 Controller checkpoint 升级为 v9。旧 checkpoint
   不得在缺失 relation registry/fence 时静默恢复。
 
+## v0.4 evolution
+
+ADR-0026 extends this v0.1 lifecycle contract with Context/Task-scoped coupling modes, typed
+relation descriptors, selective Group shared views, and a transport-neutral peer channel lifecycle.
+Those additions preserve the endpoint, fence, restart, rebind, and authority boundaries defined here;
+they do not add a Node Protocol command or move high-frequency control into Runtime. Typed relation
+and non-independent coupling evidence advances the event payload codec to v8; the original
+`RequiresActive + Independent` shape remains a valid v5 replay payload.
+
 ## Consequences
 
 - Task DAG 继续只决定 readiness；Execution Relation 只约束已经并发运行的 logical executions。

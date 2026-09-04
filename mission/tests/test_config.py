@@ -19,6 +19,8 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.prompts.interpreter_path.is_file()
     assert settings.prompts.planner_path.is_file()
     assert settings.prompts.reviewer_path.is_file()
+    assert settings.contract_version == "roboguide.mission-plan/v0.4"
+    assert settings.schema_path == Path.cwd() / "contracts/mission/v0.4/mission-plan.schema.json"
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
     assert "sk-" not in path.read_text(encoding="utf-8")
 

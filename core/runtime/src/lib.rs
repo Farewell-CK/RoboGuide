@@ -5,10 +5,12 @@
 //! Runtime execution semantics between DEAIOS Control and local node adapters.
 
 mod clock;
+mod coordination;
 mod execution;
 mod relation;
 
 pub use clock::{FixedClock, SystemMonotonicClock};
+pub use coordination::{CoordinationReadiness, PeerChannelLifecycle, RuntimePeerChannel};
 pub use execution::{
     DispatchDecision, ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionStatus,
     ObservedTaskResult, RuntimeExecutionCheckpoint, RuntimeExecutionManager,

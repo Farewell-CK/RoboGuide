@@ -150,6 +150,18 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
     task_properties = cast(JSONObject, tasks_schema["properties"])
     depends_on_schema = cast(JSONObject, task_properties["depends_on"])
     assert "uniqueItems" not in depends_on_schema
+    contexts_schema = cast(JSONObject, cast(JSONObject, properties["contexts"])["items"])
+    context_properties = cast(JSONObject, contexts_schema["properties"])
+    assert set(cast(list[str], contexts_schema["required"])) == set(context_properties)
+    shared_view_schema = cast(JSONObject, context_properties["shared_view"])
+    assert {"type": "null"} in cast(list[JSONObject], shared_view_schema["anyOf"])
+    definitions = cast(JSONObject, provider_schema["$defs"])
+    relation_schema = cast(JSONObject, definitions["relation"])
+    relation_properties = cast(JSONObject, relation_schema["properties"])
+    assert "allOf" not in relation_schema
+    assert set(cast(list[str], relation_schema["required"])) == set(relation_properties)
+    state_key_schema = cast(JSONObject, relation_properties["state_key"])
+    assert {"type": "null"} in cast(list[JSONObject], state_key_schema["anyOf"])
 
 
 def test_responses_planner_rejects_failed_review() -> None:

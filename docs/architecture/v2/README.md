@@ -86,7 +86,7 @@ context 由 Runtime 承载并跨节点运行。State 只保存二者的事实和
 ### Execution Coordination Relation
 
 Task DAG 表达完成前置关系，不表达两个已经运行的执行单元之间持续成立的约束。
-MissionPlan v0.3 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation。
+MissionPlan v0.4 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation，并声明该 Context 的 Execution Coupling Mode。
 关系端点引用 `(TaskId, RoleId)` 逻辑执行槽；Group 接受后补全 Mission/Group identity，Runtime
 再把逻辑槽解析到当前 execution attempt。关系绝不直接引用 NodeId，因此 replacement/rebind
 不会改变其 Mission 语义。
@@ -96,13 +96,25 @@ commitment、binding 和 recovery decision；Runtime 只拥有 live endpoint res
 有序归约和 checkpoint。State Plane 的 durable Event Log 保存 relation evidence，但 v0.1 不建立
 第二份 live relation projection，也不主动触发恢复。
 
-第一版只定义 `requires-active`：target execution 处于 Accepted/Running 时，source execution
+v0.1 只定义 `requires-active`：target execution 处于 Accepted/Running 时，source execution
 必须持续处于 Accepted/Running。Runtime 将关系归约为 `Dormant`、`Pending`、`Satisfied`、
 `Violated` 或 `Unknown`。`Violated/Unknown` 形成 coordination-required evidence，并 fence
 受约束 Task 的成功归约；即使关系重新变为 `Satisfied`，也必须由 Control/应用恢复流程显式
 确认后解除 fence。Runtime 不选择 replacement、不修改资源承诺，也不把关系违例伪装成
 某个 Node 的物理失败。完整边界见
 [`ADR-0020`](../../decisions/0020-execution-coordination-relations.md)。
+
+v0.4 增加 `Independent`、`SequentialHandoff`、`ConcurrentCooperation` 和
+`TightlyCoupledCooperation`。Mode 属于 Context，并可由 Task override；它只声明所需机制，
+不固化控制算法。Context 可用明确的 `ContextRole + StateExportId + payload schema` binding
+声明选择性的 pose/velocity，并直接按 logical Task/Role 读取 Runtime-owned execution status；
+两类 evidence 组成 Group shared view，另可声明 typed map revision/frame；
+Runtime/Orchestration 以只读方式从 State evidence 组装视图，并按现有 receive-time/TTL
+返回 Fresh/Stale/Unknown，不从 channel 名称猜测字段语义。
+Tightly-coupled Context 可声明 transport-neutral peer channel descriptor 与 Runtime 生命周期；
+高频 relative-state 计算、纠偏、formation/grasp/safety control 保留在 Local EAIOS，Node Protocol
+不承载这些消息。Typed relation 的 state key、frame、freshness 等字段不包含阈值、公式或 DSL。
+详见 [`ADR-0026`](../../decisions/0026-execution-coupling-and-group-views.md)。
 
 ## 4. 决策与承诺语义
 

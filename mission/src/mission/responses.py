@@ -74,6 +74,20 @@ class ReviewResult:
     issues: tuple[str, ...]
 
 
+def _nullable_schema(value: JSONValue) -> JSONValue:
+    """Return a provider schema accepting null exactly for a contract-optional property."""
+    if isinstance(value, dict):
+        type_value = value.get("type")
+        if type_value == "null" or (isinstance(type_value, list) and "null" in type_value):
+            return value
+        alternatives = value.get("anyOf")
+        if isinstance(alternatives, list) and any(
+            isinstance(item, dict) and item.get("type") == "null" for item in alternatives
+        ):
+            return value
+    return {"anyOf": [value, {"type": "null"}]}
+
+
 class ResponsesMissionPlanner:
     """Plan and optionally review a Mission through a Responses-compatible provider."""
 
@@ -134,12 +148,23 @@ class ResponsesMissionPlanner:
         return prompt
 
     def _provider_schema(self, value: JSONValue) -> JSONValue:
-        """Project the full contract into the strict subset accepted by Responses providers."""
+        """Project the full contract into the strict provider subset without weakening parsing."""
         if isinstance(value, list):
             return [self._provider_schema(item) for item in value]
         if not isinstance(value, dict):
             return value
-        unsupported = {"$schema", "$id", "title", "minLength", "pattern", "uniqueItems"}
+        unsupported = {
+            "$schema",
+            "$id",
+            "title",
+            "minLength",
+            "pattern",
+            "uniqueItems",
+            "allOf",
+            "if",
+            "then",
+            "else",
+        }
         projected: JSONObject = {}
         for key, item in value.items():
             if key in unsupported:
@@ -148,6 +173,18 @@ class ResponsesMissionPlanner:
                 projected["enum"] = [self._provider_schema(item)]
                 continue
             projected[key] = self._provider_schema(item)
+        properties = projected.get("properties")
+        if projected.get("type") == "object" and isinstance(properties, dict):
+            required_value = value.get("required", [])
+            originally_required = (
+                {item for item in required_value if isinstance(item, str)}
+                if isinstance(required_value, list)
+                else set()
+            )
+            for name, schema in list(properties.items()):
+                if name not in originally_required:
+                    properties[name] = _nullable_schema(schema)
+            projected["required"] = list(properties)
         return projected
 
     def _request(

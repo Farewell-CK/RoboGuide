@@ -17,8 +17,9 @@ mod integration_bridge;
 mod mission_contract;
 
 pub use integration_bridge::{
-    CONTROLLER_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge, IntegrationRuntimeError,
-    ObservedTaskOutcome, ObservedTaskResult, RemoteExecutionStatus,
+    CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
+    GroupViewFreshness, IntegrationRuntimeBridge, IntegrationRuntimeError, ObservedTaskOutcome,
+    ObservedTaskResult, RemoteExecutionStatus,
 };
 pub use mission_contract::decode_mission_plan;
 
@@ -647,33 +648,31 @@ impl MissionOrchestrator {
     }
 }
 
-/// Serializes a validated domain MissionPlan into the v0.3 wire shape without typed JSON map keys.
+/// Serializes a validated domain MissionPlan into the v0.4 wire shape without typed JSON map keys.
 fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
     let contexts = plan
         .contexts()
         .iter()
         .map(|context| {
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "id": context.context_id().as_str(),
                 "roles": context.roles().iter().map(|role| serde_json::json!({
                     "id": role.context_role_id().as_str(),
                     "actor": role.actor_id().as_str(),
                 })).collect::<Vec<_>>(),
-                "relations": context.relations().iter().map(|relation| serde_json::json!({
-                    "id": relation.relation_id().as_str(),
-                    "kind": match relation.kind() {
-                        domain::ExecutionRelationKind::RequiresActive => "requires-active",
-                    },
-                    "source": {
-                        "task_id": relation.source().task_id().as_str(),
-                        "role_id": relation.source().role_id().as_str(),
-                    },
-                    "target": {
-                        "task_id": relation.target().task_id().as_str(),
-                        "role_id": relation.target().role_id().as_str(),
-                    },
-                })).collect::<Vec<_>>(),
-            })
+                "coupling_mode": coupling_mode_name(context.coupling_mode()),
+                "relations": context.relations().iter().map(relation_json).collect::<Vec<_>>(),
+            });
+            let object = value
+                .as_object_mut()
+                .expect("coordination Context JSON is an object");
+            if let Some(view) = context.shared_view() {
+                object.insert("shared_view".to_string(), shared_view_json(view));
+            }
+            if let Some(channel) = context.peer_channel() {
+                object.insert("peer_channel".to_string(), peer_channel_json(channel));
+            }
+            value
         })
         .collect::<Vec<_>>();
     let tasks = plan
@@ -711,21 +710,162 @@ fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                     })
                 })
                 .collect::<Vec<_>>();
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "id": task.task_id().as_str(),
                 "description": task.description(),
                 "context_id": task.continuity().context_id().as_str(),
                 "depends_on": task.dependencies().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                 "roles": roles,
-            })
+            });
+            if let Some(mode) = task.continuity().coupling_mode_override() {
+                value
+                    .as_object_mut()
+                    .expect("Task JSON is an object")
+                    .insert(
+                        "coupling_mode".to_string(),
+                        serde_json::json!(coupling_mode_name(mode)),
+                    );
+            }
+            value
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_3,
+        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_4,
         "mission": {"id": plan.goal().mission_id().as_str(), "objective": plan.goal().objective()},
         "contexts": contexts,
         "tasks": tasks,
     })
+}
+
+/// Serializes one typed relation while retaining its closed family and reserved fields.
+fn relation_json(relation: &domain::ExecutionRelationSpec) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "id": relation.relation_id().as_str(),
+        "kind": relation_kind_name(relation.kind()),
+        "source": {"task_id": relation.source().task_id().as_str(), "role_id": relation.source().role_id().as_str()},
+        "target": {"task_id": relation.target().task_id().as_str(), "role_id": relation.target().role_id().as_str()},
+    });
+    let object = value.as_object_mut().expect("relation JSON is an object");
+    match relation.relation_type() {
+        domain::ExecutionRelationType::GroupMemberState { state_key }
+        | domain::ExecutionRelationType::StateRequirement { state_key, .. }
+        | domain::ExecutionRelationType::FreshnessRequirement { state_key, .. } => {
+            object.insert("state_key".to_string(), serde_json::json!(state_key));
+        }
+        domain::ExecutionRelationType::SharedSpatialReference { reference } => {
+            object.insert("reference".to_string(), spatial_reference_json(reference));
+        }
+        domain::ExecutionRelationType::RelativePose { frame_id }
+        | domain::ExecutionRelationType::RelativeDistance { frame_id } => {
+            object.insert("frame_id".to_string(), serde_json::json!(frame_id));
+        }
+        domain::ExecutionRelationType::RequiresActive => {}
+    }
+    if let domain::ExecutionRelationType::StateRequirement { requirement, .. } =
+        relation.relation_type()
+    {
+        object.insert(
+            "requirement".to_string(),
+            serde_json::json!(match requirement {
+                domain::RelationStateRequirement::Available => "available",
+                domain::RelationStateRequirement::Unavailable => "unavailable",
+            }),
+        );
+    }
+    if let domain::ExecutionRelationType::FreshnessRequirement { policy, .. } =
+        relation.relation_type()
+    {
+        object.insert("policy_id".to_string(), serde_json::json!(policy.policy_id));
+    }
+    value
+}
+
+/// Serializes one Context coupling mode with its stable wire spelling.
+fn coupling_mode_name(mode: domain::ExecutionCouplingMode) -> &'static str {
+    match mode {
+        domain::ExecutionCouplingMode::Independent => "independent",
+        domain::ExecutionCouplingMode::SequentialHandoff => "sequential-handoff",
+        domain::ExecutionCouplingMode::ConcurrentCooperation => "concurrent-cooperation",
+        domain::ExecutionCouplingMode::TightlyCoupledCooperation => "tightly-coupled-cooperation",
+    }
+}
+
+/// Serializes a selective Group shared view declaration.
+fn shared_view_json(view: &domain::GroupSharedViewSpec) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "bindings": view.bindings().iter().map(group_view_binding_json).collect::<Vec<_>>(),
+        "include_freshness": view.include_freshness(),
+    });
+    if let Some(reference) = view.spatial_reference() {
+        value
+            .as_object_mut()
+            .expect("Group shared view JSON is an object")
+            .insert(
+                "spatial_reference".to_string(),
+                spatial_reference_json(reference),
+            );
+    }
+    value
+}
+
+/// Serializes one State-backed or Runtime-backed Group view binding.
+fn group_view_binding_json(binding: &domain::GroupViewBinding) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "context_role_id": binding.context_role_id().as_str(),
+        "field": group_view_field_name(binding.field()),
+    });
+    let object = value
+        .as_object_mut()
+        .expect("Group view binding JSON is an object");
+    if let Some(state_export_id) = binding.state_export_id() {
+        object.insert(
+            "state_export_id".to_string(),
+            serde_json::json!(state_export_id),
+        );
+    }
+    if let Some(payload_schema) = binding.payload_schema() {
+        object.insert(
+            "payload_schema".to_string(),
+            serde_json::json!(payload_schema),
+        );
+    }
+    value
+}
+
+/// Returns the stable wire spelling for a Group view field.
+fn group_view_field_name(field: domain::GroupViewField) -> &'static str {
+    match field {
+        domain::GroupViewField::Pose => "pose",
+        domain::GroupViewField::Velocity => "velocity",
+        domain::GroupViewField::Execution => "execution",
+    }
+}
+
+/// Serializes a shared map/frame reference.
+fn spatial_reference_json(reference: &domain::SharedSpatialReference) -> serde_json::Value {
+    serde_json::json!({
+        "map_id": reference.selector().map_id().as_str(),
+        "revision_id": reference.selector().revision_id().as_str(),
+        "frame_id": reference.frame_id(),
+    })
+}
+
+/// Serializes a transport-neutral peer channel descriptor.
+fn peer_channel_json(channel: &domain::PeerChannelSpec) -> serde_json::Value {
+    serde_json::json!({"profile_id": channel.profile_id, "message_schema": channel.message_schema})
+}
+
+/// Returns the stable wire spelling for one relation family.
+fn relation_kind_name(kind: domain::ExecutionRelationKind) -> &'static str {
+    match kind {
+        domain::ExecutionRelationKind::RequiresActive => "requires-active",
+        domain::ExecutionRelationKind::GroupMemberState => "group-member-state",
+        domain::ExecutionRelationKind::SharedSpatialReference => "shared-spatial-reference",
+        domain::ExecutionRelationKind::RelativePose => "relative-pose",
+        domain::ExecutionRelationKind::RelativeDistance => "relative-distance",
+        domain::ExecutionRelationKind::StateRequirement => "state-requirement",
+        domain::ExecutionRelationKind::FreshnessRequirement => "freshness-requirement",
+    }
 }
 
 /// Serializes one canonical capability contract into contract JSON.
@@ -754,7 +894,7 @@ mod tests {
     use state::InMemorySharedNodeState;
     use testkit::InMemoryEventLog;
 
-    /// MissionPlan v0.3 decodes one Node-independent relation between concurrent Task roles.
+    /// Legacy MissionPlan v0.3 decodes one Node-independent relation and normalizes to v0.4.
     #[test]
     fn execution_relation_fixture_decodes_logical_endpoints() {
         let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
@@ -793,12 +933,78 @@ mod tests {
         );
     }
 
+    /// v0.4 preserves coupling declarations and typed relation metadata at the JSON boundary.
+    #[test]
+    fn v0_4_decodes_coupling_and_typed_relation() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut document: serde_json::Value =
+            serde_json::from_str(source).expect("fixture is JSON");
+        document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+        document["contexts"][0]["coupling_mode"] = serde_json::json!("concurrent-cooperation");
+        document["contexts"][0]["shared_view"] = serde_json::json!({
+            "bindings": [
+                {
+                    "context_role_id": "safety",
+                    "field": "pose",
+                    "state_export_id": "safety-pose",
+                    "payload_schema": "roboguide.pose/v1"
+                },
+                {"context_role_id": "guide", "field": "execution"}
+            ],
+            "include_freshness": true,
+            "spatial_reference": {"map_id": "campus", "revision_id": "r1", "frame_id": "map"}
+        });
+        document["contexts"][0]["relations"][0] = serde_json::json!({
+            "id": "safety-guards-navigation",
+            "kind": "state-requirement",
+            "state_key": "hazard",
+            "requirement": "available",
+            "source": {"task_id": "observe-safety", "role_id": "safety-observer"},
+            "target": {"task_id": "navigate", "role_id": "navigator"}
+        });
+        let plan = decode_mission_plan(&document.to_string()).expect("v0.4 plan should validate");
+        assert_eq!(
+            plan.contexts()[0].coupling_mode(),
+            domain::ExecutionCouplingMode::ConcurrentCooperation
+        );
+        assert!(plan.contexts()[0].shared_view().is_some());
+        assert!(matches!(
+            plan.contexts()[0].relations()[0].relation_type(),
+            domain::ExecutionRelationType::StateRequirement { .. }
+        ));
+
+        let encoded = mission_plan_json(&plan);
+        let execution_binding = &encoded["contexts"][0]["shared_view"]["bindings"][1];
+        assert!(execution_binding.get("state_export_id").is_none());
+        assert!(execution_binding.get("payload_schema").is_none());
+        let decoded = decode_mission_plan(&encoded.to_string())
+            .expect("canonical v0.4 MissionPlan should round trip");
+        assert_eq!(decoded, plan);
+    }
+
+    /// v0.4 rejects a Task mode override whose Context lacks its static mechanisms.
+    #[test]
+    fn v0_4_rejects_unbacked_task_coupling_mode() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut document: serde_json::Value =
+            serde_json::from_str(source).expect("fixture is JSON");
+        document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+        document["tasks"][1]["coupling_mode"] = serde_json::json!("tightly-coupled-cooperation");
+
+        assert!(
+            decode_mission_plan(&document.to_string())
+                .expect_err("unbacked Task mode must fail acceptance")
+                .to_string()
+                .contains("requires a Group shared view")
+        );
+    }
+
     /// The Phase 1 fixture decodes into a four-Task DAG and preserves Context continuity metadata.
     #[test]
     fn phase1_fixture_contains_complete_dag_and_context() {
         let source = include_str!("../../../scenarios/phase1-mission-v0.3/mission-plan.json");
         let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
-        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_4);
         assert_eq!(plan.contexts().len(), 1);
         assert_eq!(plan.task_graph().tasks().len(), 4);
         assert_eq!(
@@ -932,7 +1138,7 @@ mod tests {
         );
     }
 
-    /// Both directions of the Spatial Memory experiment remain valid MissionPlan v0.3 DAGs.
+    /// Both directions of the Spatial Memory experiment remain valid legacy plans.
     #[test]
     fn distributed_spatial_memory_fixtures_decode_in_both_directions() {
         let fixtures = [
@@ -952,7 +1158,7 @@ mod tests {
         for fixture in fixtures {
             let plan =
                 decode_mission_plan(fixture).expect("Spatial Memory fixture should validate");
-            assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
+            assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_4);
             assert_eq!(plan.contexts().len(), 1);
             assert_eq!(plan.task_graph().tasks().len(), 2);
         }
@@ -1091,12 +1297,12 @@ mod tests {
         assert!(error.to_string().contains("unsupported MissionPlan schema"));
     }
 
-    /// MissionPlan v0.2 remains a relation-free compatibility input during v0.3 migration.
+    /// MissionPlan v0.2 remains a relation-free compatibility input during v0.4 migration.
     #[test]
     fn v0_2_plan_decodes_without_execution_relations() {
         let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
         let plan = decode_mission_plan(source).expect("v0.2 compatibility input should decode");
-        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_3);
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_4);
         assert!(
             plan.contexts()
                 .iter()

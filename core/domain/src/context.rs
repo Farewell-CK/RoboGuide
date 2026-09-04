@@ -1,7 +1,8 @@
 //! Mission Intelligence context declarations shared with orchestration and Control.
 
 use crate::{
-    ActorId, ContextRoleId, CoordinationContextId, DomainError, ExecutionRelationSpec,
+    ActorId, ContextRoleId, CoordinationContextId, CoordinationMechanism, DomainError,
+    ExecutionCouplingMode, ExecutionRelationSpec, GroupSharedViewSpec, PeerChannelSpec,
     ResourceBindingScope, RoleId,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,6 +45,15 @@ pub struct CoordinationContext {
     roles: Vec<ContextRole>,
     /// Directional execution-time constraints scoped to this semantic Context.
     relations: Vec<ExecutionRelationSpec>,
+    /// Default execution coupling mode for TaskExecutions in this Context.
+    #[serde(default)]
+    coupling_mode: ExecutionCouplingMode,
+    /// Optional selective group-scoped state/spatial view declaration.
+    #[serde(default)]
+    shared_view: Option<GroupSharedViewSpec>,
+    /// Optional transport-neutral direct peer channel declaration.
+    #[serde(default)]
+    peer_channel: Option<PeerChannelSpec>,
 }
 
 impl CoordinationContext {
@@ -65,6 +75,9 @@ impl CoordinationContext {
             context_id,
             roles,
             relations: Vec::new(),
+            coupling_mode: ExecutionCouplingMode::Independent,
+            shared_view: None,
+            peer_channel: None,
         })
     }
 
@@ -91,6 +104,47 @@ impl CoordinationContext {
         Ok(context)
     }
 
+    /// Creates a Context with coupling mode, shared view, peer channel, and relations.
+    pub fn new_with_coordination(
+        context_id: CoordinationContextId,
+        roles: Vec<ContextRole>,
+        relations: Vec<ExecutionRelationSpec>,
+        coupling_mode: ExecutionCouplingMode,
+        shared_view: Option<GroupSharedViewSpec>,
+        peer_channel: Option<PeerChannelSpec>,
+    ) -> Result<Self, DomainError> {
+        let mut context = Self::new_with_relations(context_id, roles, relations)?;
+        if let Some(view) = &shared_view {
+            view.validate()?;
+            for binding in view.bindings() {
+                if context.role(binding.context_role_id()).is_none() {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "context {} shared view references unknown ContextRole {}",
+                            context.context_id,
+                            binding.context_role_id()
+                        ),
+                    });
+                }
+            }
+        }
+        if let Some(channel) = &peer_channel
+            && (channel.profile_id.trim().is_empty() || channel.message_schema.trim().is_empty())
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} peer channel contains a blank identity",
+                    context.context_id
+                ),
+            });
+        }
+        context.coupling_mode = coupling_mode;
+        context.shared_view = shared_view;
+        context.peer_channel = peer_channel;
+        context.validate_mechanisms_for(coupling_mode)?;
+        Ok(context)
+    }
+
     /// Returns this context identity.
     pub const fn context_id(&self) -> &CoordinationContextId {
         &self.context_id
@@ -112,6 +166,50 @@ impl CoordinationContext {
     pub fn relations(&self) -> &[ExecutionRelationSpec] {
         &self.relations
     }
+
+    /// Returns the default execution coupling mode for this Context.
+    pub const fn coupling_mode(&self) -> ExecutionCouplingMode {
+        self.coupling_mode
+    }
+
+    /// Returns the optional group-scoped shared view declaration.
+    pub const fn shared_view(&self) -> Option<&GroupSharedViewSpec> {
+        self.shared_view.as_ref()
+    }
+
+    /// Returns the optional direct peer channel declaration.
+    pub const fn peer_channel(&self) -> Option<&PeerChannelSpec> {
+        self.peer_channel.as_ref()
+    }
+
+    /// Validates that this Context declares every static mechanism required by a mode.
+    pub fn validate_mechanisms_for(&self, mode: ExecutionCouplingMode) -> Result<(), DomainError> {
+        if mode.requires(CoordinationMechanism::GroupSharedState) && self.shared_view.is_none() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} mode {mode:?} requires a Group shared view",
+                    self.context_id
+                ),
+            });
+        }
+        if mode.requires(CoordinationMechanism::RelationEvidence) && self.relations.is_empty() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} mode {mode:?} requires at least one execution relation",
+                    self.context_id
+                ),
+            });
+        }
+        if mode.requires(CoordinationMechanism::DirectPeerChannel) && self.peer_channel.is_none() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} mode {mode:?} requires a direct peer channel declaration",
+                    self.context_id
+                ),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Mission Intelligence continuity declarations attached to one planned Task.
@@ -123,6 +221,9 @@ pub struct TaskContinuity {
     context_roles: BTreeMap<RoleId, ContextRoleId>,
     /// Resource lifetime declared per Task role.
     resource_scopes: BTreeMap<RoleId, ResourceBindingScope>,
+    /// Optional Task-level coupling mode overriding its Context default.
+    #[serde(default)]
+    coupling_mode_override: Option<ExecutionCouplingMode>,
 }
 
 impl TaskContinuity {
@@ -136,6 +237,22 @@ impl TaskContinuity {
             context_id,
             context_roles,
             resource_scopes,
+            coupling_mode_override: None,
+        }
+    }
+
+    /// Creates a Task continuity declaration with an explicit coupling mode override.
+    pub const fn new_with_coupling_mode(
+        context_id: CoordinationContextId,
+        context_roles: BTreeMap<RoleId, ContextRoleId>,
+        resource_scopes: BTreeMap<RoleId, ResourceBindingScope>,
+        coupling_mode_override: Option<ExecutionCouplingMode>,
+    ) -> Self {
+        Self {
+            context_id,
+            context_roles,
+            resource_scopes,
+            coupling_mode_override,
         }
     }
 
@@ -165,5 +282,10 @@ impl TaskContinuity {
     /// Returns every explicit role-level resource lifetime.
     pub const fn resource_scopes(&self) -> &BTreeMap<RoleId, ResourceBindingScope> {
         &self.resource_scopes
+    }
+
+    /// Returns the Task-level coupling mode override, when declared.
+    pub const fn coupling_mode_override(&self) -> Option<ExecutionCouplingMode> {
+        self.coupling_mode_override
     }
 }

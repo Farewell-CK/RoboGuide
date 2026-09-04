@@ -1,5 +1,8 @@
 //! Transport-neutral live execution contexts for committed distributed work.
 
+use crate::coordination::{
+    CoordinationKey, RuntimeCoordinationContext, RuntimePeerChannel, restore_coordination_maps,
+};
 use crate::relation::{
     RelationFenceCheckpoint, RelationKey, RelationProofCheckpoint, RelationStateCheckpoint,
     RuntimeExecutionRelation, restore_relation_maps,
@@ -169,6 +172,12 @@ pub struct RuntimeExecutionCheckpoint {
     relation_fences: Vec<RelationFenceCheckpoint>,
     /// Target attempts proven to have run under a satisfied relation.
     relation_proofs: Vec<RelationProofCheckpoint>,
+    /// Mission-owned coordination Context declarations.
+    #[serde(default)]
+    coordination_contexts: Vec<RuntimeCoordinationContext>,
+    /// Direct peer channel descriptors and lifecycle state.
+    #[serde(default)]
+    peer_channels: Vec<RuntimePeerChannel>,
 }
 
 /// Whether a validated dispatch must be sent through Integration.
@@ -240,6 +249,10 @@ pub struct RuntimeExecutionManager {
     pub(crate) relation_fences: BTreeSet<RelationKey>,
     /// Current target attempts observed at least once under a satisfied relation.
     pub(crate) relation_proofs: BTreeMap<RelationKey, String>,
+    /// Mission-owned coordination mechanism declarations by Group and Context.
+    pub(crate) coordination_contexts: BTreeMap<CoordinationKey, RuntimeCoordinationContext>,
+    /// Direct Local EAIOS peer channel lifecycle without owning transport traffic.
+    pub(crate) peer_channels: BTreeMap<CoordinationKey, RuntimePeerChannel>,
 }
 
 impl RuntimeExecutionManager {
@@ -257,6 +270,8 @@ impl RuntimeExecutionManager {
             relation_states: BTreeMap::new(),
             relation_fences: BTreeSet::new(),
             relation_proofs: BTreeMap::new(),
+            coordination_contexts: BTreeMap::new(),
+            peer_channels: BTreeMap::new(),
         }
     }
 
@@ -308,6 +323,8 @@ impl RuntimeExecutionManager {
                     },
                 )
                 .collect(),
+            coordination_contexts: self.coordination_contexts.values().cloned().collect(),
+            peer_channels: self.peer_channels.values().cloned().collect(),
         }
     }
 
@@ -320,6 +337,15 @@ impl RuntimeExecutionManager {
             checkpoint.relation_fences.clone(),
             checkpoint.relation_proofs.clone(),
         )?;
+        let (coordination_contexts, mut peer_channels) = restore_coordination_maps(
+            checkpoint.coordination_contexts.clone(),
+            checkpoint.peer_channels.clone(),
+        )?;
+        for channel in peer_channels.values_mut() {
+            if channel.lifecycle() == crate::PeerChannelLifecycle::Ready {
+                channel.lifecycle = crate::PeerChannelLifecycle::Fenced;
+            }
+        }
         let restored_executions = checkpoint.executions.keys().cloned().collect();
         let activated_tasks = checkpoint
             .active_executions
@@ -365,6 +391,8 @@ impl RuntimeExecutionManager {
             relation_states,
             relation_fences,
             relation_proofs,
+            coordination_contexts,
+            peer_channels,
         };
         restored.refresh_all_relations_after_restore();
         Ok(restored)
@@ -446,6 +474,19 @@ impl RuntimeExecutionManager {
     /// Returns the latest accepted Runtime status for one execution identity.
     pub fn execution_status(&self, execution_id: &str) -> Option<ExecutionStatus> {
         self.execution_status.get(execution_id).copied()
+    }
+
+    /// Returns the status of the current attempt occupying one logical Group Task role.
+    pub fn current_execution_status(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<ExecutionStatus> {
+        self.active_executions
+            .get(&(group_id.clone(), task_ref.clone(), role_id.clone()))
+            .and_then(|execution_id| self.execution_status.get(execution_id))
+            .copied()
     }
 
     /// Reduces one ordered Node execution fact into canonical Runtime events.

@@ -51,7 +51,7 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
   显式消费 objective、confirmed constraints 和 assumptions；
-- Mission 输出使用 `contracts/mission/v0.3/` 中的版本化合同；每个 Role 分别声明
+- Mission 输出使用 `contracts/mission/v0.4/` 中的版本化合同；v0.2/v0.3 作为兼容输入；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
   不绑定 NodeId 的 execution-time cross-role relation；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
@@ -377,10 +377,12 @@ Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单
 Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它承载
 Mission-level Group 的 live execution context。当前 slice 已实现 TaskExecution 的 execution
 identity、事件顺序归约、checkpoint fencing、recovery-required evidence 和 lifecycle
-transition。MissionPlan v0.3 还允许 Context 声明 `requires-active` Execution Coordination
-Relation；端点是稳定的 `(TaskId, RoleId)` 逻辑槽，Runtime 将其解析到当前 attempt，归约
+transition。MissionPlan v0.4 还允许 Context 声明 coupling mode、typed Execution Coordination
+Relation、选择性的 Group shared view 和 transport-neutral peer channel；端点是稳定的
+`(TaskId, RoleId)` 逻辑槽，Runtime 将其解析到当前 attempt，归约
 `Dormant/Pending/Satisfied/Violated/Unknown`，并以 relation fence 阻止未经满足证明的 target
-Task 成功。rebind 改变 Node/attempt 而不改变关系语义，restart 则保守恢复为 `Unknown`。
+Task 成功。rebind 改变 Node/attempt 而不改变关系语义，restart 则保守恢复为 `Unknown`；高频
+相对状态与安全控制仍由 Local EAIOS 负责。
 Runtime-owned timer、取消状态与显式 resume/remote pause protocol 仍待后续实现。Matching、
 Scheduling、Reservation、Commit 和 replacement selection 仍属于
 Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service 的
@@ -511,7 +513,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
-│   ├── mission/v0.2/ + v0.3/
+│   ├── mission/v0.2/ + v0.3/ + v0.4/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ ... v0.6/

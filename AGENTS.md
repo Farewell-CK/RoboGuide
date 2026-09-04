@@ -45,9 +45,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
-- Phase 1 uses `roboguide.mission-plan/v0.3`: Context/ContextRole continuity and
-  Execution Relation specifications are Mission Intelligence metadata, while Task/Context
-  resource ownership is recorded independently in Control and its Group projection.
+- The current Mission boundary uses `roboguide.mission-plan/v0.4`: Context/ContextRole
+  continuity, coupling mode, selective Group view, peer descriptor, and Execution Relation
+  specifications are Mission Intelligence metadata, while Task/Context resource ownership is
+  recorded independently in Control and its Group projection. v0.2/v0.3 remain compatibility
+  inputs.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.

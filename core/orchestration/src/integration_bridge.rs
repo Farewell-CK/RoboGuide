@@ -3,16 +3,19 @@
 use control::ControlPlane;
 use domain::{
     Capability, CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload,
-    ExecutionCommand, ExecutionValue, LeaseId, LocalRuntime, LocalSystemDescriptor, LocalSystemId,
-    MemoryKind, MemoryProviderDescriptor, MemoryScopeLimit, MemoryVisibility, NodeContractVersion,
-    NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease, NodeStatus, Resource, ResourceId,
-    ResourceKind, SensorDescriptor, SensorId, StateExportDescriptor, StateObjectClass,
-    StateObjectRef, StateRecord, StateSemantic, StateSource, TimestampMs,
+    ExecutionCommand, ExecutionCouplingMode, ExecutionValue, LeaseId, LocalRuntime,
+    LocalSystemDescriptor, LocalSystemId, MemoryKind, MemoryProviderDescriptor, MemoryScopeLimit,
+    MemoryVisibility, NodeContractVersion, NodeEvent, NodeHealth, NodeHeartbeat, NodeId, NodeLease,
+    NodeStatus, Resource, ResourceId, ResourceKind, SensorDescriptor, SensorId,
+    StateExportDescriptor, StateObjectClass, StateObjectRef, StateRecord, StateSemantic,
+    StateSource, TimestampMs,
 };
 use integration::grpc::v0_3::node_message::Message as NodePayload;
 use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
 use integration::{GrpcNodeEvent, GrpcNodeRouter};
-use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordWriter};
+use ports::{
+    EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader, StateRecordWriter,
+};
 use runtime::{
     ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
     RuntimeRelationSnapshot,
@@ -23,11 +26,11 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 9 adds source-aware State records while accepting one-step v8 migration.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
+/// Version 10 adds Runtime coordination contexts and peer lifecycle state.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v8";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -64,6 +67,122 @@ pub struct ObservedTaskOutcome {
     task_ref: domain::TaskRef,
     /// Runtime-derived terminal role result.
     result: ObservedTaskResult,
+}
+
+/// Read-only Group-scoped view assembled from existing State evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSharedViewSnapshot {
+    /// Mission-level Group that owns the view.
+    group_id: domain::ExecutionGroupId,
+    /// Coordination Context selecting the exposed member fields.
+    context_id: domain::CoordinationContextId,
+    /// Optional common map/frame interpretation.
+    spatial_reference: Option<domain::SharedSpatialReference>,
+    /// One result per logical Task/Role and declared field/schema binding.
+    entries: Vec<GroupSharedViewEntry>,
+}
+
+/// Freshness classification for one Group view binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupViewFreshness {
+    /// Current State evidence remains inside its receive-relative validity window.
+    Fresh,
+    /// State evidence exists but its validity window has elapsed.
+    Stale,
+    /// No matching State evidence exists for the currently bound member.
+    Unknown,
+}
+
+/// Read-only evidence for one logical Group member field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSharedViewEntry {
+    /// Mission-scoped Task containing the logical member.
+    task_ref: domain::TaskRef,
+    /// Task-local Role occupying the logical member slot.
+    role_id: domain::RoleId,
+    /// Current bound Node supplying evidence.
+    node_id: NodeId,
+    /// Typed semantic field.
+    field: domain::GroupViewField,
+    /// Exact State payload schema selected by the Context, absent for Runtime execution status.
+    payload_schema: Option<String>,
+    /// Exact registered State export selected by the Context, absent for Runtime execution status.
+    state_export_id: Option<String>,
+    /// Latest independently attributed State evidence, when present.
+    record: Option<StateRecord>,
+    /// Current Runtime-owned execution status for an Execution field.
+    execution_status: Option<RemoteExecutionStatus>,
+    /// Receive-time freshness result, or Unknown when no record exists.
+    freshness: Option<GroupViewFreshness>,
+}
+
+impl GroupSharedViewEntry {
+    /// Returns the logical Task member.
+    pub const fn task_ref(&self) -> &domain::TaskRef {
+        &self.task_ref
+    }
+
+    /// Returns the logical Role member.
+    pub const fn role_id(&self) -> &domain::RoleId {
+        &self.role_id
+    }
+
+    /// Returns the current physical placement as evidence, not relation identity.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the typed semantic field.
+    pub const fn field(&self) -> domain::GroupViewField {
+        self.field
+    }
+
+    /// Returns the selected State payload schema.
+    pub fn payload_schema(&self) -> Option<&str> {
+        self.payload_schema.as_deref()
+    }
+
+    /// Returns the exact node-wide State export identity.
+    pub fn state_export_id(&self) -> Option<&str> {
+        self.state_export_id.as_deref()
+    }
+
+    /// Returns the latest attributed State record when one exists.
+    pub const fn record(&self) -> Option<&StateRecord> {
+        self.record.as_ref()
+    }
+
+    /// Returns current Runtime status for an Execution field, when an attempt exists.
+    pub const fn execution_status(&self) -> Option<RemoteExecutionStatus> {
+        self.execution_status
+    }
+
+    /// Returns receive-time freshness when the Context requested it, including Unknown.
+    pub const fn freshness(&self) -> Option<GroupViewFreshness> {
+        self.freshness
+    }
+}
+
+impl GroupSharedViewSnapshot {
+    /// Returns the owning Group.
+    pub const fn group_id(&self) -> &domain::ExecutionGroupId {
+        &self.group_id
+    }
+
+    /// Returns the declaring Context.
+    pub const fn context_id(&self) -> &domain::CoordinationContextId {
+        &self.context_id
+    }
+
+    /// Returns the optional shared spatial interpretation.
+    pub const fn spatial_reference(&self) -> Option<&domain::SharedSpatialReference> {
+        self.spatial_reference.as_ref()
+    }
+
+    /// Returns one deterministic result per member and declared binding.
+    pub fn entries(&self) -> &[GroupSharedViewEntry] {
+        &self.entries
+    }
 }
 
 impl ObservedTaskOutcome {
@@ -111,7 +230,7 @@ struct ControllerCheckpoint {
     control: control::ControlCheckpoint,
     /// Shared reported node facts; local receive/liveness times are rebased on restore.
     nodes: Vec<domain::NodeStateSnapshot>,
-    /// Independently attributed State channels; absent in v8 checkpoints.
+    /// Independently attributed State channels introduced by v9 checkpoints.
     #[serde(default)]
     state_records: Vec<StateRecord>,
     /// Runtime-owned live execution contexts and continuity state.
@@ -451,6 +570,21 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     "TaskExecution is absent from the Mission-level Group".to_string(),
                 )
             })?;
+            let coordination_readiness = self.runtime.coordination_readiness_for_mode(
+                group_id,
+                execution.context_id(),
+                execution.coupling_mode(),
+            );
+            let coordination_unavailable = match coordination_readiness {
+                Some(runtime::CoordinationReadiness::Ready) => false,
+                Some(_) => true,
+                None => execution.coupling_mode() != domain::ExecutionCouplingMode::Independent,
+            };
+            if coordination_unavailable {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "TaskExecution coordination mechanisms are not ready".to_string(),
+                ));
+            }
             if !matches!(
                 execution.lifecycle(),
                 domain::TaskExecutionLifecycle::Ready | domain::TaskExecutionLifecycle::Active
@@ -551,10 +685,22 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .flat_map(domain::CoordinationContext::relations)
             .cloned()
             .collect::<Vec<_>>();
-        let runtime_events = self
-            .runtime
-            .register_relations(group_id, plan.goal().mission_id(), &specifications)
+        let mut candidate_runtime = self.runtime.clone();
+        for context in plan.contexts() {
+            candidate_runtime
+                .register_coordination_context(group_id, context)
+                .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        }
+        let task_modes = effective_task_coupling_modes(plan);
+        let runtime_events = candidate_runtime
+            .register_relations_with_modes(
+                group_id,
+                plan.goal().mission_id(),
+                &specifications,
+                &task_modes,
+            )
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        self.runtime = candidate_runtime;
         for event in runtime_events {
             append_runtime_evidence(&mut self.events, &event, timestamp, correlation_id);
             self.runtime_events.push_back(event);
@@ -584,8 +730,17 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .flat_map(domain::CoordinationContext::relations)
             .cloned()
             .collect::<Vec<_>>();
+        let task_modes = effective_task_coupling_modes(plan);
         self.runtime
-            .validate_relations(group_id, plan.goal().mission_id(), &specifications)
+            .validate_coordination_contexts(group_id, plan.contexts())
+            .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
+        self.runtime
+            .validate_relations_with_modes(
+                group_id,
+                plan.goal().mission_id(),
+                &specifications,
+                &task_modes,
+            )
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))
     }
 
@@ -595,6 +750,146 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         group_id: &domain::ExecutionGroupId,
     ) -> Vec<RuntimeRelationSnapshot> {
         self.runtime.relation_snapshots(group_id)
+    }
+
+    /// Returns transport-neutral direct peer channel lifecycle snapshots for one Group.
+    pub fn peer_channel_snapshots(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Vec<runtime::RuntimePeerChannel> {
+        self.runtime.peer_channels(group_id)
+    }
+
+    /// Returns whether one Context's declared coordination mechanisms are ready.
+    pub fn coordination_readiness(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+        context_id: &domain::CoordinationContextId,
+    ) -> Option<runtime::CoordinationReadiness> {
+        self.runtime.coordination_readiness(group_id, context_id)
+    }
+
+    /// Builds a selective read-only Group view from State records and current bindings.
+    pub fn group_shared_view(
+        &self,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+        context_id: &domain::CoordinationContextId,
+        now: TimestampMs,
+    ) -> Result<GroupSharedViewSnapshot, IntegrationRuntimeError> {
+        let context = plan
+            .contexts()
+            .iter()
+            .find(|context| context.context_id() == context_id)
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol("coordination Context is unknown".to_string())
+            })?;
+        let view = context.shared_view().ok_or_else(|| {
+            IntegrationRuntimeError::Protocol("coordination Context has no shared view".to_string())
+        })?;
+        let group = self.control.group(group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
+        })?;
+        if group.mission_id() != plan.goal().mission_id() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "shared view plan differs from Group Mission".to_string(),
+            ));
+        }
+        let context_tasks = plan
+            .task_graph()
+            .tasks()
+            .iter()
+            .filter(|task| task.continuity().context_id() == context_id)
+            .map(|task| task.task_id())
+            .collect::<BTreeSet<_>>();
+        let state_records = self.state_records.records();
+        let mut entries = Vec::new();
+        for execution in group
+            .task_executions()
+            .filter(|execution| context_tasks.contains(execution.task_ref().task_id()))
+        {
+            for assignment in execution.assignments() {
+                for binding in view.bindings() {
+                    if execution.context_role(assignment.role_id())
+                        != Some(binding.context_role_id())
+                    {
+                        continue;
+                    }
+                    let (record, execution_status, freshness) = match binding.field() {
+                        domain::GroupViewField::Execution => (
+                            None,
+                            self.runtime
+                                .current_execution_status(
+                                    group_id,
+                                    execution.task_ref(),
+                                    assignment.role_id(),
+                                )
+                                .map(remote_status),
+                            None,
+                        ),
+                        domain::GroupViewField::Pose | domain::GroupViewField::Velocity => {
+                            let record = latest_group_record(
+                                &state_records,
+                                assignment.node_id(),
+                                binding
+                                    .state_export_id()
+                                    .expect("validated spatial binding has State export"),
+                                binding
+                                    .payload_schema()
+                                    .expect("validated spatial binding has payload schema"),
+                            );
+                            let freshness = view.include_freshness().then(|| match &record {
+                                Some(record) if record.is_stale_at(now) => {
+                                    GroupViewFreshness::Stale
+                                }
+                                Some(_) => GroupViewFreshness::Fresh,
+                                None => GroupViewFreshness::Unknown,
+                            });
+                            (record, None, freshness)
+                        }
+                    };
+                    entries.push(GroupSharedViewEntry {
+                        task_ref: execution.task_ref().clone(),
+                        role_id: assignment.role_id().clone(),
+                        node_id: assignment.node_id().clone(),
+                        field: binding.field(),
+                        payload_schema: binding.payload_schema().map(str::to_string),
+                        state_export_id: binding.state_export_id().map(str::to_string),
+                        record,
+                        execution_status,
+                        freshness,
+                    });
+                }
+            }
+        }
+        Ok(GroupSharedViewSnapshot {
+            group_id: group_id.clone(),
+            context_id: context_id.clone(),
+            spatial_reference: view.spatial_reference().cloned(),
+            entries,
+        })
+    }
+
+    /// Records deployment/local integration confirmation for a direct peer channel.
+    pub fn mark_peer_channel_ready(
+        &mut self,
+        group_id: &domain::ExecutionGroupId,
+        context_id: &domain::CoordinationContextId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.runtime
+            .mark_peer_channel_ready(group_id, context_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
+    /// Fences a direct peer channel while preserving its logical Context identity.
+    pub fn fence_peer_channel(
+        &mut self,
+        group_id: &domain::ExecutionGroupId,
+        context_id: &domain::CoordinationContextId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.runtime
+            .fence_peer_channel(group_id, context_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
     }
 
     /// Applies an explicit Control recovery acknowledgement to one satisfied relation.
@@ -773,6 +1068,48 @@ fn task_assignments_are_complete(execution: &domain::TaskExecution) -> bool {
     expected_roles == assigned_roles && execution.assignments().len() == assigned_roles.len()
 }
 
+/// Computes each Task's effective coupling mode from its Context default and override.
+fn effective_task_coupling_modes(
+    plan: &domain::MissionPlan,
+) -> BTreeMap<domain::TaskId, ExecutionCouplingMode> {
+    plan.task_graph()
+        .tasks()
+        .iter()
+        .map(|task| {
+            let continuity = task.continuity();
+            let mode = plan
+                .contexts()
+                .iter()
+                .find(|context| context.context_id() == continuity.context_id())
+                .map(|context| {
+                    continuity
+                        .coupling_mode_override()
+                        .unwrap_or_else(|| context.coupling_mode())
+                })
+                .unwrap_or_default();
+            (task.task_id().clone(), mode)
+        })
+        .collect()
+}
+
+/// Selects the latest evidence for one exact node export and payload schema.
+fn latest_group_record(
+    records: &[StateRecord],
+    node_id: &NodeId,
+    state_export_id: &str,
+    payload_schema: &str,
+) -> Option<StateRecord> {
+    records
+        .iter()
+        .filter(|record| {
+            record.key().source().node_id() == Some(node_id)
+                && record.key().channel_id() == state_export_id
+                && record.payload_schema() == payload_schema
+        })
+        .max_by_key(|record| (record.received_at(), record.sequence()))
+        .cloned()
+}
+
 /// Persists canonical Runtime facts without granting Integration lifecycle authority.
 fn append_runtime_evidence<E: EventSink>(
     events: &mut E,
@@ -821,6 +1158,8 @@ fn append_runtime_evidence<E: EventSink>(
                 target_task_ref: relation.target_task_ref().clone(),
                 target_role_id: relation.target_role_id().clone(),
                 kind: relation.kind(),
+                relation_type: relation.relation_type().clone(),
+                coupling_mode: relation.coupling_mode(),
             }
         }
         ExecutionEvent::RelationStateChanged {
@@ -836,6 +1175,8 @@ fn append_runtime_evidence<E: EventSink>(
             current: *current,
             source_execution_id: source_execution_id.clone(),
             target_execution_id: target_execution_id.clone(),
+            relation_type: relation.relation_type().clone(),
+            coupling_mode: relation.coupling_mode(),
         },
         ExecutionEvent::RelationReconciliationRequired {
             relation,
@@ -854,6 +1195,8 @@ fn append_runtime_evidence<E: EventSink>(
             source_execution_id: source_execution_id.clone(),
             target_execution_id: target_execution_id.clone(),
             reason: reason.clone(),
+            relation_type: relation.relation_type().clone(),
+            coupling_mode: relation.coupling_mode(),
         },
     };
     events.append(timestamp, correlation_id, None, payload);
@@ -1365,9 +1708,9 @@ mod tests {
         assert_eq!(restored.relation_snapshots(&group_id).len(), 1);
     }
 
-    /// The immediately previous checkpoint migrates with an empty State-record projection.
+    /// The immediately previous checkpoint migrates without coordination declarations.
     #[test]
-    fn v8_checkpoint_migrates_missing_state_records_once() {
+    fn v9_checkpoint_migrates_missing_coordination_once() {
         let bridge = IntegrationRuntimeBridge::new(
             ControlPlane::new(),
             InMemorySharedNodeState::new(),
@@ -1381,10 +1724,11 @@ mod tests {
         )
         .expect("current checkpoint is JSON");
         checkpoint["schema"] = serde_json::json!(PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA);
-        checkpoint
+        let runtime = checkpoint["runtime"]
             .as_object_mut()
-            .expect("checkpoint is an object")
-            .remove("state_records");
+            .expect("Runtime checkpoint is an object");
+        runtime.remove("coordination_contexts");
+        runtime.remove("peer_channels");
 
         let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
             &checkpoint.to_string(),
@@ -1393,7 +1737,13 @@ mod tests {
             TimestampMs::new(1),
         )
         .expect("previous checkpoint migrates");
-        assert!(restored.state_records().records().is_empty());
+        assert!(
+            restored
+                .peer_channel_snapshots(
+                    &domain::ExecutionGroupId::new("unused").expect("group id is valid")
+                )
+                .is_empty()
+        );
     }
 
     /// Integration cannot create a relation registry beside an absent Control Group.
@@ -1676,6 +2026,289 @@ mod tests {
         assert_eq!(
             restored_record.source_observed_at(),
             record.source_observed_at()
+        );
+    }
+
+    /// A Group view selects exact authorized exports and exposes receive-time freshness states.
+    #[test]
+    fn group_shared_view_uses_exact_export_schema_and_freshness() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut document: serde_json::Value =
+            serde_json::from_str(source).expect("relation fixture is JSON");
+        document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+        document["contexts"][0]["coupling_mode"] = serde_json::json!("concurrent-cooperation");
+        document["contexts"][0]["shared_view"] = serde_json::json!({
+            "bindings": [
+                {
+                    "context_role_id": "safety",
+                    "field": "pose",
+                    "state_export_id": "safety-pose",
+                    "payload_schema": "roboguide.pose/v1"
+                },
+                {"context_role_id": "safety", "field": "execution"}
+            ],
+            "include_freshness": true
+        });
+        let plan = crate::decode_mission_plan(&document.to_string()).expect("v0.4 plan validates");
+        let context_id = plan.contexts()[0].context_id().clone();
+        let task = &plan.task_graph().tasks()[0];
+        let requirement = task.requirement();
+        let role_id = requirement.roles()[0].role_id().clone();
+        let group_id = domain::ExecutionGroupId::new("group-view").expect("group id is valid");
+        let correlation = CorrelationId::new("group-view-test").expect("correlation is valid");
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        bridge
+            .consume(
+                GrpcNodeEvent::Registered {
+                    session_id: "session-view".to_string(),
+                    lease_id: "lease-view".to_string(),
+                    registration: NodeRegistration {
+                        node_id: "cane-a".to_string(),
+                        local_systems: vec![LocalSystemDescriptor {
+                            id: "safety".to_string(),
+                            runtime: Some(WireRuntime {
+                                name: "safety-runtime".to_string(),
+                                version: "1".to_string(),
+                            }),
+                            metadata: Default::default(),
+                        }],
+                        capabilities: vec![WireCapability {
+                            kind: "observation".to_string(),
+                            available: true,
+                            contracts: vec!["safety.observe@v1".to_string()],
+                            local_system_id: "safety".to_string(),
+                        }],
+                        sensors: Vec::new(),
+                        resources: Vec::new(),
+                        metadata: Default::default(),
+                        node_contract_version: "roboguide.node.v0.3".to_string(),
+                        state_exports: ["safety-pose", "pose-shadow"]
+                            .into_iter()
+                            .map(|export_id| integration::grpc::v0_3::StateExportDescriptor {
+                                export_id: export_id.to_string(),
+                                local_system_id: "safety".to_string(),
+                                object_class: integration::grpc::v0_3::StateObjectClass::Node
+                                    as i32,
+                                object_type: "pose".to_string(),
+                                object_id: "cane-a".to_string(),
+                                semantic: integration::grpc::v0_3::StateSemantic::Reported as i32,
+                                payload_schema: "roboguide.pose/v1".to_string(),
+                                valid_for_ms: 100,
+                            })
+                            .collect(),
+                        memory_providers: Vec::new(),
+                    },
+                },
+                TimestampMs::new(1),
+                &correlation,
+            )
+            .expect("node registration is accepted");
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "cane-a".to_string(),
+                    session_id: "session-view".to_string(),
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
+                            session_id: "session-view".to_string(),
+                            lease_id: "lease-view".to_string(),
+                            sequence: 1,
+                            status: Some(integration::grpc::v0_3::NodeStatus {
+                                health: "online".to_string(),
+                                detail: String::new(),
+                            }),
+                        })),
+                    },
+                },
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("online heartbeat is accepted");
+        bridge
+            .control
+            .create_mission_group(
+                group_id.clone(),
+                &plan,
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("Mission Group is created");
+        bridge
+            .control
+            .ready_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("Task becomes ready");
+        let candidates = bridge
+            .control
+            .match_capabilities(
+                &bridge.state,
+                requirement,
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("node matches exact observation contract");
+        let proposal = bridge
+            .control
+            .propose(
+                &bridge.state,
+                requirement,
+                &candidates,
+                vec![domain::RoleAssignment::new(
+                    role_id,
+                    NodeId::new("cane-a").expect("node id is valid"),
+                    Vec::new(),
+                )],
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("zero-resource proposal is valid");
+        let committed = bridge
+            .control
+            .commit(
+                &proposal,
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("proposal commits");
+        bridge
+            .control
+            .bind_task_execution_with_requirement(
+                &group_id,
+                &committed,
+                requirement,
+                TimestampMs::new(3),
+                &correlation,
+                &mut bridge.events,
+            )
+            .expect("Task binds to the State-producing node");
+
+        let missing_coordination = bridge.execute_task_bound(
+            "execution-without-coordination".to_string(),
+            &group_id,
+            requirement.task_ref(),
+            requirement.roles()[0].role_id(),
+            task.execution_intent(requirement.roles()[0].role_id())
+                .expect("plan contains role intent")
+                .clone(),
+            correlation.clone(),
+        );
+        assert!(matches!(
+            missing_coordination,
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("coordination mechanisms are not ready")
+        ));
+
+        let unknown = bridge
+            .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(4))
+            .expect("Group view is readable before evidence arrives");
+        assert_eq!(unknown.entries().len(), 2);
+        assert_eq!(
+            unknown.entries()[0].freshness(),
+            Some(GroupViewFreshness::Unknown)
+        );
+        assert!(unknown.entries()[0].record().is_none());
+        assert_eq!(
+            unknown.entries()[1].field(),
+            domain::GroupViewField::Execution
+        );
+        assert_eq!(unknown.entries()[1].execution_status(), None);
+        assert_eq!(unknown.entries()[1].state_export_id(), None);
+
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "cane-a".to_string(),
+                    session_id: "session-view".to_string(),
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::StateObservationBatch(
+                            integration::grpc::v0_3::StateObservationBatch {
+                                session_id: "session-view".to_string(),
+                                sequence: 2,
+                                observations: vec![
+                                    integration::grpc::v0_3::StateObservation {
+                                        export_id: "pose-shadow".to_string(),
+                                        json_value: br#"{"x":999}"#.to_vec(),
+                                        has_source_observed_at: false,
+                                        source_observed_at_ms: 0,
+                                        has_confidence: false,
+                                        confidence_millionths: 0,
+                                    },
+                                    integration::grpc::v0_3::StateObservation {
+                                        export_id: "safety-pose".to_string(),
+                                        json_value: br#"{"x":1}"#.to_vec(),
+                                        has_source_observed_at: false,
+                                        source_observed_at_ms: 0,
+                                        has_confidence: false,
+                                        confidence_millionths: 0,
+                                    },
+                                ],
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(10),
+                &correlation,
+            )
+            .expect("State evidence is accepted");
+
+        let fresh = bridge
+            .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(50))
+            .expect("fresh view is readable");
+        assert_eq!(fresh.entries().len(), 2);
+        assert_eq!(fresh.entries()[0].state_export_id(), Some("safety-pose"));
+        assert_eq!(
+            fresh.entries()[0].freshness(),
+            Some(GroupViewFreshness::Fresh)
+        );
+        assert_eq!(
+            fresh.entries()[0]
+                .record()
+                .expect("selected evidence exists")
+                .value(),
+            &serde_json::json!({"x": 1})
+        );
+        let command = ExecutionCommand::new(
+            requirement.mission_id().clone(),
+            requirement.task_id().clone(),
+            group_id.clone(),
+            requirement.roles()[0].role_id().clone(),
+            NodeId::new("cane-a").expect("node id is valid"),
+            task.execution_intent(requirement.roles()[0].role_id())
+                .expect("plan contains role intent")
+                .clone(),
+            correlation.clone(),
+        );
+        bridge
+            .runtime
+            .record_dispatched("execution-view".to_string(), command, Vec::new())
+            .expect("Runtime dispatch is recorded");
+        let execution_view = bridge
+            .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(50))
+            .expect("Runtime execution view is readable");
+        assert_eq!(
+            execution_view.entries()[1].execution_status(),
+            Some(RemoteExecutionStatus::Accepted)
+        );
+        let stale = bridge
+            .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(111))
+            .expect("stale evidence remains inspectable");
+        assert_eq!(
+            stale.entries()[0].freshness(),
+            Some(GroupViewFreshness::Stale)
         );
     }
 

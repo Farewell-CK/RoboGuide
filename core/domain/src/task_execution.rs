@@ -1,8 +1,8 @@
 //! Task execution units hosted by a Mission-level Execution Group.
 
 use crate::{
-    ContextRoleId, CoordinationContextId, ResourceBindingScope, ResourceId, RoleAssignment, RoleId,
-    TaskRef,
+    ContextRoleId, CoordinationContextId, ExecutionCouplingMode, ResourceBindingScope, ResourceId,
+    RoleAssignment, RoleId, TaskRef,
 };
 use std::collections::BTreeMap;
 
@@ -32,6 +32,9 @@ pub struct TaskExecution {
     task_ref: TaskRef,
     /// Mission Intelligence context referenced by this Task.
     context_id: CoordinationContextId,
+    /// Effective Context default or Task override coupling mode.
+    #[serde(default)]
+    coupling_mode: ExecutionCouplingMode,
     /// Current Task execution lifecycle.
     lifecycle: TaskExecutionLifecycle,
     /// Current Task-local role bindings.
@@ -110,9 +113,27 @@ impl TaskExecution {
         context_roles: BTreeMap<RoleId, ContextRoleId>,
         role_scopes: BTreeMap<RoleId, ResourceBindingScope>,
     ) -> Self {
+        Self::new_with_coupling_mode(
+            task_ref,
+            context_id,
+            context_roles,
+            role_scopes,
+            ExecutionCouplingMode::Independent,
+        )
+    }
+
+    /// Creates a pending Task execution with an explicit effective coupling mode.
+    pub fn new_with_coupling_mode(
+        task_ref: TaskRef,
+        context_id: CoordinationContextId,
+        context_roles: BTreeMap<RoleId, ContextRoleId>,
+        role_scopes: BTreeMap<RoleId, ResourceBindingScope>,
+        coupling_mode: ExecutionCouplingMode,
+    ) -> Self {
         Self {
             task_ref,
             context_id,
+            coupling_mode,
             lifecycle: TaskExecutionLifecycle::Pending,
             role_scopes,
             context_roles,
@@ -128,6 +149,11 @@ impl TaskExecution {
     /// Returns the Mission Intelligence context referenced by this Task.
     pub const fn context_id(&self) -> &CoordinationContextId {
         &self.context_id
+    }
+
+    /// Returns the effective execution coupling mode.
+    pub const fn coupling_mode(&self) -> ExecutionCouplingMode {
+        self.coupling_mode
     }
 
     /// Returns the current Task execution lifecycle.
@@ -184,6 +210,7 @@ impl TaskExecution {
         Self {
             task_ref: self.task_ref.clone(),
             context_id: self.context_id.clone(),
+            coupling_mode: self.coupling_mode,
             lifecycle,
             role_scopes: self.role_scopes.clone(),
             context_roles: self.context_roles.clone(),

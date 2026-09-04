@@ -31,7 +31,10 @@ pub use allocation::{
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
 pub use execution_relation::{
-    ExecutionRelationKind, ExecutionRelationSpec, ExecutionRelationState, PlannedExecutionRef,
+    CoordinationMechanism, ExecutionCouplingMode, ExecutionRelationKind, ExecutionRelationSpec,
+    ExecutionRelationState, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
+    GroupViewBinding, GroupViewField, PeerChannelSpec, PlannedExecutionRef,
+    RelationStateRequirement, SharedSpatialReference,
 };
 pub use localization_evidence::{
     LOCALIZATION_EVIDENCE_SCHEMA_V0_1, LocalizationFrames, LocalizationVerificationEvidence,
@@ -71,6 +74,9 @@ pub const MISSION_PLAN_SCHEMA_V0_2: &str = "roboguide.mission-plan/v0.2";
 
 /// Version identifier for Mission Plans declaring execution-time coordination relations.
 pub const MISSION_PLAN_SCHEMA_V0_3: &str = "roboguide.mission-plan/v0.3";
+
+/// Version identifier for Mission Plans carrying execution coupling modes and typed relations.
+pub const MISSION_PLAN_SCHEMA_V0_4: &str = "roboguide.mission-plan/v0.4";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
@@ -990,9 +996,22 @@ impl MissionPlan {
                     });
                 }
             }
+            let coupling_mode = task
+                .continuity()
+                .coupling_mode_override()
+                .unwrap_or_else(|| context.coupling_mode());
+            context.validate_mechanisms_for(coupling_mode)?;
         }
         for context in &contexts {
             for relation in context.relations() {
+                if relation.kind() != relation.relation_type().kind() {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "execution relation {} has inconsistent kind and typed relation",
+                            relation.relation_id()
+                        ),
+                    });
+                }
                 validate_relation_endpoint(&task_graph, context, relation.source())?;
                 validate_relation_endpoint(&task_graph, context, relation.target())?;
                 if relation.source().task_id() != relation.target().task_id()
@@ -1024,7 +1043,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_3
+        MISSION_PLAN_SCHEMA_V0_4
     }
 
     /// Returns the original mission goal.
@@ -2364,6 +2383,12 @@ pub enum EventPayload {
         target_role_id: RoleId,
         /// Closed relation behavior.
         kind: ExecutionRelationKind,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
     },
     /// Runtime execution facts changed the observable state of a relation.
     ExecutionRelationStateChanged {
@@ -2379,6 +2404,12 @@ pub enum EventPayload {
         source_execution_id: Option<String>,
         /// Current target attempt, when dispatched.
         target_execution_id: Option<String>,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
     },
     /// A relation violation or ambiguity fenced target progression for reconciliation.
     ExecutionRelationReconciliationRequired {
@@ -2402,6 +2433,12 @@ pub enum EventPayload {
         target_execution_id: Option<String>,
         /// Stable Runtime diagnostic.
         reason: String,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
     },
     /// A role was rebound after a recoverable failure.
     RecoveryRebound {

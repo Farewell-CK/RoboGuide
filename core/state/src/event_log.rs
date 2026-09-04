@@ -18,20 +18,23 @@ use std::sync::{Arc, Mutex};
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
 const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
 
-/// Current JSON payload codec including Distributed Spatial Memory evidence variants.
+/// JSON payload codec including Distributed Spatial Memory evidence variants.
 const EVENT_PAYLOAD_SCHEMA_V3: &str = "domain.EventPayload.json/v3";
 
 /// JSON payload codec including strong localization verification evidence.
 const EVENT_PAYLOAD_SCHEMA_V4: &str = "domain.EventPayload.json/v4";
 
-/// Current JSON payload codec including execution coordination relation evidence.
+/// JSON payload codec including execution coordination relation evidence.
 const EVENT_PAYLOAD_SCHEMA_V5: &str = "domain.EventPayload.json/v5";
 
 /// JSON payload codec including source-aware State and generic Memory evidence.
 const EVENT_PAYLOAD_SCHEMA_V6: &str = "domain.EventPayload.json/v6";
 
-/// Current JSON payload codec including provider-qualified generic Memory replica identity.
+/// JSON payload codec including provider-qualified generic Memory replica identity.
 const EVENT_PAYLOAD_SCHEMA_V7: &str = "domain.EventPayload.json/v7";
+
+/// Current JSON payload codec including typed execution relation and coupling evidence.
+const EVENT_PAYLOAD_SCHEMA_V8: &str = "domain.EventPayload.json/v8";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -458,6 +461,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V5 => Ok(5),
         EVENT_PAYLOAD_SCHEMA_V6 => Ok(6),
         EVENT_PAYLOAD_SCHEMA_V7 => Ok(7),
+        EVENT_PAYLOAD_SCHEMA_V8 => Ok(8),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -498,9 +502,29 @@ fn validate_payload_schema(
         EventPayload::StateRecordObserved { .. } | EventPayload::MemoryManifestPublished { .. } => {
             6
         }
-        EventPayload::ExecutionRelationRegistered { .. }
-        | EventPayload::ExecutionRelationStateChanged { .. }
-        | EventPayload::ExecutionRelationReconciliationRequired { .. } => 5,
+        EventPayload::ExecutionRelationRegistered {
+            relation_type,
+            coupling_mode,
+            ..
+        }
+        | EventPayload::ExecutionRelationStateChanged {
+            relation_type,
+            coupling_mode,
+            ..
+        }
+        | EventPayload::ExecutionRelationReconciliationRequired {
+            relation_type,
+            coupling_mode,
+            ..
+        } => {
+            if *relation_type == domain::ExecutionRelationType::RequiresActive
+                && *coupling_mode == domain::ExecutionCouplingMode::Independent
+            {
+                5
+            } else {
+                8
+            }
+        }
         EventPayload::MapLocalizationEvidenceRecorded { .. } => 4,
         EventPayload::MapArtifactDeclared { .. }
         | EventPayload::MapArtifactPublished { .. }
@@ -581,7 +605,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V7,
+                    EVENT_PAYLOAD_SCHEMA_V8,
                     payload_json,
                 ],
             )
@@ -759,6 +783,37 @@ mod tests {
             ),
             target_role_id: RoleId::new("navigator").expect("role id is valid"),
             kind: domain::ExecutionRelationKind::RequiresActive,
+            relation_type: domain::ExecutionRelationType::RequiresActive,
+            coupling_mode: domain::ExecutionCouplingMode::Independent,
+        }
+    }
+
+    /// Builds one v8-only typed relation registration payload with non-default coupling.
+    fn typed_execution_relation_payload() -> EventPayload {
+        let EventPayload::ExecutionRelationRegistered {
+            group_id,
+            relation_id,
+            source_task_ref,
+            source_role_id,
+            target_task_ref,
+            target_role_id,
+            ..
+        } = execution_relation_payload()
+        else {
+            unreachable!("relation fixture always returns a registration event")
+        };
+        EventPayload::ExecutionRelationRegistered {
+            group_id,
+            relation_id,
+            source_task_ref,
+            source_role_id,
+            target_task_ref,
+            target_role_id,
+            kind: domain::ExecutionRelationKind::GroupMemberState,
+            relation_type: domain::ExecutionRelationType::GroupMemberState {
+                state_key: "user-contact".to_string(),
+            },
+            coupling_mode: domain::ExecutionCouplingMode::ConcurrentCooperation,
         }
     }
 
@@ -851,7 +906,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V7);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V8);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
@@ -980,6 +1035,48 @@ mod tests {
         assert!(matches!(
             log.decoded_events(),
             Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v5")
+        ));
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V5],
+            )
+            .expect("fixture marker changes to v5");
+        assert_eq!(
+            log.decoded_events()
+                .expect("legacy relation remains v5-compatible")[0]
+                .payload(),
+            &execution_relation_payload()
+        );
+    }
+
+    /// A v7 marker cannot masquerade typed relation/coupling evidence introduced by codec v8.
+    #[test]
+    fn event_decoder_rejects_typed_relation_payload_under_v7_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-typed-relation-v7.sqlite3");
+        let correlation = CorrelationId::new("typed-relation-version").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(31),
+            &correlation,
+            None,
+            typed_execution_relation_payload(),
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V7],
+            )
+            .expect("fixture marker changes to v7");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v8")
         ));
     }
 

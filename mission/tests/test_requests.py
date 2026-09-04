@@ -32,6 +32,21 @@ from mission.requests import (
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 
 
+def test_request_contract_accepts_current_and_compatible_plan_versions() -> None:
+    """Durable request records retain v0.3 while admitting current v0.4 plans."""
+    schema = json.loads(
+        Path("contracts/mission/request-v0.1/mission-request.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    plan_options = schema["properties"]["plan"]["oneOf"]
+    references = {option["$ref"] for option in plan_options if "$ref" in option}
+    assert references == {
+        "../v0.3/mission-plan.schema.json",
+        "../v0.4/mission-plan.schema.json",
+    }
+
+
 class FakeInterpreter:
     """Return scripted assessments and retain dialogue/inventory calls."""
 

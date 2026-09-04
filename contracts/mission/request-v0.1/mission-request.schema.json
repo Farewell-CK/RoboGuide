@@ -30,6 +30,7 @@
     "plan": {
       "oneOf": [
         {"$ref": "../v0.3/mission-plan.schema.json"},
+        {"$ref": "../v0.4/mission-plan.schema.json"},
         {"type": "null"}
       ]
     },

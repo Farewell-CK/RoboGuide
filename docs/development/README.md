@@ -398,17 +398,17 @@ staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 sym
 
 `core/state::SqliteEventLog` 提供 SQLite WAL-backed immutable event envelope。它保存
 `event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
-和 `domain.EventPayload.json/v7` 版本化 JSON payload，供 Integration Server 的事件查询使用；
-读取路径保留 v2-v6 兼容。v7 为 generic Memory replica 补充 consumer provider identity，缺少
+和 `domain.EventPayload.json/v8` 版本化 JSON payload，供 Integration Server 的事件查询使用；
+读取路径保留 v2-v7 兼容。v8 保存 typed relation 与 coupling evidence；v7 为 generic Memory replica 补充 consumer provider identity，缺少
 该字段的 v6 历史 evidence 保守归入 reserved legacy bucket；v6 增加 source-aware State 与 generic
 Memory catalog/replica evidence，v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-外层 `roboguide.controller-checkpoint/v10` 包含内层 v9
+外层 `roboguide.controller-checkpoint/v11` 包含内层 v10
 Control/Shared Node/State records/Runtime projection；
 启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
-fail-closed；outer v9/inner v8 只支持一步迁移，缺少的 State record projection 恢复为空。
+fail-closed；outer v10/inner v9 只支持一步迁移，缺少的 coordination projection 恢复为空。
 Memory catalog 从 event evidence replay，不进入 Runtime checkpoint。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、
 复制或 State Authority resolution。
 

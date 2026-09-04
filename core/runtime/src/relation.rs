@@ -2,8 +2,9 @@
 
 use crate::{ExecutionEvent, ExecutionStatus, RuntimeExecutionManager};
 use domain::{
-    ExecutionGroupId, ExecutionRelationId, ExecutionRelationKind, ExecutionRelationSpec,
-    ExecutionRelationState, MissionId, RoleId, TaskRef,
+    ExecutionCouplingMode, ExecutionGroupId, ExecutionRelationId, ExecutionRelationKind,
+    ExecutionRelationSpec, ExecutionRelationState, ExecutionRelationType, MissionId, RoleId,
+    TaskRef,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,6 +28,12 @@ pub struct RuntimeExecutionRelation {
     pub(crate) target_role_id: RoleId,
     /// Closed v0.1 relation behavior.
     pub(crate) kind: ExecutionRelationKind,
+    /// Typed relation descriptor retained across restart and rebind.
+    #[serde(default)]
+    pub(crate) relation_type: ExecutionRelationType,
+    /// Effective coupling mode of the constrained Task execution.
+    #[serde(default)]
+    pub(crate) coupling_mode: ExecutionCouplingMode,
 }
 
 impl RuntimeExecutionRelation {
@@ -63,6 +70,16 @@ impl RuntimeExecutionRelation {
     /// Returns the closed relation behavior.
     pub const fn kind(&self) -> ExecutionRelationKind {
         self.kind
+    }
+
+    /// Returns the typed relation descriptor.
+    pub const fn relation_type(&self) -> &ExecutionRelationType {
+        &self.relation_type
+    }
+
+    /// Returns the constrained Task execution's effective coupling mode.
+    pub const fn coupling_mode(&self) -> ExecutionCouplingMode {
+        self.coupling_mode
     }
 
     /// Returns the Runtime map key for this relation.
@@ -170,6 +187,17 @@ impl RuntimeExecutionManager {
         mission_id: &MissionId,
         specifications: &[ExecutionRelationSpec],
     ) -> Result<Vec<ExecutionEvent>, crate::ExecutionRuntimeError> {
+        self.register_relations_with_modes(group_id, mission_id, specifications, &BTreeMap::new())
+    }
+
+    /// Registers Mission relations with effective Task coupling modes.
+    pub fn register_relations_with_modes(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        mission_id: &MissionId,
+        specifications: &[ExecutionRelationSpec],
+        task_modes: &BTreeMap<domain::TaskId, ExecutionCouplingMode>,
+    ) -> Result<Vec<ExecutionEvent>, crate::ExecutionRuntimeError> {
         let mut events = Vec::new();
         for specification in specifications {
             let relation = RuntimeExecutionRelation {
@@ -186,6 +214,11 @@ impl RuntimeExecutionManager {
                 ),
                 target_role_id: specification.target().role_id().clone(),
                 kind: specification.kind(),
+                relation_type: specification.relation_type().clone(),
+                coupling_mode: task_modes
+                    .get(specification.target().task_id())
+                    .copied()
+                    .unwrap_or_default(),
             };
             let key = relation.key();
             if let Some(existing) = self.relations.get(&key) {
@@ -260,6 +293,17 @@ impl RuntimeExecutionManager {
         mission_id: &MissionId,
         specifications: &[ExecutionRelationSpec],
     ) -> Result<(), crate::ExecutionRuntimeError> {
+        self.validate_relations_with_modes(group_id, mission_id, specifications, &BTreeMap::new())
+    }
+
+    /// Confirms restored relations including effective Task coupling modes.
+    pub fn validate_relations_with_modes(
+        &self,
+        group_id: &ExecutionGroupId,
+        mission_id: &MissionId,
+        specifications: &[ExecutionRelationSpec],
+        task_modes: &BTreeMap<domain::TaskId, ExecutionCouplingMode>,
+    ) -> Result<(), crate::ExecutionRuntimeError> {
         let expected = specifications
             .iter()
             .map(|specification| RuntimeExecutionRelation {
@@ -276,6 +320,11 @@ impl RuntimeExecutionManager {
                 ),
                 target_role_id: specification.target().role_id().clone(),
                 kind: specification.kind(),
+                relation_type: specification.relation_type().clone(),
+                coupling_mode: task_modes
+                    .get(specification.target().task_id())
+                    .copied()
+                    .unwrap_or_default(),
             })
             .map(|relation| (relation.key(), relation))
             .collect::<BTreeMap<_, _>>();
@@ -429,6 +478,12 @@ impl RuntimeExecutionManager {
                     Some(ExecutionStatus::Dispatched) | None => ExecutionRelationState::Pending,
                 }
             }
+            ExecutionRelationKind::GroupMemberState
+            | ExecutionRelationKind::SharedSpatialReference
+            | ExecutionRelationKind::RelativePose
+            | ExecutionRelationKind::RelativeDistance
+            | ExecutionRelationKind::StateRequirement
+            | ExecutionRelationKind::FreshnessRequirement => ExecutionRelationState::Unknown,
         }
     }
 
@@ -467,6 +522,28 @@ pub(crate) fn restore_relation_maps(
                 "relation endpoints belong to different Missions".to_string(),
             ));
         }
+        if relation.kind != relation.relation_type.kind() {
+            return Err(crate::ExecutionRuntimeError::InvalidCheckpoint(
+                "checkpoint relation kind disagrees with typed relation".to_string(),
+            ));
+        }
+        domain::ExecutionRelationSpec::new_typed(
+            relation.relation_id.clone(),
+            domain::PlannedExecutionRef::new(
+                relation.source_task_ref.task_id().clone(),
+                relation.source_role_id.clone(),
+            ),
+            domain::PlannedExecutionRef::new(
+                relation.target_task_ref.task_id().clone(),
+                relation.target_role_id.clone(),
+            ),
+            relation.relation_type.clone(),
+        )
+        .map_err(|error| {
+            crate::ExecutionRuntimeError::InvalidCheckpoint(format!(
+                "checkpoint relation contract is invalid: {error}"
+            ))
+        })?;
         if relation_map.insert(relation.key(), relation).is_some() {
             return Err(crate::ExecutionRuntimeError::InvalidCheckpoint(
                 "checkpoint contains duplicate execution relation".to_string(),
