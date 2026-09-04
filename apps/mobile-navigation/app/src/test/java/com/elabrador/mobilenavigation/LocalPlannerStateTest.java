@@ -133,6 +133,28 @@ public class LocalPlannerStateTest {
         assertEquals(60, result.startCost);
     }
 
+    @Test
+    public void openUniformMapPathStaysCloseToStraightTargetRay() {
+        int[][] openMap = new int[80][80];
+        float dirX = 0.5f;
+        float dirY = 1f;
+
+        LocalPlanner.PathResult result = new LocalPlanner().plan(
+                openMap, 0.2f, -7.9f, -7.9f, 0f, 0f, dirX, dirY);
+
+        assertTrue(result.success);
+        assertFalse(result.worldPath.isEmpty());
+        float directionLength = (float) Math.hypot(dirX, dirY);
+        float maxCrossTrack = 0f;
+        for (float[] point : result.worldPath) {
+            float crossTrack = Math.abs(dirY * point[0] - dirX * point[1])
+                    / directionLength;
+            maxCrossTrack = Math.max(maxCrossTrack, crossTrack);
+        }
+        assertTrue("open-grid path deviated " + maxCrossTrack + "m from target ray",
+                maxCrossTrack <= 0.25f);
+    }
+
     @Test(timeout = 2000L)
     public void repeatedPlanningOnMixedCostGridDoesNotReexpandStaleQueueEntries() {
         int[][] map = new int[80][80];
@@ -305,14 +327,53 @@ public class LocalPlannerStateTest {
         int[][] result = LocalPlannerGrid.preprocess(source);
 
         assertEquals(100, result[4][4]);
-        assertEquals(20, result[4][5]);
+        assertEquals(10, result[4][5]);
         assertEquals(20, result[4][1]);
         assertEquals(50, result[0][0]);
         assertEquals(0, result[8][8]);
     }
 
     @Test
-    public void traversableRoadCostsDoNotCreateSafetyZones() {
+    public void sourceInflationLeavesTheSafetyBandTraversable() {
+        int[][] source = new int[15][15];
+        source[7][4] = 100;
+        source[7][9] = 100;
+
+        int[][] result = LocalPlannerGrid.preprocess(source);
+
+        assertEquals(100, result[7][4]);
+        assertEquals(20, result[7][5]);
+        assertEquals(20, result[7][8]);
+        assertEquals(100, result[7][9]);
+    }
+
+    @Test
+    public void unknownDepthRemainsUnknownAfterInflation() {
+        int[][] source = new int[15][15];
+        for (int[] row : source) Arrays.fill(row, -1);
+        source[7][7] = 100;
+
+        int[][] result = LocalPlannerGrid.preprocess(source);
+
+        assertEquals(50, result[7][9]);
+        assertEquals(50, result[7][10]);
+        assertEquals(50, result[7][11]);
+    }
+
+    @Test
+    public void bodyClearanceDoesNotSealAWideDoorway() {
+        int[][] source = new int[21][21];
+        source[10][4] = 100;
+        source[10][16] = 100;
+
+        int[][] result = LocalPlannerGrid.preprocess(source);
+
+        assertFalse(Env.isObstacleCost(result[10][10]));
+        assertEquals(0, result[10][10]);
+    }
+
+    @Test
+    public void sourceInflationAlsoCoversSoftOccupiedCells() {
         int[][] source = new int[9][9];
         source[4][4] = 20;
         source[2][6] = 10;
@@ -323,9 +384,9 @@ public class LocalPlannerStateTest {
         assertEquals(20, result[4][4]);
         assertEquals(10, result[2][6]);
         assertEquals(5, result[7][1]);
-        assertEquals(0, result[4][3]);
-        assertEquals(0, result[2][5]);
-        assertEquals(0, result[7][2]);
+        assertEquals(20, result[4][3]);
+        assertEquals(20, result[2][5]);
+        assertEquals(20, result[7][2]);
     }
 
     @Test
@@ -524,17 +585,20 @@ public class LocalPlannerStateTest {
     }
 
     @Test
-    public void astarTieBreakingMatchesPythonHeapTupleOrdering() {
+    public void astarTieBreakingKeepsAnOptimalStraightRoute() {
         int[][] map = new int[7][7];
         List<int[]> path = new AStar(
                 new int[]{0, 0}, new int[]{6, 3}, map, Collections.emptySet(),
                 AStar.Heuristic.EUCLIDEAN, 3.0).searching();
-        int[][] expected = {
-                {6, 3}, {5, 2}, {4, 1}, {3, 0}, {2, 0}, {1, 0}, {0, 0}
-        };
 
-        assertEquals(expected.length, path.size());
-        for (int i = 0; i < expected.length; i++) assertTrue(Arrays.equals(expected[i], path.get(i)));
+        assertEquals(7, path.size());
+        assertTrue(Arrays.equals(new int[]{6, 3}, path.get(0)));
+        assertTrue(Arrays.equals(new int[]{0, 0}, path.get(path.size() - 1)));
+        for (int[] point : path) {
+            double crossTrackCells = Math.abs(3.0 * point[0] - 6.0 * point[1])
+                    / Math.hypot(6.0, 3.0);
+            assertTrue(crossTrackCells <= 0.45);
+        }
     }
 
     @Test

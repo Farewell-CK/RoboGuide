@@ -1,0 +1,2 @@
+# Set this path to the Android SDK on the machine doing the build.
+# sdk.dir=C\:\\Users\\your-name\\AppData\\Local\\Android\\Sdk

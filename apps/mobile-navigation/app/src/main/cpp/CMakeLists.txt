@@ -3,6 +3,7 @@ project(elabrador_native LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(ELABRADOR_OPTIMIZED_NATIVE "Optimize native mapping in the fast flavor" OFF)
 
 # The upstream OctoMap sources are vendored from the same dependency used by
 # edge. Only the two runtime libraries are built; command-line tools are not
@@ -34,6 +35,8 @@ add_library(elabrador_native SHARED
     elabrador/semantics_max.cpp
     elabrador/semantic_octomap_jni.cpp
     elabrador/realsense_batch_jni.cpp
+    elabrador/neuron_probe_jni.cpp
+    elabrador/neuron_shim_jni.cpp
 )
 target_include_directories(elabrador_native PRIVATE
     ${OCTOMAP_ROOT}/include
@@ -43,6 +46,12 @@ add_library(realsense2 SHARED IMPORTED)
 set_target_properties(realsense2 PROPERTIES IMPORTED_LOCATION
     ${CMAKE_CURRENT_LIST_DIR}/../../../../librealsense/src/main/jniLibs/${ANDROID_ABI}/librealsense2.so)
 target_link_libraries(elabrador_native PRIVATE octomap octomath realsense2 log)
+
+if(ELABRADOR_OPTIMIZED_NATIVE)
+    target_compile_options(octomath PRIVATE -O3)
+    target_compile_options(octomap PRIVATE -O3)
+    target_compile_options(elabrador_native PRIVATE -O3)
+endif()
 
 # Full VINS-Mono port. The two shared libraries preserve the original ROS
 # process boundary and therefore keep each package's global parameter symbols

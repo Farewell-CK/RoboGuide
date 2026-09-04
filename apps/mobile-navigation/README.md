@@ -1,57 +1,37 @@
-# Mobile Navigation Android
+# Mobile Navigation Turbo
 
-`mobile-navigation` is an experimental Android Local System for phone-side
-perception, positioning, semantic mapping, route planning, and local navigation.
-It retains the V2 `Immediate How` and final-safety responsibility. It is not a
-RoboGuide Control, Runtime, State, Mission, or Node Protocol authority, and this
-initial import does not yet provide a `roboguide-node` integration.
+This export contains the current `turbo` Android flavor of Mobile Navigation.
 
-## Project layout
+## Turbo configuration
 
-- `app/` contains the Android application, Java local-navigation logic, JNI
-  bridges, unit tests, and the `r50`/`swinl` semantic-model flavors.
-- `librealsense/` contains the Android Java bindings used by the application.
-- `third_party/octomap/` and `third_party/vins_mono/` contain the vendored native
-  source required by the JNI build.
-- `tools/prepare_vins_android_deps.ps1` downloads and builds the generated VINS
-  Android dependency tree under `third_party/vins_android_deps/`.
-- The remaining scripts under `tools/` export and inspect semantic ONNX models.
+- Flavor: `turbo`
+- Semantic model: PIDNet-S Cityscapes TFLite
+- Model input: `1024 x 1024`
+- Semantic output: `128 x 128`
+- Camera frame: full `640 x 480` RGB frame; no left/right crop
+- Runtime: LiteRT GPU delegate when available, with CPU fallback
+- Native mapping: optimized CMake build (`ELABRADOR_OPTIMIZED_NATIVE=ON`)
+- ABI: `arm64-v8a`
 
-## External assets
+## Build
 
-Regular Git cannot carry the current runtime models and native library because
-each exceeds GitHub's 100 MB per-file limit. Obtain the exact reviewed artifacts
-from the project owner and place them at:
+This module stores the Turbo model and RealSense native library with Git LFS. Run `git lfs pull` after cloning or switching to this branch.
 
-```text
-app/src/r50/assets/models/mask2former-R50-mapillary-semantic-320.onnx
-app/src/swinl/assets/models/mask2former-swinL-mapillary-semantic-640x480.onnx
-librealsense/src/main/jniLibs/arm64-v8a/librealsense2.so
+1. Install Android Studio/SDK with API 35, NDK and CMake.
+2. Copy `local.properties.example` to `local.properties` and set `sdk.dir` to the local Android SDK.
+3. Run `tools/prepare_vins_android_deps.ps1` once. It downloads and builds the OpenCV/Ceres dependencies used by VINS.
+4. Build the Turbo debug APK:
+
+```powershell
+.\gradlew.bat :app:assembleTurboDebug
 ```
 
-The expected model sizes are declared in `app/build.gradle`. Do not substitute
-models or native libraries without recording their provenance and compatibility.
-The original local backup remains the source for these uncommitted artifacts.
+The export intentionally omits Gradle/build caches, generated CMake output, test captures, and host-only Python/Java tool bundles.
 
-## Local setup
+## Important runtime note
 
-1. Install Android SDK 35, an Android NDK, CMake, and JDK 17.
-2. Let Android Studio create the untracked `local.properties`, or set
-   `ANDROID_HOME`.
-3. Stage the external assets listed above.
-4. Prepare VINS dependencies from PowerShell:
+The Turbo flavor uses LiteRT GPU. The MediaTek NeuroPilot ROM Shim belongs to the separate `npu` flavor and is not required by Turbo.
 
-   ```powershell
-   .\tools\prepare_vins_android_deps.ps1
-   ```
+## License and provenance
 
-5. Run local JVM tests:
-
-   ```powershell
-   .\gradlew.bat test
-   ```
-
-Hardware, camera, model, and network checks are adapter/system checks and require
-the corresponding Android device, RealSense camera, model assets, and service
-credentials. The GaoDe Web Service key is entered at runtime and must not be
-committed.
+See the licenses included with the vendored VINS-Mono, OctoMap, RealSense and dependency sources. Model licensing should be checked before public redistribution.

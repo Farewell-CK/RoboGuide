@@ -4,6 +4,7 @@ import java.util.*;
 
 /** Direct port of nvi_planning/src/local_planning/Astar.py. */
 final class AStar {
+    private static final double STRAIGHTNESS_TIE_BREAK = 0.01;
     enum Heuristic { MANHATTAN, EUCLIDEAN }
     private final int[] start, goal; private final int[][] map; private final Set<Long> obstacles;
     private final int rows, cols; private final double alpha; private final Heuristic heuristic;
@@ -38,7 +39,15 @@ final class AStar {
         }
         if(!parent.containsKey(go))return Collections.emptyList();List<int[]> path=new ArrayList<>();long cur=go;while(true){path.add(new int[]{x(cur),y(cur)});if(cur==st)break;cur=parent.get(cur)[0];}return path;
     }
-    private double cost(int x,int y,int nx,int ny){return alpha*Math.hypot(nx-x,ny-y)+Math.abs(map[nx][ny]);}
+    private double cost(int x,int y,int nx,int ny){
+        return alpha*Math.hypot(nx-x,ny-y)+Math.abs(map[nx][ny])
+                + STRAIGHTNESS_TIE_BREAK*targetRayDeviation(nx,ny);
+    }
+    private double targetRayDeviation(int x,int y){
+        double dx=goal[0]-start[0],dy=goal[1]-start[1],length=Math.hypot(dx,dy);
+        if(length<1e-9)return 0.0;
+        return Math.abs(dy*(x-start[0])-dx*(y-start[1]))/length;
+    }
     private boolean collision(int x,int y,int nx,int ny){if(nx<0||ny<0||nx>=rows||ny>=cols||obstacles.contains(key(x,y))||obstacles.contains(key(nx,ny)))return true;if(nx!=x&&ny!=y){if(obstacles.contains(key(nx,y))||obstacles.contains(key(x,ny)))return true;}return false;}
     private double heuristic(int x,int y){return heuristic==Heuristic.MANHATTAN?Math.abs(goal[0]-x)+Math.abs(goal[1]-y):Math.hypot(goal[0]-x,goal[1]-y);}
     static long key(int x,int y){return ((long)x<<32)^(y&0xffffffffL);} private static int x(long k){return (int)(k>>32);}private static int y(long k){return (int)k;}

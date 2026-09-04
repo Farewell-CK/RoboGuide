@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -26,6 +27,8 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtProvider;
 import ai.onnxruntime.OrtSession;
+import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.gpu.GpuDelegate;
 
 final class SemanticSegmenter implements AutoCloseable {
     private static final String TAG = "SemanticPipeline";
@@ -88,6 +91,17 @@ final class SemanticSegmenter implements AutoCloseable {
     private static final long MODEL_BYTES = BuildConfig.SEMANTIC_MODEL_BYTES;
     private static final int MODEL_WIDTH = BuildConfig.SEMANTIC_MODEL_WIDTH;
     private static final int MODEL_HEIGHT = BuildConfig.SEMANTIC_MODEL_HEIGHT;
+    private static final int OUTPUT_WIDTH = BuildConfig.SEMANTIC_OUTPUT_WIDTH;
+    private static final int OUTPUT_HEIGHT = BuildConfig.SEMANTIC_OUTPUT_HEIGHT;
+    private static final boolean USE_NEURON = "PIDNET_NEURON".equals(
+            BuildConfig.SEMANTIC_MODEL_KIND);
+    private static final boolean USE_PIDNET = USE_NEURON || "PIDNET_LITERT".equals(
+            BuildConfig.SEMANTIC_MODEL_KIND);
+    private static final int PIDNET_CLASS_COUNT = 19;
+    private static final int[] PIDNET_TO_MAPILLARY = {
+            13, 15, 17, 6, 3, 45, 48, 50, 30, 29,
+            27, 19, 20, 55, 61, 54, 58, 57, 52
+    };
     // Keep half of the Dimensity 9300+ cores available for VINS, USB and UI work.
     private static final int INFERENCE_THREADS = Math.max(1,
             Math.min(4, Runtime.getRuntime().availableProcessors()));
@@ -107,16 +121,34 @@ final class SemanticSegmenter implements AutoCloseable {
     private final Listener listener;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable ->
             new Thread(runnable, "semantic-inference"));
+    private final ExecutorService mapExecutor = Executors.newSingleThreadExecutor(runnable ->
+            new Thread(runnable, "semantic-map"));
     private final AtomicBoolean inferencePending = new AtomicBoolean(false);
+    private final AtomicBoolean mapPending = new AtomicBoolean(false);
+    private final AtomicLong droppedMapFrames = new AtomicLong();
     private final AtomicLong vinsGeneration = new AtomicLong();
     private final VinsPoseHistory vinsPoseHistory = new VinsPoseHistory();
-    private final FloatBuffer inputBuffer = ByteBuffer
+    private final FloatBuffer inputBuffer = USE_PIDNET ? null : ByteBuffer
             .allocateDirect(3 * MODEL_WIDTH * MODEL_HEIGHT * Float.BYTES)
             .order(ByteOrder.nativeOrder())
             .asFloatBuffer();
-    private final int[] maskBuffer = new int[MODEL_WIDTH * MODEL_HEIGHT];
-    private final float[] confidenceBuffer = new float[MODEL_WIDTH * MODEL_HEIGHT];
+    private final ByteBuffer liteRtInputBytes = USE_PIDNET ? ByteBuffer
+            .allocateDirect(3 * MODEL_WIDTH * MODEL_HEIGHT * Float.BYTES)
+            .order(ByteOrder.nativeOrder()) : null;
+    private final ByteBuffer liteRtOutputBytes = USE_PIDNET ? ByteBuffer
+            .allocateDirect(PIDNET_CLASS_COUNT * OUTPUT_WIDTH * OUTPUT_HEIGHT * Float.BYTES)
+            .order(ByteOrder.nativeOrder()) : null;
+    private final Object pidNetBufferLock = new Object();
+    private int[] maskBuffer = new int[OUTPUT_WIDTH * OUTPUT_HEIGHT];
+    private float[] confidenceBuffer = new float[OUTPUT_WIDTH * OUTPUT_HEIGHT];
+    private int[] recycledMaskBuffer = USE_PIDNET
+            ? new int[OUTPUT_WIDTH * OUTPUT_HEIGHT] : null;
+    private float[] recycledConfidenceBuffer = USE_PIDNET
+            ? new float[OUTPUT_WIDTH * OUTPUT_HEIGHT] : null;
     private volatile OrtSession session;
+    private volatile Interpreter liteRtInterpreter;
+    private volatile GpuDelegate liteRtGpuDelegate;
+    private volatile long neuronHandle;
     private volatile String backend = "CPU";
     private volatile boolean closed;
     private volatile long octomapHandle;
@@ -154,7 +186,7 @@ final class SemanticSegmenter implements AutoCloseable {
         latestResult = null;
         if (!closed) {
             try {
-                executor.execute(() -> {
+                mapExecutor.execute(() -> {
                     if (octomapHandle != 0L) NativeOctomap.nativeClear(octomapHandle);
                     latestOctomapLeaves = null;
                     latestResult = null;
@@ -179,35 +211,34 @@ final class SemanticSegmenter implements AutoCloseable {
                     throw new IllegalStateException("无法创建原生 OctoMap");
                 }
                 File model = prepareModelFile();
-                OrtEnvironment environment = OrtEnvironment.getEnvironment();
-                listener.onStatus("正在加载 " + BuildConfig.SEMANTIC_MODEL_NAME + "（WebGPU）");
-                try {
-                    if (!OrtEnvironment.getAvailableProviders().contains(OrtProvider.WEBGPU)) {
-                        throw new IllegalStateException("WebGPU provider unavailable");
+                if (USE_NEURON) {
+                    listener.onStatus("正在加载 " + BuildConfig.SEMANTIC_MODEL_NAME
+                            + "（MediaTek Neuron NPU）");
+                    neuronHandle = NativeNeuronShim.nativeCreate(model.getAbsolutePath(), true);
+                    if (neuronHandle == 0L) {
+                        throw new IllegalStateException("MediaTek Neuron NPU 模型创建失败");
                     }
-                    try (OrtSession.SessionOptions options = webGpuOptions()) {
-                        session = environment.createSession(model.getAbsolutePath(), options);
-                        backend = "WebGPU";
-                    }
-                } catch (Exception webGpuError) {
-                    Log.w(TAG, "WebGPU session unavailable; falling back to XNNPACK", webGpuError);
-                    listener.onStatus("WebGPU 不兼容，正在回退 XNNPACK");
-                    try (OrtSession.SessionOptions options = xnnpackOptions()) {
-                        session = environment.createSession(model.getAbsolutePath(), options);
-                        backend = "XNNPACK-" + INFERENCE_THREADS + "T";
-                    } catch (Exception xnnpackError) {
-                        Log.w(TAG, "XNNPACK session unavailable; falling back to CPU", xnnpackError);
-                        listener.onStatus("XNNPACK 不兼容此模型，正在回退 CPU");
-                        try (OrtSession.SessionOptions options = cpuOptions()) {
-                            session = environment.createSession(model.getAbsolutePath(), options);
-                            backend = "CPU";
-                        }
-                    }
+                    backend = "MediaTek-Neuron-FP16";
+                } else if (USE_PIDNET) {
+                    listener.onStatus("正在加载 " + BuildConfig.SEMANTIC_MODEL_NAME
+                            + "（LiteRT GPU）");
+                    GpuDelegate.Options delegateOptions = new GpuDelegate.Options();
+                    delegateOptions.setPrecisionLossAllowed(true);
+                    GpuDelegate gpuDelegate = new GpuDelegate(delegateOptions);
+                    Interpreter.Options options = new Interpreter.Options();
+                    options.addDelegate(gpuDelegate);
+                    liteRtGpuDelegate = gpuDelegate;
+                    liteRtInterpreter = new Interpreter(model, options);
+                    backend = "LiteRT-GPU-FP16";
+                } else {
+                    initializeOnnx(model);
                 }
                 Log.i(TAG, "model ready backend=" + backend
                         + " input=" + MODEL_WIDTH + "x" + MODEL_HEIGHT
+                        + " output=" + OUTPUT_WIDTH + "x" + OUTPUT_HEIGHT
                         + " bytes=" + model.length());
-                listener.onStatus("Mask2Former 已加载（" + backend + "），等待彩色帧");
+                listener.onStatus(BuildConfig.SEMANTIC_MODEL_NAME + " 已加载（"
+                        + backend + "），等待彩色帧");
             } catch (Exception error) {
                 listener.onError(errorMessage(error));
             }
@@ -217,7 +248,8 @@ final class SemanticSegmenter implements AutoCloseable {
     void submitRgb(byte[] rgb, int width, int height, int stride,
                    byte[] depth, int depthWidth, int depthHeight, int depthStride,
                    float depthUnits, Intrinsic intrinsic, double frameTimestampSeconds) {
-        if (session == null || closed || !inferencePending.compareAndSet(false, true)) {
+        if (!isModelReady() || closed
+                || !inferencePending.compareAndSet(false, true)) {
             return;
         }
         long generation = vinsGeneration.get();
@@ -244,6 +276,17 @@ final class SemanticSegmenter implements AutoCloseable {
         }
     }
 
+    boolean canAcceptFrame() {
+        return !closed
+                && isModelReady()
+                && !inferencePending.get();
+    }
+
+    private boolean isModelReady() {
+        if (USE_NEURON) return neuronHandle != 0L;
+        return USE_PIDNET ? liteRtInterpreter != null : session != null;
+    }
+
     private Result runInference(byte[] rgb, int width, int height, int stride,
                                 byte[] depth, int depthWidth, int depthHeight, int depthStride,
                                 float depthUnits, Intrinsic intrinsic,
@@ -252,13 +295,96 @@ final class SemanticSegmenter implements AutoCloseable {
         Log.i(TAG, String.format(Locale.US,
                 "inference start input=%dx%d source=%dx%d frame=%.3f",
                 MODEL_WIDTH, MODEL_HEIGHT, width, height, frameTimestampSeconds));
-        FloatBuffer input = inputBuffer;
-        input.clear();
-        int[] crop = modelAspectCrop(width, height, MODEL_WIDTH, MODEL_HEIGHT);
+        int[] crop = USE_PIDNET
+                ? new int[]{0, 0, width, height}
+                : modelAspectCrop(width, height, MODEL_WIDTH, MODEL_HEIGHT);
         int xOffset = crop[0];
         int yOffset = crop[1];
         int cropWidth = crop[2];
         int cropHeight = crop[3];
+        if (USE_PIDNET) {
+            preparePidNetInput(rgb, stride, xOffset, yOffset, cropWidth, cropHeight);
+        } else {
+            prepareMask2FormerInput(rgb, stride, xOffset, yOffset, cropWidth, cropHeight);
+        }
+        long prepared = SystemClock.elapsedRealtimeNanos();
+
+        if (USE_PIDNET) {
+            return runPidNetInference(depth, depthWidth, depthHeight, depthStride,
+                    depthUnits, intrinsic, frameTimestampSeconds, generation, crop,
+                    started, prepared);
+        }
+
+        OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        try (OnnxTensor tensor = OnnxTensor.createTensor(
+                environment, inputBuffer, new long[]{1, 3, MODEL_HEIGHT, MODEL_WIDTH});
+             OrtSession.Result outputs = session.run(
+                      Collections.singletonMap("image", tensor))) {
+            long inferred = SystemClock.elapsedRealtimeNanos();
+            Log.i(TAG, String.format(Locale.US,
+                    "inference returned backend=%s elapsed=%.1fms",
+                    backend, (inferred - started) / 1_000_000.0));
+            int plane = OUTPUT_WIDTH * OUTPUT_HEIGHT;
+            OnnxTensor maskTensor = (OnnxTensor) outputs.get(0);
+            IntBuffer maskOutput = maskTensor.getIntBuffer();
+            LongBuffer longMaskOutput = maskOutput == null ? maskTensor.getLongBuffer() : null;
+            FloatBuffer confidenceOutput = ((OnnxTensor) outputs.get(1)).getFloatBuffer();
+            if ((maskOutput == null && longMaskOutput == null)
+                    || (maskOutput != null && maskOutput.remaining() < plane)
+                    || (longMaskOutput != null && longMaskOutput.remaining() < plane)
+                    || confidenceOutput == null || confidenceOutput.remaining() < plane) {
+                throw new IllegalStateException("Mask2Former 返回了无效的后处理张量");
+            }
+            int[] mask = maskBuffer;
+            float[] confidence = confidenceBuffer;
+            if (maskOutput != null) {
+                maskOutput.get(mask);
+            } else {
+                for (int i = 0; i < plane; i++) {
+                    mask[i] = (int) longMaskOutput.get();
+                }
+            }
+            confidenceOutput.get(confidence);
+            long decoded = SystemClock.elapsedRealtimeNanos();
+            return finishInference(mask, confidence, OUTPUT_WIDTH, OUTPUT_HEIGHT,
+                    depth, depthWidth, depthHeight, depthStride, depthUnits, intrinsic,
+                    frameTimestampSeconds, generation, crop, started, prepared, inferred,
+                    decoded);
+        }
+    }
+
+    private void initializeOnnx(File model) throws Exception {
+        OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        listener.onStatus("正在加载 " + BuildConfig.SEMANTIC_MODEL_NAME + "（WebGPU）");
+        try {
+            if (!OrtEnvironment.getAvailableProviders().contains(OrtProvider.WEBGPU)) {
+                throw new IllegalStateException("WebGPU provider unavailable");
+            }
+            try (OrtSession.SessionOptions options = webGpuOptions()) {
+                session = environment.createSession(model.getAbsolutePath(), options);
+                backend = "WebGPU";
+            }
+        } catch (Exception webGpuError) {
+            Log.w(TAG, "WebGPU session unavailable; falling back to XNNPACK", webGpuError);
+            listener.onStatus("WebGPU 不兼容，正在回退 XNNPACK");
+            try (OrtSession.SessionOptions options = xnnpackOptions()) {
+                session = environment.createSession(model.getAbsolutePath(), options);
+                backend = "XNNPACK-" + INFERENCE_THREADS + "T";
+            } catch (Exception xnnpackError) {
+                Log.w(TAG, "XNNPACK session unavailable; falling back to CPU", xnnpackError);
+                listener.onStatus("XNNPACK 不兼容此模型，正在回退 CPU");
+                try (OrtSession.SessionOptions options = cpuOptions()) {
+                    session = environment.createSession(model.getAbsolutePath(), options);
+                    backend = "CPU";
+                }
+            }
+        }
+    }
+
+    private void prepareMask2FormerInput(byte[] rgb, int stride, int xOffset, int yOffset,
+                                         int cropWidth, int cropHeight) {
+        FloatBuffer input = inputBuffer;
+        input.clear();
         int plane = MODEL_WIDTH * MODEL_HEIGHT;
         for (int y = 0; y < MODEL_HEIGHT; y++) {
             int sourceY = yOffset + Math.min(cropHeight - 1,
@@ -274,105 +400,185 @@ final class SemanticSegmenter implements AutoCloseable {
             }
         }
         input.position(0);
-        long prepared = SystemClock.elapsedRealtimeNanos();
+    }
 
-        OrtEnvironment environment = OrtEnvironment.getEnvironment();
-        try (OnnxTensor tensor = OnnxTensor.createTensor(
-                environment, input, new long[]{1, 3, MODEL_HEIGHT, MODEL_WIDTH});
-             OrtSession.Result outputs = session.run(
-                      Collections.singletonMap("image", tensor))) {
-            long inferred = SystemClock.elapsedRealtimeNanos();
-            Log.i(TAG, String.format(Locale.US,
-                    "inference returned backend=%s elapsed=%.1fms",
-                    backend, (inferred - started) / 1_000_000.0));
-            IntBuffer maskOutput = ((OnnxTensor) outputs.get(0)).getIntBuffer();
-            FloatBuffer confidenceOutput = ((OnnxTensor) outputs.get(1)).getFloatBuffer();
-            if (maskOutput == null || maskOutput.remaining() < plane
-                    || confidenceOutput == null || confidenceOutput.remaining() < plane) {
-                throw new IllegalStateException("Mask2Former 返回了无效的后处理张量");
-            }
-            int[] mask = maskBuffer;
-            float[] confidence = confidenceBuffer;
-            maskOutput.get(mask);
-            confidenceOutput.get(confidence);
-            long decoded = SystemClock.elapsedRealtimeNanos();
-            SemanticPointCloud.Data cloud = SemanticPointCloud.generate(
-                    mask, confidence, MODEL_WIDTH, MODEL_HEIGHT, depth,
-                    depthWidth, depthHeight, depthStride, depthUnits, intrinsic,
-                    xOffset, yOffset, cropWidth, cropHeight,
-                    MapillaryMetadata.colors(context));
-            long cloudBuilt = SystemClock.elapsedRealtimeNanos();
-            if (generation != vinsGeneration.get() || closed) return null;
-            VinsMono.Pose framePose = vinsPoseHistory.at(frameTimestampSeconds);
-            VinsMono.Pose currentPose = vinsPose;
-            float[] frameCameraToWorld = framePose == null ? null : framePose.cameraToWorld();
-            int[] classColors = MapillaryMetadata.colors(context);
-            FrameGroundSemanticFilter.Result frameGround = frameCameraToWorld == null
-                    ? new FrameGroundSemanticFilter.Result(Float.NaN, 0, 0)
-                    : FrameGroundSemanticFilter.apply(cloud, frameCameraToWorld,
-                    SemanticPointCloud.sourceTreeColor(
-                            classColors[MapillaryMetadata.SIDEWALK_CLASS_INDEX]));
-            int inserted = octomapHandle == 0L || framePose == null ? 0 : NativeOctomap.nativeInsert(
-                    octomapHandle, cloud.xyz, cloud.semanticRgb, cloud.confidence,
-                    frameCameraToWorld);
-            long mapInserted = SystemClock.elapsedRealtimeNanos();
-            if (generation != vinsGeneration.get() || closed) return null;
-            int leafCount = octomapHandle == 0L ? 0
-                    : NativeOctomap.nativeLeafCount(octomapHandle);
-            int gridKnown = 0;
-            float groundHeight = Float.NaN;
-            int groundClearedCells = 0;
-            int groundSupportCells = 0;
-            int groundPositiveCostCells = 0;
-            int groundCandidateCells = 0;
-            int[] localCostGrid = null;
-            if (octomapHandle != 0L && leafCount > 0) {
-                float[] leaves = NativeOctomap.nativeExportLeafs(octomapHandle);
-                latestOctomapLeaves = leaves;
-                // The cloud belongs to the camera pose at its capture timestamp.
-                // Using the newer live pose here shifts/rotates a delayed inference
-                // frame a second time; reprojectLatestLocalMap() handles the live
-                // pose separately for the UI and planner.
-                VinsMono.Pose projectionPose = framePose != null ? framePose : currentPose;
-                float locationX = projectionPose == null ? 0f : (float) projectionPose.x;
-                float locationY = projectionPose == null ? 0f : (float) projectionPose.y;
-                float locationZ = projectionPose == null ? 0f : (float) projectionPose.z;
-                float yaw = projectionPose == null ? 0f : projectionPose.egoRightAxisYawRadians();
-                MapTransform.Grid grid = MapTransform.octree2localprmapHeightEgo(
-                        context, leaves,
-                        locationX, locationY, locationZ, yaw);
-                gridKnown = grid.known;
-                groundHeight = grid.groundHeight;
-                groundClearedCells = grid.groundClearedCells;
-                groundSupportCells = grid.groundSupportCells;
-                groundPositiveCostCells = grid.groundPositiveCostCells;
-                groundCandidateCells = grid.groundCandidateCells;
-                localCostGrid = grid.cost;
-                localMapStampNanos = System.nanoTime();
-            }
-            long gridBuilt = SystemClock.elapsedRealtimeNanos();
-            double poseDelta = framePose == null || currentPose == null ? Double.NaN
-                    : Math.sqrt(Math.pow(currentPose.x - framePose.x, 2)
-                    + Math.pow(currentPose.y - framePose.y, 2)
-                    + Math.pow(currentPose.z - framePose.z, 2));
-            double yawDelta = framePose == null || currentPose == null ? Double.NaN
-                    : Math.toDegrees(normalizeRadians(currentPose.egoRightAxisYawRadians()
-                    - framePose.egoRightAxisYawRadians()));
-            Log.i(TAG, String.format(Locale.US,
-                    "stages total=%dms prep=%d model=%d decode=%d cloud=%d octomap=%d grid=%d "
-                            + "frame_pose_delta=%.3fm yaw_delta=%.2fdeg points=%d leaves=%d known=%d "
-                            + "frame_ground=%.3fm/%d/%d ground=%.3fm support=%d positive=%d candidates=%d cleared=%d",
-                    millis(gridBuilt - started), millis(prepared - started),
-                    millis(inferred - prepared), millis(decoded - inferred),
-                    millis(cloudBuilt - decoded), millis(mapInserted - cloudBuilt),
-                    millis(gridBuilt - mapInserted), poseDelta, yawDelta,
-                    inserted, leafCount, gridKnown, frameGround.groundHeight,
-                    frameGround.supportCells, frameGround.correctedPoints, groundHeight,
-                    groundSupportCells, groundPositiveCostCells, groundCandidateCells,
-                    groundClearedCells));
-            return summarize(mask, inserted, leafCount, gridKnown, localCostGrid,
-                    groundHeight, groundClearedCells, millis(gridBuilt - started));
+    private void preparePidNetInput(byte[] rgb, int stride, int xOffset, int yOffset,
+                                    int cropWidth, int cropHeight) {
+        liteRtInputBytes.position(0);
+        NativeOctomap.nativePreparePidNet(rgb, stride, xOffset, yOffset,
+                cropWidth, cropHeight, MODEL_WIDTH, MODEL_HEIGHT, liteRtInputBytes);
+        liteRtInputBytes.position(0);
+    }
+
+    private Result runPidNetInference(byte[] depth, int depthWidth, int depthHeight,
+                                      int depthStride, float depthUnits, Intrinsic intrinsic,
+                                      double frameTimestampSeconds, long generation, int[] crop,
+                                      long started, long prepared) throws Exception {
+        liteRtInputBytes.position(0);
+        liteRtOutputBytes.position(0);
+        if (USE_NEURON) {
+            long handle = neuronHandle;
+            if (handle == 0L) throw new IllegalStateException("PIDNet Neuron 尚未初始化");
+            NativeNeuronShim.nativeRun(handle, liteRtInputBytes, liteRtOutputBytes);
+        } else {
+            Interpreter interpreter = liteRtInterpreter;
+            if (interpreter == null) throw new IllegalStateException("PIDNet LiteRT 尚未初始化");
+            interpreter.run(liteRtInputBytes, liteRtOutputBytes);
         }
+        long inferred = SystemClock.elapsedRealtimeNanos();
+        int plane = OUTPUT_WIDTH * OUTPUT_HEIGHT;
+        liteRtOutputBytes.position(0);
+        NativeOctomap.nativeDecodePidNet(liteRtOutputBytes, PIDNET_CLASS_COUNT, plane,
+                PIDNET_TO_MAPILLARY, maskBuffer, confidenceBuffer);
+        long decoded = SystemClock.elapsedRealtimeNanos();
+        Log.i(TAG, String.format(Locale.US,
+                "inference returned backend=%s elapsed=%.1fms",
+                backend, (inferred - started) / 1_000_000.0));
+        enqueuePidNetMap(depth, depthWidth, depthHeight, depthStride, depthUnits, intrinsic,
+                frameTimestampSeconds, generation, crop, started, prepared, inferred, decoded);
+        return null;
+    }
+
+    /**
+     * GPU inference and CPU map fusion use separate bounded stages. A second pair of output
+     * buffers makes the handed-off mask immutable until mapping completes. If mapping is still
+     * busy, the newer segmentation is discarded instead of accumulating stale map updates.
+     */
+    private void enqueuePidNetMap(byte[] depth, int depthWidth, int depthHeight,
+                                  int depthStride, float depthUnits, Intrinsic intrinsic,
+                                  double frameTimestampSeconds, long generation, int[] crop,
+                                  long started, long prepared, long inferred, long decoded) {
+        if (!mapPending.compareAndSet(false, true)) {
+            long dropped = droppedMapFrames.incrementAndGet();
+            if (dropped == 1L || dropped % 30L == 0L) {
+                Log.i(TAG, "semantic map busy; dropped completed inference count=" + dropped);
+            }
+            return;
+        }
+
+        final int[] mapMask;
+        final float[] mapConfidence;
+        synchronized (pidNetBufferLock) {
+            if (recycledMaskBuffer == null || recycledConfidenceBuffer == null) {
+                mapPending.set(false);
+                throw new IllegalStateException("PIDNet 双缓冲状态无效");
+            }
+            mapMask = maskBuffer;
+            mapConfidence = confidenceBuffer;
+            maskBuffer = recycledMaskBuffer;
+            confidenceBuffer = recycledConfidenceBuffer;
+            recycledMaskBuffer = null;
+            recycledConfidenceBuffer = null;
+        }
+
+        try {
+            mapExecutor.execute(() -> {
+                try {
+                    Result result = finishInference(
+                            mapMask, mapConfidence, OUTPUT_WIDTH, OUTPUT_HEIGHT,
+                            depth, depthWidth, depthHeight, depthStride, depthUnits, intrinsic,
+                            frameTimestampSeconds, generation, crop, started, prepared, inferred,
+                            decoded);
+                    if (result != null && generation == vinsGeneration.get() && !closed) {
+                        latestResult = result;
+                        listener.onResult(result);
+                    }
+                } catch (Exception error) {
+                    if (generation == vinsGeneration.get() && !closed) {
+                        listener.onError(errorMessage(error));
+                    }
+                } finally {
+                    synchronized (pidNetBufferLock) {
+                        recycledMaskBuffer = mapMask;
+                        recycledConfidenceBuffer = mapConfidence;
+                    }
+                    mapPending.set(false);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            synchronized (pidNetBufferLock) {
+                recycledMaskBuffer = mapMask;
+                recycledConfidenceBuffer = mapConfidence;
+            }
+            mapPending.set(false);
+        }
+    }
+
+    private Result finishInference(int[] mask, float[] confidence, int maskWidth,
+                                   int maskHeight, byte[] depth, int depthWidth,
+                                   int depthHeight, int depthStride, float depthUnits,
+                                   Intrinsic intrinsic, double frameTimestampSeconds,
+                                   long generation, int[] crop, long started, long prepared,
+                                   long inferred, long decoded) throws Exception {
+        SemanticPointCloud.Data cloud = SemanticPointCloud.generate(
+                mask, confidence, maskWidth, maskHeight, depth,
+                depthWidth, depthHeight, depthStride, depthUnits, intrinsic,
+                crop[0], crop[1], crop[2], crop[3], MapillaryMetadata.colors(context));
+        long cloudBuilt = SystemClock.elapsedRealtimeNanos();
+        if (generation != vinsGeneration.get() || closed) return null;
+        VinsMono.Pose framePose = vinsPoseHistory.at(frameTimestampSeconds);
+        VinsMono.Pose currentPose = vinsPose;
+        float[] frameCameraToWorld = framePose == null ? null : framePose.cameraToWorld();
+        int[] classColors = MapillaryMetadata.colors(context);
+        FrameGroundSemanticFilter.Result frameGround = frameCameraToWorld == null
+                ? new FrameGroundSemanticFilter.Result(Float.NaN, 0, 0)
+                : FrameGroundSemanticFilter.apply(cloud, frameCameraToWorld,
+                SemanticPointCloud.sourceTreeColor(
+                        classColors[MapillaryMetadata.SIDEWALK_CLASS_INDEX]));
+        int inserted = octomapHandle == 0L || framePose == null ? 0 : NativeOctomap.nativeInsert(
+                octomapHandle, cloud.xyz, cloud.semanticRgb, cloud.confidence,
+                frameCameraToWorld);
+        long mapInserted = SystemClock.elapsedRealtimeNanos();
+        if (generation != vinsGeneration.get() || closed) return null;
+        int leafCount = octomapHandle == 0L ? 0 : NativeOctomap.nativeLeafCount(octomapHandle);
+        int gridKnown = 0;
+        float groundHeight = Float.NaN;
+        int groundClearedCells = 0;
+        int groundSupportCells = 0;
+        int groundPositiveCostCells = 0;
+        int groundCandidateCells = 0;
+        int[] localCostGrid = null;
+        if (octomapHandle != 0L && leafCount > 0) {
+            float[] leaves = NativeOctomap.nativeExportLeafs(octomapHandle);
+            latestOctomapLeaves = leaves;
+            VinsMono.Pose projectionPose = framePose != null ? framePose : currentPose;
+            float locationX = projectionPose == null ? 0f : (float) projectionPose.x;
+            float locationY = projectionPose == null ? 0f : (float) projectionPose.y;
+            float locationZ = projectionPose == null ? 0f : (float) projectionPose.z;
+            float yaw = projectionPose == null ? 0f : projectionPose.egoRightAxisYawRadians();
+            MapTransform.Grid grid = MapTransform.octree2localprmapHeightEgo(
+                    context, leaves, locationX, locationY, locationZ, yaw, USE_PIDNET);
+            gridKnown = grid.known;
+            groundHeight = grid.groundHeight;
+            groundClearedCells = grid.groundClearedCells;
+            groundSupportCells = grid.groundSupportCells;
+            groundPositiveCostCells = grid.groundPositiveCostCells;
+            groundCandidateCells = grid.groundCandidateCells;
+            localCostGrid = grid.cost;
+            localMapStampNanos = System.nanoTime();
+        }
+        long gridBuilt = SystemClock.elapsedRealtimeNanos();
+        double poseDelta = framePose == null || currentPose == null ? Double.NaN
+                : Math.sqrt(Math.pow(currentPose.x - framePose.x, 2)
+                + Math.pow(currentPose.y - framePose.y, 2)
+                + Math.pow(currentPose.z - framePose.z, 2));
+        double yawDelta = framePose == null || currentPose == null ? Double.NaN
+                : Math.toDegrees(normalizeRadians(currentPose.egoRightAxisYawRadians()
+                - framePose.egoRightAxisYawRadians()));
+        Log.i(TAG, String.format(Locale.US,
+                "stages total=%dms prep=%d model=%d decode=%d cloud=%d octomap=%d grid=%d "
+                        + "frame_pose_delta=%.3fm yaw_delta=%.2fdeg points=%d leaves=%d known=%d "
+                        + "frame_ground=%.3fm/%d/%d ground=%.3fm support=%d positive=%d candidates=%d cleared=%d",
+                millis(gridBuilt - started), millis(prepared - started),
+                millis(inferred - prepared), millis(decoded - inferred),
+                millis(cloudBuilt - decoded), millis(mapInserted - cloudBuilt),
+                millis(gridBuilt - mapInserted), poseDelta, yawDelta,
+                inserted, leafCount, gridKnown, frameGround.groundHeight,
+                frameGround.supportCells, frameGround.correctedPoints, groundHeight,
+                groundSupportCells, groundPositiveCostCells, groundCandidateCells,
+                groundClearedCells));
+        return summarize(mask, maskWidth, maskHeight, inserted, leafCount, gridKnown,
+                localCostGrid, groundHeight, groundClearedCells, millis(gridBuilt - started));
     }
 
     private static long millis(long nanos) {
@@ -398,7 +604,7 @@ final class SemanticSegmenter implements AutoCloseable {
         }
         MapTransform.Grid grid = MapTransform.octree2localprmapHeightEgo(
                 context, leaves, (float) pose.x, (float) pose.y, (float) pose.z,
-                pose.egoRightAxisYawRadians());
+                pose.egoRightAxisYawRadians(), USE_PIDNET);
         return new Result(base.isNotWalkable, base.label, base.areaRatio,
                 base.inferenceMillis, base.backend, base.leftCost, base.centerCost,
                 base.rightCost, base.obstacleDistance, base.semanticPointCount,
@@ -421,12 +627,13 @@ final class SemanticSegmenter implements AutoCloseable {
         return "等待局部地图刷新";
     }
 
-    private Result summarize(int[] mask, int pointCount, int leafCount, int gridKnown,
-                             int[] localCostGrid, float groundHeight, int groundClearedCells,
+    private Result summarize(int[] mask, int maskWidth, int maskHeight, int pointCount,
+                             int leafCount, int gridKnown, int[] localCostGrid,
+                             float groundHeight, int groundClearedCells,
                              long inferenceMillis) {
         // Navigation costs come from the native semantic cloud, OctoMap and
         // the source map_transform implementation passed in localCostGrid.
-        int centerPixel = (MODEL_HEIGHT / 2) * MODEL_WIDTH + MODEL_WIDTH / 2;
+        int centerPixel = (maskHeight / 2) * maskWidth + maskWidth / 2;
         int classId = mask[centerPixel];
         return new Result(false, LABELS[classId], 0f, inferenceMillis, backend,
                 Float.NaN, Float.NaN, Float.NaN, Float.NaN, pointCount, leafCount, gridKnown,
@@ -505,7 +712,8 @@ final class SemanticSegmenter implements AutoCloseable {
                 "mask2former-R50-mapillary-semantic-320.onnx",
                 "mask2former-swinL-semantic.onnx",
                 "mask2former-swinL-mapillary-semantic-480.onnx",
-                "mask2former-swinL-mapillary-semantic-640x480.onnx"
+                "mask2former-swinL-mapillary-semantic-640x480.onnx",
+                "pidnet-s-cityscapes-1024.tflite"
         };
         for (String name : obsoleteNames) {
             if (name.equals(currentName)) continue;
@@ -550,16 +758,21 @@ final class SemanticSegmenter implements AutoCloseable {
         closed = true;
         vinsGeneration.incrementAndGet();
         vinsPoseHistory.clear();
-        executor.execute(this::closeResources);
+        executor.execute(this::closeInferenceResources);
         executor.shutdown();
+        mapExecutor.execute(this::closeMapResources);
+        mapExecutor.shutdown();
     }
 
-    private void closeResources() {
+    private void closeMapResources() {
         long map = octomapHandle;
         octomapHandle = 0L;
         if (map != 0L) {
             NativeOctomap.nativeDestroy(map);
         }
+    }
+
+    private void closeInferenceResources() {
         OrtSession current = session;
         session = null;
         if (current != null) {
@@ -569,5 +782,14 @@ final class SemanticSegmenter implements AutoCloseable {
                 // The process is shutting down.
             }
         }
+        Interpreter interpreter = liteRtInterpreter;
+        liteRtInterpreter = null;
+        if (interpreter != null) interpreter.close();
+        GpuDelegate gpuDelegate = liteRtGpuDelegate;
+        liteRtGpuDelegate = null;
+        if (gpuDelegate != null) gpuDelegate.close();
+        long currentNeuronHandle = neuronHandle;
+        neuronHandle = 0L;
+        if (currentNeuronHandle != 0L) NativeNeuronShim.nativeDestroy(currentNeuronHandle);
     }
 }

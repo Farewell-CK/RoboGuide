@@ -66,6 +66,7 @@ final class LocalPlanner {
             planGeneration = stateGeneration;
         }
         int[][] map = LocalPlannerGrid.preprocess(sourceMap);
+        int[][] visualizationMap = planningVisualization(sourceMap, map);
         float locCol=(locationX-originX)/resolution, locRow=(locationY-originY)/resolution;
         LocalPlannerGrid.Target target;
         try { target=LocalPlannerGrid.boundaryTarget(map.length,map[0].length,locRow,locCol,dirY,dirX); }
@@ -84,7 +85,7 @@ final class LocalPlanner {
             }
             return new PathResult(
                 Collections.emptyList(),true,false,Float.NaN,false,startCost,targetCost,
-                env.obstacles.size(),visualize(sourceMap, Collections.emptyList(),
+                env.obstacles.size(),visualize(visualizationMap, Collections.emptyList(),
                 resolution, originX, originY),null);
         }
         List<float[]> world=new ArrayList<>();
@@ -97,7 +98,7 @@ final class LocalPlanner {
         }
         return new PathResult(world, true, true, steering.degrees, steering.blocked,
                 startCost,targetCost,env.obstacles.size(),
-                visualize(sourceMap, world, resolution, originX, originY),null);
+                visualize(visualizationMap, world, resolution, originX, originY),null);
     }
     List<float[]> previousPath(){
         synchronized (stateLock) {
@@ -136,6 +137,18 @@ final class LocalPlanner {
             if (inBounds) visualization[row][col] = 127;
         }
         return visualization;
+    }
+
+    private static int[][] planningVisualization(int[][] sourceMap, int[][] planningMap) {
+        int rows = sourceMap.length, cols = sourceMap[0].length;
+        int[][] visible = new int[rows][cols];
+        for (int row = 0; row < rows; row++) for (int col = 0; col < cols; col++) {
+            int planned = planningMap[row][col];
+            // Preserve distant unknown space as gray, but show safety inflation that
+            // deliberately extends into an unknown glass/depth hole.
+            visible[row][col] = sourceMap[row][col] < 0 && planned == 50 ? -1 : planned;
+        }
+        return visible;
     }
 
     /** Direct port of local_planner.py pure_pursuit_with_obstacle_avoidance(). */

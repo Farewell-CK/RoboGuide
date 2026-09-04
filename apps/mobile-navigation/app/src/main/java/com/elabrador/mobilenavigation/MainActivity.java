@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
     private static final float PREVIEW_MAX_METERS = 4.0f;
     private static final int COLOR_WIDTH = VIDEO_WIDTH;
     private static final int COLOR_HEIGHT = VIDEO_HEIGHT;
-    private static final int COLOR_FRAME_INTERVAL = VIDEO_FPS;
+    private static final int COLOR_FRAME_INTERVAL = BuildConfig.SEMANTIC_FRAME_INTERVAL;
     private static final float COLOR_AUTO_EXPOSURE_LIMIT_US = 16_000f;
     private static final int COLOR_METADATA_LOG_INTERVAL = 30;
     // One second of source frames prevents UI/GC pauses from becoming VINS image
@@ -149,6 +149,7 @@ public class MainActivity extends AppCompatActivity {
     private volatile long latestLocalPlanRefreshNanos = -1L;
     private volatile long latestLocalPlanCompletedNanos;
     private volatile long latestLocalPlanInputAgeNanos = -1L;
+    private volatile boolean hasValidLocalPlanDisplay;
     private volatile boolean vinsInitialized;
     private volatile int vinsResetCount;
     private int consecutiveUninitializedPoses;
@@ -236,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onError(String message) {
                         runOnUiThread(() -> {
-                            semanticStatusText.setText("Mask2Former 错误：" + message);
+                            semanticStatusText.setText(BuildConfig.SEMANTIC_MODEL_NAME + " 错误：" + message);
                             semanticStatusText.setTextColor(
                                     ContextCompat.getColor(MainActivity.this, R.color.nav_danger));
                         });
@@ -555,7 +556,8 @@ public class MainActivity extends AppCompatActivity {
                 ? String.format(Locale.CHINA, "\n偏离路线约 %d 米", guidance.crossTrackMeters)
                 : "";
         String semanticWarning = latestSemanticResult.isNotWalkable
-                ? String.format(Locale.CHINA, "\nMask2Former：%s（%.0f%%），不可通行",
+                ? String.format(Locale.CHINA, "\n%s：%s（%.0f%%），不可通行",
+                BuildConfig.SEMANTIC_MODEL_NAME,
                 latestSemanticResult.label,
                 latestSemanticResult.areaRatio * 100f)
                 : "";
@@ -838,6 +840,7 @@ public class MainActivity extends AppCompatActivity {
                 Intrinsic colorIntrinsic = initializeVins(profile);
                 runOnUiThread(() -> cameraStatusText.setText("深度相机运行中"));
                 long frameCount = 0;
+                long semanticCaptureCount = 0;
                 int consecutiveVideoTimeouts = 0;
 
                 while (streaming.get() && !Thread.currentThread().isInterrupted()) {
@@ -879,42 +882,59 @@ public class MainActivity extends AppCompatActivity {
                             requestVinsProcessing();
                         }
 
-                        // The source VINS image path is independent of depth alignment.
-                        // Keep feature tracking at 30 Hz and run navigation depth work at
-                        // 10 Hz so alignment and rendering cannot delay the next image.
-                        if (frameCount % NAVIGATION_FRAME_INTERVAL == 0) {
+                        // VINS remains independent at 30 Hz. Navigation rendering stays at
+                        // 10 Hz, while an idle semantic worker may consume an additional
+                        // time-aligned RGB/depth frame instead of being capped at 10 Hz.
+                        boolean navigationFrame = frameCount % NAVIGATION_FRAME_INTERVAL == 0;
+                        boolean semanticFrame = rgb != null && intrinsic != null
+                                && Double.isFinite(imageTime) && vinsInitialized
+                                && frameCount % COLOR_FRAME_INTERVAL == 0
+                                && semanticSegmenter != null
+                                && semanticSegmenter.canAcceptFrame();
+                        if (navigationFrame || semanticFrame) {
+                            long alignStartedNanos = SystemClock.elapsedRealtimeNanos();
                             try (Frame rawDepthFrame = frames.first(StreamType.DEPTH);
                                  FrameSet alignedFrames = frames.applyFilter(align);
                                  Frame alignedDepthFrame = alignedFrames.first(StreamType.DEPTH)) {
+                                long alignedNanos = SystemClock.elapsedRealtimeNanos();
                                 DepthFrame rawDepth = rawDepthFrame.as(Extension.DEPTH_FRAME);
                                 DepthFrame alignedDepth = alignedDepthFrame.as(Extension.DEPTH_FRAME);
-                                SectorDistances distances = analyzeDepth(alignedDepth);
-                                if (rgb != null && intrinsic != null && Double.isFinite(imageTime)
-                                        && vinsInitialized
-                                        && frameCount % COLOR_FRAME_INTERVAL == 0
-                                        && semanticSegmenter != null) {
+                                long semanticCopiedNanos = alignedNanos;
+                                if (semanticFrame) {
                                     byte[] semanticDepth = new byte[alignedDepth.getDataSize()];
                                     alignedDepth.getData(semanticDepth);
+                                    semanticCopiedNanos = SystemClock.elapsedRealtimeNanos();
                                     semanticSegmenter.submitRgb(
                                             rgb, colorWidth, colorHeight, colorStride,
                                             semanticDepth, alignedDepth.getWidth(), alignedDepth.getHeight(),
                                             alignedDepth.getStride(), alignedDepth.getUnits(), intrinsic,
                                             imageTime / 1000.0);
+                                    semanticCaptureCount++;
+                                    if (semanticCaptureCount % 10L == 0L) {
+                                        Log.i(TAG, String.format(Locale.US,
+                                                "SEMANTIC_CAPTURE align=%.1fms depth_copy=%.1fms frame=%d",
+                                                (alignedNanos - alignStartedNanos) / 1_000_000.0,
+                                                (semanticCopiedNanos - alignedNanos) / 1_000_000.0,
+                                                frameCount));
+                                    }
                                 }
-                                SemanticSegmenter.Result semantic = latestSemanticResult;
-                                updateDepthPreview(alignedDepth, rawDepth, frameCount);
-                                long shownFrameCount = frameCount;
-                                // The camera thread is faster than the Android UI once the
-                                // local cost grid is visible. Keep only one UI callback so
-                                // stale frames cannot accumulate until the Java heap fails.
-                                if (uiUpdatePending.compareAndSet(false, true)) {
-                                    runOnUiThread(() -> {
-                                        try {
-                                            updateUi(distances, shownFrameCount, semantic);
-                                        } finally {
-                                            uiUpdatePending.set(false);
-                                        }
-                                    });
+                                if (navigationFrame) {
+                                    SectorDistances distances = analyzeDepth(alignedDepth);
+                                    SemanticSegmenter.Result semantic = latestSemanticResult;
+                                    updateDepthPreview(alignedDepth, rawDepth, frameCount);
+                                    long shownFrameCount = frameCount;
+                                    // The camera thread is faster than the Android UI once the
+                                    // local cost grid is visible. Keep only one UI callback so
+                                    // stale frames cannot accumulate until the Java heap fails.
+                                    if (uiUpdatePending.compareAndSet(false, true)) {
+                                        runOnUiThread(() -> {
+                                            try {
+                                                updateUi(distances, shownFrameCount, semantic);
+                                            } finally {
+                                                uiUpdatePending.set(false);
+                                            }
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -1519,6 +1539,9 @@ public class MainActivity extends AppCompatActivity {
                     LocalPlanner.PathResult waiting = LocalPlanner.PathResult.waiting(
                             segmenter.localMapWaitingReason());
                     long sequence = localPlanSequence.incrementAndGet();
+                    // A temporary pose/map synchronization miss must not erase the last valid
+                    // costmap. The planner still waits for a fresh input; this only keeps the UI
+                    // from flashing an empty map between two valid projections.
                     latestLocalPlan = waiting;
                     recordLocalPlanMetrics(refreshStartedNanos, -1L);
                     runOnUiThread(() -> {
@@ -1528,7 +1551,9 @@ public class MainActivity extends AppCompatActivity {
                         renderSemanticStatus(latestSemanticResult);
                         renderLocalPlanStatus(latestSemanticResult);
                         renderLocalPlanMetrics();
-                        localPlanView.setPlan(waiting);
+                        if (!hasValidLocalPlanDisplay) {
+                            localPlanView.setPlan(waiting);
+                        }
                     });
                     return;
                 }
@@ -1552,6 +1577,7 @@ public class MainActivity extends AppCompatActivity {
                     renderLocalPlanStatus(projected);
                     renderLocalPlanMetrics();
                     localPlanView.setPlan(plan);
+                    hasValidLocalPlanDisplay = true;
                     updateNavigationGuidance();
                 });
             } catch (Exception error) {
@@ -1582,7 +1608,8 @@ public class MainActivity extends AppCompatActivity {
             if (semantic.semanticPointCount > 0 && semantic.octomapLeafCount > 0) {
                 semanticStatusText.setText(String.format(
                         Locale.CHINA,
-                        "Mask2Former：中心类别 %s · 语义点云 %,d 点 · OctoMap %,d 叶节点 · 局部代价栅格 %,d/6400 格 · %s · %s · 推理 %.1f 秒；%s",
+                        "%s：中心类别 %s · 语义点云 %,d 点 · OctoMap %,d 叶节点 · 局部代价栅格 %,d/6400 格 · %s · %s · 推理 %.1f 秒",
+                        BuildConfig.SEMANTIC_MODEL_NAME,
                         semantic.label,
                         semantic.semanticPointCount,
                         semantic.octomapLeafCount,
@@ -1591,12 +1618,12 @@ public class MainActivity extends AppCompatActivity {
                                 ? String.format(Locale.CHINA, "地面修正 %,d 格", semantic.groundClearedCells)
                                 : "未检出可靠地面",
                         semantic.backend,
-                        semantic.inferenceMillis / 1000f,
-                        latestLocalPlan.planned ? "A*局部规划运行中" : "A*等待导航目标方向"));
+                        semantic.inferenceMillis / 1000f));
             } else {
                 semanticStatusText.setText(String.format(
                         Locale.CHINA,
-                        "Mask2Former语义分割正常，中心类别 %s · %s · 推理 %.1f 秒；等待语义点云/OctoMap数据",
+                        "%s语义分割正常，中心类别 %s · %s · 推理 %.1f 秒；等待语义点云/OctoMap数据",
+                        BuildConfig.SEMANTIC_MODEL_NAME,
                         semantic.label,
                         semantic.backend,
                         semantic.inferenceMillis / 1000f));
@@ -1609,7 +1636,8 @@ public class MainActivity extends AppCompatActivity {
                     ? String.format(Locale.CHINA, "深度距离 %.1f 米", semantic.obstacleDistance)
                     : "局部代价超过 50";
             semanticStatusText.setText(String.format(
-                    Locale.CHINA, "Mask2Former：前方%s，类别 %s · 左 %.0f / 前 %.0f / 右 %.0f · %s · 推理 %.1f 秒",
+                    Locale.CHINA, "%s：前方%s，类别 %s · 左 %.0f / 前 %.0f / 右 %.0f · %s · 推理 %.1f 秒",
+                    BuildConfig.SEMANTIC_MODEL_NAME,
                     reason, semantic.label, semantic.leftCost * 100f,
                     semantic.centerCost * 100f, semantic.rightCost * 100f,
                     semantic.backend, semantic.inferenceMillis / 1000f));
@@ -1617,7 +1645,8 @@ public class MainActivity extends AppCompatActivity {
         } else {
             semanticStatusText.setText(String.format(
                     Locale.CHINA,
-                    "Mask2Former局部代价：左 %.0f / 前 %.0f / 右 %.0f，前方无不可通行栅格 · %s · 推理 %.1f 秒",
+                    "%s局部代价：左 %.0f / 前 %.0f / 右 %.0f，前方无不可通行栅格 · %s · 推理 %.1f 秒",
+                    BuildConfig.SEMANTIC_MODEL_NAME,
                     semantic.leftCost * 100f,
                     semantic.centerCost * 100f,
                     semantic.rightCost * 100f,
@@ -1629,12 +1658,12 @@ public class MainActivity extends AppCompatActivity {
 
     /** Runs the ported local_planner grid preprocessing and A* on each semantic map result. */
     private void renderLocalPlanStatus(SemanticSegmenter.Result semantic) {
-        if (semantic.localCostGrid == null || semantic.localCostGrid.length != MapTransform.WIDTH * MapTransform.HEIGHT) {
-            return;
-        }
         LocalPlanner.PathResult result = latestLocalPlan;
         if (!result.planned) {
             semanticStatusText.append("\nA*局部规划: " + result.waitingReason);
+            if (hasValidLocalPlanDisplay) {
+                semanticStatusText.append("（下方保留上次有效地图，仅供显示）");
+            }
             return;
         }
         semanticStatusText.append(String.format(Locale.CHINA,
@@ -1719,6 +1748,7 @@ public class MainActivity extends AppCompatActivity {
         latestLocalPlanRefreshNanos = -1L;
         latestLocalPlanCompletedNanos = 0L;
         latestLocalPlanInputAgeNanos = -1L;
+        hasValidLocalPlanDisplay = false;
         if (localPlanView != null) localPlanView.setPlan(latestLocalPlan);
         renderLocalPlanMetrics();
     }

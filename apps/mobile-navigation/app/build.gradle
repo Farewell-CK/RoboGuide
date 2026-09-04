@@ -10,8 +10,8 @@ android {
         applicationId 'com.elabrador.mobilenavigation'
         minSdk 24
         targetSdk 35
-        versionCode 82
-        versionName '0.9.57'
+        versionCode 85
+        versionName '0.9.60'
         testInstrumentationRunner 'com.elabrador.mobilenavigation.SemanticBenchmarkInstrumentation'
 
         ndk {
@@ -33,6 +33,10 @@ android {
             buildConfigField 'int', 'SEMANTIC_MODEL_HEIGHT', '320'
             buildConfigField 'String', 'SEMANTIC_MODEL_NAME', '"Mask2Former R50"'
             buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION', '"R50 A/B 基线（约 178 MB）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_KIND', '"MASK2FORMER_ONNX"'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_WIDTH', '320'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_HEIGHT', '320'
+            buildConfigField 'int', 'SEMANTIC_FRAME_INTERVAL', '30'
         }
         swinl {
             dimension 'semanticModel'
@@ -40,12 +44,91 @@ android {
             manifestPlaceholders = [appLabel: 'Mobile Navigation Swin-L']
             buildConfigField 'String', 'SEMANTIC_MODEL_ASSET',
                     '"models/mask2former-swinL-mapillary-semantic-640x480.onnx"'
-            buildConfigField 'long', 'SEMANTIC_MODEL_BYTES', '910448873L'
+            buildConfigField 'long', 'SEMANTIC_MODEL_BYTES', '910377637L'
             buildConfigField 'int', 'SEMANTIC_MODEL_WIDTH', '640'
             buildConfigField 'int', 'SEMANTIC_MODEL_HEIGHT', '480'
             buildConfigField 'String', 'SEMANTIC_MODEL_NAME', '"Mask2Former Swin-L"'
-            buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION', '"源码等价 Swin-L 65 类 640x480 模型（可变形注意力已修复）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION', '"源码等价 Swin-L 65 类 640x480 模型（WebGPU 等价裁剪版）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_KIND', '"MASK2FORMER_ONNX"'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_WIDTH', '640'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_HEIGHT', '480'
+            buildConfigField 'int', 'SEMANTIC_FRAME_INTERVAL', '30'
         }
+        fast {
+            dimension 'semanticModel'
+            applicationIdSuffix '.fast'
+            testApplicationId 'com.elabrador.mobilenavigation.test'
+            versionNameSuffix '-pidnet-gpu'
+            manifestPlaceholders = [appLabel: 'Mobile Navigation Fast']
+            externalNativeBuild {
+                cmake {
+                    arguments '-DELABRADOR_OPTIMIZED_NATIVE=ON'
+                }
+            }
+            buildConfigField 'String', 'SEMANTIC_MODEL_ASSET',
+                    '"models/pidnet-s-cityscapes-1024.tflite"'
+            buildConfigField 'long', 'SEMANTIC_MODEL_BYTES', '30645332L'
+            buildConfigField 'int', 'SEMANTIC_MODEL_WIDTH', '1024'
+            buildConfigField 'int', 'SEMANTIC_MODEL_HEIGHT', '1024'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_WIDTH', '128'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_HEIGHT', '128'
+            buildConfigField 'String', 'SEMANTIC_MODEL_NAME', '"PIDNet-S"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION',
+                    '"PIDNet-S 19 类 LiteRT GPU 候选模型（完整视野 + D455 地面约束）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_KIND', '"PIDNET_LITERT"'
+            buildConfigField 'int', 'SEMANTIC_FRAME_INTERVAL', '1'
+        }
+        turbo {
+            dimension 'semanticModel'
+            applicationIdSuffix '.turbo'
+            versionNameSuffix '-pidnet-gpu-dual-stage'
+            manifestPlaceholders = [appLabel: 'Mobile Navigation Turbo']
+            externalNativeBuild {
+                cmake {
+                    arguments '-DELABRADOR_OPTIMIZED_NATIVE=ON'
+                }
+            }
+            buildConfigField 'String', 'SEMANTIC_MODEL_ASSET',
+                    '"models/pidnet-s-cityscapes-1024.tflite"'
+            buildConfigField 'long', 'SEMANTIC_MODEL_BYTES', '30645332L'
+            buildConfigField 'int', 'SEMANTIC_MODEL_WIDTH', '1024'
+            buildConfigField 'int', 'SEMANTIC_MODEL_HEIGHT', '1024'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_WIDTH', '128'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_HEIGHT', '128'
+            buildConfigField 'String', 'SEMANTIC_MODEL_NAME', '"PIDNet-S"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION',
+                    '"PIDNet-S 19 类 LiteRT GPU 流水线调度版（完整视野 + D455 地面约束）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_KIND', '"PIDNET_LITERT"'
+            buildConfigField 'int', 'SEMANTIC_FRAME_INTERVAL', '1'
+        }
+        npu {
+            dimension 'semanticModel'
+            applicationIdSuffix '.npu'
+            versionNameSuffix '-pidnet-neuron'
+            manifestPlaceholders = [appLabel: 'Mobile Navigation NPU']
+            externalNativeBuild {
+                cmake {
+                    arguments '-DELABRADOR_OPTIMIZED_NATIVE=ON'
+                }
+            }
+            buildConfigField 'String', 'SEMANTIC_MODEL_ASSET',
+                    '"models/pidnet-s-cityscapes-1024-neuron-stage2.tflite"'
+            buildConfigField 'long', 'SEMANTIC_MODEL_BYTES', '31976968L'
+            buildConfigField 'int', 'SEMANTIC_MODEL_WIDTH', '1024'
+            buildConfigField 'int', 'SEMANTIC_MODEL_HEIGHT', '1024'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_WIDTH', '128'
+            buildConfigField 'int', 'SEMANTIC_OUTPUT_HEIGHT', '128'
+            buildConfigField 'String', 'SEMANTIC_MODEL_NAME', '"PIDNet-S NPU"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_DESCRIPTION',
+                    '"PIDNet-S 19 类 MediaTek Neuron NPU 版（完整视野 + D455 地面约束）"'
+            buildConfigField 'String', 'SEMANTIC_MODEL_KIND', '"PIDNET_NEURON"'
+            buildConfigField 'int', 'SEMANTIC_FRAME_INTERVAL', '1'
+        }
+    }
+
+    sourceSets {
+        turbo.assets.srcDirs = ['src/fast/assets']
+        npu.assets.srcDirs = ['src/npu/assets']
     }
 
     buildFeatures {
@@ -65,7 +148,7 @@ android {
     }
 
     androidResources {
-        noCompress 'onnx'
+        noCompress 'onnx', 'tflite'
     }
 
     externalNativeBuild {
@@ -78,6 +161,14 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.27.0'
+    compileOnly 'com.google.ai.edge.litert:litert:1.4.1'
+    compileOnly 'com.google.ai.edge.litert:litert-gpu:1.4.1'
+    fastImplementation 'com.google.ai.edge.litert:litert:1.4.1'
+    fastImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
+    turboImplementation 'com.google.ai.edge.litert:litert:1.4.1'
+    turboImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
+    npuImplementation 'com.google.ai.edge.litert:litert:1.4.1'
+    npuImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
     implementation project(':librealsense')
     testImplementation 'junit:junit:4.13.2'
 }

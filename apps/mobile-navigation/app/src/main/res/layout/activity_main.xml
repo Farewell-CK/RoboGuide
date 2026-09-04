@@ -122,6 +122,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
+        android:ellipsize="end"
+        android:gravity="center_vertical"
+        android:maxLines="6"
+        android:minLines="6"
         android:text="语义预检：等待彩色流"
         android:textColor="@color/nav_muted"
         android:textSize="14sp" />

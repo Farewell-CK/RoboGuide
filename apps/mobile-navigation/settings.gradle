@@ -19,7 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = 'MobileNavigation'
+rootProject.name = 'MobileNavigationTurbo'
 include ':app'
 include ':librealsense'
 project(':librealsense').projectDir = file('librealsense')
