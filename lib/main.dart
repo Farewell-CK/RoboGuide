@@ -486,7 +486,35 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('[PTT] stopRecorder FAILED: $e');
     }
-    try { await _spp.writeControl({'type': 'mic_end'}); } catch (e) { _appendLog('mic_end failed: $e'); }
+    try {
+      // P2 上下文延续：mic_end 携带会话树上下文（session_id + 最近历史），
+      // Thor 用稳定 session_id 让 Pilot 跨 PTT 保留会话语境；history
+      // 注入下次 StartVoiceSession 的 context_json 供审计/未来消费。
+      // 保留不带上下文的纯 mic_end 兼容路径。
+      final session = _currentSession;
+      if (session != null) {
+        final history = <Map<String, String>>[];
+        // turns 最新在前 -> 取最近 5 个回合（按时间正序），最多 ~10 条消息
+        for (final t in session.turns.reversed.take(5)) {
+          if (t.userText.isNotEmpty) {
+            history.add({'role': 'user', 'text': t.userText});
+          }
+          if (t.assistantText.isNotEmpty) {
+            history.add({'role': 'assistant', 'text': t.assistantText});
+          }
+        }
+        await _spp.writeControl({
+          'type': 'mic_end',
+          'session_id': session.id,
+          'history': history,
+        });
+        debugPrint('[PTT] mic_end session=${session.id} history=${history.length}');
+      } else {
+        await _spp.writeControl({'type': 'mic_end'});
+      }
+    } catch (e) {
+      _appendLog('mic_end failed: $e');
+    }
     final turn = _activeTurn;
     if (turn != null && turn.state == 'recording') {
       setState(() { turn.state = 'recognizing'; _audioState = 'recognizing'; });
