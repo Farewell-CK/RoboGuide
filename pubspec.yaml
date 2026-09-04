@@ -38,6 +38,7 @@ dependencies:
   web_socket_channel: ^3.0.1
   # Audio capture/playback at 16kHz int16 mono PCM
   flutter_sound: ^9.2.13
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart' as fs;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'bluetooth/bluetooth_spp.dart';
+
 void main() {
   runApp(const RoboguideRemoteApp());
 }
@@ -34,23 +37,95 @@ class HomePage extends StatefulWidget {
 
 enum _ConnState { disconnected, connecting, connected, error }
 
-class _ConversationTurn {
+/// 一行对话：一次 PTT 按下→松开即为一个回合。
+class ConversationTurn {
   final String id;
   final DateTime startedAt;
-  String userText;
-  String assistantText;
-  String state;
+  String userText; // ASR final（用户说的话）
+  String assistantText; // Pilot 文本（机器人回复）
+  String state; // recording | recognizing | thinking | playing | done | error
   String error;
 
-  _ConversationTurn({required this.id})
-      : startedAt = DateTime.now(),
+  /// P3 运动标记：当用户指令命中运动意图时记录动作摘要（如
+  /// 'motion_request · 前进'）。仅标记展示，绝不自动执行。
+  String? action;
+
+  ConversationTurn({required this.id, DateTime? startedAt})
+      : startedAt = startedAt ?? DateTime.now(),
         userText = '',
         assistantText = '',
         state = 'recording',
         error = '';
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'startedAt': startedAt.toIso8601String(),
+        'userText': userText,
+        'assistantText': assistantText,
+        'state': state,
+        'error': error,
+        if (action != null) 'action': action,
+      };
+
+  factory ConversationTurn.fromJson(Map<String, dynamic> json) {
+    final turn = ConversationTurn(
+      id: json['id'] as String? ?? '',
+      startedAt: DateTime.tryParse(json['startedAt'] as String? ?? ''),
+    );
+    turn.userText = json['userText'] as String? ?? '';
+    turn.assistantText = json['assistantText'] as String? ?? '';
+    turn.state = json['state'] as String? ?? 'done';
+    turn.error = json['error'] as String? ?? '';
+    turn.action = json['action'] as String?;
+    return turn;
+  }
+}
+
+/// 一个会话：一组回合（turns 最新在前，insert(0)）。
+class ConversationSession {
+  final String id;
+  final DateTime createdAt;
+  String title; // 默认 = 首句 ASR 前 12 字
+  DateTime lastActiveAt;
+  final List<ConversationTurn> turns;
+
+  ConversationSession({
+    required this.id,
+    DateTime? createdAt,
+    this.title = '新会话',
+    DateTime? lastActiveAt,
+    List<ConversationTurn>? turns,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        lastActiveAt = lastActiveAt ?? DateTime.now(),
+        turns = turns ?? [];
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'createdAt': createdAt.toIso8601String(),
+        'title': title,
+        'lastActiveAt': lastActiveAt.toIso8601String(),
+        'turns': turns.map((t) => t.toJson()).toList(),
+      };
+
+  factory ConversationSession.fromJson(Map<String, dynamic> json) {
+    final rawTurns = json['turns'] as List? ?? [];
+    return ConversationSession(
+      id: json['id'] as String? ?? '',
+      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
+      title: json['title'] as String? ?? '新会话',
+      lastActiveAt: DateTime.tryParse(json['lastActiveAt'] as String? ?? ''),
+      turns: rawTurns
+          .cast<Map<String, dynamic>>()
+          .map(ConversationTurn.fromJson)
+          .toList(),
+    );
+  }
 }
 
 class _HomePageState extends State<HomePage> {
+  static const _prefsSessionsKey = 'roboguide.sessions_v2';
+  static const _prefsCurrentKey = 'roboguide.current_session_v2';
+
   final _spp = BluetoothSpp();
   fs.FlutterSoundRecorder? _recorder;
   bool _recorderOpened = false;
@@ -59,8 +134,9 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<SppControlEvent>? _controlSub;
 
   List<Map<String, dynamic>> _devices = [];
-  final List<_ConversationTurn> _turns = [];
-  _ConversationTurn? _activeTurn;
+  List<ConversationSession> _sessions = [];
+  ConversationSession? _currentSession;
+  ConversationTurn? _activeTurn;
   String? _selectedMac;
   _ConnState _state = _ConnState.disconnected;
   bool _micActive = false;
@@ -73,6 +149,9 @@ class _HomePageState extends State<HomePage> {
   static const int _sampleRate = 16000;
   static const int _channels = 1;
 
+  List<ConversationTurn> get _turns =>
+      _currentSession?.turns ?? const <ConversationTurn>[];
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +161,7 @@ class _HomePageState extends State<HomePage> {
       _playQueue = _playQueue.then((_) => _playPcm(data));
     }, onDone: _onStreamClosed, onError: (_) => _onStreamClosed());
     _controlSub = _spp.onControl.listen(_handleControl);
+    _loadSessions();
     _loadDevices();
   }
 
@@ -97,6 +177,7 @@ class _HomePageState extends State<HomePage> {
         _audioState = 'idle';
         _activeTurn = null;
       });
+      _persist();
     } else if (mounted) {
       setState(() => _audioState = 'idle');
     }
@@ -104,6 +185,155 @@ class _HomePageState extends State<HomePage> {
       setState(() => _state = _ConnState.disconnected);
       _appendLog('bluetooth link closed');
     }
+  }
+
+  // ── 会话树持久化（shared_preferences，轻量 JSON） ─────────────
+  Future<void> _loadSessions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsSessionsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+        _sessions = list.map(ConversationSession.fromJson).toList();
+        // 未来版本格式变化时自动丢弃损坏数据
+      }
+      final curId = prefs.getString(_prefsCurrentKey);
+      if (_sessions.isNotEmpty) {
+        _currentSession = _sessions.firstWhere(
+          (s) => s.id == curId,
+          orElse: () => _sessions.first,
+        );
+      }
+      debugPrint('[SESS] loaded ${_sessions.length} session(s)');
+    } catch (e) {
+      debugPrint('[SESS] load failed: $e');
+      _sessions = [];
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _persist() {
+    // fire-and-forget；只保留最近的会话上限，防止 prefs 膨胀
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          final list = _sessions.take(30).map((s) => s.toJson()).toList();
+          prefs.setString(_prefsSessionsKey, jsonEncode(list));
+          prefs.setString(_prefsCurrentKey, _currentSession?.id ?? '');
+        })
+        .catchError((e) => debugPrint('[SESS] save failed: $e'));
+  }
+
+  // ── 会话操作 ──────────────────────────────────────────────
+  ConversationSession _ensureSession() {
+    final cur = _currentSession;
+    if (cur != null) return cur;
+    final s = ConversationSession(
+        id: DateTime.now().microsecondsSinceEpoch.toString());
+    _sessions.insert(0, s);
+    _currentSession = s;
+    return s;
+  }
+
+  void _newSession() {
+    setState(() => _ensureSession());
+    _persist();
+    debugPrint('[SESS] new session ${_currentSession!.id}');
+  }
+
+  void _selectSession(String? id) {
+    if (id == null) return;
+    final s = _sessions.where((x) => x.id == id).firstOrNull;
+    if (s == null) return;
+    setState(() {
+      _currentSession = s;
+      _activeTurn = null; // 切换会话后旧回合状态不再归属当前视图
+    });
+    _persist();
+  }
+
+  Future<void> _renameSession([ConversationSession? session]) async {
+    final s = session ?? _currentSession;
+    if (s == null) return;
+    final controller = TextEditingController(text: s.title);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名会话'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '输入会话名称'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (name != null && name.trim().isNotEmpty) {
+      setState(() => s.title = name.trim());
+      _persist();
+    }
+  }
+
+  void _clearSessionTurns() {
+    final s = _currentSession;
+    if (s == null) return;
+    setState(() {
+      s.turns.clear();
+      _activeTurn = null;
+    });
+    _persist();
+  }
+
+  Future<void> _deleteSession(ConversationSession s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除会话「${s.title}」？'),
+        content: const Text('会话内的所有对话记录将被删除，不可恢复。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _sessions.remove(s);
+      if (_currentSession == s) {
+        _currentSession = _sessions.isEmpty ? null : _sessions.first;
+        _activeTurn = null;
+      }
+    });
+    _persist();
+  }
+
+  void _openSessionList() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _SessionListPage(
+        sessions: _sessions,
+        currentId: _currentSession?.id,
+        onSelect: (s) {
+          _selectSession(s.id);
+          Navigator.of(context).pop();
+        },
+        onNewSession: () {
+          _newSession();
+        },
+        onRename: _renameSession,
+        onDelete: _deleteSession,
+      ),
+    ));
   }
 
   Future<void> _loadDevices() async {
@@ -169,10 +399,13 @@ class _HomePageState extends State<HomePage> {
   // ── PTT: capture microphone PCM and send over Bluetooth SPP ─────────
   Future<void> _startTalking() async {
     if (_micActive || _state != _ConnState.connected) return;
-    final turn = _ConversationTurn(id: DateTime.now().microsecondsSinceEpoch.toString());
+    final session = _ensureSession();
+    final turn = ConversationTurn(
+        id: DateTime.now().microsecondsSinceEpoch.toString());
+    session.lastActiveAt = DateTime.now();
     setState(() {
       _activeTurn = turn;
-      _turns.insert(0, turn);
+      session.turns.insert(0, turn);
       _audioState = 'starting microphone';
     });
     // P0 fix (root cause of "second utterance freezes at recognizing"):
@@ -200,6 +433,7 @@ class _HomePageState extends State<HomePage> {
           debugPrint('[PTT] openRecorder retry failed: $e2');
           _appendLog('openRecorder failed (mic permission?): $e2');
           setState(() { turn.state = 'error'; turn.error = 'Microphone permission/initialization failed'; _audioState = 'error'; });
+          _persist();
           return;
         }
       }
@@ -233,9 +467,11 @@ class _HomePageState extends State<HomePage> {
       _appendLog('startRecorder failed: $e');
       debugPrint('[PTT] startRecorder FAILED: $e');
       setState(() { turn.state = 'error'; turn.error = 'Microphone start failed'; _audioState = 'error'; });
+      _persist();
       return;
     }
     setState(() { _micActive = true; _audioState = 'recording'; });
+    _persist();
   }
 
   Future<void> _stopTalking() async {
@@ -254,6 +490,7 @@ class _HomePageState extends State<HomePage> {
     final turn = _activeTurn;
     if (turn != null && turn.state == 'recording') {
       setState(() { turn.state = 'recognizing'; _audioState = 'recognizing'; });
+      _persist();
     }
   }
 
@@ -278,6 +515,7 @@ class _HomePageState extends State<HomePage> {
       _appendLog('playback failed: $e');
       if (mounted && _activeTurn != null) {
         setState(() { _activeTurn!.state = 'error'; _activeTurn!.error = 'Speaker playback failed'; _audioState = 'error'; });
+        _persist();
       }
     }
   }
@@ -316,52 +554,126 @@ class _HomePageState extends State<HomePage> {
       }
       if (kind == 4 && text.isNotEmpty && turn.userText.isEmpty) turn.userText = text;
     });
+    // 会话标题默认取首句 ASR 前 12 字
+    if (kind == 4 && text.isNotEmpty) {
+      final s = _currentSession;
+      if (s != null && (s.title == '新会话' || s.title.isEmpty)) {
+        s.title = text.length > 12 ? text.substring(0, 12) : text;
+      }
+      if (s != null) s.lastActiveAt = DateTime.now();
+    }
+    if (kind == 4 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 10) {
+      _persist();
+    }
   }
-
-  void _clearTurns() => setState(() { _turns.clear(); _activeTurn = null; });
-  void _removeTurn(_ConversationTurn turn) => setState(() { _turns.remove(turn); if (_activeTurn == turn) _activeTurn = null; });
 
   @override
   Widget build(BuildContext context) {
     final connected = _state == _ConnState.connected;
+    final sessions = _sessions;
+    final current = _currentSession;
     return Scaffold(
-      appBar: AppBar(title: const Text('Roboguide Remote')),
+      appBar: AppBar(
+        title: const Text('Roboguide Remote'),
+        actions: [
+          IconButton(
+            onPressed: _openSessionList,
+            icon: const Icon(Icons.forum_outlined),
+            tooltip: '会话列表',
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<String>(
-              initialValue: _selectedMac,
-              isExpanded: true,
-              items: _devices
-                  .map((d) => DropdownMenuItem(
-                        value: d['address'] as String,
-                        child: Text(
-                          '${d['name']} (${d['address']})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ))
-                  .toList(),
-              onChanged: connected ? null : (mac) => setState(() => _selectedMac = mac),
-              decoration: const InputDecoration(
-                labelText: 'Robot (Bluetooth)',
-                border: OutlineInputBorder(),
-              ),
+            // ── 会话选择器（仿 robonix-client Session 下拉）──
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: current?.id,
+                    isExpanded: true,
+                    hint: const Text('选择会话'),
+                    items: sessions
+                        .map((s) => DropdownMenuItem(
+                              value: s.id,
+                              child: Text(
+                                s.title,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: _selectSession,
+                    decoration: const InputDecoration(
+                      labelText: '会话',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: _newSession,
+                  icon: const Icon(Icons.add_circle_outline),
+                  tooltip: '新建会话',
+                ),
+                IconButton(
+                  onPressed: current == null ? null : _renameSession,
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: '重命名会话',
+                ),
+                IconButton(
+                  onPressed: _turns.isEmpty ? null : _clearSessionTurns,
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                  tooltip: '清空当前会话',
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: connected ? null : _loadDevices,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh devices'),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedMac,
+                    isExpanded: true,
+                    items: _devices
+                        .map((d) => DropdownMenuItem(
+                              value: d['address'] as String,
+                              child: Text(
+                                '${d['name']} (${d['address']})',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: connected
+                        ? null
+                        : (mac) => setState(() => _selectedMac = mac),
+                    decoration: const InputDecoration(
+                      labelText: 'Robot (Bluetooth)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: connected ? null : _loadDevices,
+                  icon: const Icon(Icons.refresh),
+                  tooltip: '刷新设备',
+                ),
+                const SizedBox(width: 4),
+                FilledButton.icon(
+                  onPressed: _toggleConnect,
+                  icon: Icon(connected
+                      ? Icons.bluetooth_disabled
+                      : Icons.bluetooth),
+                  label: Text(connected ? '断开' : '连接'),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _toggleConnect,
-              icon: Icon(connected ? Icons.bluetooth_disabled : Icons.bluetooth),
-              label: Text(connected ? 'Disconnect' : 'Connect'),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _StatusCard(
               state: _state,
               micActive: _micActive,
@@ -369,54 +681,85 @@ class _HomePageState extends State<HomePage> {
               sentBytes: _sentAudioBytes,
               receivedBytes: _receivedAudioBytes,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _PttButton(
               enabled: connected,
               talking: _micActive,
               onPressStart: _startTalking,
               onPressEnd: _stopTalking,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(
               children: [
-                Text('会话记录', style: Theme.of(context).textTheme.titleMedium),
-                const Spacer(),
-                TextButton(
-                  onPressed: _turns.isEmpty ? null : _clearTurns,
-                  child: const Text('清空'),
+                Expanded(
+                  child: Text(
+                    current == null
+                        ? '尚无会话'
+                        : '会话：${current.title}（${current.turns.length} 回合）',
+                    style: Theme.of(context).textTheme.titleSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
             Expanded(
               child: _turns.isEmpty
-                  ? const Center(child: Text('暂无会话，按住下方按钮开始说话'))
+                  ? Center(
+                      child: Text(
+                        current == null
+                            ? '点击 ➕ 新建会话，按住下方按钮开始说话'
+                            : '暂无对话，按住下方按钮开始说话',
+                      ),
+                    )
                   : ListView.builder(
                       itemCount: _turns.length,
                       itemBuilder: (context, index) {
                         final turn = _turns[index];
-                        return _TurnCard(turn: turn, onDelete: () => _removeTurn(turn));
+                        return _Bubble(
+                          turn: turn,
+                          onDelete: () => _removeTurn(turn),
+                        );
                       },
                     ),
             ),
             if (_log.isNotEmpty)
               SizedBox(
                 height: 58,
-                child: Text(_log, style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
+                child: Text(_log,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 10)),
               ),
           ],
         ),
       ),
     );
   }
+
+  void _removeTurn(ConversationTurn turn) {
+    final s = _currentSession;
+    if (s == null) return;
+    setState(() {
+      s.turns.remove(turn);
+      if (_activeTurn == turn) _activeTurn = null;
+    });
+    _persist();
+  }
 }
 
+// ── 状态卡（连接/音频状态） ────────────────────────────────
 class _StatusCard extends StatelessWidget {
   final _ConnState state;
   final bool micActive;
   final String audioState;
   final int sentBytes;
   final int receivedBytes;
-  const _StatusCard({required this.state, required this.micActive, required this.audioState, required this.sentBytes, required this.receivedBytes});
+  const _StatusCard({
+    required this.state,
+    required this.micActive,
+    required this.audioState,
+    required this.sentBytes,
+    required this.receivedBytes,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -469,35 +812,223 @@ class _StatusCard extends StatelessWidget {
   }
 }
 
-class _TurnCard extends StatelessWidget {
-  final _ConversationTurn turn;
+// ── 消息气泡（你=右 / 机器人=左） ──────────────────────────
+class _Bubble extends StatelessWidget {
+  final ConversationTurn turn;
   final VoidCallback onDelete;
-  const _TurnCard({required this.turn, required this.onDelete});
+  const _Bubble({required this.turn, required this.onDelete});
+
+  String get _time {
+    final t = turn.startedAt;
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final time = '${turn.startedAt.hour.toString().padLeft(2, '0')}:${turn.startedAt.minute.toString().padLeft(2, '0')}';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            Text(time, style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(width: 8),
-            Chip(label: Text(turn.state), visualDensity: VisualDensity.compact),
-            const Spacer(),
-            IconButton(onPressed: onDelete, icon: const Icon(Icons.delete_outline), tooltip: '删除会话'),
-          ]),
-          if (turn.userText.isNotEmpty) Text('你：${turn.userText}'),
-          if (turn.assistantText.isNotEmpty) Text('机器人：${turn.assistantText}'),
-          if (turn.userText.isEmpty && turn.assistantText.isEmpty) const Text('正在等待语音结果…'),
-          if (turn.error.isNotEmpty) Text(turn.error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-        ]),
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 用户消息（右对齐）
+          if (turn.userText.isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.78),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(turn.userText),
+              ),
+            ),
+          // 运动标记（P3：仅标记展示，不自动执行）
+          if (turn.action != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Chip(
+                  avatar: const Icon(Icons.directions_walk, size: 16),
+                  label: Text('运动指令 · ${turn.action}',
+                      style: const TextStyle(fontSize: 11)),
+                  backgroundColor: Colors.amber.shade100,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          // 机器人消息（左对齐）
+          if (turn.assistantText.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                margin: const EdgeInsets.only(top: 2),
+                constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.78),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(turn.assistantText),
+              ),
+            ),
+          if (turn.userText.isEmpty && turn.assistantText.isEmpty && turn.error.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 4),
+              child: Text('正在等待语音结果…',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+          if (turn.error.isNotEmpty)
+            Text(
+              turn.error,
+              style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+            ),
+          // 状态行：时间 + 状态 chip + 删除
+          Row(
+            mainAxisAlignment: turn.userText.isNotEmpty
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            children: [
+              Text(_time,
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: Colors.grey)),
+              const SizedBox(width: 6),
+              Chip(
+                label: Text(turn.state,
+                    style: const TextStyle(fontSize: 10)),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+              IconButton(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline, size: 16),
+                tooltip: '删除此回合',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 28, minHeight: 28),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
+// ── 会话列表页 ────────────────────────────────────────────
+class _SessionListPage extends StatelessWidget {
+  final List<ConversationSession> sessions;
+  final String? currentId;
+  final ValueChanged<ConversationSession> onSelect;
+  final VoidCallback onNewSession;
+  final Future<void> Function(ConversationSession) onRename;
+  final Future<void> Function(ConversationSession) onDelete;
+
+  const _SessionListPage({
+    required this.sessions,
+    required this.currentId,
+    required this.onSelect,
+    required this.onNewSession,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('会话列表'),
+        actions: [
+          IconButton(
+            onPressed: onNewSession,
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: '新建会话',
+          ),
+        ],
+      ),
+      body: sessions.isEmpty
+          ? const Center(child: Text('暂无会话，点击右上角 ➕ 新建'))
+          : ListView.builder(
+              itemCount: sessions.length,
+              itemBuilder: (context, index) {
+                final s = sessions[index];
+                final last = s.turns.isEmpty
+                    ? ''
+                    : s.turns.first.assistantText.isNotEmpty
+                        ? s.turns.first.assistantText
+                        : s.turns.first.userText;
+                final selected = s.id == currentId;
+                final time =
+                    '${s.lastActiveAt.month}/${s.lastActiveAt.day} '
+                    '${s.lastActiveAt.hour.toString().padLeft(2, '0')}:'
+                    '${s.lastActiveAt.minute.toString().padLeft(2, '0')}';
+                return Card(
+                  child: ListTile(
+                    onTap: () => onSelect(s),
+                    onLongPress: () => onRename(s),
+                    leading: CircleAvatar(
+                      backgroundColor: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                      child: Icon(
+                        Icons.chat_bubble_outline,
+                        size: 20,
+                        color: selected
+                            ? Theme.of(context).colorScheme.onPrimary
+                            : null,
+                      ),
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            s.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: selected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 6),
+                            child: Text('当前',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.teal)),
+                          ),
+                      ],
+                    ),
+                    subtitle: Text(
+                      s.turns.isEmpty
+                          ? '$time · 空会话'
+                          : '$time · ${s.turns.length} 回合 · ${last.length > 24 ? last.substring(0, 24) : last}',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    trailing: IconButton(
+                      onPressed: () => onDelete(s),
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: '删除会话（长按可重命名）',
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+// ── PTT 按钮 ──────────────────────────────────────────────
 class _PttButton extends StatefulWidget {
   final bool enabled;
   final bool talking;
