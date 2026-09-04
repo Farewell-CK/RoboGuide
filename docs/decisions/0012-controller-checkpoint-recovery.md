@@ -3,6 +3,9 @@
 - 状态：Accepted for the Integration Server bootstrap
 - 日期：2026-08-25
 
+> 当前 `IntegrationRuntimeBridge` 的代码归属是 `core/orchestration`；本 ADR 中的
+> “Integration bridge” 指 Controller composition 角色，transport 边界见 ADR-0021。
+
 ## Context
 
 The SQLite event envelope is durable evidence, but the current `EventPayload` values do not carry
@@ -13,8 +16,8 @@ discard reservations while physical work may still exist.
 
 ## Decision
 
-The Integration bridge persists its versioned `roboguide.controller-checkpoint/v6`
-Control/State/Runtime projection inside the current outer
+The Integration bridge initially persisted its versioned `roboguide.controller-checkpoint/v6`
+Control/State/Runtime projection inside the outer
 `roboguide.controller-checkpoint/v7` JSON checkpoint in the same SQLite transaction as each
 accepted fact and its lifecycle evidence. The checkpoint contains Control commitments, actor
 bindings, deployment actor placement constraints, Groups, immutable Task/Role requirements used by
@@ -22,6 +25,13 @@ recovery authority checks, pending recovery commitments, Shared Node State regis
 Runtime execution contexts/statuses. Its event sequence must equal the event-log tail before startup
 recovery is allowed. Outer v6 and embedded v5 make the newly required Group role metadata a
 fail-closed schema boundary; it is never reconstructed from a caller-supplied recovery request.
+
+ADR-0019 later upgrades the Integration projection to v7 and the outer Controller checkpoint to
+v8 so exact-contract readiness cannot be ignored by an older restoring binary; the atomicity and
+recovery rules in this decision are unchanged.
+
+ADR-0020 further upgrades the current Integration projection to v8 and the outer Controller
+checkpoint to v9 so the Runtime relation registry, state and fences cannot disappear on restore.
 
 Recovery is conservative across the process-local monotonic clock boundary:
 

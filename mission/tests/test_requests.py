@@ -18,6 +18,7 @@ from mission.controller import (
     InventorySnapshot,
     SubmissionReceipt,
 )
+from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.requests import (
     IntentAssessment,
@@ -28,7 +29,22 @@ from mission.requests import (
     MissionRequestStore,
 )
 
-FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
+
+
+def test_request_contract_accepts_current_and_compatible_plan_versions() -> None:
+    """Durable request records retain v0.3 while admitting current v0.4 plans."""
+    schema = json.loads(
+        Path("contracts/mission/request-v0.1/mission-request.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    plan_options = schema["properties"]["plan"]["oneOf"]
+    references = {option["$ref"] for option in plan_options if "$ref" in option}
+    assert references == {
+        "../v0.3/mission-plan.schema.json",
+        "../v0.4/mission-plan.schema.json",
+    }
 
 
 class FakeInterpreter:
@@ -57,15 +73,15 @@ class FakePlanner:
 
     def __init__(self) -> None:
         """Initialize an inspectable call list."""
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, GroundedIntent]] = []
 
-    def plan(self, mission_id: str, objective: str) -> MissionPlan:
-        """Return a strict plan while preserving supplied Mission identity and objective."""
-        self.calls.append((mission_id, objective))
+    def plan(self, mission_id: str, grounded_intent: GroundedIntent) -> MissionPlan:
+        """Return a strict plan while retaining the complete grounded Planner input."""
+        self.calls.append((mission_id, grounded_intent))
         raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
         mission = cast(JSONObject, raw["mission"])
         mission["id"] = mission_id
-        mission["objective"] = objective
+        mission["objective"] = grounded_intent.objective
         return MissionPlan.from_json(raw)
 
 
@@ -203,7 +219,18 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
     assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
     assert accepted.messages == ("把物品送到实验室入口",)
     assert len(planner.calls) == 1
+    assert planner.calls[0][1] == GroundedIntent(
+        "deliver the payload through the approved route",
+        ("preserve local safety",),
+        (),
+    )
     assert len(controller.submissions) == 1
+
+
+def test_assessment_with_questions_cannot_form_a_grounded_planner_input() -> None:
+    """The typed handoff rejects unresolved ambiguity even outside the engine loop."""
+    with pytest.raises(MissionRequestError, match="open questions"):
+        _assessment("Which destination?").grounded_intent()
 
 
 def test_risk_policy_requires_revision_bound_approval(tmp_path: Path) -> None:

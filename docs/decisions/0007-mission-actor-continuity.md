@@ -57,6 +57,9 @@ Blocked/RecoveryPending，不得把该逻辑 Actor 静默换绑到另一物理 N
 2026-08-26 的 placement 补充同样不改变当前 `roboguide.mission-plan/v0.2`：物理部署
 关系由独立、版本化的 composition 配置提供，不能反向塞入 Mission Intelligence 合同。
 
+2026-09-01：ADR-0020 将当前合同升级为 `roboguide.mission-plan/v0.3`，新增的 Execution
+Relation 仍只引用逻辑 Task/Role，并未把 Actor 或 placement 变成物理 binding authority。
+
 ## 后果
 
 首次选择可能因未来 Task 的要求而排除当前 Task 看似可行的节点；这是连续 Actor

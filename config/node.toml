@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.3"
+schema = "roboguide.node-config/v0.6"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
@@ -92,8 +92,59 @@ id = "front-camera"
 kind = "rgb-camera"
 owner = "local-sensors"
 
+[[state_exports]]
+id = "runtime-summary"
+owner = "local-runtime"
+object_class = "node"
+object_type = "runtime"
+object_id = "generic-node"
+semantic = "reported"
+payload_schema = "roboguide.example.runtime-health/v0.1"
+valid_for_ms = 15000
+interval_ms = 5000
+value_pointer = ""
+
+[state_exports.step]
+id = "runtime-state"
+connection = "local-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[state_exports.step.request]
+base = {}
+
+[[memory_providers]]
+id = "local-artifacts"
+owner = "local-runtime"
+kind = "artifact"
+scope = "local"
+visibility = "discoverable"
+payload_schema = "roboguide.example.local-artifact/v0.1"
+media_type = "application/octet-stream"
+
 [capabilities.workflow]
 poll_interval_ms = 250
+
+[capabilities.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "compute-readiness"
+connection = "local-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/compute.noop"
+
+[capabilities.readiness.step.request]
+base = {}
 
 [capabilities.workflow.local_handle]
 kind = "pointer"

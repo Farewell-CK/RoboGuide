@@ -10,9 +10,11 @@
 
 mod artifact;
 mod config;
+mod conformance;
 mod engine;
 mod journal;
 mod local_engine;
+mod memory;
 mod service;
 
 pub use artifact::{
@@ -21,13 +23,22 @@ pub use artifact::{
 };
 pub use config::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, CredentialSourceConfig,
-    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    NodeServiceConfig, RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+    CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
+    LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig,
+    RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig,
     ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
+pub use conformance::{
+    CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
+    ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
+    LifecycleConformanceInvariant, MemoryProviderConformance,
+    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance,
+    StepConformance, WorkflowConformance, compile_extension_config, compile_extension_config_json,
+};
 pub use engine::{
-    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, journal_path,
+    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,
+    journal_path,
 };
 pub use journal::{
     ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, JournalError, JournalExecution,
@@ -42,11 +53,14 @@ pub use local_engine::http_driver::HttpDriver;
 pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowContext};
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
-    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CatalogError, CompiledArtifactService,
-    CompiledCapability, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
-    CompiledLocalSystem, CompiledResource, CompiledSensor, CompiledWorkflow, CompiledWorkflowStep,
-    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
+    CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
+    CONFIG_SCHEMA_V0_6, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
+    CompiledCapability, CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck,
+    CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryProvider, CompiledMemoryWorkflow,
+    CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
+    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase, StateExportFact,
 };
+pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};
 
 #[cfg(test)]

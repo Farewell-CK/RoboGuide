@@ -31,6 +31,12 @@ Mission Service 是独立 Python composition root。它使用自己的 SQLite �
 evidence，但不复制 Node、Control、Runtime 或 Mission execution lifecycle。`Accepted` 只表示
 现有 Rust Controller 接受完整 MissionPlan；Running/Completed 继续由 Orchestration 查询。
 
+Interpreter 到 Planner 的内部 handoff 使用 resolved `GroundedIntent`，显式携带 objective、
+confirmed constraints 和 assumptions。只要 assessment 仍含 open questions，就不能构造该
+handoff。Planner 与独立 Reviewer 都消费同一份 GroundedIntent；不能依赖把约束重复塞进
+objective，也不能让仅存在于 Python local context 的字段对模型不可见。GroundedIntent 属于
+Mission Intelligence deliberation，不扩张 MissionPlan 或 Controller 输入合同。
+
 Integration Server 提供只读 `GET /v1/inventory`，返回 Shared Node State 当前注册、reported
 health、RoboGuide-observed liveness、canonical contracts 和 resources。该 snapshot 仅用于
 规划预检且允许滞后；Control 在 Match/Commit 时仍是唯一资格与资源 authority。

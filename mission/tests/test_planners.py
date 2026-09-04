@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 from mission.config import MissionSettings, load_settings
 from mission.controller import InventorySnapshot
+from mission.intent import GroundedIntent
 from mission.models import JSONObject
 from mission.planners import FixturePlanner
 from mission.responses import (
@@ -19,7 +20,7 @@ from mission.responses import (
     ResponsesMissionPlanner,
 )
 
-FIXTURE = Path("scenarios/phase1-mission-v0.2/mission-plan.json")
+FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 
 
 def _response(output: JSONObject) -> JSONObject:
@@ -77,8 +78,19 @@ def test_fixture_planner_loads_the_approved_plan() -> None:
     """The deterministic planner returns the approved artifact for the exact request."""
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     mission = raw["mission"]
-    plan = FixturePlanner(FIXTURE).plan(mission["id"], mission["objective"])
+    plan = FixturePlanner(FIXTURE).plan(mission["id"], GroundedIntent(mission["objective"], (), ()))
     assert plan.mission.mission_id == "mission-phase1-001"
+
+
+def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
+    """A fixture cannot silently claim that unknown constraints are encoded in its plan."""
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    mission = raw["mission"]
+    with pytest.raises(ValueError, match="cannot prove"):
+        FixturePlanner(FIXTURE).plan(
+            mission["id"],
+            GroundedIntent(mission["objective"], ("keep the marked aisle clear",), ()),
+        )
 
 
 def test_responses_planner_uses_strict_output_and_review() -> None:
@@ -92,8 +104,13 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
         transport,
     )
     mission = plan_json["mission"]
+    grounded_intent = GroundedIntent(
+        mission["objective"],
+        ("keep the marked aisle clear",),
+        ("the payload remains available at the pickup point",),
+    )
 
-    plan = planner.plan(mission["id"], mission["objective"])
+    plan = planner.plan(mission["id"], grounded_intent)
 
     assert plan.to_json() == plan_json
     assert len(transport.requests) == 2
@@ -110,6 +127,16 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
         == Path("mission/prompts/v0/reviewer.md").read_text(encoding="utf-8").strip()
     )
     assert planning_payload["store"] is False
+    planning_input = json.loads(cast(str, planning_payload["input"]))
+    assert planning_input == {
+        "mission_id": mission["id"],
+        "grounded_intent": grounded_intent.to_json(),
+    }
+    review_input = json.loads(cast(str, review_payload["input"]))
+    assert review_input == {
+        "grounded_intent": grounded_intent.to_json(),
+        "mission_plan": plan_json,
+    }
     text_config = planning_payload["text"]
     assert isinstance(text_config, dict)
     output_format = text_config["format"]
@@ -123,6 +150,18 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
     task_properties = cast(JSONObject, tasks_schema["properties"])
     depends_on_schema = cast(JSONObject, task_properties["depends_on"])
     assert "uniqueItems" not in depends_on_schema
+    contexts_schema = cast(JSONObject, cast(JSONObject, properties["contexts"])["items"])
+    context_properties = cast(JSONObject, contexts_schema["properties"])
+    assert set(cast(list[str], contexts_schema["required"])) == set(context_properties)
+    shared_view_schema = cast(JSONObject, context_properties["shared_view"])
+    assert {"type": "null"} in cast(list[JSONObject], shared_view_schema["anyOf"])
+    definitions = cast(JSONObject, provider_schema["$defs"])
+    relation_schema = cast(JSONObject, definitions["relation"])
+    relation_properties = cast(JSONObject, relation_schema["properties"])
+    assert "allOf" not in relation_schema
+    assert set(cast(list[str], relation_schema["required"])) == set(relation_properties)
+    state_key_schema = cast(JSONObject, relation_properties["state_key"])
+    assert {"type": "null"} in cast(list[JSONObject], state_key_schema["anyOf"])
 
 
 def test_responses_planner_rejects_failed_review() -> None:
@@ -139,7 +178,7 @@ def test_responses_planner_rejects_failed_review() -> None:
     )
     mission = plan_json["mission"]
     with pytest.raises(MissionProviderError, match="review rejected"):
-        planner.plan(mission["id"], mission["objective"])
+        planner.plan(mission["id"], GroundedIntent(mission["objective"], ("avoid stairs",), ()))
 
 
 def test_responses_interpreter_preserves_open_questions_before_planning() -> None:

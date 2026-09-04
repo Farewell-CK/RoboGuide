@@ -14,9 +14,13 @@ mod actor;
 mod allocation;
 mod context;
 mod execution;
+mod execution_relation;
+mod localization_evidence;
+mod memory;
 mod mission_plan;
 mod node_registration;
 mod spatial_memory;
+mod state_model;
 mod task_execution;
 
 pub use actor::{ActorBinding, MissionActor};
@@ -26,11 +30,36 @@ pub use allocation::{
 };
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
 pub use execution::{CapabilityContractRef, ExecutionIntent, ExecutionValue};
+pub use execution_relation::{
+    CoordinationMechanism, ExecutionCouplingMode, ExecutionRelationKind, ExecutionRelationSpec,
+    ExecutionRelationState, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
+    GroupViewBinding, GroupViewField, PeerChannelSpec, PlannedExecutionRef,
+    RelationStateRequirement, SharedSpatialReference,
+};
+pub use localization_evidence::{
+    LOCALIZATION_EVIDENCE_SCHEMA_V0_1, LocalizationFrames, LocalizationVerificationEvidence,
+    PoseQualityComparison, PoseQualityEvidence,
+};
+pub use memory::{
+    LEGACY_MEMORY_CONSUMER_PROVIDER_ID, MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest,
+    MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner, MemoryProviderDescriptor,
+    MemoryReplicaSnapshot, MemoryReplicaStatus, MemoryRevisionId, MemoryScope, MemoryScopeLimit,
+    MemorySelector, MemoryVisibility,
+};
+
+/// Supplies the conservative identity used only when decoding pre-v7 replica evidence.
+fn legacy_memory_consumer_provider_id() -> String {
+    LEGACY_MEMORY_CONSUMER_PROVIDER_ID.to_string()
+}
 pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
     MapReplicaSnapshot, MapReplicaStatus, MapRevisionId, MapRevisionSelector, MapRevisionSnapshot,
     MapRevisionStatus, SPATIAL_MEMORY_SCHEMA_V0_1, SpatialAnchorId,
+};
+pub use state_model::{
+    MAX_STATE_PAYLOAD_BYTES, STATE_RECORD_SCHEMA_V0_1, StateExportDescriptor, StateObjectClass,
+    StateObjectRef, StateRecord, StateRecordKey, StateSemantic, StateSource,
 };
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 
@@ -43,11 +72,20 @@ pub const MISSION_PLAN_SCHEMA_V0_1: &str = "roboguide.mission-plan/v0.1";
 /// Version identifier for Mission Plans declaring Context and ContextRole continuity.
 pub const MISSION_PLAN_SCHEMA_V0_2: &str = "roboguide.mission-plan/v0.2";
 
+/// Version identifier for Mission Plans declaring execution-time coordination relations.
+pub const MISSION_PLAN_SCHEMA_V0_3: &str = "roboguide.mission-plan/v0.3";
+
+/// Version identifier for Mission Plans carrying execution coupling modes and typed relations.
+pub const MISSION_PLAN_SCHEMA_V0_4: &str = "roboguide.mission-plan/v0.4";
+
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
 
 /// Version identifier implemented by the aggregate Local Integration Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_2: &str = "roboguide.node.v0.2";
+
+/// Version identifier carrying selective State and Memory provider declarations.
+pub const NODE_CONTRACT_VERSION_V0_3: &str = "roboguide.node.v0.3";
 
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +115,16 @@ pub enum DomainError {
         /// Stable diagnostic reason suitable for State and adapter evidence.
         reason: String,
     },
+    /// A State record or export declaration violated its semantic contract.
+    InvalidState {
+        /// Stable diagnostic reason suitable for adapter and API evidence.
+        reason: String,
+    },
+    /// A Memory manifest, provider, or replica violated its semantic contract.
+    InvalidMemory {
+        /// Stable diagnostic reason suitable for catalog and adapter evidence.
+        reason: String,
+    },
 }
 
 impl Display for DomainError {
@@ -92,6 +140,8 @@ impl Display for DomainError {
             Self::InvalidSpatialMemory { reason } => {
                 write!(formatter, "invalid spatial memory value: {reason}")
             }
+            Self::InvalidState { reason } => write!(formatter, "invalid state value: {reason}"),
+            Self::InvalidMemory { reason } => write!(formatter, "invalid memory value: {reason}"),
         }
     }
 }
@@ -169,6 +219,11 @@ define_identifier!(
     "Identifies one role that remains continuous across Tasks in a Context.",
     "context role"
 );
+define_identifier!(
+    ExecutionRelationId,
+    "Identifies one execution coordination relation within a mission.",
+    "execution relation"
+);
 define_identifier!(EventId, "Identifies one immutable event record.", "event");
 define_identifier!(
     CorrelationId,
@@ -191,6 +246,11 @@ impl NodeContractVersion {
     /// Returns the aggregate Local Integration Node Contract version.
     pub fn v0_2() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_2.to_string())
+    }
+
+    /// Returns the contract version carrying State and Memory extension declarations.
+    pub fn v0_3() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_3.to_string())
     }
 }
 
@@ -879,6 +939,20 @@ impl MissionPlan {
                 reason: "Mission Plan has duplicate context ids".to_string(),
             });
         }
+        let relation_ids = contexts
+            .iter()
+            .flat_map(CoordinationContext::relations)
+            .map(ExecutionRelationSpec::relation_id)
+            .collect::<BTreeSet<_>>();
+        let relation_count = contexts
+            .iter()
+            .map(|context| context.relations().len())
+            .sum::<usize>();
+        if relation_ids.len() != relation_count {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "Mission Plan has duplicate execution relation ids".to_string(),
+            });
+        }
         for task in task_graph.tasks() {
             let context = contexts
                 .iter()
@@ -922,6 +996,43 @@ impl MissionPlan {
                     });
                 }
             }
+            let coupling_mode = task
+                .continuity()
+                .coupling_mode_override()
+                .unwrap_or_else(|| context.coupling_mode());
+            context.validate_mechanisms_for(coupling_mode)?;
+        }
+        for context in &contexts {
+            for relation in context.relations() {
+                if relation.kind() != relation.relation_type().kind() {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "execution relation {} has inconsistent kind and typed relation",
+                            relation.relation_id()
+                        ),
+                    });
+                }
+                validate_relation_endpoint(&task_graph, context, relation.source())?;
+                validate_relation_endpoint(&task_graph, context, relation.target())?;
+                if relation.source().task_id() != relation.target().task_id()
+                    && (task_depends_on(
+                        &task_graph,
+                        relation.source().task_id(),
+                        relation.target().task_id(),
+                    ) || task_depends_on(
+                        &task_graph,
+                        relation.target().task_id(),
+                        relation.source().task_id(),
+                    ))
+                {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "execution relation {} connects Tasks ordered by the DAG",
+                            relation.relation_id()
+                        ),
+                    });
+                }
+            }
         }
         Ok(Self {
             goal,
@@ -932,7 +1043,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_2
+        MISSION_PLAN_SCHEMA_V0_4
     }
 
     /// Returns the original mission goal.
@@ -949,6 +1060,59 @@ impl MissionPlan {
     pub fn contexts(&self) -> &[CoordinationContext] {
         &self.contexts
     }
+}
+
+/// Confirms one relation endpoint is an exact Task/Role in the containing Context.
+fn validate_relation_endpoint(
+    graph: &TaskGraph,
+    context: &CoordinationContext,
+    endpoint: &PlannedExecutionRef,
+) -> Result<(), DomainError> {
+    let task = graph
+        .tasks()
+        .iter()
+        .find(|task| task.task_id() == endpoint.task_id())
+        .ok_or_else(|| DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation references unknown Task {}",
+                endpoint.task_id()
+            ),
+        })?;
+    if task.continuity().context_id() != context.context_id() {
+        return Err(DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation endpoint {}:{} belongs to another Context",
+                endpoint.task_id(),
+                endpoint.role_id()
+            ),
+        });
+    }
+    if !task
+        .requirement()
+        .roles()
+        .iter()
+        .any(|role| role.role_id() == endpoint.role_id())
+    {
+        return Err(DomainError::InvalidMissionPlan {
+            reason: format!(
+                "execution relation references unknown Role {} in Task {}",
+                endpoint.role_id(),
+                endpoint.task_id()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Returns whether `task_id` transitively depends on `candidate_dependency`.
+fn task_depends_on(graph: &TaskGraph, task_id: &TaskId, candidate_dependency: &TaskId) -> bool {
+    let Some(task) = graph.tasks().iter().find(|task| task.task_id() == task_id) else {
+        return false;
+    };
+    task.dependencies().iter().any(|dependency| {
+        dependency == candidate_dependency
+            || task_depends_on(graph, dependency, candidate_dependency)
+    })
 }
 
 /// A node's proposed assignment for one execution-group role.
@@ -1170,6 +1334,12 @@ pub struct NodeRegistration {
     /// Unique local-system owner of each canonical contract.
     #[serde(with = "capability_owner_map_serde")]
     capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+    /// Exact coarse capability category associated with each canonical contract.
+    #[serde(default, with = "capability_kind_map_serde")]
+    capability_kinds: BTreeMap<CapabilityContractRef, CapabilityKind>,
+    /// Latest observed readiness of each canonical contract.
+    #[serde(default, with = "capability_readiness_map_serde")]
+    capability_readiness: BTreeMap<CapabilityContractRef, bool>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
@@ -1177,6 +1347,12 @@ pub struct NodeRegistration {
     /// Unique local-system owner of each node-wide resource.
     #[serde(with = "resource_owner_map_serde")]
     resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+    /// Selective source-aware State channels exposed by configured local systems.
+    #[serde(default)]
+    state_exports: Vec<StateExportDescriptor>,
+    /// Selective Memory discovery and exchange providers exposed by local systems.
+    #[serde(default)]
+    memory_providers: Vec<MemoryProviderDescriptor>,
 }
 
 /// Encodes structured capability-contract owner keys as checkpoint-safe records.
@@ -1203,6 +1379,68 @@ mod capability_owner_map_serde {
             if values.insert(contract, owner).is_some() {
                 return Err(serde::de::Error::custom(
                     "duplicate capability owner contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes structured capability-contract readiness keys as checkpoint-safe records.
+mod capability_readiness_map_serde {
+    use super::CapabilityContractRef;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each contract readiness fact as a typed two-element record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, bool>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores readiness facts and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, bool>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, bool)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, available) in entries {
+            if values.insert(contract, available).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability readiness contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// Encodes structured capability-contract category keys as checkpoint-safe records.
+mod capability_kind_map_serde {
+    use super::{CapabilityContractRef, CapabilityKind};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each exact contract/category pair as a typed record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, CapabilityKind>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores category facts and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, CapabilityKind>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, CapabilityKind)> = Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, kind) in entries {
+            if values.insert(contract, kind).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability kind contract",
                 ));
             }
         }
@@ -1269,6 +1507,7 @@ impl NodeRegistration {
         supported_contracts: Vec<CapabilityContractRef>,
         resources: Vec<Resource>,
     ) -> Self {
+        let exact_kind = (capabilities.len() == 1).then(|| capabilities[0].kind());
         Self {
             node_id,
             local_systems: vec![LocalSystemDescriptor::new(
@@ -1283,6 +1522,20 @@ impl NodeRegistration {
                 .cloned()
                 .map(|contract| (contract, LocalSystemId("default".to_string())))
                 .collect(),
+            capability_readiness: supported_contracts
+                .iter()
+                .cloned()
+                .map(|contract| (contract, true))
+                .collect(),
+            capability_kinds: exact_kind
+                .map(|kind| {
+                    supported_contracts
+                        .iter()
+                        .cloned()
+                        .map(|contract| (contract, kind))
+                        .collect()
+                })
+                .unwrap_or_default(),
             supported_contracts,
             sensors: Vec::new(),
             resource_owners: resources
@@ -1290,6 +1543,8 @@ impl NodeRegistration {
                 .map(|resource| (resource.id().clone(), LocalSystemId("default".to_string())))
                 .collect(),
             resources,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         }
     }
 
@@ -1305,6 +1560,49 @@ impl NodeRegistration {
         resources: Vec<Resource>,
         resource_owners: BTreeMap<ResourceId, LocalSystemId>,
     ) -> Result<Self, DomainError> {
+        let capability_readiness = capability_owners
+            .keys()
+            .cloned()
+            .map(|contract| (contract, true))
+            .collect();
+        let capability_kinds = (capabilities.len() == 1)
+            .then(|| capabilities[0].kind())
+            .map(|kind| {
+                capability_owners
+                    .keys()
+                    .cloned()
+                    .map(|contract| (contract, kind))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self::new_with_local_systems_and_readiness(
+            node_id,
+            local_systems,
+            contract_version,
+            capabilities,
+            capability_owners,
+            capability_kinds,
+            capability_readiness,
+            sensors,
+            resources,
+            resource_owners,
+        )
+    }
+
+    /// Creates an aggregate registration with explicit ownership and exact readiness facts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_local_systems_and_readiness(
+        node_id: NodeId,
+        local_systems: Vec<LocalSystemDescriptor>,
+        contract_version: NodeContractVersion,
+        capabilities: Vec<Capability>,
+        capability_owners: BTreeMap<CapabilityContractRef, LocalSystemId>,
+        capability_kinds: BTreeMap<CapabilityContractRef, CapabilityKind>,
+        capability_readiness: BTreeMap<CapabilityContractRef, bool>,
+        sensors: Vec<SensorDescriptor>,
+        resources: Vec<Resource>,
+        resource_owners: BTreeMap<ResourceId, LocalSystemId>,
+    ) -> Result<Self, DomainError> {
         let owners = local_systems
             .iter()
             .map(LocalSystemDescriptor::id)
@@ -1314,14 +1612,32 @@ impl NodeRegistration {
             .map(SensorDescriptor::id)
             .collect::<BTreeSet<_>>();
         let resource_ids = resources.iter().map(Resource::id).collect::<BTreeSet<_>>();
+        let advertised_capability_kinds = capabilities
+            .iter()
+            .map(Capability::kind)
+            .collect::<BTreeSet<_>>();
         if local_systems.is_empty() || owners.len() != local_systems.len() {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "node local systems must be nonempty and unique".to_string(),
             });
         }
+        if capability_readiness.keys().collect::<BTreeSet<_>>()
+            != capability_owners.keys().collect::<BTreeSet<_>>()
+            || (!capability_kinds.is_empty()
+                && capability_kinds.keys().collect::<BTreeSet<_>>()
+                    != capability_owners.keys().collect::<BTreeSet<_>>())
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "capability readiness and any supplied capability-kind map must cover every configured contract exactly"
+                    .to_string(),
+            });
+        }
         if capability_owners
             .values()
             .any(|owner| !owners.contains(owner))
+            || capability_kinds
+                .values()
+                .any(|kind| !advertised_capability_kinds.contains(kind))
             || sensors
                 .iter()
                 .any(|sensor| !owners.contains(sensor.local_system_id()))
@@ -1349,10 +1665,67 @@ impl NodeRegistration {
             capabilities,
             supported_contracts,
             capability_owners,
+            capability_kinds,
+            capability_readiness,
             sensors,
             resources,
             resource_owners,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         })
+    }
+
+    /// Adds validated selective State and Memory declarations to an aggregate registration.
+    ///
+    /// Existing constructors deliberately produce empty declarations so legacy checkpoints and
+    /// in-process callers retain their prior behavior until a v0.3 adapter opts in.
+    pub fn with_state_memory_exports(
+        mut self,
+        state_exports: Vec<StateExportDescriptor>,
+        memory_providers: Vec<MemoryProviderDescriptor>,
+    ) -> Result<Self, DomainError> {
+        let owners = self
+            .local_systems
+            .iter()
+            .map(LocalSystemDescriptor::id)
+            .collect::<BTreeSet<_>>();
+        let export_ids = state_exports
+            .iter()
+            .map(StateExportDescriptor::export_id)
+            .collect::<BTreeSet<_>>();
+        let provider_ids = memory_providers
+            .iter()
+            .map(MemoryProviderDescriptor::provider_id)
+            .collect::<BTreeSet<_>>();
+        if export_ids.len() != state_exports.len() {
+            return Err(DomainError::InvalidState {
+                reason: "node state export identities must be unique".to_string(),
+            });
+        }
+        if provider_ids.len() != memory_providers.len() {
+            return Err(DomainError::InvalidMemory {
+                reason: "node memory provider identities must be unique".to_string(),
+            });
+        }
+        if state_exports
+            .iter()
+            .any(|descriptor| !owners.contains(descriptor.local_system_id()))
+        {
+            return Err(DomainError::InvalidState {
+                reason: "node state export references an unknown local system owner".to_string(),
+            });
+        }
+        if memory_providers
+            .iter()
+            .any(|descriptor| !owners.contains(descriptor.local_system_id()))
+        {
+            return Err(DomainError::InvalidMemory {
+                reason: "node memory provider references an unknown local system owner".to_string(),
+            });
+        }
+        self.state_exports = state_exports;
+        self.memory_providers = memory_providers;
+        Ok(self)
     }
 
     /// Returns the logical node identity.
@@ -1392,6 +1765,56 @@ impl NodeRegistration {
         self.capability_owners.get(contract)
     }
 
+    /// Returns whether one configured canonical contract is currently ready to execute.
+    ///
+    /// A missing fact can only come from a legacy checkpoint, whose former static-ready
+    /// semantics remain in force until a complete registration observation replaces it.
+    pub fn contract_is_available(&self, contract: &CapabilityContractRef) -> bool {
+        self.capability_owners.contains_key(contract)
+            && self
+                .capability_readiness
+                .get(contract)
+                .copied()
+                .unwrap_or(true)
+    }
+
+    /// Returns whether an exact canonical contract is ready under the requested capability kind.
+    pub fn contract_is_available_for_kind(
+        &self,
+        contract: &CapabilityContractRef,
+        kind: CapabilityKind,
+    ) -> bool {
+        self.contract_is_available(contract)
+            && self
+                .capability_kinds
+                .get(contract)
+                .copied()
+                .or_else(|| self.inferred_legacy_capability_kind())
+                == Some(kind)
+    }
+
+    /// Infers a missing legacy contract category only when every coarse declaration agrees.
+    fn inferred_legacy_capability_kind(&self) -> Option<CapabilityKind> {
+        let mut kinds = self.capabilities.iter().map(Capability::kind);
+        let first = kinds.next()?;
+        kinds.all(|kind| kind == first).then_some(first)
+    }
+
+    /// Returns exact readiness facts in deterministic contract order.
+    pub const fn capability_readiness(&self) -> &BTreeMap<CapabilityContractRef, bool> {
+        &self.capability_readiness
+    }
+
+    /// Returns the selective State channels declared by this node.
+    pub fn state_exports(&self) -> &[StateExportDescriptor] {
+        &self.state_exports
+    }
+
+    /// Returns the selective Memory providers declared by this node.
+    pub fn memory_providers(&self) -> &[MemoryProviderDescriptor] {
+        &self.memory_providers
+    }
+
     /// Returns all node sensors in stable declaration order.
     pub fn sensors(&self) -> &[SensorDescriptor] {
         &self.sensors
@@ -1413,9 +1836,7 @@ impl NodeRegistration {
             capability.kind() == requirement.capability() && capability.is_available()
         });
         let has_contract = requirement.required_contract().is_none_or(|contract| {
-            self.supported_contracts
-                .iter()
-                .any(|supported| supported == contract)
+            self.contract_is_available_for_kind(contract, requirement.capability())
         });
         let has_resource = requirement.resource_kind().is_none_or(|kind| {
             self.resources
@@ -1615,6 +2036,48 @@ impl ExecutionCommand {
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// A source-aware State record was durably accepted for projection.
+    StateRecordObserved {
+        /// Bounded record retaining source, semantic, receive time, and freshness.
+        record: StateRecord,
+    },
+    /// A generic immutable Memory manifest became discoverable.
+    MemoryManifestPublished {
+        /// Immutable metadata; content bytes remain in the Artifact data plane.
+        manifest: MemoryArtifactManifest,
+    },
+    /// A node staged one generic Memory artifact after digest verification.
+    MemoryArtifactStaged {
+        /// Immutable Memory revision staged by the node.
+        manifest: MemoryArtifactManifest,
+        /// Node that owns the local staging cache.
+        node_id: NodeId,
+        /// Exact node-local provider receiving the staged revision.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
+    },
+    /// A node imported one generic Memory artifact into a local heterogeneous store.
+    MemoryArtifactImported {
+        /// Immutable Memory revision imported by the node.
+        manifest: MemoryArtifactManifest,
+        /// Node that owns the local imported representation.
+        node_id: NodeId,
+        /// Exact node-local provider owning the imported representation.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
+    },
+    /// A node rejected generic Memory staging or import.
+    MemoryArtifactRejected {
+        /// Immutable Memory revision involved in the failed exchange.
+        manifest: MemoryArtifactManifest,
+        /// Node that rejected the operation.
+        node_id: NodeId,
+        /// Exact node-local provider that rejected the operation.
+        #[serde(default = "legacy_memory_consumer_provider_id")]
+        consumer_provider_id: String,
+        /// Stable diagnostic retained as evidence.
+        reason: String,
+    },
     /// A map revision manifest was declared before its bytes were published.
     MapArtifactDeclared {
         /// Immutable map manifest retained by the catalog.
@@ -1653,6 +2116,11 @@ pub enum EventPayload {
         mission_id: MissionId,
         /// Anchor used by the localization check.
         anchor_id: SpatialAnchorId,
+    },
+    /// A node produced complete strong localization verification evidence.
+    MapLocalizationEvidenceRecorded {
+        /// Canonical evidence bound to artifact and execution identity.
+        evidence: LocalizationVerificationEvidence,
     },
     /// A node rejected an artifact or could not verify its spatial metadata.
     MapArtifactRejected {
@@ -1898,6 +2366,79 @@ pub enum EventPayload {
         role_id: Option<RoleId>,
         /// Diagnostic explaining why execution cannot safely continue.
         reason: String,
+    },
+    /// Runtime registered one Mission-owned execution coordination relation.
+    ExecutionRelationRegistered {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity from the accepted MissionPlan.
+        relation_id: ExecutionRelationId,
+        /// Logical condition-provider Task.
+        source_task_ref: TaskRef,
+        /// Logical condition-provider Role.
+        source_role_id: RoleId,
+        /// Logical constrained Task.
+        target_task_ref: TaskRef,
+        /// Logical constrained Role.
+        target_role_id: RoleId,
+        /// Closed relation behavior.
+        kind: ExecutionRelationKind,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
+    },
+    /// Runtime execution facts changed the observable state of a relation.
+    ExecutionRelationStateChanged {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity.
+        relation_id: ExecutionRelationId,
+        /// Previous Runtime-derived state.
+        previous: ExecutionRelationState,
+        /// New Runtime-derived state.
+        current: ExecutionRelationState,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
+    },
+    /// A relation violation or ambiguity fenced target progression for reconciliation.
+    ExecutionRelationReconciliationRequired {
+        /// Mission-level Group containing both logical endpoints.
+        group_id: ExecutionGroupId,
+        /// Stable relation identity.
+        relation_id: ExecutionRelationId,
+        /// Violated or unknown Runtime-derived state.
+        state: ExecutionRelationState,
+        /// Logical condition-provider Task.
+        source_task_ref: TaskRef,
+        /// Logical condition-provider Role.
+        source_role_id: RoleId,
+        /// Logical constrained Task.
+        target_task_ref: TaskRef,
+        /// Logical constrained Role.
+        target_role_id: RoleId,
+        /// Current source attempt, when dispatched.
+        source_execution_id: Option<String>,
+        /// Current target attempt, when dispatched.
+        target_execution_id: Option<String>,
+        /// Stable Runtime diagnostic.
+        reason: String,
+        /// Typed relation contract retained for replay and evidence inspection.
+        #[serde(default)]
+        relation_type: ExecutionRelationType,
+        /// Effective coupling mode of the constrained Task execution scope.
+        #[serde(default)]
+        coupling_mode: ExecutionCouplingMode,
     },
     /// A role was rebound after a recoverable failure.
     RecoveryRebound {
@@ -2184,6 +2725,65 @@ mod tests {
             serde_json::from_str(&encoded).expect("registration deserializes");
         assert_eq!(decoded, registration);
         assert!(encoded.contains("\"capability_owners\":[["));
+        assert!(encoded.contains("\"capability_kinds\":[["));
+        assert!(encoded.contains("\"capability_readiness\":[["));
         assert!(encoded.contains("\"resource_owners\":[["));
+
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(&encoded).expect("registration JSON parses");
+        legacy
+            .as_object_mut()
+            .expect("registration is an object")
+            .remove("capability_readiness");
+        legacy
+            .as_object_mut()
+            .expect("registration is an object")
+            .remove("capability_kinds");
+        let restored: NodeRegistration =
+            serde_json::from_value(legacy).expect("legacy registration restores");
+        assert!(restored.contract_is_available(&contract));
+    }
+
+    /// Legacy aggregate registration fails closed when several kinds prevent exact inference.
+    #[test]
+    fn legacy_registration_rejects_ambiguous_contract_kinds() {
+        let node_id = NodeId::new("node-legacy-mixed").expect("node id must be valid");
+        let local_system_id = LocalSystemId::new("mixed").expect("local system id is valid");
+        let compute = CapabilityContractRef::new("spatial.map", "build", "v0")
+            .expect("compute contract is valid");
+        let observation = CapabilityContractRef::new("spatial.map", "observe", "v0")
+            .expect("observation contract is valid");
+        let registration = NodeRegistration::new_with_local_systems(
+            node_id,
+            vec![LocalSystemDescriptor::new(
+                local_system_id.clone(),
+                LocalRuntime::new("mixed-runtime", "0.1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_2(),
+            vec![
+                Capability::new(CapabilityKind::Compute, true),
+                Capability::new(CapabilityKind::Observation, true),
+            ],
+            BTreeMap::from([
+                (compute.clone(), local_system_id.clone()),
+                (observation.clone(), local_system_id),
+            ]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("legacy mixed registration remains structurally valid");
+
+        assert!(!registration.contract_is_available_for_kind(&compute, CapabilityKind::Compute));
+        assert!(
+            !registration.contract_is_available_for_kind(&compute, CapabilityKind::Observation)
+        );
+        assert!(
+            !registration.contract_is_available_for_kind(&observation, CapabilityKind::Observation)
+        );
+        assert!(
+            !registration.contract_is_available_for_kind(&observation, CapabilityKind::Compute)
+        );
     }
 }

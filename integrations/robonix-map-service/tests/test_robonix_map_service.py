@@ -46,7 +46,7 @@ def _archive_map(source: Path, destination: Path) -> None:
             archive.add(path, arcname=path.name)
 
 
-def _adapter(tmp_path: Path) -> Any:
+def _adapter(tmp_path: Path, ros_command: tuple[str, ...] = ()) -> Any:
     """Construct one adapter whose filesystem authority is confined to a temporary directory."""
     config = ADAPTER.AdapterConfig(
         map_root=tmp_path / "maps",
@@ -55,6 +55,8 @@ def _adapter(tmp_path: Path) -> Any:
         robonix_endpoint="http://127.0.0.1:1",
         request_timeout_s=0.05,
         max_archive_bytes=16 * 1024 * 1024,
+        ros_service_list_command=ros_command,
+        ros_discovery_timeout_s=0.2,
     )
     return ADAPTER.LocalAdapter(config)
 
@@ -133,5 +135,76 @@ def test_health_reports_offline_when_robonix_is_unreachable(tmp_path: Path) -> N
     adapter = _adapter(tmp_path)
     try:
         assert adapter.health()["state"] == "OFFLINE"
+    finally:
+        adapter.close()
+
+
+def test_readiness_requires_exact_discovered_ros_services(tmp_path: Path) -> None:
+    """Mapping and localization readiness follow exact service discovery independently."""
+    adapter = _adapter(
+        tmp_path,
+        (
+            sys.executable,
+            "-c",
+            "print('/rtabmap/set_mode_mapping')",
+        ),
+    )
+    try:
+        capabilities = cast(dict[str, dict[str, str]], adapter.readiness()["capabilities"])
+        assert capabilities["spatial.map.build@v0"]["state"] == "READY"
+        assert capabilities["spatial.localization.verify@v0"]["state"] == "UNAVAILABLE"
+        assert capabilities["spatial.map.publish@v0"]["state"] == "READY"
+        assert capabilities["spatial.map.import@v0"]["state"] == "READY"
+    finally:
+        adapter.close()
+
+
+def test_readiness_fails_ros_capabilities_closed_when_discovery_fails(tmp_path: Path) -> None:
+    """A failed ROS discovery command cannot leave ROS-dependent contracts ready."""
+    adapter = _adapter(tmp_path, (sys.executable, "-c", "raise SystemExit(7)"))
+    try:
+        capabilities = cast(dict[str, dict[str, str]], adapter.readiness()["capabilities"])
+        assert capabilities["spatial.map.build@v0"]["state"] == "UNAVAILABLE"
+        assert capabilities["spatial.localization.verify@v0"]["state"] == "UNAVAILABLE"
+        assert "exited with 7" in capabilities["spatial.map.build@v0"]["detail"]
+    finally:
+        adapter.close()
+
+
+def test_readiness_fails_ros_capabilities_closed_when_discovery_times_out(
+    tmp_path: Path,
+) -> None:
+    """A bounded discovery timeout leaves all ROS-dependent contracts unavailable."""
+    adapter = _adapter(
+        tmp_path,
+        (sys.executable, "-c", "import time; time.sleep(2)"),
+    )
+    try:
+        capabilities = cast(dict[str, dict[str, str]], adapter.readiness()["capabilities"])
+        assert capabilities["spatial.map.build@v0"]["state"] == "UNAVAILABLE"
+        assert capabilities["spatial.localization.verify@v0"]["state"] == "UNAVAILABLE"
+        assert "timed out" in capabilities["spatial.map.build@v0"]["detail"]
+    finally:
+        adapter.close()
+
+
+def test_readiness_applies_storage_dependencies_per_exact_contract(tmp_path: Path) -> None:
+    """Losing map storage fences build/import/verify without hiding artifact publication."""
+    adapter = _adapter(
+        tmp_path,
+        (
+            sys.executable,
+            "-c",
+            "print('/rtabmap/set_mode_mapping\\n/rtabmap/set_mode_localization')",
+        ),
+    )
+    try:
+        adapter._config.map_root.rename(tmp_path / "detached-maps")
+        capabilities = cast(dict[str, dict[str, str]], adapter.readiness()["capabilities"])
+        assert capabilities["spatial.map.build@v0"]["state"] == "UNAVAILABLE"
+        assert capabilities["spatial.map.publish@v0"]["state"] == "READY"
+        assert capabilities["spatial.map.import@v0"]["state"] == "UNAVAILABLE"
+        assert capabilities["spatial.localization.verify@v0"]["state"] == "UNAVAILABLE"
+        assert "map storage is not accessible" in capabilities["spatial.map.build@v0"]["detail"]
     finally:
         adapter.close()

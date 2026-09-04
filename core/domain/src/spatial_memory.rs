@@ -716,7 +716,7 @@ pub enum MapReplicaStatus {
     Staged,
     /// Bytes were imported into the node-local cache.
     Imported,
-    /// The node verified the artifact and its spatial metadata.
+    /// The node reported verification; inspect strong evidence before using this as an RT-G8 gate.
     Verified,
     /// The node rejected the artifact or could not verify it.
     Rejected,
@@ -1028,6 +1028,9 @@ pub struct MapReplicaSnapshot {
     observed_at: TimestampMs,
     /// Optional rejection diagnostic retained as evidence.
     rejection_reason: Option<String>,
+    /// Strong localization evidence, absent for legacy smoke-only verification.
+    #[serde(default)]
+    localization_evidence: Option<crate::LocalizationVerificationEvidence>,
 }
 
 impl MapReplicaSnapshot {
@@ -1039,6 +1042,7 @@ impl MapReplicaSnapshot {
         mission_id: MissionId,
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
+        localization_evidence: Option<crate::LocalizationVerificationEvidence>,
     ) -> Self {
         Self {
             selector,
@@ -1047,6 +1051,7 @@ impl MapReplicaSnapshot {
             mission_id,
             observed_at,
             rejection_reason,
+            localization_evidence,
         }
     }
 
@@ -1078,6 +1083,16 @@ impl MapReplicaSnapshot {
     /// Returns a rejection diagnostic, when the replica was rejected.
     pub fn rejection_reason(&self) -> Option<&str> {
         self.rejection_reason.as_deref()
+    }
+
+    /// Returns strong localization evidence when the replica passed the v0.1 contract.
+    pub const fn localization_evidence(&self) -> Option<&crate::LocalizationVerificationEvidence> {
+        self.localization_evidence.as_ref()
+    }
+
+    /// Returns whether this replica has strong evidence rather than a legacy smoke fact.
+    pub const fn is_strongly_verified(&self) -> bool {
+        self.localization_evidence.is_some()
     }
 }
 

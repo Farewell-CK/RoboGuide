@@ -98,8 +98,8 @@ impl SensorDescriptor {
 mod tests {
     use super::*;
     use crate::{
-        Capability, CapabilityContractRef, CapabilityKind, NodeContractVersion, NodeId,
-        NodeRegistration,
+        ActorId, Capability, CapabilityContractRef, CapabilityKind, NodeContractVersion, NodeId,
+        NodeRegistration, RoleId, RoleRequirement,
     };
 
     /// Aggregate registration preserves local-system ownership without changing matching facts.
@@ -125,5 +125,52 @@ mod tests {
         .expect("aggregate registration is valid");
         assert_eq!(registration.capability_owner(&contract), Some(&system_id));
         assert_eq!(registration.local_systems().len(), 1);
+    }
+
+    /// Exact contract readiness fences one contract without hiding its configured owner.
+    #[test]
+    fn aggregate_registration_retains_exact_contract_readiness() {
+        let system_id = LocalSystemId::new("mapping").expect("local system id is valid");
+        let ready = CapabilityContractRef::new("spatial.map", "build", "v0")
+            .expect("ready contract is valid");
+        let unavailable = CapabilityContractRef::new("spatial.map", "localize", "v0")
+            .expect("unavailable contract is valid");
+        let owners = BTreeMap::from([
+            (ready.clone(), system_id.clone()),
+            (unavailable.clone(), system_id.clone()),
+        ]);
+        let registration = NodeRegistration::new_with_local_systems_and_readiness(
+            NodeId::new("dog-a").expect("node id is valid"),
+            vec![LocalSystemDescriptor::new(
+                system_id,
+                LocalRuntime::new("mapping", "1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_2(),
+            vec![Capability::new(CapabilityKind::Compute, true)],
+            owners,
+            BTreeMap::from([
+                (ready.clone(), CapabilityKind::Compute),
+                (unavailable.clone(), CapabilityKind::Compute),
+            ]),
+            BTreeMap::from([(ready.clone(), true), (unavailable.clone(), false)]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("aggregate registration is valid");
+
+        assert!(registration.contract_is_available(&ready));
+        assert!(!registration.contract_is_available(&unavailable));
+        assert!(registration.capability_owner(&unavailable).is_some());
+        assert!(
+            !registration.supports_role(&RoleRequirement::new_with_actor_and_contract(
+                RoleId::new("localizer").expect("role id is valid"),
+                ActorId::new("robot").expect("actor id is valid"),
+                CapabilityKind::Compute,
+                unavailable,
+                None,
+            ))
+        );
     }
 }

@@ -31,5 +31,6 @@ Released。
 - v0.x 的单 Group 策略可以在未来演化为多个 Group，而无需重新定义 Task DAG。
 - Mission-level Group/TaskExecution 事件最初使用 `domain.EventPayload.json/v2`；加入 Spatial
   Memory evidence 后的新写入由 ADR-0011 升级为 `domain.EventPayload.json/v3`。Phase 1 的
-  外层 Controller checkpoint 使用 `roboguide.controller-checkpoint/v7`，其中嵌入
-  `roboguide.controller-checkpoint/v6` Integration projection，旧投影不得静默恢复。
+  该决策首次采用外层 Controller checkpoint v7 与内层 Integration projection v6；ADR-0019
+  因 exact-contract readiness 将两者分别升级为 v8/v7，ADR-0020 因 Execution Relation
+  registry/state/fence 再升级为 v9/v8；旧投影仍不得静默恢复。

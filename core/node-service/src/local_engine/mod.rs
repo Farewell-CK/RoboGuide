@@ -9,15 +9,17 @@ pub mod mcp_driver;
 
 use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig,
-    HealthCheckConfig, LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, ResourceConfig,
-    SensorConfig, WorkflowConfig, WorkflowStepConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, ResourceConfig, SensorConfig,
+    StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
     CompiledRequestMapping, MappingError, WorkflowContext, evaluate, validate_expression,
     validate_pointer,
 };
+use prost_reflect::DescriptorPool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -25,6 +27,12 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_SCHEMA_V0_2: &str = "roboguide.node-config/v0.2";
 /// Schema identity for the node catalog with Spatial Memory artifact bindings.
 pub const CONFIG_SCHEMA_V0_3: &str = "roboguide.node-config/v0.3";
+/// Schema identity requiring an exact readiness observation for every capability.
+pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
+/// Schema identity adding selective State exports and Memory providers over Protocol v0.3.
+pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
+/// Schema identity adding executable heterogeneous Memory provider workflows.
+pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -35,6 +43,8 @@ type CompiledLocalSystems = (
 /// Immutable startup-validated local integration catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledLocalCatalog {
+    /// Accepted node-config schema identity retained for conformance policy.
+    schema: String,
     /// Stable Node identity.
     node_id: String,
     /// Remote RoboGuide Server endpoint.
@@ -55,6 +65,10 @@ pub struct CompiledLocalCatalog {
     resources: BTreeMap<String, CompiledResource>,
     /// Sensors by stable identity.
     sensors: BTreeMap<String, CompiledSensor>,
+    /// Selective source-aware State channels by node-wide export identity.
+    state_exports: BTreeMap<String, CompiledStateExport>,
+    /// Selective Memory discovery/exchange providers by node-wide identity.
+    memory_providers: BTreeMap<String, CompiledMemoryProvider>,
     /// Optional independent Spatial Memory artifact data-plane configuration.
     artifacts: Option<CompiledArtifactService>,
 }
@@ -130,6 +144,114 @@ pub struct LocalHealthFact {
     pub detail: String,
 }
 
+/// Immutable fixed local State sampling operation and semantic declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledStateExport {
+    /// Node-wide export identity.
+    id: String,
+    /// Local-system owner.
+    owner: String,
+    /// Node or world object class.
+    object_class: String,
+    /// Domain-specific object category.
+    object_type: String,
+    /// Stable object identity.
+    object_id: String,
+    /// Reported or observed source meaning.
+    semantic: String,
+    /// Versioned JSON value schema.
+    payload_schema: String,
+    /// Receive-relative validity period.
+    valid_for_ms: u64,
+    /// Period between local samples.
+    interval_ms: u64,
+    /// Fixed local observation operation; the deployment facade must keep it side-effect free.
+    step: CompiledWorkflowStep,
+    /// Response-relative JSON value pointer.
+    value_pointer: String,
+    /// Optional response-relative source timestamp pointer.
+    source_observed_at_pointer: Option<String>,
+    /// Optional response-relative confidence pointer.
+    confidence_pointer: Option<String>,
+}
+
+/// One successful local State sample ready for a protocol observation batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateExportFact {
+    /// Node-wide export identity.
+    pub export_id: String,
+    /// Bounded structured value.
+    pub value: serde_json::Value,
+    /// Optional source-local timestamp in milliseconds.
+    pub source_observed_at_ms: Option<u64>,
+    /// Optional confidence in millionths.
+    pub confidence_millionths: Option<u32>,
+}
+
+/// Immutable Memory provider declaration without a local storage implementation requirement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryProvider {
+    /// Node-wide provider identity.
+    id: String,
+    /// Local-system owner.
+    owner: String,
+    /// Generic Memory kind.
+    kind: String,
+    /// Maximum local/global sharing scope.
+    scope: String,
+    /// Discoverable or exchangeable policy.
+    visibility: String,
+    /// Versioned provider payload schema.
+    payload_schema: String,
+    /// Artifact media type when bytes are offered.
+    media_type: String,
+    /// Whether node-config/v0.6 enables local backend operations.
+    operational: bool,
+    /// Node ledger, controlled export handoff, and reference-backend root.
+    storage_directory: PathBuf,
+    /// Optional discovery workflow.
+    discover: Option<CompiledMemoryWorkflow>,
+    /// Optional export workflow.
+    export: Option<CompiledMemoryWorkflow>,
+    /// Optional import workflow.
+    import: Option<CompiledMemoryWorkflow>,
+}
+
+/// Startup-validated Memory provider workflow.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryWorkflow {
+    /// Ordered local driver steps.
+    steps: Vec<CompiledWorkflowStep>,
+    /// Optional response pointer to the provider-authorized publish-eligible manifest set.
+    manifests_pointer: Option<String>,
+    /// Optional response pointer to an exported artifact path.
+    artifact_path_pointer: Option<String>,
+}
+
+/// Immutable exact-capability readiness check and state projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledCapabilityReadiness {
+    /// Fixed local driver operation.
+    step: CompiledWorkflowStep,
+    /// Response-relative state pointer.
+    state_pointer: String,
+    /// Optional response-relative detail pointer.
+    detail_pointer: Option<String>,
+    /// Normalized local readiness lookup.
+    states: BTreeMap<String, bool>,
+    /// Whether lookup is case-sensitive.
+    case_sensitive: bool,
+}
+
+/// One exact-capability readiness fact and descriptive detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityReadinessFact {
+    /// Whether the exact canonical contract can execute now.
+    pub available: bool,
+    /// Local descriptive detail or observation failure.
+    pub detail: String,
+}
+
 /// Immutable validated connection details for one local driver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledConnection {
@@ -193,6 +315,8 @@ pub struct CompiledCapability {
     local_locks: BTreeSet<String>,
     /// Optional artifact action fixed by the versioned node configuration.
     artifact_operation: Option<ArtifactOperationConfig>,
+    /// Optional exact-contract readiness observation; required by schema v0.4.
+    readiness: Option<CompiledCapabilityReadiness>,
     /// Compiled execute/status/cancel behavior.
     workflow: CompiledWorkflow,
 }
@@ -323,14 +447,31 @@ impl CompiledLocalCatalog {
         config: NodeServiceConfig,
         config_directory: &Path,
     ) -> Result<Self, CatalogError> {
-        let supports_artifacts = config.schema == CONFIG_SCHEMA_V0_3;
+        let supports_artifacts = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+        );
+        let requires_readiness = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+        );
+        let supports_state_memory = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+        );
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_2 | CONFIG_SCHEMA_V0_3
+                CONFIG_SCHEMA_V0_2
+                    | CONFIG_SCHEMA_V0_3
+                    | CONFIG_SCHEMA_V0_4
+                    | CONFIG_SCHEMA_V0_5
+                    | CONFIG_SCHEMA_V0_6
             ),
             "schema",
-            format!("expected `{CONFIG_SCHEMA_V0_2}` or `{CONFIG_SCHEMA_V0_3}`"),
+            format!(
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, or `{CONFIG_SCHEMA_V0_6}`"
+            ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
         validate_server_endpoint(&config.server_endpoint)?;
@@ -360,6 +501,21 @@ impl CompiledLocalCatalog {
             "must contain at least one local connection",
         )?;
         let health_checks = compile_health_checks(health_configs, &local_systems, &connections)?;
+        require(
+            supports_state_memory
+                || (config.state_exports.is_empty() && config.memory_providers.is_empty()),
+            "state_exports",
+            format!("State and Memory declarations require schema `{CONFIG_SCHEMA_V0_5}`"),
+        )?;
+        let state_exports =
+            compile_state_exports(config.state_exports, &local_systems, &connections)?;
+        let memory_providers = compile_memory_providers(
+            config.memory_providers,
+            &local_systems,
+            &connections,
+            &state_directory,
+            config.schema == CONFIG_SCHEMA_V0_6,
+        )?;
         let resources = compile_resources(config.resources, &local_systems)?;
         let sensors = compile_sensors(config.sensors, &local_systems)?;
         let capabilities = compile_capabilities(
@@ -368,6 +524,7 @@ impl CompiledLocalCatalog {
             &connections,
             &resources,
             supports_artifacts,
+            requires_readiness,
         )?;
         require(
             !capabilities.is_empty(),
@@ -382,6 +539,7 @@ impl CompiledLocalCatalog {
         let artifacts = compile_artifacts(config.artifacts, config_directory)?;
 
         Ok(Self {
+            schema: config.schema,
             node_id: config.node_id,
             server_endpoint: config.server_endpoint,
             state_directory,
@@ -392,8 +550,15 @@ impl CompiledLocalCatalog {
             capabilities,
             resources,
             sensors,
+            state_exports,
+            memory_providers,
             artifacts,
         })
+    }
+
+    /// Returns the accepted versioned node-config schema identity.
+    pub fn schema(&self) -> &str {
+        &self.schema
     }
 
     /// Returns the stable node identity.
@@ -444,6 +609,16 @@ impl CompiledLocalCatalog {
     /// Returns sensors in stable lexical identity order.
     pub const fn sensors(&self) -> &BTreeMap<String, CompiledSensor> {
         &self.sensors
+    }
+
+    /// Returns selective State channels in deterministic export identity order.
+    pub const fn state_exports(&self) -> &BTreeMap<String, CompiledStateExport> {
+        &self.state_exports
+    }
+
+    /// Returns selective Memory providers in deterministic provider identity order.
+    pub const fn memory_providers(&self) -> &BTreeMap<String, CompiledMemoryProvider> {
+        &self.memory_providers
     }
 
     /// Returns optional startup-validated Spatial Memory artifact configuration.
@@ -554,6 +729,222 @@ impl CompiledHealthCheck {
             .map(value_to_reason)
             .unwrap_or_default();
         Ok(LocalHealthFact { state, detail })
+    }
+}
+
+impl CompiledStateExport {
+    /// Returns the node-wide export identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the local-system owner.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the State object class spelling.
+    pub fn object_class(&self) -> &str {
+        &self.object_class
+    }
+
+    /// Returns the domain-specific object category.
+    pub fn object_type(&self) -> &str {
+        &self.object_type
+    }
+
+    /// Returns the stable object identity.
+    pub fn object_id(&self) -> &str {
+        &self.object_id
+    }
+
+    /// Returns the State semantic spelling.
+    pub fn semantic(&self) -> &str {
+        &self.semantic
+    }
+
+    /// Returns the JSON value schema.
+    pub fn payload_schema(&self) -> &str {
+        &self.payload_schema
+    }
+
+    /// Returns the receive-relative validity period.
+    pub const fn valid_for_ms(&self) -> u64 {
+        self.valid_for_ms
+    }
+
+    /// Returns the configured sample interval.
+    pub const fn interval_ms(&self) -> u64 {
+        self.interval_ms
+    }
+
+    /// Returns the fixed local sampling operation.
+    pub const fn step(&self) -> &CompiledWorkflowStep {
+        &self.step
+    }
+
+    /// Maps one completed local response into a bounded source-aware State fact.
+    pub fn map(&self, context: &WorkflowContext) -> Result<StateExportFact, MappingError> {
+        let response_pointer = format!("/steps/{}", escape_pointer_segment(self.step.id()));
+        let response = context
+            .as_json()
+            .pointer(&response_pointer)
+            .ok_or(MappingError::MissingSource(response_pointer))?;
+        let value = response
+            .pointer(&self.value_pointer)
+            .cloned()
+            .ok_or_else(|| MappingError::MissingSource(self.value_pointer.clone()))?;
+        if serde_json::to_vec(&value)
+            .map_err(|_| MappingError::InvalidFunctionArguments("state JSON".to_string()))?
+            .len()
+            > domain::MAX_STATE_PAYLOAD_BYTES
+        {
+            return Err(MappingError::InvalidFunctionArguments(
+                "state payload exceeds 64 KiB".to_string(),
+            ));
+        }
+        let source_observed_at_ms = self
+            .source_observed_at_pointer
+            .as_ref()
+            .map(|pointer| {
+                response
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| MappingError::MissingSource(pointer.clone()))
+            })
+            .transpose()?;
+        let confidence_millionths = self
+            .confidence_pointer
+            .as_ref()
+            .map(|pointer| {
+                let confidence = response
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_f64)
+                    .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    .ok_or_else(|| MappingError::MissingSource(pointer.clone()))?;
+                Ok::<u32, MappingError>((confidence * 1_000_000.0).round() as u32)
+            })
+            .transpose()?;
+        Ok(StateExportFact {
+            export_id: self.id.clone(),
+            value,
+            source_observed_at_ms,
+            confidence_millionths,
+        })
+    }
+}
+
+impl CompiledMemoryProvider {
+    /// Returns the node-wide provider identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the local-system owner.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the Memory kind spelling.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    /// Returns the maximum scope spelling.
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    /// Returns the discovery/exchange visibility spelling.
+    pub fn visibility(&self) -> &str {
+        &self.visibility
+    }
+
+    /// Returns the provider payload schema.
+    pub fn payload_schema(&self) -> &str {
+        &self.payload_schema
+    }
+
+    /// Returns the provider content media type.
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
+
+    /// Returns whether v0.6 enables the Node ledger and operational provider workflow facade.
+    pub const fn operational(&self) -> bool {
+        self.operational
+    }
+
+    /// Returns the Node ledger and workflow-free reference-backend root.
+    pub fn storage_directory(&self) -> &Path {
+        &self.storage_directory
+    }
+
+    /// Returns the optional discovery workflow.
+    pub const fn discover(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.discover.as_ref()
+    }
+
+    /// Returns the optional export workflow.
+    pub const fn export(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.export.as_ref()
+    }
+
+    /// Returns the optional import workflow.
+    pub const fn import(&self) -> Option<&CompiledMemoryWorkflow> {
+        self.import.as_ref()
+    }
+}
+
+impl CompiledMemoryWorkflow {
+    /// Returns ordered provider-local workflow steps.
+    pub fn steps(&self) -> &[CompiledWorkflowStep] {
+        &self.steps
+    }
+
+    /// Returns the optional response pointer containing manifests.
+    pub fn manifests_pointer(&self) -> Option<&str> {
+        self.manifests_pointer.as_deref()
+    }
+
+    /// Returns the optional response pointer containing an artifact path.
+    pub fn artifact_path_pointer(&self) -> Option<&str> {
+        self.artifact_path_pointer.as_deref()
+    }
+}
+
+impl CompiledCapabilityReadiness {
+    /// Returns the fixed local observation step.
+    pub const fn step(&self) -> &CompiledWorkflowStep {
+        &self.step
+    }
+
+    /// Maps one completed observation response into an exact readiness fact.
+    pub fn map(&self, context: &WorkflowContext) -> Result<CapabilityReadinessFact, MappingError> {
+        let response_pointer = format!("/steps/{}", escape_pointer_segment(self.step.id()));
+        let response = context
+            .as_json()
+            .pointer(&response_pointer)
+            .ok_or_else(|| MappingError::MissingSource(response_pointer.clone()))?;
+        let state = response
+            .pointer(&self.state_pointer)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| MappingError::MissingSource(self.state_pointer.clone()))?;
+        let key = if self.case_sensitive {
+            state.to_string()
+        } else {
+            state.to_ascii_lowercase()
+        };
+        let available = self.states.get(&key).copied().ok_or_else(|| {
+            MappingError::MissingSource(format!("unmapped capability readiness state {key}"))
+        })?;
+        let detail = self
+            .detail_pointer
+            .as_ref()
+            .and_then(|pointer| response.pointer(pointer))
+            .map(value_to_reason)
+            .unwrap_or_default();
+        Ok(CapabilityReadinessFact { available, detail })
     }
 }
 
@@ -692,6 +1083,11 @@ impl CompiledCapability {
         self.artifact_operation
     }
 
+    /// Returns the exact-contract readiness observation when configured.
+    pub const fn readiness(&self) -> Option<&CompiledCapabilityReadiness> {
+        self.readiness.as_ref()
+    }
+
     /// Returns immutable local execution behavior.
     pub const fn workflow(&self) -> &CompiledWorkflow {
         &self.workflow
@@ -735,6 +1131,24 @@ impl CompiledWorkflow {
     ) -> Result<MappedExecutionFact, MappingError> {
         self.execution_state.map(context)
     }
+
+    /// Returns whether the compiled state map covers every non-ambiguous lifecycle phase.
+    pub fn execution_state_mapped(&self) -> bool {
+        [
+            MappedExecutionPhase::Accepted,
+            MappedExecutionPhase::Running,
+            MappedExecutionPhase::Completed,
+            MappedExecutionPhase::Failed,
+            MappedExecutionPhase::Cancelled,
+        ]
+        .iter()
+        .all(|phase| {
+            self.execution_state
+                .states
+                .values()
+                .any(|mapped| mapped == phase)
+        })
+    }
 }
 
 impl CompiledWorkflowStep {
@@ -746,6 +1160,11 @@ impl CompiledWorkflowStep {
     /// Returns the fixed connection identity.
     pub fn connection(&self) -> &str {
         &self.connection
+    }
+
+    /// Returns the fixed local operation selected by this workflow step.
+    pub const fn operation(&self) -> &LocalOperationConfig {
+        &self.operation
     }
 
     /// Renders one driver request while preserving compiled route and operation authority.
@@ -1183,6 +1602,314 @@ fn compile_health_checks(
     Ok(checks)
 }
 
+/// Compiles selective fixed State sampling operations without granting lifecycle authority.
+fn compile_state_exports(
+    configs: Vec<StateExportConfig>,
+    systems: &BTreeMap<String, CompiledLocalSystem>,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<BTreeMap<String, CompiledStateExport>, CatalogError> {
+    let mut exports = BTreeMap::new();
+    for config in configs {
+        validate_identity(&config.id, "state_exports.id")?;
+        require(
+            systems.contains_key(&config.owner),
+            format!("state_exports.{}.owner", config.id),
+            format!("unknown local system `{}`", config.owner),
+        )?;
+        require(
+            matches!(config.object_class.as_str(), "node" | "world"),
+            format!("state_exports.{}.object_class", config.id),
+            "must be node or world",
+        )?;
+        require(
+            matches!(config.semantic.as_str(), "reported" | "observed"),
+            format!("state_exports.{}.semantic", config.id),
+            "must be reported or observed",
+        )?;
+        validate_identity(&config.object_type, "state_exports.object_type")?;
+        validate_identity(&config.object_id, "state_exports.object_id")?;
+        validate_identity(&config.payload_schema, "state_exports.payload_schema")?;
+        require(
+            config.valid_for_ms > 0,
+            format!("state_exports.{}.valid_for_ms", config.id),
+            "must be positive",
+        )?;
+        require(
+            config.interval_ms >= 100,
+            format!("state_exports.{}.interval_ms", config.id),
+            "must be at least 100ms",
+        )?;
+        let field = format!("state_exports.{}", config.id);
+        validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
+        validate_state_export_operation(&config.step.operation, &field)?;
+        if config
+            .step
+            .request
+            .bindings
+            .iter()
+            .any(|binding| contains_pointer_expression(&binding.value))
+        {
+            return Err(validation(
+                format!("{field}.step"),
+                "State sampling requests must use deployment constants only",
+            ));
+        }
+        for pointer in [
+            Some(&config.value_pointer),
+            config.source_observed_at_pointer.as_ref(),
+            config.confidence_pointer.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+                step: field.clone(),
+                source,
+            })?;
+        }
+        let mut step_ids = BTreeSet::new();
+        let mut steps =
+            compile_steps(vec![config.step], &config.owner, connections, &mut step_ids)?;
+        let id = config.id.clone();
+        let export = CompiledStateExport {
+            id: config.id,
+            owner: config.owner,
+            object_class: config.object_class,
+            object_type: config.object_type,
+            object_id: config.object_id,
+            semantic: config.semantic,
+            payload_schema: config.payload_schema,
+            valid_for_ms: config.valid_for_ms,
+            interval_ms: config.interval_ms,
+            step: steps
+                .pop()
+                .expect("one State export step compiles into one step"),
+            value_pointer: config.value_pointer,
+            source_observed_at_pointer: config.source_observed_at_pointer,
+            confidence_pointer: config.confidence_pointer,
+        };
+        insert_unique(&mut exports, id, export, "state_exports.id")?;
+    }
+    Ok(exports)
+}
+
+/// Restricts periodic State sampling to operations that are mechanically read-only.
+fn validate_state_export_operation(
+    operation: &LocalOperationConfig,
+    field: &str,
+) -> Result<(), CatalogError> {
+    match operation {
+        LocalOperationConfig::Http { method, .. } if method == "GET" => Ok(()),
+        LocalOperationConfig::Http { .. } => Err(validation(
+            format!("{field}.step.operation"),
+            "State export HTTP operations must use GET",
+        )),
+        LocalOperationConfig::GrpcUnary { .. }
+        | LocalOperationConfig::GrpcServerStream { .. }
+        | LocalOperationConfig::McpTool { .. } => Err(validation(
+            format!("{field}.step.operation"),
+            "State export gRPC and MCP operations require an explicit read-only contract and are not enabled in v0.1",
+        )),
+    }
+}
+
+/// Compiles provider metadata while preserving local storage and exchange ownership.
+fn compile_memory_providers(
+    configs: Vec<MemoryProviderConfig>,
+    systems: &BTreeMap<String, CompiledLocalSystem>,
+    connections: &BTreeMap<String, CompiledConnection>,
+    state_directory: &Path,
+    supports_workflows: bool,
+) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
+    let mut providers = BTreeMap::new();
+    let mut storage_roots: BTreeSet<PathBuf> = BTreeSet::new();
+    for config in configs {
+        validate_identity(&config.id, "memory_providers.id")?;
+        require(
+            systems.contains_key(&config.owner),
+            format!("memory_providers.{}.owner", config.id),
+            format!("unknown local system `{}`", config.owner),
+        )?;
+        require(
+            matches!(
+                config.kind.as_str(),
+                "execution" | "spatial" | "semantic" | "experience" | "artifact"
+            ),
+            format!("memory_providers.{}.kind", config.id),
+            "must be execution, spatial, semantic, experience, or artifact",
+        )?;
+        require(
+            matches!(config.scope.as_str(), "local" | "global"),
+            format!("memory_providers.{}.scope", config.id),
+            "must be local or global",
+        )?;
+        require(
+            matches!(config.visibility.as_str(), "discoverable" | "exchangeable"),
+            format!("memory_providers.{}.visibility", config.id),
+            "must be discoverable or exchangeable",
+        )?;
+        validate_identity(&config.payload_schema, "memory_providers.payload_schema")?;
+        require(
+            !supports_workflows || config.payload_schema != domain::SPATIAL_MEMORY_SCHEMA_V0_1,
+            format!("memory_providers.{}.payload_schema", config.id),
+            "v0.6 generic workflows cannot claim the dedicated typed map and localization-verification schema",
+        )?;
+        require(
+            !config.media_type.trim().is_empty(),
+            format!("memory_providers.{}.media_type", config.id),
+            "must not be empty",
+        )?;
+        require(
+            supports_workflows
+                || (config.discover.is_none()
+                    && config.export.is_none()
+                    && config.import.is_none()
+                    && config.storage_directory.is_none()),
+            format!("memory_providers.{}", config.id),
+            format!("Memory workflows require schema `{CONFIG_SCHEMA_V0_6}`"),
+        )?;
+        let storage_directory = match config.storage_directory.as_deref() {
+            Some(path) => {
+                validate_relative_artifact_path(
+                    path,
+                    &format!("memory_providers.{}.storage_directory", config.id),
+                )?;
+                resolve_path(state_directory, path)
+            }
+            None => state_directory.join("memory").join(&config.id),
+        };
+        require(
+            storage_roots.iter().all(|existing| {
+                !storage_directory.starts_with(existing)
+                    && !existing.starts_with(&storage_directory)
+            }),
+            format!("memory_providers.{}.storage_directory", config.id),
+            "must not equal, contain, or be contained by another Memory ledger root",
+        )?;
+        storage_roots.insert(storage_directory.clone());
+        let discover = compile_memory_workflow(
+            config.discover,
+            &config.id,
+            &config.owner,
+            connections,
+            "discover",
+        )?;
+        let export = compile_memory_workflow(
+            config.export,
+            &config.id,
+            &config.owner,
+            connections,
+            "export",
+        )?;
+        let import = compile_memory_workflow(
+            config.import,
+            &config.id,
+            &config.owner,
+            connections,
+            "import",
+        )?;
+        require(
+            config.visibility != "exchangeable"
+                || export
+                    .as_ref()
+                    .is_none_or(|workflow| workflow.artifact_path_pointer().is_some()),
+            format!(
+                "memory_providers.{}.export.artifact_path_pointer",
+                config.id
+            ),
+            "is required for an exchangeable provider export workflow",
+        )?;
+        let id = config.id.clone();
+        let provider = CompiledMemoryProvider {
+            id: config.id,
+            owner: config.owner,
+            kind: config.kind,
+            scope: config.scope,
+            visibility: config.visibility,
+            payload_schema: config.payload_schema,
+            media_type: config.media_type,
+            operational: supports_workflows,
+            storage_directory,
+            discover,
+            export,
+            import,
+        };
+        insert_unique(&mut providers, id, provider, "memory_providers.id")?;
+    }
+    Ok(providers)
+}
+
+/// Compiles one optional Memory workflow using the same fixed local routing as capabilities.
+fn compile_memory_workflow(
+    config: Option<MemoryWorkflowConfig>,
+    provider_id: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+    operation: &str,
+) -> Result<Option<CompiledMemoryWorkflow>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    require(
+        !config.steps.is_empty(),
+        format!("memory_providers.{provider_id}.{operation}.steps"),
+        "must contain at least one step",
+    )?;
+    validate_step_sources(
+        &config.steps,
+        false,
+        &format!("memory_providers.{provider_id}.{operation}.steps"),
+    )?;
+    let steps = compile_steps(config.steps, owner, connections, &mut BTreeSet::new())?;
+    if let Some(pointer) = &config.manifests_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: format!("memory_providers.{provider_id}.{operation}"),
+            source,
+        })?;
+    }
+    if let Some(pointer) = &config.artifact_path_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: format!("memory_providers.{provider_id}.{operation}"),
+            source,
+        })?;
+    }
+    match operation {
+        "discover" => {
+            require(
+                config.manifests_pointer.is_some(),
+                format!("memory_providers.{provider_id}.discover.manifests_pointer"),
+                "is required for discovery",
+            )?;
+            require(
+                config.artifact_path_pointer.is_none(),
+                format!("memory_providers.{provider_id}.discover.artifact_path_pointer"),
+                "is not valid for discovery",
+            )?;
+        }
+        "export" => require(
+            config.manifests_pointer.is_none(),
+            format!("memory_providers.{provider_id}.export.manifests_pointer"),
+            "is not valid for export",
+        )?,
+        "import" => require(
+            config.manifests_pointer.is_none() && config.artifact_path_pointer.is_none(),
+            format!("memory_providers.{provider_id}.import"),
+            "does not accept result pointers",
+        )?,
+        _ => {
+            return Err(validation(
+                format!("memory_providers.{provider_id}.{operation}"),
+                "unknown Memory provider operation",
+            ));
+        }
+    }
+    Ok(Some(CompiledMemoryWorkflow {
+        steps,
+        manifests_pointer: config.manifests_pointer,
+        artifact_path_pointer: config.artifact_path_pointer,
+    }))
+}
+
 /// Returns whether an expression reads dynamic invocation or prior workflow context.
 fn contains_pointer_expression(expression: &crate::ValueExpressionConfig) -> bool {
     match expression {
@@ -1231,7 +1958,10 @@ fn compile_connections(
             format!("connections.{}.local_system", config.id()),
             format!("unknown local system `{}`", config.local_system()),
         )?;
-        validate_local_endpoint(config.endpoint(), "connections.endpoint")?;
+        validate_local_endpoint(
+            config.endpoint(),
+            &format!("connections.{}.endpoint", config.id()),
+        )?;
         let (id, connection) = match config {
             ConnectionConfig::Http {
                 id,
@@ -1240,8 +1970,12 @@ fn compile_connections(
                 timeout_ms,
                 headers,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
-                let headers = compile_credentials(headers, "connections.headers")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
+                let headers = compile_credentials(headers, &format!("connections.{id}.headers"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1263,7 +1997,11 @@ fn compile_connections(
                 timeout_ms,
                 metadata,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
                 require(
                     descriptor_set.is_some() ^ reflection,
                     format!("connections.{id}.descriptor_set"),
@@ -1277,10 +2015,15 @@ fn compile_connections(
                             format!("connections.{id}.descriptor_set"),
                             format!("file `{}` does not exist", path.display()),
                         )?;
+                        validate_descriptor_set(
+                            &path,
+                            &format!("connections.{id}.descriptor_set"),
+                        )?;
                         Ok::<_, CatalogError>(path)
                     })
                     .transpose()?;
-                let metadata = compile_credentials(metadata, "connections.metadata")?;
+                let metadata =
+                    compile_credentials(metadata, &format!("connections.{id}.metadata"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1302,8 +2045,12 @@ fn compile_connections(
                 timeout_ms,
                 headers,
             } => {
-                require(timeout_ms > 0, "connections.timeout_ms", "must be non-zero")?;
-                let headers = compile_credentials(headers, "connections.headers")?;
+                require(
+                    timeout_ms > 0,
+                    format!("connections.{id}.timeout_ms"),
+                    "must be non-zero",
+                )?;
+                let headers = compile_credentials(headers, &format!("connections.{id}.headers"))?;
                 let key = id.clone();
                 (
                     key,
@@ -1385,6 +2132,77 @@ fn compile_sensors(
     Ok(sensors)
 }
 
+/// Compiles one fixed exact-capability readiness observation.
+fn compile_capability_readiness(
+    config: CapabilityReadinessConfig,
+    contract: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<CompiledCapabilityReadiness, CatalogError> {
+    let field = format!("capabilities.{contract}.readiness");
+    validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
+    if config
+        .step
+        .request
+        .bindings
+        .iter()
+        .any(|binding| contains_pointer_expression(&binding.value))
+    {
+        return Err(validation(
+            format!("{field}.step"),
+            "readiness request mappings must use deployment constants only",
+        ));
+    }
+    let mut step_ids = BTreeSet::new();
+    let mut steps = compile_steps(vec![config.step], owner, connections, &mut step_ids)?;
+    let step = steps
+        .pop()
+        .expect("one readiness step compiles into one step");
+    validate_pointer(&config.state_pointer).map_err(|source| CatalogError::Mapping {
+        step: field.clone(),
+        source,
+    })?;
+    if let Some(pointer) = &config.detail_pointer {
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: field.clone(),
+            source,
+        })?;
+    }
+    require(!config.ready.is_empty(), &field, "ready must be nonempty")?;
+    require(
+        !config.unavailable.is_empty(),
+        &field,
+        "unavailable must be nonempty",
+    )?;
+    let mut states = BTreeMap::new();
+    for (values, available) in [(config.ready, true), (config.unavailable, false)] {
+        for value in values {
+            require(
+                !value.trim().is_empty(),
+                &field,
+                "state values must be nonblank",
+            )?;
+            let key = if config.case_sensitive {
+                value
+            } else {
+                value.to_ascii_lowercase()
+            };
+            require(
+                states.insert(key.clone(), available).is_none(),
+                &field,
+                format!("duplicate readiness state `{key}`"),
+            )?;
+        }
+    }
+    Ok(CompiledCapabilityReadiness {
+        step,
+        state_pointer: config.state_pointer,
+        detail_pointer: config.detail_pointer,
+        states,
+        case_sensitive: config.case_sensitive,
+    })
+}
+
 /// Compiles canonical capability owners and their local workflows.
 fn compile_capabilities(
     configs: Vec<CapabilityBindingConfig>,
@@ -1392,6 +2210,7 @@ fn compile_capabilities(
     connections: &BTreeMap<String, CompiledConnection>,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
+    requires_readiness: bool,
 ) -> Result<BTreeMap<String, CompiledCapability>, CatalogError> {
     let mut capabilities = BTreeMap::new();
     for config in configs {
@@ -1440,6 +2259,27 @@ fn compile_capabilities(
             format!("capabilities.{}.artifact_operation", config.contract),
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
+        require(
+            !requires_readiness || config.readiness.is_some(),
+            format!("capabilities.{}.readiness", config.contract),
+            format!("is required by schema `{CONFIG_SCHEMA_V0_4}`"),
+        )?;
+        require(
+            requires_readiness || config.readiness.is_none(),
+            format!("capabilities.{}.readiness", config.contract),
+            format!("requires schema `{CONFIG_SCHEMA_V0_4}`"),
+        )?;
+        let readiness = config
+            .readiness
+            .map(|readiness| {
+                compile_capability_readiness(
+                    readiness,
+                    &config.contract,
+                    &config.owner,
+                    connections,
+                )
+            })
+            .transpose()?;
         let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
         let contract = config.contract.clone();
         let capability = CompiledCapability {
@@ -1449,6 +2289,7 @@ fn compile_capabilities(
             required_resources,
             local_locks,
             artifact_operation: config.artifact_operation,
+            readiness,
             workflow,
         };
         insert_unique(
@@ -1724,7 +2565,21 @@ fn validate_operation(
             | LocalOperationConfig::GrpcServerStream { service, method },
         ) => {
             validate_fixed_symbol(service, &field, true)?;
-            validate_fixed_symbol(method, &field, false)
+            validate_fixed_symbol(method, &field, false)?;
+            if let CompiledConnection::Grpc {
+                descriptor_set: Some(path),
+                ..
+            } = connection
+            {
+                validate_grpc_method_descriptor(
+                    path,
+                    service,
+                    method,
+                    matches!(operation, LocalOperationConfig::GrpcServerStream { .. }),
+                    &field,
+                )?;
+            }
+            Ok(())
         }
         (DriverKind::Mcp, LocalOperationConfig::McpTool { tool }) => {
             validate_fixed_symbol(tool, &field, true)
@@ -1734,6 +2589,72 @@ fn validate_operation(
             "operation kind does not match connection driver",
         )),
     }
+}
+
+/// Decodes one configured descriptor set before the node opens any local connection.
+fn validate_descriptor_set(path: &Path, field: &str) -> Result<(), CatalogError> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
+    DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+        validation(
+            field,
+            format!(
+                "cannot decode gRPC descriptor set `{}`: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    Ok(())
+}
+
+/// Confirms that one descriptor-backed gRPC workflow step names an exact method shape.
+fn validate_grpc_method_descriptor(
+    path: &Path,
+    service_name: &str,
+    method_name: &str,
+    configured_server_streaming: bool,
+    field: &str,
+) -> Result<(), CatalogError> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
+    let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+        validation(
+            field,
+            format!(
+                "cannot decode gRPC descriptor set `{}`: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let service = pool.get_service_by_name(service_name).ok_or_else(|| {
+        validation(
+            field,
+            format!("gRPC service `{service_name}` is absent from the descriptor set"),
+        )
+    })?;
+    let method = service
+        .methods()
+        .find(|descriptor| descriptor.name() == method_name)
+        .ok_or_else(|| {
+            validation(
+                field,
+                format!(
+                    "gRPC method `{service_name}.{method_name}` is absent from the descriptor set"
+                ),
+            )
+        })?;
+    require(
+        !method.is_client_streaming(),
+        field,
+        format!("gRPC method `{service_name}.{method_name}` uses unsupported client streaming"),
+    )?;
+    require(
+        method.is_server_streaming() == configured_server_streaming,
+        field,
+        format!(
+            "configured streaming mode does not match gRPC method `{service_name}.{method_name}`"
+        ),
+    )
 }
 
 /// Compiles a disjoint local-state lookup table.
@@ -2025,7 +2946,7 @@ mod tests {
     use crate::{RequestBindingConfig, RequestMappingConfig, ValueExpressionConfig};
 
     /// Returns a valid multi-system catalog fixture with all supported drivers.
-    fn valid_config(descriptor_set: PathBuf) -> NodeServiceConfig {
+    fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
         let state_mapping = ExecutionStateMappingConfig {
             state_pointer: "/steps/read-state/state".to_string(),
             reason_pointer: Some("/steps/read-state/detail".to_string()),
@@ -2106,8 +3027,8 @@ mod tests {
                     id: "motion-grpc".to_string(),
                     local_system: "motion".to_string(),
                     endpoint: "http://[::1]:8200".to_string(),
-                    descriptor_set: Some(descriptor_set),
-                    reflection: false,
+                    descriptor_set: None,
+                    reflection: true,
                     timeout_ms: 1_000,
                     metadata: BTreeMap::new(),
                 },
@@ -2126,6 +3047,7 @@ mod tests {
                 required_resources: vec!["base".to_string()],
                 local_locks: vec!["locomotion".to_string()],
                 artifact_operation: None,
+                readiness: None,
                 workflow: WorkflowConfig {
                     execute: vec![step(
                         "dispatch",
@@ -2172,7 +3094,306 @@ mod tests {
                 metadata: BTreeMap::new(),
             }],
             artifacts: None,
+            state_exports: Vec::new(),
+            memory_providers: Vec::new(),
         }
+    }
+
+    /// Adds the exact readiness declaration required by node-config/v0.4 and later.
+    fn add_readiness(config: &mut NodeServiceConfig) {
+        config.capabilities[0].readiness = Some(CapabilityReadinessConfig {
+            step: WorkflowStepConfig {
+                id: "read-readiness".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".to_string(),
+                    path: "/capabilities/reach-region".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            state_pointer: "/state".to_string(),
+            detail_pointer: Some("/detail".to_string()),
+            ready: vec!["READY".to_string()],
+            unavailable: vec!["UNAVAILABLE".to_string()],
+            case_sensitive: false,
+        });
+    }
+
+    /// v0.6 compiles the Node ledger/handoff root and all fixed EAIOS Memory workflows.
+    #[test]
+    fn compiles_v0_6_memory_provider_workflows() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        let workflow = |id: &str, path: &str| MemoryWorkflowConfig {
+            steps: vec![WorkflowStepConfig {
+                id: id.to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "POST".to_string(),
+                    path: path.to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            }],
+            manifests_pointer: None,
+            artifact_path_pointer: None,
+        };
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "maps".to_string(),
+            owner: "motion".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: "example.map/v1".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            storage_directory: Some(PathBuf::from("maps")),
+            discover: Some(MemoryWorkflowConfig {
+                manifests_pointer: Some("/steps/discover/manifests".to_string()),
+                ..workflow("discover", "/memory/discover")
+            }),
+            export: Some(MemoryWorkflowConfig {
+                artifact_path_pointer: Some("/steps/export/path".to_string()),
+                ..workflow("export", "/memory/export")
+            }),
+            import: Some(workflow("import", "/memory/import")),
+        }];
+        let catalog = CompiledLocalCatalog::compile(config, directory.path())
+            .expect("v0.6 provider workflows compile");
+        let provider = &catalog.memory_providers()["maps"];
+        assert!(provider.discover().is_some());
+        assert!(provider.export().is_some());
+        assert!(provider.import().is_some());
+        assert_eq!(
+            provider.storage_directory(),
+            directory.path().join("state/maps")
+        );
+    }
+
+    /// v0.5 remains metadata-only and rejects executable provider workflow declarations.
+    #[test]
+    fn v0_5_rejects_memory_provider_workflows() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_5.to_string();
+        add_readiness(&mut config);
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "lessons".to_string(),
+            owner: "motion".to_string(),
+            kind: "experience".to_string(),
+            scope: "global".to_string(),
+            visibility: "discoverable".to_string(),
+            payload_schema: "example.experience/v1".to_string(),
+            media_type: "application/json".to_string(),
+            storage_directory: None,
+            discover: Some(MemoryWorkflowConfig {
+                steps: vec![WorkflowStepConfig {
+                    id: "discover".to_string(),
+                    connection: "motion-http".to_string(),
+                    operation: LocalOperationConfig::Http {
+                        method: "GET".to_string(),
+                        path: "/memory".to_string(),
+                    },
+                    request: RequestMappingConfig::default(),
+                }],
+                manifests_pointer: Some("/steps/discover/manifests".to_string()),
+                artifact_path_pointer: None,
+            }),
+            export: None,
+            import: None,
+        }];
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. }) if field == "memory_providers.lessons"
+        ));
+    }
+
+    /// Provider-local backends cannot overlap and thereby cross semantic ownership boundaries.
+    #[test]
+    fn rejects_nested_memory_provider_storage_roots() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        let provider = |id: &str, storage: &str| MemoryProviderConfig {
+            id: id.to_string(),
+            owner: "motion".to_string(),
+            kind: "semantic".to_string(),
+            scope: "global".to_string(),
+            visibility: "discoverable".to_string(),
+            payload_schema: "example.semantic/v1".to_string(),
+            media_type: "application/json".to_string(),
+            storage_directory: Some(PathBuf::from(storage)),
+            discover: None,
+            export: None,
+            import: None,
+        };
+        config.memory_providers = vec![
+            provider("semantic-a", "memory"),
+            provider("semantic-b", "memory/nested"),
+        ];
+
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "memory_providers.semantic-b.storage_directory"
+        ));
+    }
+
+    /// Generic provider configuration cannot claim the strongly verified Spatial map schema.
+    #[test]
+    fn rejects_typed_spatial_schema_in_generic_memory_provider() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        config.memory_providers = vec![MemoryProviderConfig {
+            id: "maps".to_string(),
+            owner: "motion".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: domain::SPATIAL_MEMORY_SCHEMA_V0_1.to_string(),
+            media_type: "application/octet-stream".to_string(),
+            storage_directory: None,
+            discover: None,
+            export: None,
+            import: None,
+        }];
+
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "memory_providers.maps.payload_schema"
+        ));
+    }
+
+    /// The reference backend is local, idempotent, and queryable without central replication.
+    #[test]
+    fn filesystem_memory_ledger_round_trips_jsonl_metadata() {
+        use crate::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryQuery};
+        use domain::{
+            ContentDigest, LocalSystemId, MemoryArtifactManifest, MemoryArtifactRef, MemoryId,
+            MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope, MemorySelector,
+            MemoryVisibility, NodeId, TimestampMs,
+        };
+
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = CompiledMemoryProvider {
+            id: "maps".to_string(),
+            owner: "maps".to_string(),
+            kind: "spatial".to_string(),
+            scope: "global".to_string(),
+            visibility: "exchangeable".to_string(),
+            payload_schema: "example.map/v1".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            operational: true,
+            storage_directory: directory.path().join("provider"),
+            discover: None,
+            export: None,
+            import: None,
+        };
+        let ledger = FilesystemMemoryLedger::open(descriptor.clone()).expect("ledger opens");
+        let manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("map-a").expect("memory id is valid"),
+                MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            MemoryKind::Spatial,
+            "maps",
+            MemoryOwner::Node {
+                node_id: NodeId::new("node-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("maps").expect("system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.map/v1",
+            "application/octet-stream",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("a".repeat(64)).expect("digest is valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest is valid");
+        ledger.record_export(&manifest).expect("manifest records");
+        ledger
+            .record_export(&manifest)
+            .expect("same record is idempotent");
+        let found = ledger
+            .discover_recorded(&MemoryQuery {
+                selector: Some(manifest.selector().clone()),
+                kind: Some(MemoryKind::Spatial),
+                scope: Some(MemoryScope::Global),
+                provider_id: Some("maps".to_string()),
+                payload_schema: Some("example.map/v1".to_string()),
+                owner: Some(manifest.owner().clone()),
+            })
+            .expect("recorded manifest discovers");
+        assert_eq!(found, vec![manifest.clone()]);
+        std::fs::remove_file(descriptor.storage_directory().join("manifests.jsonl"))
+            .expect("derived index removes");
+        drop(ledger);
+        let ledger_root = descriptor.storage_directory().to_path_buf();
+        let reopened = FilesystemMemoryLedger::open(descriptor).expect("ledger reopens");
+        assert_eq!(
+            reopened
+                .discover_recorded(&MemoryQuery::default())
+                .expect("index rebuilds from ledger objects"),
+            vec![manifest]
+        );
+
+        let reference_manifest = MemoryArtifactManifest::new(
+            MemorySelector::new(
+                MemoryId::new("map-b").expect("memory id is valid"),
+                MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            MemoryKind::Spatial,
+            "remote-maps",
+            MemoryOwner::Node {
+                node_id: NodeId::new("node-b").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("maps").expect("system id is valid"),
+            },
+            MemoryScope::Global,
+            MemoryVisibility::Exchangeable,
+            "example.map/v1",
+            "application/octet-stream",
+            Some(MemoryArtifactRef::new(
+                ContentDigest::new("b".repeat(64)).expect("digest is valid"),
+                1,
+            )),
+            None,
+            None,
+            None,
+            TimestampMs::new(2),
+        )
+        .expect("reference manifest is valid");
+        assert!(matches!(
+            reopened.record_import(&reference_manifest, None),
+            Err(crate::MemoryLedgerError::Configuration(_))
+        ));
+        let staged = directory.path().join("staged-map.bin");
+        std::fs::write(&staged, b"b").expect("staged reference bytes write");
+        reopened
+            .record_import(&reference_manifest, Some(&staged))
+            .expect("workflow-free reference backend imports bytes");
+        let reference_blob = format!(
+            "{}.blob",
+            reference_manifest
+                .artifact()
+                .expect("reference manifest carries bytes")
+                .content_digest()
+                .as_str()
+                .replace(':', "_")
+        );
+        assert_eq!(
+            std::fs::read(ledger_root.join(reference_blob))
+                .expect("reference bytes remain available"),
+            b"b"
+        );
     }
 
     /// Catalog compiles multiple local systems and all generic driver configurations.
@@ -2194,6 +3415,53 @@ mod tests {
         assert_eq!(
             catalog.capabilities()["mobility.reach_region@v1"].artifact_operation(),
             None
+        );
+    }
+
+    /// v0.4 requires and compiles one fixed readiness observation per exact contract.
+    #[test]
+    fn requires_exact_capability_readiness_in_v0_4() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.schema = CONFIG_SCHEMA_V0_4.to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config.clone(), directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "capabilities.mobility.reach_region@v1.readiness"
+        ));
+        config.capabilities[0].readiness = Some(CapabilityReadinessConfig {
+            step: WorkflowStepConfig {
+                id: "read-readiness".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".to_string(),
+                    path: "/capabilities/reach-region".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            state_pointer: "/state".to_string(),
+            detail_pointer: Some("/detail".to_string()),
+            ready: vec!["READY".to_string()],
+            unavailable: vec!["UNAVAILABLE".to_string()],
+            case_sensitive: false,
+        });
+
+        let mut legacy = config.clone();
+        legacy.schema = CONFIG_SCHEMA_V0_3.to_string();
+        assert!(matches!(
+            CompiledLocalCatalog::compile(legacy, directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "capabilities.mobility.reach_region@v1.readiness"
+        ));
+
+        let catalog = CompiledLocalCatalog::compile(config, directory.path())
+            .expect("v0.4 readiness observation compiles");
+        assert!(
+            catalog.capabilities()["mobility.reach_region@v1"]
+                .readiness()
+                .is_some()
         );
     }
 
@@ -2417,11 +3685,89 @@ mod tests {
         }
         assert!(matches!(
             CompiledLocalCatalog::compile(remote, directory.path()),
-            Err(CatalogError::Validation { field, .. }) if field == "connections.endpoint"
+            Err(CatalogError::Validation { field, .. })
+                if field == "connections.motion-http.endpoint"
         ));
+        let mut missing_descriptor = valid_config(missing.clone());
+        if let ConnectionConfig::Grpc {
+            descriptor_set,
+            reflection,
+            ..
+        } = &mut missing_descriptor.connections[1]
+        {
+            *descriptor_set = Some(missing.clone());
+            *reflection = false;
+        }
         assert!(matches!(
-            CompiledLocalCatalog::compile(valid_config(missing), directory.path()),
+            CompiledLocalCatalog::compile(missing_descriptor, directory.path()),
             Err(CatalogError::Validation { field, .. }) if field.contains("descriptor_set")
+        ));
+    }
+
+    /// Descriptor-backed gRPC routes are checked offline for service, method, and stream shape.
+    #[test]
+    fn validates_descriptor_backed_grpc_routes_offline() {
+        use prost::Message;
+        use prost_types::{
+            DescriptorProto, FileDescriptorProto, FileDescriptorSet, MethodDescriptorProto,
+            ServiceDescriptorProto,
+        };
+
+        let descriptor_set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("navigation.proto".to_string()),
+                package: Some("local".to_string()),
+                syntax: Some("proto3".to_string()),
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("Request".to_string()),
+                        ..DescriptorProto::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Response".to_string()),
+                        ..DescriptorProto::default()
+                    },
+                ],
+                service: vec![ServiceDescriptorProto {
+                    name: Some("Navigation".to_string()),
+                    method: vec![MethodDescriptorProto {
+                        name: Some("GetStatus".to_string()),
+                        input_type: Some(".local.Request".to_string()),
+                        output_type: Some(".local.Response".to_string()),
+                        ..MethodDescriptorProto::default()
+                    }],
+                    ..ServiceDescriptorProto::default()
+                }],
+                ..FileDescriptorProto::default()
+            }],
+        }
+        .encode_to_vec();
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor_path = directory.path().join("navigation.pb");
+        std::fs::write(&descriptor_path, descriptor_set).expect("descriptor writes");
+        let mut config = valid_config(descriptor_path.clone());
+        if let ConnectionConfig::Grpc {
+            descriptor_set,
+            reflection,
+            ..
+        } = &mut config.connections[1]
+        {
+            *descriptor_set = Some(descriptor_path.clone());
+            *reflection = false;
+        }
+        CompiledLocalCatalog::compile(config.clone(), directory.path())
+            .expect("descriptor-backed route compiles");
+
+        if let LocalOperationConfig::GrpcUnary { method, .. } =
+            &mut config.capabilities[0].workflow.status[0].operation
+        {
+            *method = "Missing".to_string();
+        }
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, reason })
+                if field == "workflow.read-state.operation"
+                    && reason.contains("absent from the descriptor set")
         ));
     }
 
@@ -2497,6 +3843,29 @@ mod tests {
                 reason: Some("stopped".to_string()),
             }
         );
+    }
+
+    /// Unknown local status values fail closed instead of being treated as terminal success.
+    #[test]
+    fn rejects_unknown_execution_state_mapping() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let catalog = CompiledLocalCatalog::compile(valid_config(descriptor), directory.path())
+            .expect("catalog compiles");
+        let workflow = catalog.capabilities()["mobility.reach_region@v1"].workflow();
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step(
+                "read-state",
+                serde_json::json!({ "state": "VENDOR_UNKNOWN" }),
+            )
+            .expect("status records");
+        assert!(matches!(
+            workflow.map_execution_state(&context),
+            Err(MappingError::MissingSource(reason))
+                if reason.contains("unmapped state")
+        ));
     }
 
     /// Startup validation rejects handles and requests that depend on unavailable facts.

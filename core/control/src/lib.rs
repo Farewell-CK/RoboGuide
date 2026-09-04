@@ -256,7 +256,7 @@ impl Display for ControlError {
 impl std::error::Error for ControlError {}
 
 /// Authoritative in-process Control Plane state for the bootstrap.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ControlPlane {
     /// Renewable lease authority pending later ownership review.
     pub(crate) leases: BTreeMap<NodeId, NodeLease>,

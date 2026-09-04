@@ -1,17 +1,26 @@
-//! Formal Node Protocol v0.2 lifecycle around the generic Local Integration Engine.
+//! Formal Node Protocol v0.3 lifecycle around the generic Local Integration Engine.
 
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
-use integration::grpc::v0_2::node_message::Message as NodePayload;
-use integration::grpc::v0_2::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
-use integration::grpc::v0_2::server_message::Message as ServerPayload;
-use integration::grpc::v0_2::{
+use integration::grpc::v0_3::node_message::Message as NodePayload;
+use integration::grpc::v0_3::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
+use integration::grpc::v0_3::server_message::Message as ServerPayload;
+use integration::grpc::v0_3::{
     Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
-    NODE_CONTRACT_VERSION, NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError,
-    Register, Resource, Sensor, ServerMessage,
+    MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NODE_CONTRACT_VERSION,
+    NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError, Register, RegistrationUpdate,
+    Resource, Sensor, ServerMessage, StateExportDescriptor, StateObjectClass, StateObservation,
+    StateObservationBatch, StateSemantic,
 };
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+/// Maximum State records carried by one Node Protocol management message.
+const MAX_STATE_BATCH_RECORDS: usize = 64;
+/// Maximum aggregate State JSON bytes carried by one management message.
+const MAX_STATE_BATCH_BYTES: usize = 512 * 1024;
 
 /// Long-running, vendor-neutral node-side RoboGuide service.
 pub struct NodeService {
@@ -39,7 +48,7 @@ impl NodeService {
         }
     }
 
-    /// Runs one Hello -> Welcome -> Register -> Registered v0.2 session.
+    /// Runs one Hello -> Welcome -> Register -> Registered v0.3 session.
     pub async fn run_session(&self) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
         let mut client =
@@ -72,10 +81,15 @@ impl NodeService {
                 "server selected an unsupported protocol or contract".to_string(),
             ));
         }
+        let initial_observation = self.engine.observe().await;
+        let initial_readiness = readiness_snapshot(&initial_observation);
         outbound
             .send(NodeMessage {
                 message: Some(NodePayload::Register(Register {
-                    registration: Some(registration_from_catalog(catalog)),
+                    registration: Some(registration_from_observation(
+                        catalog,
+                        &initial_observation,
+                    )),
                 })),
             })
             .map_err(|_| NodeServiceError::Closed)?;
@@ -87,12 +101,21 @@ impl NodeService {
         };
         let mut local_events = self.engine.subscribe();
         self.replay_snapshots(&registered.session_id, &outbound)?;
+        let management_sequence = Arc::new(tokio::sync::Mutex::new(0_u64));
         let heartbeat_task = self.spawn_heartbeat(
             registered.session_id.clone(),
             registered.lease_id.clone(),
             welcome.heartbeat_interval_ms.max(1),
             outbound.clone(),
+            initial_readiness,
+            Arc::clone(&management_sequence),
         );
+        let state_task = self.spawn_state_observations(
+            registered.session_id.clone(),
+            outbound.clone(),
+            management_sequence,
+        );
+        let memory_task = self.spawn_memory_exports(registered.session_id.clone());
         let session_result: Result<(), NodeServiceError> = async {
             loop {
                 tokio::select! {
@@ -117,6 +140,8 @@ impl NodeService {
             }
         }.await;
         heartbeat_task.abort();
+        state_task.abort();
+        memory_task.abort();
         session_result
     }
 
@@ -127,28 +152,211 @@ impl NodeService {
         lease_id: String,
         interval_ms: u64,
         outbound: mpsc::UnboundedSender<NodeMessage>,
+        mut previous_readiness: BTreeMap<String, bool>,
+        sequence: Arc<tokio::sync::Mutex<u64>>,
     ) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
             let mut heartbeat =
                 tokio::time::interval(std::time::Duration::from_millis(interval_ms));
-            let mut sequence = 0_u64;
             loop {
                 heartbeat.tick().await;
-                sequence = sequence.saturating_add(1);
-                let status = engine.status().await;
-                if outbound
-                    .send(NodeMessage {
-                        message: Some(NodePayload::Heartbeat(Heartbeat {
-                            session_id: session_id.clone(),
-                            lease_id: lease_id.clone(),
-                            sequence,
-                            status: Some(status),
-                        })),
+                let observation = engine.observe().await;
+                let mut sequence = sequence.lock().await;
+                for message in management_messages(
+                    &session_id,
+                    &lease_id,
+                    &mut sequence,
+                    engine.catalog(),
+                    &observation,
+                    &mut previous_readiness,
+                ) {
+                    if outbound.send(message).is_err() {
+                        return;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Periodically samples configured State channels without coupling failure to heartbeat health.
+    fn spawn_state_observations(
+        &self,
+        session_id: String,
+        outbound: mpsc::UnboundedSender<NodeMessage>,
+        sequence: Arc<tokio::sync::Mutex<u64>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let engine = self.engine.clone();
+        tokio::spawn(async move {
+            let intervals = engine
+                .catalog()
+                .state_exports()
+                .iter()
+                .map(|(id, export)| (id.clone(), export.interval_ms()))
+                .collect::<BTreeMap<_, _>>();
+            let Some(minimum_interval) = intervals.values().copied().min() else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            let mut next_due = intervals
+                .keys()
+                .cloned()
+                .map(|id| (id, tokio::time::Instant::now()))
+                .collect::<BTreeMap<_, _>>();
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_millis(minimum_interval));
+            loop {
+                ticker.tick().await;
+                let now = tokio::time::Instant::now();
+                let due = next_due
+                    .iter_mut()
+                    .filter_map(|(id, due_at)| {
+                        if now < *due_at {
+                            return None;
+                        }
+                        let interval = intervals[id];
+                        *due_at = now + std::time::Duration::from_millis(interval);
+                        Some(id.clone())
                     })
-                    .is_err()
-                {
-                    break;
+                    .collect::<BTreeSet<_>>();
+                let facts = engine.observe_state_exports(&due).await;
+                if facts.is_empty() {
+                    continue;
+                }
+                let batches = state_observation_batches(facts);
+                if batches.is_empty() {
+                    continue;
+                }
+                let mut sequence = sequence.lock().await;
+                for observations in batches {
+                    *sequence = sequence.saturating_add(1);
+                    if outbound
+                        .send(NodeMessage {
+                            message: Some(NodePayload::StateObservationBatch(
+                                StateObservationBatch {
+                                    session_id: session_id.clone(),
+                                    sequence: *sequence,
+                                    observations,
+                                },
+                            )),
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Periodically publishes the provider-authorized Memory set via the Artifact data plane.
+    ///
+    /// `discover` is the provider's publish-eligibility decision. Node Service performs only the
+    /// publication mechanism and mechanical safety checks; it does not promote or select from all
+    /// Local EAIOS Memory. ExecutionGroup-scoped items are excluded because complete distributed
+    /// Group authorization/handoff is not part of the current Node Protocol.
+    fn spawn_memory_exports(&self, session_id: String) -> tokio::task::JoinHandle<()> {
+        let engine = self.engine.clone();
+        tokio::spawn(async move {
+            if engine.catalog().memory_providers().is_empty() || engine.artifact_stager().is_none()
+            {
+                std::future::pending::<()>().await;
+                return;
+            }
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                let provider_ids = engine
+                    .catalog()
+                    .memory_providers()
+                    .values()
+                    .filter(|provider| provider.operational())
+                    .map(|provider| provider.id().to_string())
+                    .collect::<Vec<_>>();
+                for provider_id in provider_ids {
+                    let invocation = serde_json::json!({
+                        "node_id": engine.catalog().node_id(),
+                        "provider_id": provider_id,
+                    });
+                    let publish_eligible_manifests = match engine
+                        .discover_memories(
+                            &provider_id,
+                            &crate::MemoryQuery::default(),
+                            invocation.clone(),
+                        )
+                        .await
+                    {
+                        Ok(manifests) => manifests,
+                        Err(error) => {
+                            eprintln!("Memory discovery for {provider_id} will retry: {error}");
+                            continue;
+                        }
+                    };
+                    for manifest in publish_eligible_manifests {
+                        if matches!(manifest.scope(), domain::MemoryScope::ExecutionGroup(_)) {
+                            continue;
+                        }
+                        if let Err(error) = engine.validate_memory_export(&provider_id, &manifest) {
+                            eprintln!(
+                                "Memory discovery for {} returned an inadmissible export: {error}",
+                                manifest.selector()
+                            );
+                            continue;
+                        }
+                        let artifact_path = match engine
+                            .export_memory(&provider_id, &manifest, invocation.clone())
+                            .await
+                        {
+                            Ok(path) => path,
+                            Err(error) => {
+                                eprintln!(
+                                    "Memory export for {} will retry: {error}",
+                                    manifest.selector()
+                                );
+                                continue;
+                            }
+                        };
+                        let Some(stager) = engine.artifact_stager() else {
+                            eprintln!(
+                                "Memory publication for {} requires the Artifact data plane",
+                                manifest.selector()
+                            );
+                            continue;
+                        };
+                        if manifest.visibility() == domain::MemoryVisibility::Exchangeable {
+                            let Some(path) = artifact_path else {
+                                eprintln!(
+                                    "Memory export for {} lacks its configured artifact path",
+                                    manifest.selector()
+                                );
+                                continue;
+                            };
+                            if let Err(error) = stager.upload_memory_output(&manifest, &path).await
+                            {
+                                eprintln!(
+                                    "Memory Artifact upload for {} will retry: {error}",
+                                    manifest.selector()
+                                );
+                                continue;
+                            }
+                        }
+                        let node_id = match domain::NodeId::new(engine.catalog().node_id()) {
+                            Ok(node_id) => node_id,
+                            Err(error) => {
+                                eprintln!("Memory publisher Node identity is invalid: {error}");
+                                continue;
+                            }
+                        };
+                        if let Err(error) = stager
+                            .publish_memory(&manifest, &node_id, &session_id)
+                            .await
+                        {
+                            eprintln!(
+                                "Memory publication for {} is fenced until retry: {error}",
+                                manifest.selector()
+                            );
+                        }
+                    }
                 }
             }
         })
@@ -230,6 +438,41 @@ impl NodeService {
     }
 }
 
+/// Encodes sampled State facts into protocol-bounded deterministic batches.
+fn state_observation_batches(facts: Vec<crate::StateExportFact>) -> Vec<Vec<StateObservation>> {
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut current_bytes = 0usize;
+    for fact in facts {
+        let Ok(json_value) = serde_json::to_vec(&fact.value) else {
+            continue;
+        };
+        if json_value.len() > domain::MAX_STATE_PAYLOAD_BYTES {
+            continue;
+        }
+        if !current.is_empty()
+            && (current.len() == MAX_STATE_BATCH_RECORDS
+                || current_bytes.saturating_add(json_value.len()) > MAX_STATE_BATCH_BYTES)
+        {
+            batches.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current_bytes = current_bytes.saturating_add(json_value.len());
+        current.push(StateObservation {
+            export_id: fact.export_id,
+            json_value,
+            has_source_observed_at: fact.source_observed_at_ms.is_some(),
+            source_observed_at_ms: fact.source_observed_at_ms.unwrap_or_default(),
+            has_confidence: fact.confidence_millionths.is_some(),
+            confidence_millionths: fact.confidence_millionths.unwrap_or_default(),
+        });
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
+}
+
 /// Sends an explicit local rejection without changing execution terminal state.
 fn send_local_rejection(
     outbound: &mpsc::UnboundedSender<NodeMessage>,
@@ -250,8 +493,74 @@ fn send_local_rejection(
         .map_err(|_| NodeServiceError::Closed)
 }
 
-/// Builds a complete v0.2 registration from the immutable compiled catalog.
+/// Builds a legacy complete registration with static-ready capability facts.
+#[cfg(test)]
 fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegistration {
+    let readiness = catalog
+        .capabilities()
+        .keys()
+        .cloned()
+        .map(|contract| (contract, true))
+        .collect();
+    registration_from_readiness(catalog, &readiness)
+}
+
+/// Builds a complete registration from one current health/readiness observation.
+fn registration_from_observation(
+    catalog: &crate::CompiledLocalCatalog,
+    observation: &crate::NodeObservation,
+) -> NodeRegistration {
+    registration_from_readiness(catalog, &readiness_snapshot(observation))
+}
+
+/// Extracts the comparable exact-contract availability snapshot from one observation.
+fn readiness_snapshot(observation: &crate::NodeObservation) -> BTreeMap<String, bool> {
+    observation
+        .capabilities()
+        .iter()
+        .map(|(contract, fact)| (contract.clone(), fact.available))
+        .collect()
+}
+
+/// Builds an ordered management batch with one monotonic sequence shared by updates and heartbeats.
+fn management_messages(
+    session_id: &str,
+    lease_id: &str,
+    sequence: &mut u64,
+    catalog: &crate::CompiledLocalCatalog,
+    observation: &crate::NodeObservation,
+    previous_readiness: &mut BTreeMap<String, bool>,
+) -> Vec<NodeMessage> {
+    let readiness = readiness_snapshot(observation);
+    let mut messages = Vec::with_capacity(2);
+    if readiness != *previous_readiness {
+        *sequence = sequence.saturating_add(1);
+        messages.push(NodeMessage {
+            message: Some(NodePayload::RegistrationUpdate(RegistrationUpdate {
+                session_id: session_id.to_string(),
+                sequence: *sequence,
+                registration: Some(registration_from_observation(catalog, observation)),
+            })),
+        });
+        *previous_readiness = readiness;
+    }
+    *sequence = sequence.saturating_add(1);
+    messages.push(NodeMessage {
+        message: Some(NodePayload::Heartbeat(Heartbeat {
+            session_id: session_id.to_string(),
+            lease_id: lease_id.to_string(),
+            sequence: *sequence,
+            status: Some(observation.status().clone()),
+        })),
+    });
+    messages
+}
+
+/// Builds one wire registration from a complete exact-contract availability snapshot.
+fn registration_from_readiness(
+    catalog: &crate::CompiledLocalCatalog,
+    readiness: &BTreeMap<String, bool>,
+) -> NodeRegistration {
     let local_systems = catalog
         .local_systems()
         .values()
@@ -269,7 +578,10 @@ fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegis
         .values()
         .map(|capability| Capability {
             kind: capability.kind().to_string(),
-            available: true,
+            available: readiness
+                .get(capability.contract())
+                .copied()
+                .unwrap_or_else(|| capability.readiness().is_none()),
             contracts: vec![capability.contract().to_string()],
             local_system_id: capability.owner().to_string(),
         })
@@ -295,6 +607,57 @@ fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegis
             local_system_id: sensor.owner().to_string(),
         })
         .collect();
+    let state_exports = catalog
+        .state_exports()
+        .values()
+        .map(|export| StateExportDescriptor {
+            export_id: export.id().to_string(),
+            local_system_id: export.owner().to_string(),
+            object_class: match export.object_class() {
+                "node" => StateObjectClass::Node as i32,
+                "world" => StateObjectClass::World as i32,
+                _ => StateObjectClass::Unspecified as i32,
+            },
+            object_type: export.object_type().to_string(),
+            object_id: export.object_id().to_string(),
+            semantic: match export.semantic() {
+                "reported" => StateSemantic::Reported as i32,
+                "observed" => StateSemantic::Observed as i32,
+                _ => StateSemantic::Unspecified as i32,
+            },
+            payload_schema: export.payload_schema().to_string(),
+            valid_for_ms: export.valid_for_ms(),
+        })
+        .collect();
+    let memory_providers = catalog
+        .memory_providers()
+        .values()
+        .map(|provider| MemoryProviderDescriptor {
+            provider_id: provider.id().to_string(),
+            local_system_id: provider.owner().to_string(),
+            kind: match provider.kind() {
+                "execution" => MemoryKind::Execution as i32,
+                "spatial" => MemoryKind::Spatial as i32,
+                "semantic" => MemoryKind::Semantic as i32,
+                "experience" => MemoryKind::Experience as i32,
+                "artifact" => MemoryKind::Artifact as i32,
+                _ => MemoryKind::Unspecified as i32,
+            },
+            scope: match provider.scope() {
+                "local" => MemoryScopeKind::Local as i32,
+                "global" => MemoryScopeKind::Global as i32,
+                _ => MemoryScopeKind::Unspecified as i32,
+            },
+            execution_group_id: String::new(),
+            visibility: match provider.visibility() {
+                "discoverable" => MemoryVisibility::Discoverable as i32,
+                "exchangeable" => MemoryVisibility::Exchangeable as i32,
+                _ => MemoryVisibility::Unspecified as i32,
+            },
+            payload_schema: provider.payload_schema().to_string(),
+            media_type: provider.media_type().to_string(),
+        })
+        .collect();
     NodeRegistration {
         node_id: catalog.node_id().to_string(),
         local_systems,
@@ -303,6 +666,8 @@ fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegis
         resources,
         metadata: Default::default(),
         node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        state_exports,
+        memory_providers,
     }
 }
 
@@ -362,13 +727,14 @@ mod tests {
     };
     use crate::{
         ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactServiceConfig,
-        CapabilityBindingConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
-        LocalOperationConfig, LocalSystemConfig, NodeServiceConfig, RequestMappingConfig,
-        ResourceConfig, ValueExpressionConfig, WorkflowConfig, WorkflowStepConfig,
+        CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+        ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+        NodeServiceConfig, RequestMappingConfig, ResourceConfig, ValueExpressionConfig,
+        WorkflowConfig, WorkflowStepConfig,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// Builds one complete MissionPlan for the Node Service end-to-end authority path.
     fn single_task_plan(
@@ -591,7 +957,7 @@ mod tests {
             registration_from_catalog(dog_a.catalog()),
             registration_from_catalog(dog_b.catalog()),
         ];
-        let mut bridge = integration::IntegrationRuntimeBridge::new(
+        let mut bridge = orchestration::IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
             testkit::InMemoryEventLog::new(),
@@ -700,6 +1066,13 @@ mod tests {
                         serde_json::json!({ "state": "RUNNING", "detail": "moving" })
                     }
                     "/cancel" => serde_json::json!({ "accepted": true }),
+                    "/readiness" if self.completed.load(Ordering::SeqCst) => {
+                        serde_json::json!({ "state": "READY", "detail": "service available" })
+                    }
+                    "/readiness" => serde_json::json!({
+                        "state": "UNAVAILABLE",
+                        "detail": "service unavailable"
+                    }),
                     _ => return Err(DriverError::InvalidResponse("unknown mock path".into())),
                 };
                 let (sender, receiver) = tokio::sync::mpsc::channel(1);
@@ -715,12 +1088,36 @@ mod tests {
         }
     }
 
+    /// Driver that models a request timeout without revealing whether the local call started.
+    struct TimeoutDriver {
+        /// Number of local dispatch attempts observed by the test facade.
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl LocalDriver for TimeoutDriver {
+        /// This mock uses the configured HTTP workflow family.
+        fn kind(&self) -> DriverKind {
+            DriverKind::Http
+        }
+
+        /// Returns an ambiguous transport timeout after counting one dispatch attempt.
+        fn invoke<'a>(&'a self, _request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
+            let calls = Arc::clone(&self.calls);
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(DriverError::Transport(
+                    "local request timed out".to_string(),
+                ))
+            })
+        }
+    }
+
     /// Builds one immutable generic workflow catalog for the end-to-end test.
     fn gated_catalog(
         endpoint: String,
         state_directory: std::path::PathBuf,
     ) -> crate::CompiledLocalCatalog {
-        gated_catalog_with_artifacts(endpoint, state_directory, None)
+        gated_catalog_with_artifacts(endpoint, state_directory, None, false)
     }
 
     /// Builds the generic test catalog with one optional immutable map-input binding.
@@ -728,6 +1125,7 @@ mod tests {
         endpoint: String,
         state_directory: std::path::PathBuf,
         artifact_endpoint: Option<String>,
+        readiness: bool,
     ) -> crate::CompiledLocalCatalog {
         let step = |id: &str, path: &str, request: RequestMappingConfig| WorkflowStepConfig {
             id: id.to_string(),
@@ -766,7 +1164,9 @@ mod tests {
         let artifact_operation = artifacts.as_ref().map(|_| ArtifactOperationConfig::Import);
         crate::CompiledLocalCatalog::compile(
             NodeServiceConfig {
-                schema: if artifacts.is_some() {
+                schema: if readiness {
+                    crate::CONFIG_SCHEMA_V0_4.to_string()
+                } else if artifacts.is_some() {
                     crate::CONFIG_SCHEMA_V0_3.to_string()
                 } else {
                     crate::CONFIG_SCHEMA_V0_2.to_string()
@@ -804,6 +1204,14 @@ mod tests {
                     required_resources: vec!["base".to_string()],
                     local_locks: vec!["locomotion".to_string()],
                     artifact_operation,
+                    readiness: readiness.then(|| CapabilityReadinessConfig {
+                        step: step("readiness", "/readiness", RequestMappingConfig::default()),
+                        state_pointer: "/state".to_string(),
+                        detail_pointer: Some("/detail".to_string()),
+                        ready: vec!["READY".to_string()],
+                        unavailable: vec!["UNAVAILABLE".to_string()],
+                        case_sensitive: false,
+                    }),
                     workflow: WorkflowConfig {
                         execute: vec![step(
                             "dispatch",
@@ -846,6 +1254,8 @@ mod tests {
                 ],
                 sensors: Vec::new(),
                 artifacts,
+                state_exports: Vec::new(),
+                memory_providers: Vec::new(),
             },
             std::path::Path::new("."),
         )
@@ -869,6 +1279,119 @@ mod tests {
         assert!(status.detail.contains("local runtime is unavailable"));
     }
 
+    /// Exact readiness changes registration availability without changing healthy process state.
+    #[tokio::test]
+    async fn capability_readiness_is_observed_independently_from_health() {
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let ready = Arc::new(AtomicBool::new(false));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog_with_artifacts(
+                "http://127.0.0.1:50051".to_string(),
+                state_dir.path().to_path_buf(),
+                None,
+                true,
+            ),
+            vec![Arc::new(GatedDriver {
+                completed: ready.clone(),
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+
+        let unavailable = engine.observe().await;
+        assert_eq!(unavailable.status().health, "online");
+        let unavailable_registration =
+            registration_from_observation(engine.catalog(), &unavailable);
+        assert!(!unavailable_registration.capabilities[0].available);
+
+        ready.store(true, Ordering::SeqCst);
+        let available = engine.observe().await;
+        assert_eq!(available.status().health, "online");
+        let available_registration = registration_from_observation(engine.catalog(), &available);
+        assert!(available_registration.capabilities[0].available);
+
+        let mut sequence = 0;
+        let mut previous = readiness_snapshot(&unavailable);
+        let changed = management_messages(
+            "session-a",
+            "lease-a",
+            &mut sequence,
+            engine.catalog(),
+            &available,
+            &mut previous,
+        );
+        assert_eq!(changed.len(), 2);
+        assert!(matches!(
+            changed[0].message,
+            Some(NodePayload::RegistrationUpdate(RegistrationUpdate {
+                sequence: 1,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            changed[1].message,
+            Some(NodePayload::Heartbeat(Heartbeat { sequence: 2, .. }))
+        ));
+        let unchanged = management_messages(
+            "session-a",
+            "lease-a",
+            &mut sequence,
+            engine.catalog(),
+            &available,
+            &mut previous,
+        );
+        assert!(matches!(
+            unchanged.as_slice(),
+            [NodeMessage {
+                message: Some(NodePayload::Heartbeat(Heartbeat { sequence: 3, .. }))
+            }]
+        ));
+    }
+
+    /// State samples split deterministically across both record-count and byte limits.
+    #[test]
+    fn state_observation_batches_respect_protocol_bounds() {
+        let count_limited = (0..65)
+            .map(|index| crate::StateExportFact {
+                export_id: format!("state-{index:02}"),
+                value: serde_json::json!(true),
+                source_observed_at_ms: None,
+                confidence_millionths: None,
+            })
+            .collect();
+        let batches = state_observation_batches(count_limited);
+        assert_eq!(batches.iter().map(Vec::len).collect::<Vec<_>>(), [64, 1]);
+
+        let byte_limited = (0..9)
+            .map(|index| crate::StateExportFact {
+                export_id: format!("payload-{index}"),
+                value: serde_json::json!("x".repeat(60 * 1024)),
+                source_observed_at_ms: Some(index),
+                confidence_millionths: Some(500_000),
+            })
+            .collect();
+        let batches = state_observation_batches(byte_limited);
+        assert_eq!(batches.iter().map(Vec::len).collect::<Vec<_>>(), [8, 1]);
+        assert!(batches.iter().all(|batch| {
+            batch
+                .iter()
+                .map(|observation| observation.json_value.len())
+                .sum::<usize>()
+                <= MAX_STATE_BATCH_BYTES
+        }));
+    }
+
+    /// Oversized public facts fail closed before transport if a caller bypasses local mapping.
+    #[test]
+    fn state_observation_batches_drop_oversized_fact() {
+        let batches = state_observation_batches(vec![crate::StateExportFact {
+            export_id: "oversized".to_string(),
+            value: serde_json::json!("x".repeat(domain::MAX_STATE_PAYLOAD_BYTES)),
+            source_observed_at_ms: None,
+            confidence_millionths: None,
+        }]);
+        assert!(batches.is_empty());
+    }
+
     /// Resource IDs are an unordered semantic set for execution identity.
     #[tokio::test]
     async fn execution_identity_canonicalizes_resource_order() {
@@ -883,7 +1406,7 @@ mod tests {
             }) as Arc<dyn LocalDriver>],
         )
         .expect("engine initializes");
-        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -913,6 +1436,139 @@ mod tests {
         ));
     }
 
+    /// A transport timeout fences physical ambiguity and never dispatches the same identity twice.
+    #[tokio::test]
+    async fn transport_timeout_requires_reconciliation_without_replay() {
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog(
+                "http://127.0.0.1:50051".to_string(),
+                state_dir.path().to_path_buf(),
+            ),
+            vec![Arc::new(TimeoutDriver {
+                calls: Arc::clone(&calls),
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
+            mission_id: "mission-a".to_string(),
+            task_id: "task-timeout".to_string(),
+            group_id: "group-a".to_string(),
+            role_id: "carrier".to_string(),
+            capability_contract: "mobility.reach_region@v1".to_string(),
+            ..Default::default()
+        };
+        let mut events = engine.subscribe();
+        assert_eq!(
+            engine
+                .execute(
+                    "timeout-execution".to_string(),
+                    invocation.clone(),
+                    vec!["base".to_string()],
+                )
+                .expect("timeout dispatch starts"),
+            crate::ExecuteDisposition::Started
+        );
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+            .await
+            .expect("timeout evidence arrives")
+            .expect("timeout evidence exists");
+        assert_eq!(
+            event.phase,
+            integration::grpc::v0_3::ExecutionPhase::Unknown
+        );
+        let journal =
+            crate::ExecutionJournal::open(crate::journal_path(engine.catalog().state_directory()))
+                .expect("journal opens");
+        assert_eq!(
+            journal
+                .get("timeout-execution")
+                .expect("record reads")
+                .expect("record exists")
+                .status(),
+            crate::JournalStatus::ReconciliationRequired
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            engine.execute(
+                "timeout-execution".to_string(),
+                invocation,
+                vec!["base".to_string()],
+            ),
+            Ok(crate::ExecuteDisposition::Existing(_))
+        ));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "repeating an ambiguous identity must not redispatch"
+        );
+    }
+
+    /// Controller rejection prevents `Registered` and removes the pending command route.
+    #[tokio::test]
+    async fn controller_registration_rejection_is_visible_to_node() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let (events, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (grpc_service, router) = integration::GrpcIntegrationService::new(events);
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(
+                    integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
+                        grpc_service,
+                    ),
+                )
+                .serve_with_incoming(incoming)
+                .await
+        });
+        let state_dir = tempfile::tempdir().expect("state directory exists");
+        let terminal = Arc::new(AtomicBool::new(false));
+        let engine = crate::LocalIntegrationEngine::new(
+            gated_catalog(format!("http://{address}"), state_dir.path().to_path_buf()),
+            vec![Arc::new(GatedDriver {
+                completed: terminal,
+            }) as Arc<dyn LocalDriver>],
+        )
+        .expect("engine initializes");
+        let node_task = tokio::spawn(async move { NodeService::new(engine).run_session().await });
+
+        let delivery =
+            tokio::time::timeout(std::time::Duration::from_secs(2), event_receiver.recv())
+                .await
+                .expect("registration arrives")
+                .expect("registration delivery exists");
+        let (event, completion) = delivery.into_parts();
+        assert!(matches!(
+            event,
+            integration::GrpcNodeEvent::Registered { .. }
+        ));
+        completion.reject("global resource conflict");
+
+        let error = tokio::time::timeout(std::time::Duration::from_secs(2), node_task)
+            .await
+            .expect("Node observes rejection")
+            .expect("Node task joins")
+            .expect_err("registration does not succeed");
+        assert!(matches!(
+            error,
+            NodeServiceError::Status(status)
+                if status.code() == tonic::Code::FailedPrecondition
+                    && status.message().contains("global resource conflict")
+        ));
+        assert_eq!(
+            router
+                .cancel("dog-a", "execution-rejected".to_string())
+                .expect_err("rejected registration has no route")
+                .code(),
+            tonic::Code::Unavailable
+        );
+        server.abort();
+    }
+
     /// Control-bound command reaches the local engine and terminates only on a local terminal fact.
     #[tokio::test]
     async fn control_bound_command_round_trips_through_generic_engine() {
@@ -924,11 +1580,10 @@ mod tests {
             NodeStatus as DomainStatus, Resource as DomainResource, ResourceId, ResourceKind,
             RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
         };
-        use integration::grpc::v0_2::CanonicalInvocation;
-        use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
-        use integration::{
-            GrpcIntegrationService, IntegrationRuntimeBridge, RemoteExecutionStatus,
-        };
+        use integration::GrpcIntegrationService;
+        use integration::grpc::v0_3::CanonicalInvocation;
+        use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+        use orchestration::{IntegrationRuntimeBridge, RemoteExecutionStatus};
         use state::InMemorySharedNodeState;
         use testkit::InMemoryEventLog;
 
@@ -964,7 +1619,7 @@ mod tests {
         let registration = DomainRegistration::new_with_contracts(
             NodeId::new("dog-a").expect("node valid"),
             LocalRuntime::new("configured-runtime", "1").expect("runtime valid"),
-            NodeContractVersion::new(integration::grpc::v0_2::NODE_CONTRACT_VERSION)
+            NodeContractVersion::new(integration::grpc::v0_3::NODE_CONTRACT_VERSION)
                 .expect("contract version valid"),
             vec![Capability::new(CapabilityKind::Mobility, true)],
             vec![contract.clone()],
@@ -1078,9 +1733,21 @@ mod tests {
                 .await
                 .expect("registration arrives")
                 .expect("registration exists");
+        let (registered, registration_completion) = registered.into_parts();
         bridge
             .consume(registered, TimestampMs::new(1), &correlation)
             .expect("registration consumed");
+        registration_completion.accept();
+        let heartbeat =
+            tokio::time::timeout(std::time::Duration::from_secs(2), event_receiver.recv())
+                .await
+                .expect("post-registration heartbeat arrives")
+                .expect("heartbeat exists");
+        let (heartbeat, heartbeat_completion) = heartbeat.into_parts();
+        bridge
+            .consume(heartbeat, TimestampMs::new(2), &correlation)
+            .expect("heartbeat consumed after route activation");
+        heartbeat_completion.accept();
         let command = bridge
             .execute_task_bound(
                 "execution-e2e".to_string(),
@@ -1098,9 +1765,11 @@ mod tests {
                     .await
                     .expect("running event arrives")
                     .expect("running event exists");
+            let (event, completion) = event.into_parts();
             bridge
-                .consume(event, TimestampMs::new(2), &correlation)
+                .consume(event, TimestampMs::new(3), &correlation)
                 .expect("running event consumed");
+            completion.accept();
         }
         assert_ne!(
             bridge.execution_status("execution-e2e"),
@@ -1129,9 +1798,11 @@ mod tests {
                     .await
                     .expect("terminal event arrives")
                     .expect("terminal event exists");
+            let (event, completion) = event.into_parts();
             bridge
-                .consume(event, TimestampMs::new(3), &correlation)
+                .consume(event, TimestampMs::new(4), &correlation)
                 .expect("terminal event consumed");
+            completion.accept();
         }
         assert_eq!(
             engine
@@ -1197,7 +1868,7 @@ mod tests {
         )
         .expect("engine reopens journal");
         engine.recover().expect("ambiguous execution is fenced");
-        let competing = integration::grpc::v0_2::CanonicalInvocation {
+        let competing = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -1276,10 +1947,10 @@ mod tests {
         assert_eq!(event.execution_id, "handle-recovered");
         assert_eq!(
             event.phase,
-            integration::grpc::v0_2::ExecutionPhase::Started
+            integration::grpc::v0_3::ExecutionPhase::Started
         );
 
-        let competing = integration::grpc::v0_2::CanonicalInvocation {
+        let competing = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-b".to_string(),
             group_id: "group-a".to_string(),
@@ -1452,7 +2123,7 @@ mod tests {
             "restart must not status-poll a completed local execution and freeze the source again"
         );
 
-        let invocation = integration::grpc::v0_2::CanonicalInvocation {
+        let invocation = integration::grpc::v0_3::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "build-map".to_string(),
             group_id: "group-a".to_string(),
@@ -1500,8 +2171,8 @@ mod tests {
             ContentDigest, MapArtifactManifest, MapArtifactRef, MapId, MapRevisionId,
             MapRevisionSelector, MissionId, NodeId, SpatialAnchorId, TimestampMs,
         };
-        use integration::grpc::v0_2::scalar_value::Value as Scalar;
-        use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, ScalarValue};
+        use integration::grpc::v0_3::scalar_value::Value as Scalar;
+        use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ScalarValue};
         use sha2::Digest;
         use std::collections::HashMap;
         use std::sync::atomic::AtomicUsize;
@@ -1586,6 +2257,7 @@ mod tests {
             "http://127.0.0.1:50051".to_string(),
             state_dir.path().to_path_buf(),
             Some(format!("http://{address}")),
+            false,
         );
         let parameters = HashMap::from([
             (

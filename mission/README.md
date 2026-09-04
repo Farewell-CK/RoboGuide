@@ -6,13 +6,16 @@ Execution Group 或本地设备控制。
 
 ## 目录
 
-- `src/mission/`：Mission Request 状态机、SQLite store、Controller client、合同值、Responses
-  Interpreter/Planner、HTTP API 和 CLI；
+- `src/mission/`：Mission Request 状态机、resolved GroundedIntent handoff、SQLite store、
+  Controller client、合同值、Responses Interpreter/Planner、HTTP API 和 CLI；
 - `prompts/v0/`：独立版本化的 Interpreter、Planner 与 Reviewer Prompt；
 - `tests/`：合同、配置、安全边界和 Fake Responses 的离线测试；
-- `../contracts/mission/v0.2/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role
-  execution intent 和 Task/Context resource scope 的 MissionPlan v0.2 Schema；
-- `../contracts/mission/request-v0.1/` 与 `inventory-v0.1/`：文本请求状态投影和只读
+- `../contracts/mission/v0.4/`：Python 与 Rust 共同遵守、含 Context/ContextRole、role
+  execution intent、Task/Context resource scope、typed execution relations、coupling mode、
+  selective Group shared view 和 peer channel descriptor 的当前 MissionPlan Schema；v0.3
+  继续作为兼容输入；
+- `../contracts/mission/request-v0.1/` 与 `inventory-v0.1/`：文本请求状态投影（可恢复嵌入
+  v0.3、当前输出 v0.4）和只读
   规划预检快照；旧 `v0/` 继续保留，避免静默改写已版本化合同。
 
 模型配置位于 `config/mission.toml`，服务/risk policy 位于 `config/mission-service.toml`，

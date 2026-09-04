@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+package roboguide.node.v0_3;
+
+// Formal RoboGuide Node Protocol v0.3 bidirectional session.
+service RoboGuideNodeProtocol {
+  rpc NodeSession(stream NodeMessage) returns (stream ServerMessage);
+}
+
+message NodeMessage {
+  oneof message {
+    Hello hello = 1;
+    Register register = 2;
+    Heartbeat heartbeat = 3;
+    RegistrationUpdate registration_update = 4;
+    ExecutionEvent execution_event = 5;
+    ExecutionSnapshot execution_snapshot = 6;
+    ProtocolError error = 7;
+    StateObservationBatch state_observation_batch = 8;
+  }
+}
+
+message ServerMessage {
+  oneof message {
+    Welcome welcome = 1;
+    Registered registered = 2;
+    Execute execute = 3;
+    Cancel cancel = 4;
+    Ack ack = 5;
+    ProtocolError error = 6;
+  }
+}
+
+message Hello {
+  string node_id = 1;
+  repeated string protocol_versions = 2;
+  repeated string node_contract_versions = 3;
+}
+
+message Welcome {
+  string server_version = 1;
+  string selected_protocol_version = 2;
+  string selected_node_contract_version = 3;
+  uint64 heartbeat_interval_ms = 4;
+  uint64 lease_duration_ms = 5;
+}
+
+message Register { NodeRegistration registration = 1; }
+
+message Registered {
+  string session_id = 1;
+  string lease_id = 2;
+}
+
+message NodeRegistration {
+  string node_id = 1;
+  repeated LocalSystemDescriptor local_systems = 2;
+  repeated Capability capabilities = 3;
+  repeated Sensor sensors = 4;
+  repeated Resource resources = 5;
+  map<string, string> metadata = 6;
+  string node_contract_version = 7;
+  repeated StateExportDescriptor state_exports = 8;
+  repeated MemoryProviderDescriptor memory_providers = 9;
+}
+
+message LocalSystemDescriptor {
+  string id = 1;
+  LocalRuntime runtime = 2;
+  map<string, string> metadata = 3;
+}
+
+message LocalRuntime { string name = 1; string version = 2; }
+
+message Capability {
+  string kind = 1;
+  bool available = 2;
+  repeated string contracts = 3;
+  string local_system_id = 4;
+}
+
+message Sensor {
+  string id = 1;
+  string kind = 2;
+  map<string, string> metadata = 3;
+  string local_system_id = 4;
+}
+
+message Resource {
+  string id = 1;
+  string kind = 2;
+  uint32 capacity = 3;
+  map<string, string> metadata = 4;
+  string local_system_id = 5;
+}
+
+enum StateObjectClass {
+  STATE_OBJECT_CLASS_UNSPECIFIED = 0;
+  NODE = 1;
+  WORLD = 2;
+  ROBOGUIDE = 3;
+}
+
+enum StateSemantic {
+  STATE_SEMANTIC_UNSPECIFIED = 0;
+  DESIRED = 1;
+  COMMITTED = 2;
+  REPORTED = 3;
+  OBSERVED = 4;
+  DERIVED = 5;
+  BELIEF = 6;
+}
+
+message StateExportDescriptor {
+  string export_id = 1;
+  string local_system_id = 2;
+  StateObjectClass object_class = 3;
+  string object_type = 4;
+  string object_id = 5;
+  StateSemantic semantic = 6;
+  string payload_schema = 7;
+  uint64 valid_for_ms = 8;
+}
+
+enum MemoryKind {
+  MEMORY_KIND_UNSPECIFIED = 0;
+  EXECUTION = 1;
+  SPATIAL = 2;
+  SEMANTIC = 3;
+  EXPERIENCE = 4;
+  ARTIFACT = 5;
+}
+
+enum MemoryScopeKind {
+  MEMORY_SCOPE_KIND_UNSPECIFIED = 0;
+  LOCAL = 1;
+  EXECUTION_GROUP = 2;
+  GLOBAL = 3;
+}
+
+enum MemoryVisibility {
+  MEMORY_VISIBILITY_UNSPECIFIED = 0;
+  DISCOVERABLE = 1;
+  EXCHANGEABLE = 2;
+}
+
+message MemoryProviderDescriptor {
+  string provider_id = 1;
+  string local_system_id = 2;
+  MemoryKind kind = 3;
+  MemoryScopeKind scope = 4;
+  string execution_group_id = 5;
+  MemoryVisibility visibility = 6;
+  string payload_schema = 7;
+  string media_type = 8;
+}
+
+message Heartbeat {
+  string session_id = 1;
+  string lease_id = 2;
+  uint64 sequence = 3;
+  NodeStatus status = 4;
+}
+
+message RegistrationUpdate {
+  string session_id = 1;
+  uint64 sequence = 2;
+  NodeRegistration registration = 3;
+}
+
+message NodeStatus { string health = 1; string detail = 2; }
+
+message StateObservationBatch {
+  string session_id = 1;
+  uint64 sequence = 2;
+  repeated StateObservation observations = 3;
+}
+
+message StateObservation {
+  string export_id = 1;
+  bytes json_value = 2;
+  bool has_source_observed_at = 3;
+  uint64 source_observed_at_ms = 4;
+  bool has_confidence = 5;
+  uint32 confidence_millionths = 6;
+}
+
+message Execute {
+  string session_id = 1;
+  string execution_id = 2;
+  CanonicalInvocation invocation = 3;
+  repeated string resource_ids = 4;
+}
+
+message Cancel { string session_id = 1; string execution_id = 2; }
+
+message CanonicalInvocation {
+  string mission_id = 1;
+  string task_id = 2;
+  string group_id = 3;
+  string role_id = 4;
+  string capability_contract = 5;
+  map<string, ScalarValue> parameters = 6;
+}
+
+message ScalarValue {
+  oneof value {
+    bool bool_value = 1;
+    sint64 integer_value = 2;
+    double float_value = 3;
+    string string_value = 4;
+  }
+}
+
+enum ExecutionPhase {
+  EXECUTION_PHASE_UNSPECIFIED = 0;
+  ACCEPTED = 1;
+  STARTED = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  CANCELLED = 5;
+  UNKNOWN = 6;
+}
+
+message ExecutionEvent {
+  string session_id = 1;
+  string execution_id = 2;
+  uint64 sequence = 3;
+  ExecutionPhase phase = 4;
+  string reason = 5;
+}
+
+message ExecutionSnapshot {
+  string session_id = 1;
+  string execution_id = 2;
+  uint64 last_sequence = 3;
+  ExecutionPhase phase = 4;
+  string reason = 5;
+}
+
+message Ack { uint64 sequence = 1; }
+
+message ProtocolError {
+  string code = 1;
+  string reason = 2;
+  string session_id = 3;
+  string execution_id = 4;
+}

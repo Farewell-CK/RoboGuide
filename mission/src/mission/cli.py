@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from mission.config import current_environment, load_settings
+from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner, MissionPlanner
 from mission.responses import ResponsesMissionPlanner
@@ -25,6 +26,8 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--config", type=Path, default=Path("config/mission.toml"))
     plan.add_argument("--mission-id", required=True)
     plan.add_argument("--objective", required=True)
+    plan.add_argument("--constraint", action="append", default=[])
+    plan.add_argument("--assumption", action="append", default=[])
     plan.add_argument("--output", type=Path, required=True)
     plan.add_argument("--fixture", type=Path)
     return parser
@@ -54,7 +57,15 @@ def main() -> int:
         _read_plan(cast(Path, arguments.input))
         return 0
     planner = _planner(arguments)
-    plan = planner.plan(cast(str, arguments.mission_id), cast(str, arguments.objective))
+    grounded_intent = GroundedIntent(
+        cast(str, arguments.objective),
+        tuple(cast(list[str], arguments.constraint)),
+        tuple(cast(list[str], arguments.assumption)),
+    )
+    plan = planner.plan(
+        mission_id=cast(str, arguments.mission_id),
+        grounded_intent=grounded_intent,
+    )
     output_path = cast(Path, arguments.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

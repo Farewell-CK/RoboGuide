@@ -3,13 +3,17 @@
 use crate::local_engine::driver::{DriverKind, LocalDriver};
 use crate::{
     ArtifactError, ArtifactFinalizationKind, ArtifactOperationConfig, ArtifactProvenance,
-    ArtifactStager, CompiledCapability, CompiledLocalCatalog, ExecutionJournal, ExecutionSpec,
-    JournalError, JournalExecution, JournalStatus, LocalHealthState, MappedExecutionFact,
-    MappedExecutionPhase, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact,
-    PreparedArtifactRecord, ReplicaEvidenceStatus, WorkflowContext,
+    ArtifactStager, CapabilityReadinessFact, CompiledCapability, CompiledLocalCatalog,
+    ExecutionJournal, ExecutionSpec, FilesystemMemoryLedger, JournalError, JournalExecution,
+    JournalStatus, LocalHealthState, LocalMemoryLedger, MappedExecutionFact, MappedExecutionPhase,
+    MemoryQuery, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact, PreparedArtifactRecord,
+    ReplicaEvidenceStatus, StateExportFact, WorkflowContext,
 };
-use domain::{LocalSystemId, MapArtifactManifest, MissionId, NodeId, TaskId, TaskRef, TimestampMs};
-use integration::grpc::v0_2::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
+use domain::{
+    LocalSystemId, MapArtifactManifest, MemoryArtifactManifest, MissionId, NodeId, TaskId, TaskRef,
+    TimestampMs,
+};
+use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -29,6 +33,27 @@ pub struct LocalExecutionEvent {
     pub phase: ExecutionPhase,
     /// Local diagnostic detail.
     pub reason: String,
+}
+
+/// One complete node observation used for registration readiness and heartbeat health.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeObservation {
+    /// Process/local-system health, kept independent from exact capability readiness.
+    status: integration::grpc::v0_3::NodeStatus,
+    /// Exact canonical contract readiness in deterministic contract order.
+    capabilities: BTreeMap<String, CapabilityReadinessFact>,
+}
+
+impl NodeObservation {
+    /// Returns the current process/local-system health observation.
+    pub const fn status(&self) -> &integration::grpc::v0_3::NodeStatus {
+        &self.status
+    }
+
+    /// Returns readiness facts keyed by exact canonical contract.
+    pub const fn capabilities(&self) -> &BTreeMap<String, CapabilityReadinessFact> {
+        &self.capabilities
+    }
 }
 
 /// Result of accepting a remote Execute command.
@@ -65,6 +90,8 @@ struct EngineInner {
     events: broadcast::Sender<LocalExecutionEvent>,
     /// Optional Spatial Memory artifact stager configured independently of Node Protocol.
     artifact_stager: Option<ArtifactStager>,
+    /// Node-side ledgers keyed by configured Local Memory Provider identity.
+    memory_ledgers: BTreeMap<String, Arc<dyn LocalMemoryLedger>>,
 }
 
 /// Configuration-owned artifact operation reused by validated execution directives.
@@ -107,6 +134,16 @@ impl LocalIntegrationEngine {
                 ));
             }
         }
+        let mut memory_ledgers: BTreeMap<String, Arc<dyn LocalMemoryLedger>> = BTreeMap::new();
+        for descriptor in catalog
+            .memory_providers()
+            .values()
+            .filter(|provider| provider.operational())
+        {
+            let ledger = FilesystemMemoryLedger::open(descriptor.clone())
+                .map_err(|error| EngineError::Memory(error.to_string()))?;
+            memory_ledgers.insert(descriptor.id().to_string(), Arc::new(ledger));
+        }
         for connection in catalog.connections().values() {
             if !driver_map.contains_key(&connection.driver_kind()) {
                 return Err(EngineError::Configuration(format!(
@@ -126,6 +163,7 @@ impl LocalIntegrationEngine {
                 artifact_finalizations_in_flight: Mutex::new(BTreeSet::new()),
                 events,
                 artifact_stager,
+                memory_ledgers,
             }),
         })
     }
@@ -143,13 +181,362 @@ impl LocalIntegrationEngine {
         self.inner.artifact_stager.as_ref()
     }
 
+    /// Returns the provider-authorized publish-eligible Memory set.
+    ///
+    /// A configured Local EAIOS workflow is the semantic authority for this set; its response is
+    /// not interpreted as all Memory available in the local system. RoboGuide only validates the
+    /// immutable manifest shape, applies the explicit query and live-scope safety filter, and
+    /// returns the resulting metadata for the publication mechanism. When no workflow exists,
+    /// the Node ledger is used only as the documented reference-backend fallback.
+    pub async fn discover_memories(
+        &self,
+        provider_id: &str,
+        query: &MemoryQuery,
+        mut invocation: serde_json::Value,
+    ) -> Result<Vec<MemoryArtifactManifest>, EngineError> {
+        validate_memory_query_scope(query, &invocation)?;
+        let ledger = self
+            .inner
+            .memory_ledgers
+            .get(provider_id)
+            .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
+            .clone();
+        let workflow = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .and_then(|p| p.discover());
+        let manifests = if let Some(workflow) = workflow {
+            if let Some(object) = invocation.as_object_mut() {
+                object.insert(
+                    "memory_query".to_string(),
+                    serde_json::to_value(query).map_err(EngineError::Json)?,
+                );
+            }
+            let mut context = WorkflowContext::new(invocation.clone());
+            self.run_steps(workflow.steps(), &mut context).await?;
+            let pointer = workflow.manifests_pointer().ok_or_else(|| {
+                EngineError::Memory("discover workflow requires manifests_pointer".to_string())
+            })?;
+            let value = context.as_json().pointer(pointer).ok_or_else(|| {
+                EngineError::Memory(format!("discover response missing `{pointer}`"))
+            })?;
+            serde_json::from_value(value.clone()).map_err(EngineError::Json)?
+        } else {
+            ledger
+                .discover_recorded(query)
+                .map_err(|error| EngineError::Memory(error.to_string()))?
+        };
+        accept_provider_discovery(manifests, query, &invocation)
+    }
+
+    /// Exports one immutable Memory manifest through local provider authority.
+    pub async fn export_memory(
+        &self,
+        provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+        invocation: serde_json::Value,
+    ) -> Result<Option<PathBuf>, EngineError> {
+        validate_memory_operation_scope(manifest, &invocation)?;
+        self.validate_memory_export(provider_id, manifest)?;
+        let ledger = self
+            .inner
+            .memory_ledgers
+            .get(provider_id)
+            .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
+            .clone();
+        let mut artifact_path = None;
+        if let Some(workflow) = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .and_then(|p| p.export())
+        {
+            let mut value = invocation;
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "memory_manifest".to_string(),
+                    serde_json::to_value(manifest).map_err(EngineError::Json)?,
+                );
+            }
+            let mut context = WorkflowContext::new(value);
+            self.run_steps(workflow.steps(), &mut context).await?;
+            if let Some(pointer) = workflow.artifact_path_pointer() {
+                let relative_path = context
+                    .as_json()
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        EngineError::Memory(format!("export response missing path `{pointer}`"))
+                    })?;
+                let handoff_root =
+                    self.catalog().memory_providers()[provider_id].storage_directory();
+                artifact_path = Some(resolve_memory_export_path(handoff_root, relative_path)?);
+            }
+        }
+        ledger
+            .record_export(manifest)
+            .map_err(|error| EngineError::Memory(error.to_string()))?;
+        Ok(artifact_path)
+    }
+
+    /// Applies one provider's complete local semantic admission before export side effects.
+    pub(crate) fn validate_memory_export(
+        &self,
+        provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<(), EngineError> {
+        let provider = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .ok_or_else(|| {
+                EngineError::Memory(format!("unknown memory provider `{provider_id}`"))
+            })?;
+        manifest
+            .validate()
+            .map_err(|error| EngineError::Memory(error.to_string()))?;
+        let domain::MemoryOwner::Node {
+            node_id,
+            local_system_id,
+        } = manifest.owner()
+        else {
+            return Err(EngineError::Memory(
+                "local provider export requires Node-owned Memory".to_string(),
+            ));
+        };
+        let scope_allowed = match provider.scope() {
+            "local" => matches!(manifest.scope(), domain::MemoryScope::Local),
+            "global" => true,
+            _ => false,
+        };
+        let visibility_allowed = provider.visibility() == "exchangeable"
+            || manifest.visibility() == domain::MemoryVisibility::Discoverable;
+        if node_id.as_str() != self.catalog().node_id()
+            || local_system_id.as_str() != provider.owner()
+            || manifest.provider_id() != provider.id()
+            || memory_kind_name(manifest.kind()) != provider.kind()
+            || !scope_allowed
+            || !visibility_allowed
+            || manifest.payload_schema() != provider.payload_schema()
+            || manifest.media_type() != provider.media_type()
+            || manifest.payload_schema() == domain::SPATIAL_MEMORY_SCHEMA_V0_1
+        {
+            return Err(EngineError::Memory(
+                "Memory export exceeds its local provider declaration".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates remote Memory against the consumer provider before local import side effects.
+    fn validate_memory_import(
+        &self,
+        provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<(), EngineError> {
+        let provider = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .ok_or_else(|| {
+                EngineError::Configuration(format!("unknown memory provider `{provider_id}`"))
+            })?;
+        manifest
+            .validate()
+            .map_err(|error| EngineError::Configuration(error.to_string()))?;
+        let scope_allowed = match provider.scope() {
+            "local" => matches!(manifest.scope(), domain::MemoryScope::Local),
+            "global" => true,
+            _ => false,
+        };
+        let local_scope_owner_matches = !matches!(manifest.scope(), domain::MemoryScope::Local)
+            || matches!(
+                manifest.owner(),
+                domain::MemoryOwner::Node { node_id, .. }
+                    if node_id.as_str() == self.catalog().node_id()
+            );
+        if memory_kind_name(manifest.kind()) != provider.kind()
+            || manifest.payload_schema() != provider.payload_schema()
+            || manifest.media_type() != provider.media_type()
+            || provider.visibility() != "exchangeable"
+            || manifest.visibility() != domain::MemoryVisibility::Exchangeable
+            || !scope_allowed
+            || !local_scope_owner_matches
+            || manifest.payload_schema() == domain::SPATIAL_MEMORY_SCHEMA_V0_1
+        {
+            return Err(EngineError::Configuration(
+                "Memory import exceeds its local consumer provider declaration".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Imports through EAIOS authority or the workflow-free filesystem reference backend.
+    async fn import_memory(
+        &self,
+        provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+        staged_artifact: &std::path::Path,
+        invocation: serde_json::Value,
+    ) -> Result<(), EngineError> {
+        validate_memory_operation_scope(manifest, &invocation)?;
+        let ledger = self
+            .inner
+            .memory_ledgers
+            .get(provider_id)
+            .ok_or_else(|| EngineError::Memory(format!("unknown memory provider `{provider_id}`")))?
+            .clone();
+        let workflow = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .and_then(|provider| provider.import());
+        if let Some(workflow) = workflow {
+            let mut value = invocation;
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "memory_manifest".to_string(),
+                    serde_json::to_value(manifest).map_err(EngineError::Json)?,
+                );
+                object.insert(
+                    "staged_artifact".to_string(),
+                    serde_json::Value::String(staged_artifact.to_string_lossy().into_owned()),
+                );
+            }
+            let mut context = WorkflowContext::new(value);
+            self.run_steps(workflow.steps(), &mut context).await?;
+        }
+        let reference_artifact = workflow.is_none().then_some(staged_artifact);
+        ledger
+            .record_import(manifest, reference_artifact)
+            .map_err(|error| EngineError::Memory(error.to_string()))
+    }
+
+    /// Selectively stages, imports, and reports one exchangeable Memory revision.
+    ///
+    /// Replica evidence is observational only. A failure is returned to the caller for retry or
+    /// reconciliation and never mutates Runtime, Control, Task, or Mission state.
+    pub async fn exchange_memory(
+        &self,
+        provider_id: &str,
+        manifest: &MemoryArtifactManifest,
+        session_id: &str,
+        invocation: serde_json::Value,
+    ) -> Result<(), EngineError> {
+        let stager = self.artifact_stager().ok_or_else(|| {
+            EngineError::Memory("Memory exchange requires the Artifact data plane".to_string())
+        })?;
+        let node_id = NodeId::new(self.catalog().node_id().to_string())
+            .map_err(|error| EngineError::Memory(error.to_string()))?;
+        let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {
+            EngineError::Memory(format!("unknown memory provider `{provider_id}`"))
+        })?;
+        let existing = ledger
+            .discover_recorded(&MemoryQuery {
+                selector: Some(manifest.selector().clone()),
+                ..MemoryQuery::default()
+            })
+            .map_err(|error| EngineError::Memory(error.to_string()))?
+            .into_iter()
+            .next();
+        if existing
+            .as_ref()
+            .is_some_and(|existing| existing != manifest)
+        {
+            return Err(EngineError::Configuration(
+                "selector already names different immutable Memory in the Node-side ledger"
+                    .to_string(),
+            ));
+        }
+        if let Err(error) = validate_memory_operation_scope(manifest, &invocation)
+            .and_then(|()| self.validate_memory_import(provider_id, manifest))
+        {
+            if existing.is_none() {
+                let _ = stager
+                    .record_memory_replica(
+                        manifest,
+                        &node_id,
+                        session_id,
+                        provider_id,
+                        "rejected",
+                        Some(&error.to_string()),
+                    )
+                    .await;
+            }
+            return Err(error);
+        }
+        if existing.is_some() {
+            stager
+                .record_memory_replica(
+                    manifest,
+                    &node_id,
+                    session_id,
+                    provider_id,
+                    "imported",
+                    None,
+                )
+                .await?;
+            return Ok(());
+        }
+        let path = stager.memory_cache_path(manifest.selector());
+        if let Err(error) = stager.stage_memory_input(manifest, &path).await {
+            let error = EngineError::Artifact(error);
+            if artifact_error_is_deterministic(&error) {
+                let _ = stager
+                    .record_memory_replica(
+                        manifest,
+                        &node_id,
+                        session_id,
+                        provider_id,
+                        "rejected",
+                        Some(&error.to_string()),
+                    )
+                    .await;
+            }
+            return Err(error);
+        }
+        stager
+            .record_memory_replica(manifest, &node_id, session_id, provider_id, "staged", None)
+            .await?;
+        if let Err(error) = self
+            .import_memory(provider_id, manifest, &path, invocation)
+            .await
+        {
+            if memory_import_error_is_deterministic(&error) {
+                let _ = stager
+                    .record_memory_replica(
+                        manifest,
+                        &node_id,
+                        session_id,
+                        provider_id,
+                        "rejected",
+                        Some(&error.to_string()),
+                    )
+                    .await;
+            }
+            return Err(error);
+        }
+        stager
+            .record_memory_replica(
+                manifest,
+                &node_id,
+                session_id,
+                provider_id,
+                "imported",
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Subscribes one Node Protocol session to process-level execution facts.
     pub fn subscribe(&self) -> broadcast::Receiver<LocalExecutionEvent> {
         self.inner.events.subscribe()
     }
 
     /// Observes every configured Local EAIOS and aggregates a truthful Node heartbeat status.
-    pub async fn status(&self) -> integration::grpc::v0_2::NodeStatus {
+    pub async fn status(&self) -> integration::grpc::v0_3::NodeStatus {
         let mut tasks = tokio::task::JoinSet::new();
         let checks = self
             .inner
@@ -209,10 +596,115 @@ impl LocalIntegrationEngine {
             .map(|(owner, state, detail)| format!("{owner}={state:?}:{detail}"))
             .collect::<Vec<_>>()
             .join("; ");
-        integration::grpc::v0_2::NodeStatus {
+        integration::grpc::v0_3::NodeStatus {
             health: state.to_string(),
             detail,
         }
+    }
+
+    /// Observes health and exact capability readiness without changing execution lifecycle.
+    ///
+    /// Readiness probe failures fence only the affected contract. Legacy v0.2/v0.3
+    /// capabilities retain their historical static-ready behavior until migrated to v0.4.
+    pub async fn observe(&self) -> NodeObservation {
+        let mut status = self.status().await;
+        let mut tasks = tokio::task::JoinSet::new();
+        for (contract, capability) in self.inner.catalog.capabilities() {
+            let contract = contract.clone();
+            let readiness = capability.readiness().cloned();
+            let engine = self.clone();
+            tasks.spawn(async move {
+                let fact = if let Some(readiness) = readiness {
+                    let mut context = WorkflowContext::new(serde_json::json!({}));
+                    match engine
+                        .run_steps(std::slice::from_ref(readiness.step()), &mut context)
+                        .await
+                    {
+                        Ok(()) => readiness.map(&context).unwrap_or_else(|error| {
+                            CapabilityReadinessFact {
+                                available: false,
+                                detail: error.to_string(),
+                            }
+                        }),
+                        Err(error) => CapabilityReadinessFact {
+                            available: false,
+                            detail: error.to_string(),
+                        },
+                    }
+                } else {
+                    CapabilityReadinessFact {
+                        available: true,
+                        detail: "legacy static readiness".to_string(),
+                    }
+                };
+                (contract, fact)
+            });
+        }
+        let mut capabilities = BTreeMap::new();
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok((contract, fact)) => {
+                    capabilities.insert(contract, fact);
+                }
+                Err(error) => {
+                    capabilities.insert(
+                        "readiness-task".to_string(),
+                        CapabilityReadinessFact {
+                            available: false,
+                            detail: error.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        let readiness_detail = capabilities
+            .iter()
+            .filter(|(_, fact)| !fact.available)
+            .map(|(contract, fact)| format!("{contract}=Unavailable:{}", fact.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !readiness_detail.is_empty() {
+            if !status.detail.is_empty() {
+                status.detail.push_str("; ");
+            }
+            status.detail.push_str(&readiness_detail);
+        }
+        NodeObservation {
+            status,
+            capabilities,
+        }
+    }
+
+    /// Samples selected configured State exports without changing health or execution lifecycle.
+    ///
+    /// A failed local sample is omitted so the Controller retains the previous record until its
+    /// configured validity expires. Other exports in the same polling cycle remain available.
+    pub async fn observe_state_exports(
+        &self,
+        export_ids: &BTreeSet<String>,
+    ) -> Vec<StateExportFact> {
+        let mut tasks = tokio::task::JoinSet::new();
+        for export_id in export_ids {
+            let Some(export) = self.inner.catalog.state_exports().get(export_id).cloned() else {
+                continue;
+            };
+            let engine = self.clone();
+            tasks.spawn(async move {
+                let mut context = WorkflowContext::new(serde_json::json!({}));
+                engine
+                    .run_steps(std::slice::from_ref(export.step()), &mut context)
+                    .await?;
+                export.map(&context).map_err(EngineError::Mapping)
+            });
+        }
+        let mut facts = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            if let Ok(Ok(fact)) = result {
+                facts.push(fact);
+            }
+        }
+        facts.sort_by(|left, right| left.export_id.cmp(&right.export_id));
+        facts
     }
 
     /// Returns all durable snapshots for reconnect replay.
@@ -1210,6 +1702,132 @@ impl LocalIntegrationEngine {
     }
 }
 
+/// Validates and bounds the exact publish-eligible set returned by one Memory provider.
+///
+/// This function deliberately has no ledger lookup or promotion behavior: every returned
+/// manifest must originate in the provider response. The query and live-scope checks are
+/// RoboGuide safety filters, not a sharing-selection policy.
+fn accept_provider_discovery(
+    mut manifests: Vec<MemoryArtifactManifest>,
+    query: &MemoryQuery,
+    invocation: &serde_json::Value,
+) -> Result<Vec<MemoryArtifactManifest>, EngineError> {
+    for manifest in &manifests {
+        manifest
+            .validate()
+            .map_err(|error| EngineError::Memory(error.to_string()))?;
+    }
+    manifests.retain(|manifest| {
+        query.matches(manifest) && memory_scope_visible_in_context(manifest, invocation)
+    });
+    manifests.sort_by(|left, right| left.selector().cmp(right.selector()));
+    if manifests
+        .windows(2)
+        .any(|pair| pair[0].selector() == pair[1].selector() && pair[0] != pair[1])
+    {
+        return Err(EngineError::Memory(
+            "Memory discovery returned conflicting immutable manifests".to_string(),
+        ));
+    }
+    manifests.dedup();
+    Ok(manifests)
+}
+
+/// Requires concrete ExecutionGroup Memory to match the live operation context.
+fn validate_memory_operation_scope(
+    manifest: &MemoryArtifactManifest,
+    invocation: &serde_json::Value,
+) -> Result<(), EngineError> {
+    let domain::MemoryScope::ExecutionGroup(group_id) = manifest.scope() else {
+        return Ok(());
+    };
+    let context_group = invocation
+        .get("group_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty());
+    if context_group == Some(group_id.as_str()) {
+        Ok(())
+    } else {
+        Err(EngineError::Configuration(
+            "ExecutionGroup Memory requires the matching live execution group context".to_string(),
+        ))
+    }
+}
+
+/// Applies the same live-group invariant to provider-local discovery filters.
+fn validate_memory_query_scope(
+    query: &MemoryQuery,
+    invocation: &serde_json::Value,
+) -> Result<(), EngineError> {
+    let Some(domain::MemoryScope::ExecutionGroup(group_id)) = query.scope.as_ref() else {
+        return Ok(());
+    };
+    let context_group = invocation
+        .get("group_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty());
+    if context_group == Some(group_id.as_str()) {
+        Ok(())
+    } else {
+        Err(EngineError::Configuration(
+            "ExecutionGroup Memory discovery requires the matching live execution group context"
+                .to_string(),
+        ))
+    }
+}
+
+/// Hides Group-scoped metadata unless the caller presents the exact live logical Group identity.
+fn memory_scope_visible_in_context(
+    manifest: &MemoryArtifactManifest,
+    invocation: &serde_json::Value,
+) -> bool {
+    match manifest.scope() {
+        domain::MemoryScope::ExecutionGroup(group_id) => invocation
+            .get("group_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|context_group| context_group == group_id.as_str()),
+        domain::MemoryScope::Local | domain::MemoryScope::Global => true,
+    }
+}
+
+/// Returns the node-config spelling of one generic Memory kind.
+const fn memory_kind_name(kind: domain::MemoryKind) -> &'static str {
+    match kind {
+        domain::MemoryKind::Execution => "execution",
+        domain::MemoryKind::Spatial => "spatial",
+        domain::MemoryKind::Semantic => "semantic",
+        domain::MemoryKind::Experience => "experience",
+        domain::MemoryKind::Artifact => "artifact",
+    }
+}
+
+/// Resolves an EAIOS export handoff path within the configured Node-managed root.
+fn resolve_memory_export_path(
+    root: &std::path::Path,
+    relative: &str,
+) -> Result<PathBuf, EngineError> {
+    let relative = std::path::Path::new(relative);
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(EngineError::Memory(
+            "Memory export path must be relative to the Node-managed handoff root".to_string(),
+        ));
+    }
+    let canonical_root = std::fs::canonicalize(root).map_err(EngineError::Io)?;
+    let candidate = std::fs::canonicalize(root.join(relative)).map_err(EngineError::Io)?;
+    if !candidate.starts_with(&canonical_root) || !candidate.is_file() {
+        return Err(EngineError::Memory(
+            "Memory export path escapes the Node-managed handoff root or is not a regular file"
+                .to_string(),
+        ));
+    }
+    Ok(candidate)
+}
+
 /// Returns whether an artifact completion error conclusively proves no successful finalization.
 fn artifact_error_is_deterministic(error: &EngineError) -> bool {
     match error {
@@ -1234,8 +1852,21 @@ fn artifact_error_is_deterministic(error: &EngineError) -> bool {
         | EngineError::LockState
         | EngineError::Io(_)
         | EngineError::Journal(_)
-        | EngineError::Driver(_) => false,
+        | EngineError::Driver(_)
+        | EngineError::Memory(_) => false,
     }
+}
+
+/// Returns whether import failure conclusively proves a semantic/configuration rejection.
+fn memory_import_error_is_deterministic(error: &EngineError) -> bool {
+    matches!(
+        error,
+        EngineError::Configuration(_)
+            | EngineError::Catalog(_)
+            | EngineError::Mapping(_)
+            | EngineError::Json(_)
+            | EngineError::Protocol(_)
+    )
 }
 
 /// Validates canonical command identity before any lock or local side effect.
@@ -1493,7 +2124,7 @@ fn canonical_invocation_json(
                 .value
                 .as_ref()
                 .ok_or_else(|| EngineError::Protocol("invocation scalar is empty".to_string()))?;
-            use integration::grpc::v0_2::scalar_value::Value;
+            use integration::grpc::v0_3::scalar_value::Value;
             let value = match value {
                 Value::BoolValue(value) => serde_json::Value::Bool(*value),
                 Value::IntegerValue(value) => serde_json::Value::Number((*value).into()),
@@ -1670,6 +2301,8 @@ pub enum EngineError {
     Driver(crate::DriverError),
     /// Spatial Memory artifact staging configuration or transfer failed.
     Artifact(ArtifactError),
+    /// Local EAIOS Memory workflow or Node ledger failed; callers may retry or fence independently.
+    Memory(String),
     /// Canonical JSON encoding or decoding failed.
     Json(serde_json::Error),
     /// Protocol fact was structurally invalid.
@@ -1704,6 +2337,7 @@ impl Display for EngineError {
             Self::Mapping(error) => error.fmt(formatter),
             Self::Driver(error) => error.fmt(formatter),
             Self::Artifact(error) => error.fmt(formatter),
+            Self::Memory(reason) => formatter.write_str(reason),
             Self::Json(error) => error.fmt(formatter),
         }
     }
@@ -1885,5 +2519,133 @@ mod artifact_directive_tests {
             });
             assert!(artifact_error_is_deterministic(&error));
         }
+    }
+
+    /// ExecutionGroup discovery uses the logical live group identity, not a Node binding.
+    #[test]
+    fn memory_query_requires_matching_live_execution_group() {
+        let group = domain::ExecutionGroupId::new("group-a").expect("group id is valid");
+        let query = MemoryQuery {
+            scope: Some(domain::MemoryScope::ExecutionGroup(group)),
+            ..MemoryQuery::default()
+        };
+        assert!(validate_memory_query_scope(&query, &invocation(serde_json::json!({}))).is_ok());
+        assert!(matches!(
+            validate_memory_query_scope(
+                &query,
+                &serde_json::json!({"group_id": "different-group"})
+            ),
+            Err(EngineError::Configuration(_))
+        ));
+    }
+
+    /// Unfiltered discovery cannot leak Group-scoped metadata outside its logical live context.
+    #[test]
+    fn memory_discovery_hides_other_execution_groups() {
+        let manifest = MemoryArtifactManifest::new(
+            domain::MemorySelector::new(
+                domain::MemoryId::new("lesson-a").expect("memory id is valid"),
+                domain::MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            domain::MemoryKind::Experience,
+            "lessons",
+            domain::MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("memory").expect("local system id is valid"),
+            },
+            domain::MemoryScope::ExecutionGroup(
+                domain::ExecutionGroupId::new("group-a").expect("group id is valid"),
+            ),
+            domain::MemoryVisibility::Discoverable,
+            "example.experience/v1",
+            "application/json",
+            None,
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest is valid");
+
+        assert!(!memory_scope_visible_in_context(
+            &manifest,
+            &serde_json::json!({})
+        ));
+        assert!(memory_scope_visible_in_context(
+            &manifest,
+            &serde_json::json!({"group_id": "group-a"})
+        ));
+        assert!(!memory_scope_visible_in_context(
+            &manifest,
+            &serde_json::json!({"group_id": "group-b"})
+        ));
+    }
+
+    /// Discovery acceptance returns only provider-supplied publish-eligible manifests.
+    #[test]
+    fn provider_discovery_does_not_promote_unreturned_memory() {
+        let manifest = MemoryArtifactManifest::new(
+            domain::MemorySelector::new(
+                domain::MemoryId::new("provider-memory").expect("memory id is valid"),
+                domain::MemoryRevisionId::new("r1").expect("revision id is valid"),
+            ),
+            domain::MemoryKind::Experience,
+            "provider",
+            domain::MemoryOwner::Node {
+                node_id: NodeId::new("dog-a").expect("node id is valid"),
+                local_system_id: LocalSystemId::new("memory").expect("local system id is valid"),
+            },
+            domain::MemoryScope::Global,
+            domain::MemoryVisibility::Discoverable,
+            "example.experience/v1",
+            "application/json",
+            None,
+            None,
+            None,
+            None,
+            TimestampMs::new(1),
+        )
+        .expect("manifest is valid");
+        let accepted = accept_provider_discovery(
+            vec![manifest.clone()],
+            &MemoryQuery::default(),
+            &serde_json::json!({}),
+        )
+        .expect("provider response is accepted");
+        assert_eq!(accepted, vec![manifest]);
+        assert!(
+            accept_provider_discovery(Vec::new(), &MemoryQuery::default(), &serde_json::json!({}),)
+                .expect("empty provider response is accepted")
+                .is_empty()
+        );
+    }
+
+    /// An EAIOS response cannot select bytes outside its configured Node handoff root.
+    #[test]
+    fn memory_export_path_is_confined_to_node_handoff_root() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let handoff_root = directory.path().join("handoff");
+        std::fs::create_dir_all(&handoff_root).expect("handoff root creates");
+        std::fs::write(handoff_root.join("map.bin"), b"map").expect("EAIOS output writes");
+        assert_eq!(
+            resolve_memory_export_path(&handoff_root, "map.bin")
+                .expect("handoff-relative output resolves"),
+            std::fs::canonicalize(handoff_root.join("map.bin")).expect("output canonicalizes")
+        );
+        assert!(matches!(
+            resolve_memory_export_path(&handoff_root, "../outside.bin"),
+            Err(EngineError::Memory(_))
+        ));
+    }
+
+    /// Ambiguous Local EAIOS transport failure remains retryable instead of terminal rejection.
+    #[test]
+    fn memory_import_transport_failure_is_not_conclusive_rejection() {
+        assert!(!memory_import_error_is_deterministic(&EngineError::Driver(
+            crate::DriverError::Transport("connection closed".to_string())
+        )));
+        assert!(memory_import_error_is_deterministic(
+            &EngineError::Configuration("invalid provider mapping".to_string())
+        ));
     }
 }

@@ -1,0 +1,68 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.3",
+  "mission": {
+    "id": "mission-guidance-001",
+    "objective": "在安全观察持续有效时执行引导导航"
+  },
+  "contexts": [
+    {
+      "id": "guidance-context",
+      "roles": [
+        {"id": "guide", "actor": "robot-dog"},
+        {"id": "safety", "actor": "smart-cane"}
+      ],
+      "relations": [
+        {
+          "id": "safety-guards-navigation",
+          "kind": "requires-active",
+          "source": {"task_id": "observe-safety", "role_id": "safety-observer"},
+          "target": {"task_id": "navigate", "role_id": "navigator"}
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "observe-safety",
+      "description": "持续观察用户接触和通行风险",
+      "context_id": "guidance-context",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "safety-observer",
+          "actor": "smart-cane",
+          "capability": "observation",
+          "contract": {"namespace": "safety", "name": "observe", "version": "v1"},
+          "resource_kind": null,
+          "context_role": "safety",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "safety", "name": "observe", "version": "v1"},
+            "parameters": {"mode": "continuous"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "navigate",
+      "description": "在安全观察约束下执行引导导航",
+      "context_id": "guidance-context",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "navigator",
+          "actor": "robot-dog",
+          "capability": "mobility",
+          "contract": {"namespace": "mobility", "name": "navigate", "version": "v1"},
+          "resource_kind": "space",
+          "context_role": "guide",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": {"namespace": "mobility", "name": "navigate", "version": "v1"},
+            "parameters": {"destination": "guidance-destination"}
+          }
+        }
+      ]
+    }
+  ]
+}

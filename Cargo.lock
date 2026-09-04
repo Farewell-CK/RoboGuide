@@ -3,20 +3,6 @@
 version = 4
 
 [[package]]
-name = "adapters"
-version = "0.1.0"
-dependencies = [
- "domain",
- "libc",
- "ports",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -30,6 +16,17 @@ name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
+name = "artifact-store"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "libc",
+ "ports",
+ "sha2",
+ "tempfile",
+]
 
 [[package]]
 name = "async-trait"
@@ -397,7 +394,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
- "futures-sink",
 ]
 
 [[package]]
@@ -773,16 +769,10 @@ dependencies = [
 name = "integration"
 version = "0.1.0"
 dependencies = [
- "control",
- "domain",
- "ports",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
- "runtime",
- "serde",
  "serde_json",
- "state",
  "testkit",
  "tokio",
  "tokio-stream",
@@ -795,10 +785,11 @@ dependencies = [
 name = "integration-server"
 version = "0.1.0"
 dependencies = [
- "adapters",
+ "artifact-store",
  "control",
  "domain",
  "integration",
+ "node-service",
  "orchestration",
  "ports",
  "runtime",
@@ -1038,11 +1029,14 @@ version = "0.1.0"
 dependencies = [
  "control",
  "domain",
+ "integration",
  "ports",
+ "runtime",
  "serde",
  "serde_json",
  "state",
  "testkit",
+ "tonic",
 ]
 
 [[package]]
@@ -1390,10 +1384,12 @@ dependencies = [
 name = "real-node-smoke"
 version = "0.1.0"
 dependencies = [
- "adapters",
- "domain",
- "ports",
- "runtime",
+ "integration",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
 ]
 
 [[package]]
@@ -1433,7 +1429,6 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64",
  "bytes",
- "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -1800,6 +1795,7 @@ dependencies = [
  "domain",
  "ports",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
 ]

@@ -10,6 +10,6 @@ Artifact HTTP 的单个 path segment，三者只接受 ASCII grammar
 `content_digest` 是 `sha256:<64 lowercase hex>`。发布后 manifest 不可覆盖。Node replica
 状态（staged/imported/verified/rejected）属于 State projection，不写回 manifest。
 
-v0.1 的 artifact data plane 是独立 streaming HTTP；Node Protocol v0.2 不变，地图内容不
-进入 gRPC message。Consumer 必须显式提供预分配的 map/revision 引用，不能依赖 Runtime
+v0.1 的 artifact data plane 是独立 streaming HTTP；当前 Node Protocol v0.3 仍不承载地图内容，
+也不让地图进入 gRPC message。Consumer 必须显式提供预分配的 map/revision 引用，不能依赖 Runtime
 动态替换 producer output。

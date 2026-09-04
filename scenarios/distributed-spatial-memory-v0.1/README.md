@@ -10,7 +10,8 @@
 `Published`，以及 consumer Node 的 `Staged → Imported → Verified` evidence。
 
 [`dog-a-node-v0.1.toml`](dog-a-node-v0.1.toml) 和
-[`dog-b-node-v0.1.toml`](dog-b-node-v0.1.toml) 是该场景的 Node Config v0.3 部署输入。
+[`dog-b-node-v0.1.toml`](dog-b-node-v0.1.toml) 是该场景的 Node Config v0.5 部署输入，
+并声明 readiness State export 与 exchangeable Spatial Memory provider。
 两者都显式注册 `spatial.map.build@v0`、`spatial.map.publish@v0`、
 `spatial.map.import@v0` 和 `spatial.localization.verify@v0`，但 artifact binding 保持非对称：
 dog-a 只构建 `map-a/r1`、消费 `map-b/r1`，dog-b 则相反。不要用通用
@@ -26,13 +27,21 @@ cargo run -p roboguide-node -- \
 ```
 
 两份配置假定 dog-a/dog-b 的 Local EAIOS HTTP endpoint 分别监听 `127.0.0.1:18101` 和
-`127.0.0.1:18102`，实现 `/v1/health`、`/v1/executions`、
+`127.0.0.1:18102`，实现 `/v1/health`、`/v1/readiness`、`/v1/executions`、
 `/v1/executions/status` 与 `/v1/executions/cancel`。RoboGuide Node Service 会把受控的
 `artifact_path` 和 canonical `invocation` 映射进 execute request；实际建图、导入和定位验证
 仍由 Local EAIOS 执行。Node 状态与 artifact cache 写入仓库已忽略的 `artifacts/` 目录。
 健康检查使用独立的 2 秒 HTTP connection，保证单次探测明显短于 Server 的 15 秒 lease；
 执行 workflow 保留 30 秒 timeout。Artifact 数据面另有 3 秒连接和 30 秒 read-idle timeout，
 避免断网或对端停止前进时让 Task 无限停留在 Active。
+
+每个 exact capability 的 readiness 都从 `/v1/readiness` 独立取值。建图要求 ROS discovery
+中存在 `/rtabmap/set_mode_mapping` 且 map/artifact storage 可用，定位验证要求
+`/rtabmap/set_mode_localization` 和 map storage；publish 依赖 artifact storage，import 依赖
+两类 storage。adapter 使用启动时固定的只读 service-list command，默认对应现场
+`robonix_mapping` 容器。Router 或 service discovery 失效时，Node 仍可保持 process health，
+但相关 contract 必须变为 `available=false`。正式实验前仍须在两台狗上重新执行该 probe，
+不能用离线测试代替硬件证据。
 
 配置中的 RoboGuide gRPC 与 Artifact endpoint 默认也使用 `127.0.0.1`，仅用于单机双 Node
 smoke。部署到两台机器时，必须在各自的部署配置中把 `server_endpoint` 和

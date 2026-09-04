@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/spatial/localization-evidence-v0.1/localization-verification-evidence.schema.json",
+  "title": "RoboGuide Localization Verification Evidence v0.1",
+  "description": "Strong evidence that one exact node-local attempt activated and localized against one immutable map artifact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "map_id",
+    "revision_id",
+    "content_digest",
+    "byte_size",
+    "mission_id",
+    "task_id",
+    "group_id",
+    "role_id",
+    "node_id",
+    "execution_id",
+    "local_attempt_id",
+    "active_local_map_id",
+    "mode",
+    "pose_quality",
+    "frames",
+    "anchor_id",
+    "source_observed_at_ms"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.localization-verification-evidence/v0.1"
+    },
+    "map_id": {"$ref": "#/$defs/pathSafeId"},
+    "revision_id": {"$ref": "#/$defs/pathSafeId"},
+    "content_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "byte_size": {"type": "integer", "minimum": 0},
+    "mission_id": {"$ref": "#/$defs/nonBlankString"},
+    "task_id": {"$ref": "#/$defs/nonBlankString"},
+    "group_id": {"$ref": "#/$defs/nonBlankString"},
+    "role_id": {"$ref": "#/$defs/nonBlankString"},
+    "node_id": {"$ref": "#/$defs/nonBlankString"},
+    "execution_id": {"$ref": "#/$defs/nonBlankString"},
+    "local_attempt_id": {"$ref": "#/$defs/nonBlankString"},
+    "active_local_map_id": {"$ref": "#/$defs/nonBlankString"},
+    "mode": {"const": "localization"},
+    "pose_quality": {"$ref": "#/$defs/poseQuality"},
+    "frames": {"$ref": "#/$defs/frames"},
+    "anchor_id": {"$ref": "#/$defs/nonBlankString"},
+    "source_observed_at_ms": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "pathSafeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "decimalString": {
+      "type": "string",
+      "pattern": "^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"
+    },
+    "poseQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "value", "threshold", "unit", "comparison"],
+      "properties": {
+        "metric": {"$ref": "#/$defs/nonBlankString"},
+        "value": {"$ref": "#/$defs/decimalString"},
+        "threshold": {"$ref": "#/$defs/decimalString"},
+        "unit": {"$ref": "#/$defs/nonBlankString"},
+        "comparison": {"type": "string", "enum": ["at_most", "at_least"]}
+      }
+    },
+    "frames": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["map", "odom", "base"],
+      "properties": {
+        "map": {"$ref": "#/$defs/nonBlankString"},
+        "odom": {"$ref": "#/$defs/nonBlankString"},
+        "base": {"$ref": "#/$defs/nonBlankString"}
+      }
+    }
+  }
+}

@@ -11,6 +11,11 @@ Hello -> Welcome -> Register -> Registered, followed by Heartbeat, RegistrationU
 ExecutionEvent, and reconnect ExecutionSnapshot from the Node; Execute, Cancel, Ack, and Error
 flow from RoboGuide. The exact protocol and Node Contract versions are selected by Welcome.
 
+`Registered` and sequence `Ack` are emitted only after Controller composition has accepted the fact
+through its existing Control/State/Runtime authorities and durably committed the corresponding
+checkpoint. The transport waits for that decision but does not make it. Rejection or acceptance
+timeout fails the session closed; a transport queue receipt is never exposed as application success.
+
 ## Multiple local systems
 
 One Node identity can report multiple `LocalSystemDescriptor` values. Each descriptor has a stable,

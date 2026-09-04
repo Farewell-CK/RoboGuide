@@ -1,6 +1,10 @@
 # ADR-0006：Heterogeneous EAIOS Integration Contract v0.1
 
 > 历史记录：同步 NodeGateway/HTTP reference binding 保留；节点侧异步接入与 Local Integration 边界已由 ADR-0010 和 Node Protocol v0.2 取代。
+> 2026-09-01：早期 `core/adapters::bridge::ConfiguredCommandBackend` 已退役；设备扩展 conformance
+> 与 Controller/transport ownership 见 ADR-0021。
+> 2026-09-01 follow-up：旧 HTTP reference binding 与 `real-node-smoke` 的 HTTP 路径已由 ADR-0022
+> 退役；本 ADR 的 HTTP 条款仅保留为历史设计记录。
 
 - 状态：Proposed for Integration Contract v0.1
 - 日期：2026-08-24
@@ -27,7 +31,7 @@ RoboGuide 的目标是协调多个相同或不同 EAIOS，而不是要求设备�
    路由，Adapter/Local EAIOS 保留翻译、Local Planning、Hardware Control 与 Safety。
 6. `NodeGateway::status` 返回 fallible result。transport failure 保留旧 reported health，
    Runtime 只记录 RoboGuide-observed liveness `Unreachable`，不得伪造本地 `Offline`。
-7. HTTP/JSON 是第一份 reference adapter；serde DTO 和 endpoint 只存在于 `core/adapters`。
+7. HTTP/JSON 曾是第一份 reference adapter；serde DTO 和 endpoint 只存在于历史 adapter 实现。
 8. Reference configured backend 只允许 canonical operation 查找本地预配置 fixed argv；
    网络输入不能指定 executable，不使用 shell 拼接 parameters。
 
@@ -44,5 +48,6 @@ retry/idempotency、payload size policy 和真实 EAIOS SDK mapping 均延后，
 - 相同 canonical intent 可由两个 configured backend 翻译为不同 local invocation；
 - HTTP registration/status/execute DTO 显式转换为 domain，版本和 identity mismatch 被拒绝；
 - timeout 作为 gateway error 进入 Runtime，并只影响 liveness；
-- `real-node-smoke` probe 默认不执行动作，显式 `--execute` 才发送 fixture intent；
+- `real-node-smoke` 的旧 HTTP probe 已退役；当前 smoke 直接验证 Node Protocol v0.2，显式模拟
+  模式也不会执行物理动作；
 - 当前证据仅为 deterministic offline tests，不声明 real-device verified。

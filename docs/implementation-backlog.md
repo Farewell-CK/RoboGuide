@@ -1,12 +1,12 @@
 # 架构与实现待决事项
 
-本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。
+本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。当前架构语义以 V2 README 和已接受 ADR 为准；历史 DOCX 不是后续演进的 source of truth。
 
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
 | --- | --- | --- |
-| Q1 | State Authority | Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；哪些状态必须保留 authoritative owner |
+| Q1 | State Authority | 已有 source-aware federation 之上，Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；冲突如何由显式 provider 归约 |
 | Q2 | Spatial Authority | Map、Pose、World Model 如何建立共同空间关系和系统级 reference authority |
 | Q3 | Control Topology | 集中式 Control Plane、层级控制和 Federation 的适用边界 |
 | Q4 | Execution Group Authority | Mission-level Group、TaskExecution ownership、Context semantics 与成员节点权威如何划分 |
@@ -37,10 +37,29 @@ Spatial v0 的已知后续工作：
 - 真机部署需要版本化的 Local EAIOS/Robonix/ROS mapping 和完整的
   `build -> prepare-output -> publish -> stage -> import -> verify` system test；当前场景
   只提供配置驱动的 Node fixture 和外部 HTTP workflow 假设。
-- Replica evidence v0 只有 Node/Mission 维度，下一版应补充 consumer `TaskRef`、execution
-  identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体 TaskExecution。
+- Generic Memory replica evidence 已包含 exact consumer provider；下一版仍应补充 consumer
+  `TaskRef`、execution identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体
+  TaskExecution。
+- Generic Memory 需要独立设计 Controller -> Node selective-import command，包括 exact consumer
+  provider/revision、application-accepted durable ACK、重试 fence 和可选 ExecutionGroup 关联；在
+  该协议冻结前不得由 discovery 自动触发全量复制，也不得借普通 Execute 隐式改变 Task lifecycle。
 - Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
-  identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
+identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
+
+### Q1 实现切片：Federated State and Selective Memory v0.1
+
+[`ADR-0024`](decisions/0024-federated-state-and-selective-memory.md) 已建立 Node/World/RoboGuide
+对象、六类 State semantic、source/channel/time/TTL/confidence，以及对 Mission、Control、
+Shared Node State、Runtime/Orchestration projection 的只读 federation。Node Config v0.5 和
+Protocol v0.3 支持选择性 Reported/Observed push；State observation 不自动触发 recovery。
+
+同一切片建立五类 Memory 的 provider discovery、immutable manifest catalog 和基于现有 CAS
+的 selective exchange evidence。它解决共同上层语义与 local ownership，不关闭 Q1：Belief
+provider、fusion/conflict policy、允许哪些 Belief 影响 Control、访问控制、retention/GC、
+多 Controller replication 仍需场景证据。通用 Node Memory workflow 已由
+[`ADR-0025`](decisions/0025-memory-provider-backend-and-workflow.md) 的 v0.6 provider
+discover/export/import workflow 与 filesystem/JSONL Node ledger/reference fallback 补齐；真实
+EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场证据。
 
 ## MVP 定义待决事项
 
@@ -69,12 +88,29 @@ experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、�
 | RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
 | RT-G7 | Capability readiness | Node/WebUI process health 与每个 canonical capability 的 readiness 分离；ROS discovery、Router 和 vendor service 缺失必须可观察，不能仅凭进程存活进入 Matching |
 | RT-G8 | Verification evidence | localization verification 需要 active map identity、mode、pose quality 与 coordinate-frame evidence；`has_map=true` 只保留为 smoke 证据 |
+| RT-G9 | Relation actuation | Execution Relation violation/unknown 在 progression fence 之外需要版本化 pause/stop command、durable acknowledgement、deadline 与 completion race；Local Safety authority 不得被远程动作覆盖 |
+
+RT-G7/RT-G8 的最小边界由
+[`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7
+复用 Node Protocol v0.3 的 `RegistrationUpdate`，其 v0.5 config、精确 contract readiness 和
+后续 Matching 传播已实现。双狗配置和 Robonix adapter 已按历史现场证据接入 exact ROS
+service discovery probe，但仍需全新真机故障注入。RT-G8 已建立独立结构化合同、Node journal
+持久化接口、Artifact transition 与 State projection；Node completion extraction 和真实 adapter
+mapping 仍未闭环。双狗验收条件见
+[`scenarios/distributed-spatial-memory-v0.1/acceptance.md`](../scenarios/distributed-spatial-memory-v0.1/acceptance.md)。
 
 Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
 dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得
 把 Recovery Decision 下沉到 Runtime，也不得让 Integration 获得 execution lifecycle authority。
 
-## 开发 Bootstrap 提案
+[`ADR-0020`](decisions/0020-execution-coordination-relations.md) 建立 lifecycle-derived
+`requires-active` relation、Runtime live state、checkpoint 和 progression fence，但不关闭 RT-G3
+或 RT-G9。hazard/距离/速度等条件事实、relation composition 和硬实时 actuation 需要独立合同、
+现场时序证据与安全决策，不能用自由字符串表达式提前固化。
+
+## 历史 Bootstrap 提案
+
+以下内容保留早期开发基线的上下文；已经被后续 ADR 和当前实现取代的条目不再表示开放决策。
 
 - 提议使用 Rust 实现 Domain、Control、Runtime 和 State 核心，Python 承载 Mission
   Intelligence、模型、仿真和研究型 Adapter；
@@ -94,7 +130,11 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 ## 延后的实现选型
 
 - Capability Schema、Contract 字段、类型系统和版本兼容策略；
-- 节点接入采用 Agent、Adapter、SDK、Plugin 或 ROS Bridge；
+- 节点接入的当前正式边界已由 [`ADR-0010`](decisions/0010-single-node-service-local-integration-engine.md)、
+  [`ADR-0021`](decisions/0021-device-extension-boundary-conformance.md) 和
+  [`ADR-0022`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 固定为单一
+  `roboguide-node`、声明式 Local Integration Engine 与 deployment-owned Local EAIOS facade；
+  Agent、SDK、Plugin、ROS Bridge 等仅是 facade 内部实现选择，不再是 RoboGuide core 的待决接入架构。
 - Control Plane 的进程划分、Leader Election、高可用与一致性算法；
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；

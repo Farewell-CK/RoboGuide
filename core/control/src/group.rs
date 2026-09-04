@@ -625,11 +625,20 @@ impl ControlPlane {
                     )
                 })
                 .collect();
-            let execution = TaskExecution::new(
+            let context = plan
+                .contexts()
+                .iter()
+                .find(|context| context.context_id() == continuity.context_id())
+                .expect("MissionPlan validation guarantees Task Context");
+            let coupling_mode = continuity
+                .coupling_mode_override()
+                .unwrap_or_else(|| context.coupling_mode());
+            let execution = TaskExecution::new_with_coupling_mode(
                 task.requirement().task_ref().clone(),
                 continuity.context_id().clone(),
                 continuity.context_roles().clone(),
                 role_scopes,
+                coupling_mode,
             );
             group
                 .task_executions
@@ -706,9 +715,19 @@ impl ControlPlane {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
+            let context = plan
+                .contexts()
+                .iter()
+                .find(|context| context.context_id() == task.continuity().context_id())
+                .expect("MissionPlan validation guarantees Task Context");
+            let coupling_mode = task
+                .continuity()
+                .coupling_mode_override()
+                .unwrap_or_else(|| context.coupling_mode());
             if execution.context_id() != task.continuity().context_id()
                 || execution.role_scopes() != &role_scopes
                 || execution.context_roles() != task.continuity().context_roles()
+                || execution.coupling_mode() != coupling_mode
             {
                 return Err(ControlError::InvalidProposal(
                     "MissionPlan continuity differs from the restored TaskExecution".to_string(),

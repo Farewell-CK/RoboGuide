@@ -241,8 +241,5 @@ fn node_supports_contract(
         .capabilities()
         .iter()
         .any(|item| item.kind() == capability && item.is_available())
-        && registration
-            .supported_contracts()
-            .iter()
-            .any(|supported| supported == contract)
+        && registration.contract_is_available_for_kind(contract, capability)
 }

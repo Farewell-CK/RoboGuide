@@ -19,6 +19,15 @@ correlation/causation identity 和 payload schema marker。`SqliteEventLog::deco
 Mission-level Group/TaskExecution evidence 最初使用 `domain.EventPayload.json/v2`。加入
 Distributed Spatial Memory manifest/replica evidence variant 后，新事件升级为
 `domain.EventPayload.json/v3`；读取路径继续接受 v2，不能把新增 variant 伪装成旧 marker。
+ADR-0019 加入 strong localization evidence variant 后，新写入升级为 v4；读取路径继续接受
+v2/v3，旧 marker 仍不得承载新 variant。
+
+ADR-0020 的 execution relation evidence 将新写入升级为 v5；ADR-0024 的 source-aware State
+与 generic Memory evidence 升级为 v6。generic Memory replica 最初在 v6 只有 Node identity，
+ADR-0025 completion pass 后由 v7 增加必需的 `consumer_provider_id`，durable key 成为
+`(MemorySelector, NodeId, ConsumerProviderId)`。读取继续支持 v2-v6：缺少 provider identity 的
+v6 replica 只能归入不可与合法 provider 冲突的 `~legacy-v6-unknown` bucket，不能猜测历史归属；
+带 provider identity 的 payload 不能伪装成 v6，缺少该字段的 v7 payload 必须 fail-closed。
 
 JSON codec 版本升级必须使用新的 schema marker，并保留旧版本读取路径，直到已有数据库完成
 迁移。完整 event-sourced projection replay 必须额外定义 event ordering、idempotency 和

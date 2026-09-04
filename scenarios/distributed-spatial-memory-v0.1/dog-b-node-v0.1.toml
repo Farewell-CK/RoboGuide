@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.3"
+schema = "roboguide.node-config/v0.5"
 node_id = "dog-b"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "../../artifacts/distributed-spatial-memory-v0.1/dog-b/node-state"
@@ -69,11 +69,51 @@ local_system = "spatial-runtime"
 endpoint = "http://127.0.0.1:18102"
 timeout_ms = 30000
 
+[[connections]]
+driver = "http"
+id = "spatial-readiness-http"
+local_system = "spatial-runtime"
+endpoint = "http://127.0.0.1:18102"
+timeout_ms = 7000
+
 [[resources]]
 id = "dog-b-spatial-compute"
 kind = "compute"
 capacity = 1
 owner = "spatial-runtime"
+
+[[state_exports]]
+id = "spatial-readiness-summary"
+owner = "spatial-runtime"
+object_class = "node"
+object_type = "spatial-runtime"
+object_id = "dog-b"
+semantic = "reported"
+payload_schema = "roboguide.example.spatial-readiness/v0.1"
+valid_for_ms = 15000
+interval_ms = 5000
+value_pointer = "/capabilities"
+
+[state_exports.step]
+id = "observe-spatial-state"
+connection = "spatial-readiness-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[state_exports.step.request]
+base = {}
+
+[[memory_providers]]
+id = "spatial-maps"
+owner = "spatial-runtime"
+kind = "spatial"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.map-manifest/v0.1"
+media_type = "application/vnd.roboguide.spatial-map"
 
 [[capabilities]]
 contract = "spatial.map.build@v0"
@@ -82,6 +122,24 @@ owner = "spatial-runtime"
 required_resources = ["dog-b-spatial-compute"]
 local_locks = ["spatial-map-workflow"]
 artifact_operation = "prepare-output"
+
+[capabilities.readiness]
+state_pointer = "/capabilities/spatial.map.build@v0/state"
+detail_pointer = "/capabilities/spatial.map.build@v0/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "observe-build-readiness"
+connection = "spatial-readiness-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[capabilities.readiness.step.request]
+base = {}
 
 [capabilities.workflow]
 poll_interval_ms = 250
@@ -172,6 +230,24 @@ required_resources = ["dog-b-spatial-compute"]
 local_locks = ["spatial-map-workflow"]
 artifact_operation = "publish"
 
+[capabilities.readiness]
+state_pointer = "/capabilities/spatial.map.publish@v0/state"
+detail_pointer = "/capabilities/spatial.map.publish@v0/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "observe-publish-readiness"
+connection = "spatial-readiness-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[capabilities.readiness.step.request]
+base = {}
+
 [capabilities.workflow]
 poll_interval_ms = 250
 
@@ -261,6 +337,24 @@ required_resources = ["dog-b-spatial-compute"]
 local_locks = ["spatial-map-workflow"]
 artifact_operation = "import"
 
+[capabilities.readiness]
+state_pointer = "/capabilities/spatial.map.import@v0/state"
+detail_pointer = "/capabilities/spatial.map.import@v0/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "observe-import-readiness"
+connection = "spatial-readiness-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[capabilities.readiness.step.request]
+base = {}
+
 [capabilities.workflow]
 poll_interval_ms = 250
 
@@ -349,6 +443,24 @@ owner = "spatial-runtime"
 required_resources = ["dog-b-spatial-compute"]
 local_locks = ["spatial-map-workflow"]
 artifact_operation = "verify"
+
+[capabilities.readiness]
+state_pointer = "/capabilities/spatial.localization.verify@v0/state"
+detail_pointer = "/capabilities/spatial.localization.verify@v0/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capabilities.readiness.step]
+id = "observe-localization-readiness"
+connection = "spatial-readiness-http"
+
+[capabilities.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+
+[capabilities.readiness.step.request]
+base = {}
 
 [capabilities.workflow]
 poll_interval_ms = 250

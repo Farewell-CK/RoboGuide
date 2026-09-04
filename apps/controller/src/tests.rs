@@ -99,7 +99,16 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeObservation(NodeEvent::TaskCompleted { task_ref, .. })
         | EventPayload::NodeObservation(NodeEvent::TaskFailed { task_ref, .. }) => Some(task_ref),
         EventPayload::RuntimeExecutionRecoveryRequired { task_ref, .. } => task_ref.as_ref(),
+        EventPayload::ExecutionRelationReconciliationRequired {
+            target_task_ref, ..
+        } => Some(target_task_ref),
+        EventPayload::MapLocalizationEvidenceRecorded { evidence } => Some(evidence.task_ref()),
         EventPayload::MapArtifactDeclared { .. }
+        | EventPayload::StateRecordObserved { .. }
+        | EventPayload::MemoryManifestPublished { .. }
+        | EventPayload::MemoryArtifactStaged { .. }
+        | EventPayload::MemoryArtifactImported { .. }
+        | EventPayload::MemoryArtifactRejected { .. }
         | EventPayload::MapArtifactPublished { .. }
         | EventPayload::MapArtifactStaged { .. }
         | EventPayload::MapArtifactImported { .. }
@@ -109,6 +118,8 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
+        | EventPayload::ExecutionRelationRegistered { .. }
+        | EventPayload::ExecutionRelationStateChanged { .. }
         | EventPayload::ContextBindingsReleased { .. }
         | EventPayload::NodeObservation(NodeEvent::SafeStopped { .. }) => None,
     }

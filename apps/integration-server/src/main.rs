@@ -6,13 +6,15 @@
 
 mod artifact_http;
 
-use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
-use integration::{
-    CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, GrpcIntegrationService,
-    IntegrationRuntimeBridge, ObservedTaskResult,
+use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer as LegacyRoboGuideNodeProtocolServer;
+use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
+use orchestration::{
+    CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
+    ObservedTaskResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
-use ports::Clock;
+use ports::{Clock, SharedNodeStateReader, StateRecordReader};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -23,7 +25,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v7";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
+
+/// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -49,11 +54,110 @@ struct ControlHttpRequest {
 }
 
 /// Live process state sharing one Control authority with Mission orchestration.
+#[derive(Clone)]
 struct ControllerState {
     /// Integration, Runtime, Control, and horizontal State projections.
     bridge: IntegrationRuntimeBridge<state::SqliteEventLog>,
     /// Complete MissionPlan and explicit Mission lifecycle authority.
     orchestrator: MissionOrchestrator,
+}
+
+/// Read-only admission adapter from Artifact HTTP into current Controller registration facts.
+struct ControllerMemoryAdmission {
+    /// Shared Controller composition whose State projection owns registration snapshots.
+    controller: Arc<Mutex<ControllerState>>,
+    /// Current gRPC routes used only to bind Memory writes to an active Node session.
+    router: integration::GrpcNodeRouter,
+}
+
+impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
+    /// Requires a Node-owned manifest to match one exact provider in its registration snapshot.
+    fn admit_manifest(&self, manifest: &domain::MemoryArtifactManifest) -> Result<(), String> {
+        let domain::MemoryOwner::Node { node_id, .. } = manifest.owner() else {
+            return Err(
+                "RoboGuide-owned Memory requires a composition-owned publisher, not the node data-plane endpoint"
+                    .to_string(),
+            );
+        };
+        let controller = self
+            .controller
+            .lock()
+            .map_err(|_| "Controller registration State is unavailable".to_string())?;
+        let registration = controller
+            .bridge
+            .state()
+            .node(node_id)
+            .ok_or_else(|| format!("Memory owner node {node_id} is not registered"))?
+            .registration();
+        let provider = registration
+            .memory_providers()
+            .iter()
+            .find(|provider| provider.provider_id() == manifest.provider_id())
+            .ok_or_else(|| {
+                format!(
+                    "Memory provider {} is not declared by node {node_id}",
+                    manifest.provider_id()
+                )
+            })?;
+        provider
+            .admit_manifest(manifest)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Requires replica evidence to name one compatible provider on the receiving node.
+    fn admit_replica(
+        &self,
+        node_id: &domain::NodeId,
+        consumer_provider_id: &str,
+        manifest: &domain::MemoryArtifactManifest,
+    ) -> Result<(), String> {
+        let controller = self
+            .controller
+            .lock()
+            .map_err(|_| "Controller registration State is unavailable".to_string())?;
+        let registration = controller
+            .bridge
+            .state()
+            .node(node_id)
+            .ok_or_else(|| format!("Memory replica node {node_id} is not registered"))?
+            .registration();
+        let provider = registration
+            .memory_providers()
+            .iter()
+            .find(|provider| provider.provider_id() == consumer_provider_id)
+            .ok_or_else(|| {
+                format!(
+                    "Memory consumer provider {consumer_provider_id} is not declared by node {node_id}"
+                )
+            })?;
+        provider
+            .admit_import(manifest, node_id)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Requires the declared publisher to own the active, unexpired route for the expected Node.
+    fn admit_publisher(
+        &self,
+        publisher: Option<&artifact_http::MemoryPublicationIdentity>,
+        expected_node_id: &domain::NodeId,
+    ) -> Result<(), String> {
+        let publisher = publisher.ok_or_else(|| {
+            "generic Memory mutation requires current Node/session identity".to_string()
+        })?;
+        if publisher.node_id() != expected_node_id {
+            return Err(format!(
+                "Memory publisher node {} does not match semantic owner {expected_node_id}",
+                publisher.node_id()
+            ));
+        }
+        self.router
+            .session_is_current(expected_node_id.as_str(), publisher.session_id())
+            .map_err(|error| error.to_string())?
+            .then_some(())
+            .ok_or_else(|| {
+                format!("Memory publisher session is not current for node {expected_node_id}")
+            })
+    }
 }
 
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
@@ -126,7 +230,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
     let process_clock = Arc::new(runtime::SystemMonotonicClock::new());
-    let artifact_store = adapters::artifact::FileSystemArtifactStore::new(&artifact_root)?;
+    let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
             .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
@@ -136,9 +240,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new(events);
+    let receiver_router = router.clone();
+    let memory_session_router = router.clone();
     let mut controller = match checkpoint {
         Some(checkpoint) => {
-            if checkpoint.schema != SERVER_CHECKPOINT_SCHEMA {
+            if !matches!(
+                checkpoint.schema.as_str(),
+                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+            ) {
                 return Err(format!(
                     "controller database {event_path} uses unsupported checkpoint schema {}",
                     checkpoint.schema
@@ -153,7 +262,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into());
             }
             let saved: ServerCheckpoint = serde_json::from_str(&checkpoint.checkpoint_json)?;
-            if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+            if !matches!(
+                saved.schema.as_str(),
+                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+            ) {
                 return Err(format!(
                     "controller checkpoint body uses unsupported schema {}",
                     saved.schema
@@ -199,6 +311,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .orchestrator
         .validate_control_authority(controller.bridge.control())
         .map_err(|error| format!("restored Mission authority is inconsistent: {error}"))?;
+    for mission_id in controller.orchestrator.mission_ids() {
+        let execution = controller
+            .orchestrator
+            .execution(&mission_id)
+            .expect("Mission identity came from orchestration authority");
+        controller
+            .bridge
+            .validate_execution_relations(execution.plan(), execution.group_id())
+            .map_err(|error| {
+                format!("restored Mission relation authority is inconsistent: {error}")
+            })?;
+    }
     validate_restored_actor_placement_coverage(
         controller.bridge.control(),
         &controller.orchestrator,
@@ -225,6 +349,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let receiver_event_write_gate = event_write_gate.clone();
     let artifact_catalog_for_server = artifact_catalog.clone();
     let artifact_store_for_server = artifact_store.clone();
+    let memory_admission: Arc<dyn artifact_http::MemoryProviderAdmission> =
+        Arc::new(ControllerMemoryAdmission {
+            controller: Arc::clone(&controller),
+            router: memory_session_router,
+        });
     let (fatal_sender, fatal_receiver) = tokio::sync::oneshot::channel::<String>();
     tokio::spawn(async move {
         if let Err(error) = serve_http(
@@ -244,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifact_listener,
             artifact_store_for_server,
             artifact_catalog_for_server,
+            memory_admission,
         )
         .await
         {
@@ -253,73 +383,111 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let correlation = domain::CorrelationId::new("integration-server")
             .expect("static correlation id is valid");
-        while let Some(event) = receiver.recv().await {
+        while let Some(delivery) = receiver.recv().await {
+            let (event, completion) = delivery.into_parts();
+            if let GrpcNodeEvent::NodeMessage {
+                node_id,
+                session_id,
+                ..
+            } = &event
+            {
+                match receiver_router.session_is_current(node_id, session_id) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        completion.reject("Node session is no longer current");
+                        continue;
+                    }
+                    Err(error) => {
+                        let reason = format!("cannot validate Node session: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
+                        return;
+                    }
+                }
+            }
+            let registration_fact = matches!(&event, GrpcNodeEvent::Registered { .. });
             let _write_guard = match receiver_event_write_gate.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
-                    let _ = fatal_sender.send("event-log write gate is poisoned".to_string());
+                    let reason = "event-log write gate is poisoned".to_string();
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             };
             if let Err(error) = receiver_event_log.begin_batch() {
-                let _ = fatal_sender.send(format!("cannot begin durable event batch: {error}"));
+                let reason = format!("cannot begin durable event batch: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
             }
             let mut accepted = false;
             let mut checkpoint_json = None;
+            let mut rejection = None;
+            let mut pending_controller = None;
             match controller.lock() {
-                Ok(mut controller) => {
+                Ok(controller) => {
+                    // Evaluate the complete application transition on a private candidate. The
+                    // live authority is replaced only after the durable batch commits below.
+                    let mut candidate = controller.clone();
                     let now = process_clock.now();
-                    if let Err(error) = controller.bridge.consume(event, now, &correlation) {
+                    if let Err(error) = candidate.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
+                        rejection = Some(error.to_string());
                     } else if let Err(error) = apply_runtime_events(
-                        &mut controller,
+                        &mut candidate,
                         now,
                         &correlation,
                         &mut receiver_event_log.clone(),
                     ) {
                         drop(controller);
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
+                        let reason = format!(
                             "Runtime lifecycle transition failed after fact acceptance: {error}"
-                        ));
+                        );
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
                     } else if let Err(error) = apply_runtime_outcomes(
-                        &mut controller,
+                        &mut candidate,
                         now,
                         &correlation,
                         &mut receiver_event_log.clone(),
                     ) {
                         drop(controller);
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
-                            "Mission orchestration failed after fact acceptance: {error}"
-                        ));
+                        let reason =
+                            format!("Mission orchestration failed after fact acceptance: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
-                    } else if let Err(error) = drive_ready_tasks(
-                        &mut controller,
-                        now,
-                        &correlation,
-                        &mut receiver_event_log.clone(),
-                    ) {
-                        drop(controller);
+                    } else if !registration_fact
+                        && let Err(error) = drive_ready_tasks(
+                            &mut candidate,
+                            now,
+                            &correlation,
+                            &mut receiver_event_log.clone(),
+                        )
+                    {
                         let _ = receiver_event_log.rollback_batch();
-                        let _ = fatal_sender.send(format!(
-                            "Mission Task dispatch failed after fact acceptance: {error}"
-                        ));
+                        let reason =
+                            format!("Mission Task dispatch failed after fact acceptance: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
                         return;
                     } else {
-                        match server_checkpoint_json(&controller) {
+                        match server_checkpoint_json(&candidate) {
                             Ok(checkpoint) => {
                                 checkpoint_json = Some(checkpoint);
                                 accepted = true;
+                                pending_controller = Some(candidate);
                             }
                             Err(error) => {
-                                drop(controller);
                                 let _ = receiver_event_log.rollback_batch();
-                                let _ = fatal_sender.send(format!(
-                                    "controller checkpoint serialization failed: {error}"
-                                ));
+                                let reason =
+                                    format!("controller checkpoint serialization failed: {error}");
+                                completion.unavailable(reason.clone());
+                                let _ = fatal_sender.send(reason);
                                 return;
                             }
                         }
@@ -327,21 +495,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(_) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender.send("integration bridge lock is poisoned".to_string());
+                    let reason = "integration bridge lock is poisoned".to_string();
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             }
             match receiver_event_log.take_error() {
                 Ok(Some(error)) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender.send(format!("durable event sink failed: {error}"));
+                    let reason = format!("durable event sink failed: {error}");
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
                 Ok(None) => {}
                 Err(error) => {
                     let _ = receiver_event_log.rollback_batch();
-                    let _ = fatal_sender
-                        .send(format!("durable event sink health is unavailable: {error}"));
+                    let reason = format!("durable event sink health is unavailable: {error}");
+                    completion.unavailable(reason.clone());
+                    let _ = fatal_sender.send(reason);
                     return;
                 }
             }
@@ -350,9 +523,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     receiver_event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
             {
                 let _ = receiver_event_log.rollback_batch();
-                let _ = fatal_sender.send(format!(
-                    "cannot persist controller checkpoint with accepted fact: {error}"
-                ));
+                let reason =
+                    format!("cannot persist controller checkpoint with accepted fact: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
             }
             let batch_result = if accepted {
@@ -361,12 +535,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 receiver_event_log.rollback_batch()
             };
             if let Err(error) = batch_result {
-                let _ = fatal_sender.send(format!("cannot finalize durable event batch: {error}"));
+                let reason = format!("cannot finalize durable event batch: {error}");
+                completion.unavailable(reason.clone());
+                let _ = fatal_sender.send(reason);
                 return;
+            }
+            if accepted {
+                if let Some(candidate) = pending_controller {
+                    match controller.lock() {
+                        Ok(mut live) => *live = candidate,
+                        Err(_) => {
+                            let reason = "integration bridge lock is poisoned after durable commit";
+                            completion.unavailable(reason);
+                            let _ = fatal_sender.send(reason.to_string());
+                            return;
+                        }
+                    }
+                }
+                completion.accept();
+            } else {
+                completion.reject(
+                    rejection.unwrap_or_else(|| {
+                        "Controller rejected the Node Protocol fact".to_string()
+                    }),
+                );
             }
         }
     });
     let server = tonic::transport::Server::builder()
+        .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
         .add_service(RoboGuideNodeProtocolServer::new(service))
         .serve(address);
     tokio::select! {
@@ -535,7 +732,10 @@ fn apply_runtime_events(
             }
             runtime::ExecutionEvent::RoleCompleted { .. }
             | runtime::ExecutionEvent::RoleFailed { .. }
-            | runtime::ExecutionEvent::RecoveryRequired { .. } => {}
+            | runtime::ExecutionEvent::RecoveryRequired { .. }
+            | runtime::ExecutionEvent::RelationRegistered { .. }
+            | runtime::ExecutionEvent::RelationStateChanged { .. }
+            | runtime::ExecutionEvent::RelationReconciliationRequired { .. } => {}
         }
     }
     Ok(())
@@ -808,6 +1008,27 @@ async fn handle_http_connection(
                 inventory_json(controller.bridge.state(), clock.now()),
             )
         }
+        ("GET", "/v1/state/providers") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            ("200 OK", state_providers_json(&controller))
+        }
+        ("GET", "/v1/memory/providers") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            ("200 OK", memory_providers_json(&controller))
+        }
+        ("GET", "/v1/state/records") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                state_records_json(&controller, clock.now(), &parse_query(query)),
+            )
+        }
         ("GET", "/v1/events") => {
             let query = parse_query(query);
             let after_sequence = query
@@ -855,30 +1076,39 @@ async fn handle_http_connection(
                 .map_err(|_| "event-log write gate is poisoned")?;
             event_log.begin_batch()?;
             let now = clock.now();
+            let mut pending_controller = None;
             let result: Result<String, String> = {
-                let mut controller = controller
+                let controller = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let mut candidate = controller.clone();
                 let mut events = event_log.clone();
                 let operation = {
                     let ControllerState {
                         bridge,
                         orchestrator,
-                    } = &mut *controller;
+                    } = &mut candidate;
                     validate_actor_placement_coverage(bridge.control(), &plan).and_then(|_| {
                         let submit_correlation =
                             domain::CorrelationId::new(format!("submit-{mission_id}"))
                                 .map_err(|error| error.to_string())?;
                         orchestrator
                             .submit(
-                                plan,
+                                plan.clone(),
                                 group_id.clone(),
                                 bridge.control_mut(),
                                 now,
                                 &submit_correlation,
                                 &mut events,
                             )
-                            .map(|_| ())
+                            .map_err(|error| error.to_string())?;
+                        bridge
+                            .register_execution_relations(
+                                &plan,
+                                &group_id,
+                                now,
+                                &submit_correlation,
+                            )
                             .map_err(|error| error.to_string())
                     })
                 };
@@ -887,17 +1117,41 @@ async fn handle_http_connection(
                         let dispatch_correlation =
                             domain::CorrelationId::new(format!("dispatch-{mission_id}"))
                                 .map_err(|error| error.to_string())?;
-                        drive_ready_tasks(&mut controller, now, &dispatch_correlation, &mut events)
+                        drive_ready_tasks(&mut candidate, now, &dispatch_correlation, &mut events)
                             .map_err(|error| error.to_string())
                     })
                     .and_then(|_| {
-                        server_checkpoint_json(&controller).map_err(|error| error.to_string())
+                        server_checkpoint_json(&candidate).map_err(|error| error.to_string())
                     })
+                    .inspect(|_| pending_controller = Some(candidate))
             };
             match result {
                 Ok(checkpoint_json) => {
-                    event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)?;
-                    event_log.commit_batch()?;
+                    if let Err(error) =
+                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
+                    {
+                        let rollback = event_log.rollback_batch();
+                        drop(_write_guard);
+                        return write_http_response(
+                            stream,
+                            "503 Service Unavailable",
+                            serde_json::json!({"error": format!("checkpoint persistence failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
+                        ).await;
+                    }
+                    if let Err(error) = event_log.commit_batch() {
+                        let rollback = event_log.rollback_batch();
+                        drop(_write_guard);
+                        return write_http_response(
+                            stream,
+                            "503 Service Unavailable",
+                            serde_json::json!({"error": format!("event batch commit failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
+                        ).await;
+                    }
+                    if let Some(candidate) = pending_controller {
+                        *controller
+                            .lock()
+                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                    }
                     (
                         "202 Accepted",
                         serde_json::json!({
@@ -909,6 +1163,7 @@ async fn handle_http_connection(
                 }
                 Err(error) => {
                     event_log.rollback_batch()?;
+                    drop(_write_guard);
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
             }
@@ -940,13 +1195,38 @@ async fn handle_http_connection(
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
+                    let relations = controller
+                        .bridge
+                        .relation_snapshots(execution.group_id())
+                        .into_iter()
+                        .map(|snapshot| {
+                            let relation = snapshot.relation();
+                            serde_json::json!({
+                                "id": relation.relation_id().as_str(),
+                                "kind": "requires-active",
+                                "source": {
+                                    "task_id": relation.source_task_ref().task_id().as_str(),
+                                    "role_id": relation.source_role_id().as_str(),
+                                    "execution_id": snapshot.source_execution_id(),
+                                },
+                                "target": {
+                                    "task_id": relation.target_task_ref().task_id().as_str(),
+                                    "role_id": relation.target_role_id().as_str(),
+                                    "execution_id": snapshot.target_execution_id(),
+                                },
+                                "state": format!("{:?}", snapshot.state()),
+                                "reconciliation_required": snapshot.reconciliation_required(),
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     (
                         "200 OK",
                         serde_json::json!({
                             "mission_id": mission_id.as_str(),
                             "group_id": execution.group_id().as_str(),
                             "status": format!("{:?}", execution.lifecycle()),
-                            "tasks": tasks
+                            "tasks": tasks,
+                            "relations": relations
                         }),
                     )
                 }
@@ -967,16 +1247,18 @@ async fn handle_http_connection(
                 .map_err(|_| "event-log write gate is poisoned")?;
             event_log.begin_batch()?;
             let now = clock.now();
+            let mut pending_controller = None;
             let result: Result<String, String> = {
-                let mut controller = controller
+                let controller = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let mut candidate = controller.clone();
                 let mut events = event_log.clone();
                 let operation = {
                     let ControllerState {
                         bridge,
                         orchestrator,
-                    } = &mut *controller;
+                    } = &mut candidate;
                     orchestrator.cancel(
                         &mission_id,
                         bridge.control_mut(),
@@ -985,18 +1267,45 @@ async fn handle_http_connection(
                         &mut events,
                     )
                 };
-                operation.map_err(|error| error.to_string()).and_then(|()| {
-                    server_checkpoint_json(&controller).map_err(|error| error.to_string())
-                })
+                operation
+                    .map_err(|error| error.to_string())
+                    .and_then(|()| {
+                        server_checkpoint_json(&candidate).map_err(|error| error.to_string())
+                    })
+                    .inspect(|_| pending_controller = Some(candidate))
             };
             match result {
                 Ok(checkpoint_json) => {
-                    event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)?;
-                    event_log.commit_batch()?;
+                    if let Err(error) =
+                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
+                    {
+                        let rollback = event_log.rollback_batch();
+                        drop(_write_guard);
+                        return write_http_response(
+                            stream,
+                            "503 Service Unavailable",
+                            serde_json::json!({"error": format!("checkpoint persistence failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
+                        ).await;
+                    }
+                    if let Err(error) = event_log.commit_batch() {
+                        let rollback = event_log.rollback_batch();
+                        drop(_write_guard);
+                        return write_http_response(
+                            stream,
+                            "503 Service Unavailable",
+                            serde_json::json!({"error": format!("event batch commit failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
+                        ).await;
+                    }
+                    if let Some(candidate) = pending_controller {
+                        *controller
+                            .lock()
+                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                    }
                     ("202 Accepted", serde_json::json!({"status": "Cancelled"}))
                 }
                 Err(error) => {
                     event_log.rollback_batch()?;
+                    drop(_write_guard);
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
             }
@@ -1065,7 +1374,10 @@ fn inventory_json(
                         "available": capability.is_available(),
                     })
                 }).collect::<Vec<_>>(),
-                "contracts": registration.supported_contracts().iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "contracts": registration.supported_contracts().iter()
+                    .filter(|contract| registration.contract_is_available(contract))
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
                 "resources": registration.resources().iter().map(|resource| {
                     serde_json::json!({
                         "resource_id": resource.id().as_str(),
@@ -1081,6 +1393,251 @@ fn inventory_json(
         "observed_at_ms": observed_at.as_millis(),
         "nodes": nodes,
     })
+}
+
+/// Describes built-in read adapters and selectively registered node providers.
+fn state_providers_json(controller: &ControllerState) -> serde_json::Value {
+    let built_in = [
+        ("mission-orchestrator", "desired"),
+        ("control-plane", "committed"),
+        ("shared-node-state", "reported,observed"),
+        ("runtime-orchestration", "derived"),
+    ]
+    .into_iter()
+    .map(|(provider_id, semantics)| {
+        serde_json::json!({
+            "provider_id": provider_id,
+            "owner": "roboguide",
+            "semantics": semantics.split(',').collect::<Vec<_>>(),
+            "writable_via_state_api": false,
+        })
+    })
+    .collect::<Vec<_>>();
+    let nodes = controller
+        .bridge
+        .state()
+        .snapshots()
+        .into_iter()
+        .map(|snapshot| {
+            let registration = snapshot.registration();
+            serde_json::json!({
+                "node_id": snapshot.node_id().as_str(),
+                "state_exports": registration.state_exports(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schema": "roboguide.state-provider-catalog/v0.1",
+        "built_in": built_in,
+        "nodes": nodes,
+        "belief_providers": [],
+    })
+}
+
+/// Describes the generic catalog and selectively registered node Memory providers.
+fn memory_providers_json(controller: &ControllerState) -> serde_json::Value {
+    let nodes = controller
+        .bridge
+        .state()
+        .snapshots()
+        .into_iter()
+        .map(|snapshot| {
+            serde_json::json!({
+                "node_id": snapshot.node_id().as_str(),
+                "providers": snapshot.registration().memory_providers(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schema": "roboguide.memory-provider-catalog/v0.1",
+        "built_in": [{
+            "provider_id": "artifact-memory-catalog",
+            "owner": "roboguide",
+            "kinds": ["execution", "spatial", "semantic", "experience", "artifact"],
+            "content_plane": "artifact-cas",
+        }],
+        "nodes": nodes,
+    })
+}
+
+/// Builds a read-only federated State view over existing owners plus external records.
+fn state_records_json(
+    controller: &ControllerState,
+    now: domain::TimestampMs,
+    query: &std::collections::BTreeMap<&str, &str>,
+) -> serde_json::Value {
+    let mut records = Vec::new();
+    for mission_id in controller.orchestrator.mission_ids() {
+        let execution = controller
+            .orchestrator
+            .execution(&mission_id)
+            .expect("Mission identity came from the same orchestrator");
+        records.push(state_view_record(
+            "roboguide",
+            "mission",
+            mission_id.as_str(),
+            "desired",
+            "roboguide:mission-orchestrator",
+            "accepted-plan",
+            serde_json::json!({
+                "objective": execution.plan().goal().objective(),
+                "task_ids": execution.plan().task_graph().tasks().iter()
+                    .map(|task| task.task_id().as_str())
+                    .collect::<Vec<_>>(),
+                "schema": execution.plan().schema_version(),
+            }),
+            None,
+        ));
+        records.push(state_view_record(
+            "roboguide",
+            "mission",
+            mission_id.as_str(),
+            "derived",
+            "roboguide:runtime-orchestration",
+            "mission-lifecycle",
+            serde_json::json!({"lifecycle": format!("{:?}", execution.lifecycle())}),
+            None,
+        ));
+    }
+    for group_id in controller.bridge.control().group_ids() {
+        let Some(group) = controller.bridge.control().group(&group_id) else {
+            continue;
+        };
+        records.push(state_view_record(
+            "roboguide",
+            "execution_group",
+            group_id.as_str(),
+            "committed",
+            "roboguide:control-plane",
+            "group-commitment",
+            serde_json::json!({
+                "mission_id": group.mission_id().as_str(),
+                "lifecycle": format!("{:?}", group.lifecycle()),
+                "assignments": group.assignments().iter().map(|assignment| serde_json::json!({
+                    "role_id": assignment.role_id().as_str(),
+                    "node_id": assignment.node_id().as_str(),
+                    "resource_ids": assignment.resource_ids().iter()
+                        .map(|resource| resource.as_str()).collect::<Vec<_>>(),
+                })).chain(group.task_executions().flat_map(|task| task.assignments().iter().map(|assignment| serde_json::json!({
+                    "task_id": task.task_ref().task_id().as_str(),
+                    "role_id": assignment.role_id().as_str(),
+                    "node_id": assignment.node_id().as_str(),
+                    "resource_ids": assignment.resource_ids().iter()
+                        .map(|resource| resource.as_str()).collect::<Vec<_>>(),
+                })))).collect::<Vec<_>>(),
+            }),
+            None,
+        ));
+    }
+    for snapshot in controller.bridge.state().snapshots() {
+        records.push(state_view_record(
+            "node",
+            "node",
+            snapshot.node_id().as_str(),
+            "reported",
+            &format!("node:{}/registration", snapshot.node_id()),
+            "health",
+            serde_json::json!({
+                "health": format!("{:?}", snapshot.reported_status().health()).to_ascii_lowercase(),
+                "source_observed_at_ms": snapshot.reported_status().observed_at().as_millis(),
+                "received_at_ms": snapshot.reported_status_received_at().as_millis(),
+            }),
+            None,
+        ));
+        records.push(state_view_record(
+            "node",
+            "node",
+            snapshot.node_id().as_str(),
+            "observed",
+            "roboguide:shared-node-state",
+            "liveness",
+            serde_json::json!({
+                "liveness": format!("{:?}", snapshot.liveness().liveness()).to_ascii_lowercase(),
+                "observed_at_ms": snapshot.liveness().observed_at().as_millis(),
+            }),
+            None,
+        ));
+    }
+    for record in controller.bridge.state_records().records() {
+        let key = record.key();
+        records.push(state_view_record(
+            &format!("{:?}", key.object().class()).to_ascii_lowercase(),
+            key.object().object_type(),
+            key.object().object_id(),
+            &format!("{:?}", key.semantic()).to_ascii_lowercase(),
+            &key.source().to_string(),
+            key.channel_id(),
+            serde_json::json!({
+                "payload_schema": record.payload_schema(),
+                "value": record.value(),
+                "source_observed_at_ms": record.source_observed_at().map(domain::TimestampMs::as_millis),
+                "received_at_ms": record.received_at().as_millis(),
+                "valid_for_ms": record.valid_for_ms(),
+                "confidence_millionths": record.confidence_millionths(),
+                "source_epoch": record.source_epoch(),
+                "sequence": record.sequence(),
+            }),
+            Some(record.is_stale_at(now)),
+        ));
+    }
+    records.retain(|record| state_record_matches(record, query));
+    serde_json::json!({
+        "schema": "roboguide.state-query/v0.1",
+        "observed_at_ms": now.as_millis(),
+        "records": records,
+    })
+}
+
+/// Creates one common read-facade envelope without moving authority into the API layer.
+#[allow(clippy::too_many_arguments)]
+fn state_view_record(
+    object_class: &str,
+    object_type: &str,
+    object_id: &str,
+    semantic: &str,
+    source: &str,
+    channel_id: &str,
+    value: serde_json::Value,
+    stale: Option<bool>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "object": {
+            "class": object_class,
+            "object_type": object_type,
+            "object_id": object_id,
+        },
+        "semantic": semantic,
+        "source": source,
+        "channel_id": channel_id,
+        "value": value,
+        "stale": stale,
+    })
+}
+
+/// Applies exact simple query filters while retaining stale records unless explicitly excluded.
+fn state_record_matches(
+    record: &serde_json::Value,
+    query: &std::collections::BTreeMap<&str, &str>,
+) -> bool {
+    let object = &record["object"];
+    let exact = [
+        ("object_class", object["class"].as_str()),
+        ("object_type", object["object_type"].as_str()),
+        ("object_id", object["object_id"].as_str()),
+        ("semantic", record["semantic"].as_str()),
+        ("source", record["source"].as_str()),
+        ("channel_id", record["channel_id"].as_str()),
+    ];
+    if exact.iter().any(|(name, actual)| {
+        query
+            .get(name)
+            .is_some_and(|expected| Some(*expected) != *actual)
+    }) {
+        return false;
+    }
+    query
+        .get("include_stale")
+        .is_none_or(|include| *include != "false" || record["stale"].as_bool() != Some(true))
 }
 
 /// Reads one HTTP/1.1 request using explicit header and Content-Length boundaries.
@@ -1211,6 +1768,45 @@ fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str> {
 mod tests {
     use super::*;
 
+    /// State query filters are exact and can exclude only records explicitly marked stale.
+    #[test]
+    fn state_query_filters_semantics_sources_and_staleness() {
+        let fresh = state_view_record(
+            "world",
+            "hazard",
+            "crossing-a",
+            "observed",
+            "node:cane-a/safety",
+            "hazards",
+            serde_json::json!({"present": false}),
+            Some(false),
+        );
+        let stale = state_view_record(
+            "world",
+            "hazard",
+            "crossing-a",
+            "reported",
+            "node:dog-a/navigation",
+            "hazards",
+            serde_json::json!({"present": true}),
+            Some(true),
+        );
+        let query = parse_query(
+            "object_class=world&object_type=hazard&semantic=observed&include_stale=false",
+        );
+
+        assert!(state_record_matches(&fresh, &query));
+        assert!(!state_record_matches(&stale, &query));
+        assert!(!state_record_matches(
+            &stale,
+            &parse_query("include_stale=false")
+        ));
+        assert!(state_record_matches(
+            &stale,
+            &parse_query("include_stale=true")
+        ));
+    }
+
     /// Empty inventory still carries a versioned advisory snapshot rather than an error.
     #[test]
     fn inventory_snapshot_is_versioned_and_empty_before_registration() {
@@ -1270,6 +1866,51 @@ mod tests {
         assert_eq!(value["nodes"][0]["contracts"][0], "mobility.move@v1");
         assert_eq!(value["nodes"][0]["resources"][0]["kind"], "space");
         assert_eq!(value["nodes"][0]["resources"][0]["capacity"], 2);
+    }
+
+    /// Advisory inventory excludes an exact contract whose latest readiness fact is false.
+    #[test]
+    fn inventory_snapshot_excludes_unavailable_exact_contracts() {
+        let system_id = domain::LocalSystemId::new("mapping").expect("system id is valid");
+        let contract = domain::CapabilityContractRef::new("spatial.map", "localize", "v0")
+            .expect("contract is valid");
+        let registration = domain::NodeRegistration::new_with_local_systems_and_readiness(
+            domain::NodeId::new("dog-b").expect("node id is valid"),
+            vec![domain::LocalSystemDescriptor::new(
+                system_id.clone(),
+                domain::LocalRuntime::new("mapping", "1").expect("runtime is valid"),
+                std::collections::BTreeMap::new(),
+            )],
+            domain::NodeContractVersion::v0_2(),
+            vec![domain::Capability::new(
+                domain::CapabilityKind::Compute,
+                false,
+            )],
+            std::collections::BTreeMap::from([(contract.clone(), system_id)]),
+            std::collections::BTreeMap::from([(contract.clone(), domain::CapabilityKind::Compute)]),
+            std::collections::BTreeMap::from([(contract, false)]),
+            Vec::new(),
+            Vec::new(),
+            std::collections::BTreeMap::new(),
+        )
+        .expect("registration is valid");
+        let snapshot = domain::NodeStateSnapshot::new(
+            registration,
+            domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(1)),
+            domain::TimestampMs::new(2),
+            domain::NodeLivenessObservation::new(
+                domain::NodeLiveness::Reachable,
+                domain::TimestampMs::new(2),
+            ),
+        );
+        let mut shared_state = state::InMemorySharedNodeState::new();
+        ports::SharedNodeStateWriter::record_node(&mut shared_state, snapshot)
+            .expect("snapshot is accepted");
+
+        let value = inventory_json(&shared_state, domain::TimestampMs::new(3));
+
+        assert_eq!(value["nodes"][0]["reported_health"], "Online");
+        assert_eq!(value["nodes"][0]["contracts"], serde_json::json!([]));
     }
 
     /// The control HTTP reader reconstructs a Mission request split across arbitrary TCP writes.
