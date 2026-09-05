@@ -1,5 +1,9 @@
 # ADR-0026: Execution Coupling Modes and Group Views
 
+> ADR-0027 makes `SharedSpatialReference` executable, adds identified two-ended peer readiness,
+> and introduces the Controller implementation-support gate. This ADR still defines the v0.4
+> vocabulary and authority split.
+
 ## Status
 
 Accepted
@@ -26,15 +30,15 @@ existing receive-time/TTL semantics and returned as `Fresh`, `Stale`, or `Unknow
 never guessed from a channel name. State remains the evidence authority and Runtime/Orchestration
 exposes a read-only Group view assembled from currently bound members. Runtime may retain a
 transport-neutral peer channel descriptor and lifecycle (`Planned`, `Ready`, `Fenced`, `Closed`)
-for tightly coupled contexts. No Node Protocol message or middleware is prescribed; Local EAIOS
-owns high-frequency relative-state computation and corrective control.
+for tightly coupled contexts. ADR-0027 adds a readiness-evidence message without prescribing peer
+middleware; Local EAIOS owns high-frequency relative-state computation and corrective control.
 The Runtime-backed execution field has no TTL freshness classification; its `Unknown` execution
 status already carries physical ambiguity and uses the existing reconciliation boundary.
 
 Typed relation families reserve state keys, shared spatial references, frame identifiers, state
 requirements, and provider-defined freshness policy identities. They deliberately contain no
-distance/angle thresholds, formulas, or expression DSL. Unsupported typed evidence remains
-`Unknown` and uses existing Runtime reconciliation fencing.
+distance/angle thresholds, formulas, or expression DSL. ADR-0027 implements shared spatial
+evidence and rejects the other reserved families through implementation preflight.
 
 `SequentialHandoff` requires the existing Task handoff mechanism: DAG readiness plus application
 Task lifecycle evidence. It does not create a second Runtime handoff registry in v0.4. Concurrent

@@ -17,8 +17,8 @@ use ports::{
     EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader, StateRecordWriter,
 };
 use runtime::{
-    ExecutionEvent, ExecutionStatus, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
-    RuntimeRelationSnapshot,
+    ExecutionEvent, ExecutionStatus, PeerChannelReadinessEvidence, RuntimeExecutionCheckpoint,
+    RuntimeExecutionManager, RuntimeRelationSnapshot, SharedSpatialEvidence,
 };
 use state::{InMemorySharedNodeState, StateRecordProjection};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -26,11 +26,11 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 10 adds Runtime coordination contexts and peer lifecycle state.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
+/// Version 11 preserves source receive time and adds current-attempt coordination evidence.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v9";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -93,6 +93,17 @@ pub enum GroupViewFreshness {
     Unknown,
 }
 
+/// Strong localization status of one member against the Context's shared map/frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupSpatialVerification {
+    /// Current-attempt evidence proves the declared map revision and frame.
+    Verified,
+    /// No current-attempt strong localization evidence is available.
+    Unknown,
+    /// Current-attempt evidence names a different map revision or frame.
+    Mismatched,
+}
+
 /// Read-only evidence for one logical Group member field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSharedViewEntry {
@@ -114,6 +125,10 @@ pub struct GroupSharedViewEntry {
     execution_status: Option<RemoteExecutionStatus>,
     /// Receive-time freshness result, or Unknown when no record exists.
     freshness: Option<GroupViewFreshness>,
+    /// Current-attempt strong localization evidence for the member, when available.
+    spatial_evidence: Option<SharedSpatialEvidence>,
+    /// Comparison with the Context's declared map/frame, when one is declared.
+    spatial_verification: Option<GroupSpatialVerification>,
 }
 
 impl GroupSharedViewEntry {
@@ -160,6 +175,16 @@ impl GroupSharedViewEntry {
     /// Returns receive-time freshness when the Context requested it, including Unknown.
     pub const fn freshness(&self) -> Option<GroupViewFreshness> {
         self.freshness
+    }
+
+    /// Returns strong localization evidence tied to the current physical attempt.
+    pub const fn spatial_evidence(&self) -> Option<&SharedSpatialEvidence> {
+        self.spatial_evidence.as_ref()
+    }
+
+    /// Returns whether current evidence proves the declared shared spatial reference.
+    pub const fn spatial_verification(&self) -> Option<GroupSpatialVerification> {
+        self.spatial_verification
     }
 }
 
@@ -230,7 +255,7 @@ struct ControllerCheckpoint {
     control: control::ControlCheckpoint,
     /// Shared reported node facts; local receive/liveness times are rebased on restore.
     nodes: Vec<domain::NodeStateSnapshot>,
-    /// Independently attributed State channels introduced by v9 checkpoints.
+    /// Independently attributed State channels, preserving their original receive times.
     #[serde(default)]
     state_records: Vec<StateRecord>,
     /// Runtime-owned live execution contexts and continuity state.
@@ -307,9 +332,8 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let control = ControlPlane::restore(checkpoint.control)?;
         let state = InMemorySharedNodeState::restore(checkpoint.nodes, restored_at)
             .map_err(IntegrationRuntimeError::Checkpoint)?;
-        let state_records =
-            StateRecordProjection::restore_rebased(checkpoint.state_records, restored_at)
-                .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
+        let state_records = StateRecordProjection::restore(checkpoint.state_records)
+            .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         let runtime = RuntimeExecutionManager::restore(checkpoint.runtime)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         Ok(Self {
@@ -330,6 +354,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
+        self.runtime.refresh_peer_channel_deadlines(received_at);
         match event {
             GrpcNodeEvent::Registered {
                 lease_id,
@@ -337,9 +362,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 ..
             } => {
                 let registration = registration_from_wire(registration)?;
+                let node_id = registration.node_id().clone();
                 let lease = NodeLease::new(
                     LeaseId::new(lease_id)?,
-                    registration.node_id().clone(),
+                    node_id.clone(),
                     received_at,
                     15_000,
                 )?;
@@ -352,6 +378,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     correlation_id,
                     &mut self.events,
                 )?;
+                self.runtime.fence_peer_channels_for_node(&node_id);
             }
             GrpcNodeEvent::NodeMessage {
                 node_id,
@@ -425,6 +452,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             correlation_id,
                             &mut self.events,
                         )?;
+                        // A complete registration snapshot may change the LocalSystem that owns
+                        // a committed capability. Require fresh endpoint proof under the new
+                        // snapshot instead of retaining readiness admitted under the old one.
+                        let node_id = NodeId::new(&node_id)?;
+                        self.runtime.fence_peer_channels_for_node(&node_id);
                     }
                     Some(NodePayload::StateObservationBatch(batch)) => {
                         self.consume_state_observations(
@@ -432,6 +464,15 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             &session_id,
                             batch.sequence,
                             batch.observations,
+                            received_at,
+                            correlation_id,
+                        )?;
+                    }
+                    Some(NodePayload::PeerChannelReadiness(readiness)) => {
+                        self.consume_peer_channel_readiness(
+                            &node_id,
+                            &session_id,
+                            readiness,
                             received_at,
                             correlation_id,
                         )?;
@@ -452,15 +493,128 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 {
                     return Ok(());
                 }
+                let node_id_value = NodeId::new(&node_id)?;
                 self.state.record_node_liveness(
-                    &NodeId::new(node_id)?,
+                    &node_id_value,
                     domain::NodeLivenessObservation::new(
                         domain::NodeLiveness::Unreachable,
                         received_at,
                     ),
                 )?;
+                self.runtime.fence_peer_channels_for_node(&node_id_value);
             }
         }
+        Ok(())
+    }
+
+    /// Validates an identified Local EAIOS acknowledgement against current Group ownership.
+    fn consume_peer_channel_readiness(
+        &mut self,
+        node_id: &str,
+        session_id: &str,
+        readiness: integration::grpc::v0_3::PeerChannelReadiness,
+        received_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        if readiness.session_id != session_id {
+            return Err(IntegrationRuntimeError::Protocol(
+                "peer readiness session does not match the admitted Node route".to_string(),
+            ));
+        }
+        let group_id = domain::ExecutionGroupId::new(readiness.group_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        let context_id = domain::CoordinationContextId::new(readiness.context_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        let context_role_id = domain::ContextRoleId::new(readiness.context_role_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        let local_system_id = LocalSystemId::new(readiness.local_system_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        let node_id = NodeId::new(node_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        if readiness.valid_for_ms == 0 || readiness.valid_for_ms > 60_000 {
+            return Err(IntegrationRuntimeError::Protocol(
+                "peer readiness validity must be between 1 and 60000 milliseconds".to_string(),
+            ));
+        }
+        let registration = self
+            .state
+            .node(&node_id)
+            .map(domain::NodeStateSnapshot::registration)
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol(
+                    "peer readiness Node has no current registration".to_string(),
+                )
+            })?;
+        let group = self.control.group(&group_id).ok_or_else(|| {
+            IntegrationRuntimeError::Protocol("peer readiness Group is unknown".to_string())
+        })?;
+        let owns_role = group.task_executions().any(|execution| {
+            execution.context_id() == &context_id
+                && matches!(
+                    execution.lifecycle(),
+                    domain::TaskExecutionLifecycle::Ready | domain::TaskExecutionLifecycle::Active
+                )
+                && execution.assignments().iter().any(|assignment| {
+                    assignment.node_id() == &node_id
+                        && execution.context_role(assignment.role_id()) == Some(&context_role_id)
+                        && group
+                            .role_requirement(execution.task_ref(), assignment.role_id())
+                            .and_then(domain::RoleRequirement::required_contract)
+                            .and_then(|contract| registration.capability_owner(contract))
+                            == Some(&local_system_id)
+                })
+        });
+        if !owns_role {
+            return Err(IntegrationRuntimeError::Protocol(
+                "peer readiness Node/Local EAIOS does not own the ContextRole binding".to_string(),
+            ));
+        }
+        let evidence = PeerChannelReadinessEvidence {
+            group_id,
+            context_id,
+            context_role_id,
+            node_id,
+            local_system_id,
+            session_id: session_id.to_string(),
+            channel_instance_id: readiness.channel_instance_id,
+            profile_id: readiness.profile_id,
+            message_schema: readiness.message_schema,
+            sequence: readiness.sequence,
+            received_at,
+            expires_at: TimestampMs::new(
+                received_at
+                    .as_millis()
+                    .checked_add(readiness.valid_for_ms)
+                    .ok_or_else(|| {
+                        IntegrationRuntimeError::Protocol(
+                            "peer readiness deadline overflowed".to_string(),
+                        )
+                    })?,
+            ),
+            ready: readiness.ready,
+        };
+        self.runtime
+            .observe_peer_channel_readiness(evidence.clone())
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        self.events.append(
+            received_at,
+            correlation_id,
+            None,
+            EventPayload::PeerChannelReadinessObserved {
+                group_id: evidence.group_id,
+                context_id: evidence.context_id,
+                context_role_id: evidence.context_role_id,
+                node_id: evidence.node_id,
+                local_system_id: evidence.local_system_id,
+                session_id: evidence.session_id,
+                channel_instance_id: evidence.channel_instance_id,
+                profile_id: evidence.profile_id,
+                message_schema: evidence.message_schema,
+                sequence: evidence.sequence,
+                expires_at: evidence.expires_at,
+                ready: evidence.ready,
+            },
+        );
         Ok(())
     }
 
@@ -522,11 +676,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             &task_ref,
             role_id,
             intent,
+            TimestampMs::new(0),
             correlation_id,
         )
     }
 
     /// Builds and routes a command for one specific Task execution inside a Group.
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_task_bound(
         &mut self,
         execution_id: String,
@@ -534,8 +690,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         task_ref: &domain::TaskRef,
         role_id: &domain::RoleId,
         intent: domain::ExecutionIntent,
+        now: TimestampMs,
         correlation_id: CorrelationId,
     ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        self.runtime.refresh_peer_channel_deadlines(now);
         let group = self.control.group(group_id).ok_or_else(|| {
             IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
         })?;
@@ -669,6 +827,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
+        crate::SupportedMechanismProfile::current()
+            .validate(plan)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         let group = self.control.group(group_id).ok_or_else(|| {
             IntegrationRuntimeError::Protocol(
                 "execution relations require an existing Mission-level Group".to_string(),
@@ -752,12 +913,77 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime.relation_snapshots(group_id)
     }
 
+    /// Applies durable strong localization evidence to the current Runtime execution attempt.
+    pub fn observe_localization_evidence(
+        &mut self,
+        evidence: &domain::LocalizationVerificationEvidence,
+        received_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        let spatial_evidence = SharedSpatialEvidence::from_localization(evidence, received_at);
+        // Spatial Memory verification is useful outside an active execution relation. In that
+        // case the durable catalog remains the authority and Runtime simply has no live slot to
+        // update; evidence for a matching current slot is still validated strictly below.
+        if !self
+            .runtime
+            .shared_spatial_evidence_matches_current_execution(&spatial_evidence)
+        {
+            return Ok(());
+        }
+        let runtime_events = self
+            .runtime
+            .observe_shared_spatial_evidence(spatial_evidence)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        for event in runtime_events {
+            append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
+            self.runtime_events.push_back(event);
+        }
+        Ok(())
+    }
+
+    /// Rehydrates current-attempt localization evidence without re-emitting durable events.
+    ///
+    /// Historical evidence for an older physical attempt remains in Spatial Memory but is not
+    /// admitted to the current Runtime slot.
+    pub fn restore_localization_evidence(
+        &mut self,
+        evidence: &domain::LocalizationVerificationEvidence,
+        received_at: TimestampMs,
+    ) -> Result<bool, IntegrationRuntimeError> {
+        let evidence = SharedSpatialEvidence::from_localization(evidence, received_at);
+        if !self
+            .runtime
+            .shared_spatial_evidence_targets_current_attempt(&evidence)
+        {
+            return Ok(false);
+        }
+        let changed = self.runtime.shared_spatial_evidence(
+            evidence.group_id(),
+            evidence.task_ref(),
+            evidence.role_id(),
+        ) != Some(&evidence);
+        let _ = self
+            .runtime
+            .observe_shared_spatial_evidence(evidence)
+            .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
+        Ok(changed)
+    }
+
     /// Returns transport-neutral direct peer channel lifecycle snapshots for one Group.
     pub fn peer_channel_snapshots(
         &self,
         group_id: &domain::ExecutionGroupId,
     ) -> Vec<runtime::RuntimePeerChannel> {
         self.runtime.peer_channels(group_id)
+    }
+
+    /// Returns peer channel snapshots with expired evidence conservatively shown as fenced.
+    pub fn peer_channel_snapshots_at(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+        now: TimestampMs,
+    ) -> Vec<runtime::RuntimePeerChannel> {
+        self.runtime.peer_channels_at(group_id, now)
     }
 
     /// Returns whether one Context's declared coordination mechanisms are ready.
@@ -848,6 +1074,29 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             (record, None, freshness)
                         }
                     };
+                    let spatial_evidence = view.spatial_reference().and_then(|_| {
+                        self.runtime
+                            .shared_spatial_evidence(
+                                group_id,
+                                execution.task_ref(),
+                                assignment.role_id(),
+                            )
+                            .cloned()
+                    });
+                    let spatial_verification = view.spatial_reference().map(|reference| {
+                        spatial_evidence.as_ref().map_or(
+                            GroupSpatialVerification::Unknown,
+                            |evidence| {
+                                if evidence.selector() == reference.selector()
+                                    && evidence.frame_id() == reference.frame_id()
+                                {
+                                    GroupSpatialVerification::Verified
+                                } else {
+                                    GroupSpatialVerification::Mismatched
+                                }
+                            },
+                        )
+                    });
                     entries.push(GroupSharedViewEntry {
                         task_ref: execution.task_ref().clone(),
                         role_id: assignment.role_id().clone(),
@@ -858,6 +1107,8 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         record,
                         execution_status,
                         freshness,
+                        spatial_evidence,
+                        spatial_verification,
                     });
                 }
             }
@@ -870,17 +1121,6 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         })
     }
 
-    /// Records deployment/local integration confirmation for a direct peer channel.
-    pub fn mark_peer_channel_ready(
-        &mut self,
-        group_id: &domain::ExecutionGroupId,
-        context_id: &domain::CoordinationContextId,
-    ) -> Result<(), IntegrationRuntimeError> {
-        self.runtime
-            .mark_peer_channel_ready(group_id, context_id)
-            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
-    }
-
     /// Fences a direct peer channel while preserving its logical Context identity.
     pub fn fence_peer_channel(
         &mut self,
@@ -890,6 +1130,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime
             .fence_peer_channel(group_id, context_id)
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
+    /// Closes Runtime peer descriptors after application orchestration ends their Group scope.
+    pub fn close_group_peer_channels(&mut self, group_id: &domain::ExecutionGroupId) {
+        self.runtime.close_peer_channels_for_group(group_id);
     }
 
     /// Applies an explicit Control recovery acknowledgement to one satisfied relation.
@@ -1708,9 +1953,9 @@ mod tests {
         assert_eq!(restored.relation_snapshots(&group_id).len(), 1);
     }
 
-    /// The immediately previous checkpoint migrates without coordination declarations.
+    /// The v10 checkpoint migrates with empty newly introduced live coordination evidence.
     #[test]
-    fn v9_checkpoint_migrates_missing_coordination_once() {
+    fn v10_checkpoint_migrates_missing_live_coordination_evidence() {
         let bridge = IntegrationRuntimeBridge::new(
             ControlPlane::new(),
             InMemorySharedNodeState::new(),
@@ -1727,8 +1972,7 @@ mod tests {
         let runtime = checkpoint["runtime"]
             .as_object_mut()
             .expect("Runtime checkpoint is an object");
-        runtime.remove("coordination_contexts");
-        runtime.remove("peer_channels");
+        runtime.remove("spatial_evidence");
 
         let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
             &checkpoint.to_string(),
@@ -2018,15 +2262,16 @@ mod tests {
             &checkpoint,
             InMemoryEventLog::new(),
             GrpcNodeRouter::default(),
-            TimestampMs::new(3),
+            TimestampMs::new(2_000),
         )
         .expect("State record restores");
         let restored_record = &restored.state_records().records()[0];
-        assert_eq!(restored_record.received_at(), TimestampMs::new(3));
+        assert_eq!(restored_record.received_at(), record.received_at());
         assert_eq!(
             restored_record.source_observed_at(),
             record.source_observed_at()
         );
+        assert!(restored_record.is_stale_at(TimestampMs::new(2_000)));
     }
 
     /// A Group view selects exact authorized exports and exposes receive-time freshness states.
@@ -2038,6 +2283,11 @@ mod tests {
         document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
         document["contexts"][0]["coupling_mode"] = serde_json::json!("concurrent-cooperation");
         document["contexts"][0]["shared_view"] = serde_json::json!({
+            "spatial_reference": {
+                "map_id": "campus",
+                "revision_id": "r1",
+                "frame_id": "map"
+            },
             "bindings": [
                 {
                     "context_role_id": "safety",
@@ -2204,6 +2454,7 @@ mod tests {
             task.execution_intent(requirement.roles()[0].role_id())
                 .expect("plan contains role intent")
                 .clone(),
+            TimestampMs::new(4),
             correlation.clone(),
         );
         assert!(matches!(
@@ -2221,6 +2472,10 @@ mod tests {
             Some(GroupViewFreshness::Unknown)
         );
         assert!(unknown.entries()[0].record().is_none());
+        assert_eq!(
+            unknown.entries()[0].spatial_verification(),
+            Some(GroupSpatialVerification::Unknown)
+        );
         assert_eq!(
             unknown.entries()[1].field(),
             domain::GroupViewField::Execution
@@ -2296,12 +2551,53 @@ mod tests {
             .runtime
             .record_dispatched("execution-view".to_string(), command, Vec::new())
             .expect("Runtime dispatch is recorded");
+        let evidence: domain::LocalizationVerificationEvidence =
+            serde_json::from_value(serde_json::json!({
+                "schema": domain::LOCALIZATION_EVIDENCE_SCHEMA_V0_1,
+                "map_id": "campus",
+                "revision_id": "r1",
+                "content_digest": format!("sha256:{}", "a".repeat(64)),
+                "byte_size": 1,
+                "mission_id": requirement.mission_id().as_str(),
+                "task_id": requirement.task_id().as_str(),
+                "group_id": group_id.as_str(),
+                "role_id": requirement.roles()[0].role_id().as_str(),
+                "node_id": "cane-a",
+                "execution_id": "execution-view",
+                "local_attempt_id": "local-view",
+                "active_local_map_id": "campus-r1",
+                "mode": "localization",
+                "pose_quality": {
+                    "metric": "translation_stddev",
+                    "value": "0.05",
+                    "threshold": "0.10",
+                    "unit": "m",
+                    "comparison": "at_most"
+                },
+                "frames": {"map": "map", "odom": "odom", "base": "base_link"},
+                "anchor_id": "campus-origin",
+                "source_observed_at_ms": 49
+            }))
+            .expect("strong localization evidence validates");
+        bridge
+            .observe_localization_evidence(&evidence, TimestampMs::new(50), &correlation)
+            .expect("current-attempt localization evidence is accepted");
         let execution_view = bridge
             .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(50))
             .expect("Runtime execution view is readable");
         assert_eq!(
             execution_view.entries()[1].execution_status(),
             Some(RemoteExecutionStatus::Accepted)
+        );
+        assert_eq!(
+            execution_view.entries()[0].spatial_verification(),
+            Some(GroupSpatialVerification::Verified)
+        );
+        assert_eq!(
+            execution_view.entries()[0]
+                .spatial_evidence()
+                .map(SharedSpatialEvidence::execution_id),
+            Some("execution-view")
         );
         let stale = bridge
             .group_shared_view(&plan, &group_id, &context_id, TimestampMs::new(111))
@@ -2310,6 +2606,350 @@ mod tests {
             stale.entries()[0].freshness(),
             Some(GroupViewFreshness::Stale)
         );
+    }
+
+    /// Peer readiness is admitted only from each committed role's registered Local EAIOS owner.
+    #[test]
+    fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut document: serde_json::Value =
+            serde_json::from_str(source).expect("relation fixture is JSON");
+        document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+        document["contexts"][0]["coupling_mode"] = serde_json::json!("tightly-coupled-cooperation");
+        document["contexts"][0]["shared_view"] = serde_json::json!({
+            "bindings": [
+                {"context_role_id": "guide", "field": "execution"},
+                {"context_role_id": "safety", "field": "execution"}
+            ],
+            "include_freshness": false
+        });
+        document["contexts"][0]["peer_channel"] = serde_json::json!({
+            "profile_id": "guidance-peer",
+            "message_schema": "guidance/v1"
+        });
+        let plan = crate::decode_mission_plan(&document.to_string()).expect("v0.4 plan validates");
+        let mission_id = plan.goal().mission_id().clone();
+        let group_id = domain::ExecutionGroupId::new("group-peer").expect("group id is valid");
+        let context_id = plan.contexts()[0].context_id().clone();
+        let correlation = CorrelationId::new("peer-readiness-test").expect("correlation is valid");
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let registration =
+            |node: &str,
+             local_system: &str,
+             contract: &str,
+             kind: &str,
+             resources: Vec<integration::grpc::v0_3::Resource>| NodeRegistration {
+                node_id: node.to_string(),
+                local_systems: vec![
+                    LocalSystemDescriptor {
+                        id: local_system.to_string(),
+                        runtime: Some(WireRuntime {
+                            name: format!("{local_system}-runtime"),
+                            version: "1".to_string(),
+                        }),
+                        metadata: Default::default(),
+                    },
+                    LocalSystemDescriptor {
+                        id: "decoy".to_string(),
+                        runtime: Some(WireRuntime {
+                            name: "decoy-runtime".to_string(),
+                            version: "1".to_string(),
+                        }),
+                        metadata: Default::default(),
+                    },
+                ],
+                capabilities: vec![WireCapability {
+                    kind: kind.to_string(),
+                    available: true,
+                    contracts: vec![contract.to_string()],
+                    local_system_id: local_system.to_string(),
+                }],
+                sensors: Vec::new(),
+                resources,
+                metadata: Default::default(),
+                node_contract_version: "roboguide.node.v0.3".to_string(),
+                state_exports: Vec::new(),
+                memory_providers: Vec::new(),
+            };
+        for (node, lease, local_system, contract, kind, resources) in [
+            (
+                "cane-a",
+                "lease-cane",
+                "safety",
+                "safety.observe@v1",
+                "observation",
+                Vec::new(),
+            ),
+            (
+                "dog-a",
+                "lease-dog",
+                "motion",
+                "mobility.navigate@v1",
+                "mobility",
+                vec![integration::grpc::v0_3::Resource {
+                    id: "guide-space".to_string(),
+                    kind: "space".to_string(),
+                    capacity: 1,
+                    metadata: Default::default(),
+                    local_system_id: "motion".to_string(),
+                }],
+            ),
+        ] {
+            bridge
+                .consume(
+                    GrpcNodeEvent::Registered {
+                        session_id: format!("session-{node}"),
+                        lease_id: lease.to_string(),
+                        registration: registration(node, local_system, contract, kind, resources),
+                    },
+                    TimestampMs::new(1),
+                    &correlation,
+                )
+                .expect("node registration is accepted");
+            bridge
+                .consume(
+                    GrpcNodeEvent::NodeMessage {
+                        node_id: node.to_string(),
+                        session_id: format!("session-{node}"),
+                        message: integration::grpc::v0_3::NodeMessage {
+                            message: Some(NodePayload::Heartbeat(
+                                integration::grpc::v0_3::Heartbeat {
+                                    session_id: format!("session-{node}"),
+                                    lease_id: lease.to_string(),
+                                    sequence: 1,
+                                    status: Some(integration::grpc::v0_3::NodeStatus {
+                                        health: "online".to_string(),
+                                        detail: String::new(),
+                                    }),
+                                },
+                            )),
+                        },
+                    },
+                    TimestampMs::new(2),
+                    &correlation,
+                )
+                .expect("online heartbeat is accepted");
+        }
+        let mut orchestrator = crate::MissionOrchestrator::new();
+        {
+            let (control, events) = (&mut bridge.control, &mut bridge.events);
+            orchestrator
+                .submit(
+                    plan.clone(),
+                    group_id.clone(),
+                    control,
+                    TimestampMs::new(3),
+                    &correlation,
+                    events,
+                )
+                .expect("Mission is accepted");
+        }
+        bridge
+            .register_execution_relations(&plan, &group_id, TimestampMs::new(3), &correlation)
+            .expect("coordination declarations register");
+        for task_ref in orchestrator.ready_tasks(&mission_id, bridge.control()) {
+            let state = bridge.state().clone();
+            let (control, events) = (&mut bridge.control, &mut bridge.events);
+            orchestrator
+                .prepare_task(
+                    &mission_id,
+                    &task_ref,
+                    &state,
+                    control,
+                    TimestampMs::new(4),
+                    &correlation,
+                    events,
+                )
+                .expect("ready Task binds");
+        }
+
+        let readiness = |node: &str, local_system: &str, role: &str, sequence: u64| {
+            GrpcNodeEvent::NodeMessage {
+                node_id: node.to_string(),
+                session_id: format!("session-{node}"),
+                message: integration::grpc::v0_3::NodeMessage {
+                    message: Some(NodePayload::PeerChannelReadiness(
+                        integration::grpc::v0_3::PeerChannelReadiness {
+                            session_id: format!("session-{node}"),
+                            sequence,
+                            group_id: group_id.as_str().to_string(),
+                            context_id: context_id.as_str().to_string(),
+                            context_role_id: role.to_string(),
+                            channel_instance_id: "channel-guidance-1".to_string(),
+                            profile_id: "guidance-peer".to_string(),
+                            message_schema: "guidance/v1".to_string(),
+                            ready: true,
+                            valid_for_ms: 20,
+                            local_system_id: local_system.to_string(),
+                        },
+                    )),
+                },
+            }
+        };
+        let mut wrong_session = readiness("dog-a", "motion", "guide", 2);
+        let GrpcNodeEvent::NodeMessage { message, .. } = &mut wrong_session else {
+            unreachable!("readiness fixture is a Node message");
+        };
+        let Some(NodePayload::PeerChannelReadiness(payload)) = &mut message.message else {
+            unreachable!("readiness fixture contains peer evidence");
+        };
+        payload.session_id = "session-other".to_string();
+        assert!(matches!(
+            bridge.consume(wrong_session, TimestampMs::new(9), &correlation),
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("session does not match")
+        ));
+        let mut wrong_context = readiness("dog-a", "motion", "guide", 2);
+        let GrpcNodeEvent::NodeMessage { message, .. } = &mut wrong_context else {
+            unreachable!("readiness fixture is a Node message");
+        };
+        let Some(NodePayload::PeerChannelReadiness(payload)) = &mut message.message else {
+            unreachable!("readiness fixture contains peer evidence");
+        };
+        payload.context_id = "different-context".to_string();
+        assert!(matches!(
+            bridge.consume(wrong_context, TimestampMs::new(9), &correlation),
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("does not own the ContextRole binding")
+        ));
+        assert!(matches!(
+            bridge.consume(
+                readiness("dog-a", "decoy", "guide", 2),
+                TimestampMs::new(10),
+                &correlation,
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason))
+                if reason.contains("does not own the ContextRole binding")
+        ));
+        bridge
+            .consume(
+                readiness("cane-a", "safety", "safety", 2),
+                TimestampMs::new(10),
+                &correlation,
+            )
+            .expect("safety endpoint acknowledgement is admitted");
+        bridge
+            .consume(
+                readiness("dog-a", "motion", "guide", 3),
+                TimestampMs::new(11),
+                &correlation,
+            )
+            .expect("guide endpoint acknowledgement is admitted");
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Ready
+        );
+        assert_eq!(
+            bridge
+                .events
+                .records()
+                .iter()
+                .filter(|event| matches!(
+                    event.payload(),
+                    EventPayload::PeerChannelReadinessObserved { .. }
+                ))
+                .count(),
+            2
+        );
+
+        bridge
+            .runtime
+            .refresh_peer_channel_deadlines(TimestampMs::new(31));
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Fenced
+        );
+        bridge
+            .consume(
+                readiness("cane-a", "safety", "safety", 3),
+                TimestampMs::new(32),
+                &correlation,
+            )
+            .expect("safety endpoint renews");
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Fenced
+        );
+        bridge
+            .consume(
+                readiness("dog-a", "motion", "guide", 4),
+                TimestampMs::new(33),
+                &correlation,
+            )
+            .expect("guide endpoint renews");
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Ready
+        );
+
+        bridge
+            .consume(
+                GrpcNodeEvent::NodeMessage {
+                    node_id: "dog-a".to_string(),
+                    session_id: "session-dog-a".to_string(),
+                    message: integration::grpc::v0_3::NodeMessage {
+                        message: Some(NodePayload::RegistrationUpdate(
+                            integration::grpc::v0_3::RegistrationUpdate {
+                                session_id: "session-dog-a".to_string(),
+                                sequence: 5,
+                                registration: Some(registration(
+                                    "dog-a",
+                                    "motion",
+                                    "mobility.navigate@v1",
+                                    "mobility",
+                                    vec![integration::grpc::v0_3::Resource {
+                                        id: "guide-space".to_string(),
+                                        kind: "space".to_string(),
+                                        capacity: 1,
+                                        metadata: Default::default(),
+                                        local_system_id: "motion".to_string(),
+                                    }],
+                                )),
+                            },
+                        )),
+                    },
+                },
+                TimestampMs::new(34),
+                &correlation,
+            )
+            .expect("complete registration update is accepted");
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Fenced
+        );
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0]
+                .readiness()
+                .len(),
+            1
+        );
+        bridge
+            .consume(
+                readiness("dog-a", "motion", "guide", 6),
+                TimestampMs::new(35),
+                &correlation,
+            )
+            .expect("affected endpoint reproves readiness after registration change");
+        assert_eq!(
+            bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+            runtime::PeerChannelLifecycle::Ready
+        );
+
+        let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+            &bridge.checkpoint_json().expect("checkpoint serializes"),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+            TimestampMs::new(40),
+        )
+        .expect("checkpoint restores conservatively");
+        let channel = &restored.peer_channel_snapshots(&group_id)[0];
+        assert_eq!(channel.lifecycle(), runtime::PeerChannelLifecycle::Fenced);
+        assert!(channel.readiness().is_empty());
     }
 
     /// A new Node session may restart its management sequence in the same receive millisecond.
@@ -3196,6 +3836,7 @@ mod tests {
                 requirement.task_ref(),
                 &role_id,
                 intent,
+                now,
                 correlation,
             ),
             Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("not dispatchable")
@@ -3377,6 +4018,7 @@ mod tests {
                 requirement.task_ref(),
                 &retained_role,
                 intent,
+                now,
                 correlation,
             ),
             Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("not bound")

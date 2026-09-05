@@ -5,7 +5,7 @@ use crate::coordination::{
 };
 use crate::relation::{
     RelationFenceCheckpoint, RelationKey, RelationProofCheckpoint, RelationStateCheckpoint,
-    RuntimeExecutionRelation, restore_relation_maps,
+    RuntimeExecutionRelation, SharedSpatialEvidence, restore_relation_maps,
 };
 use domain::{ExecutionCommand, ExecutionGroupId, NodeId, ResourceId, RoleId, TaskRef};
 use std::collections::{BTreeMap, BTreeSet};
@@ -175,9 +175,12 @@ pub struct RuntimeExecutionCheckpoint {
     /// Mission-owned coordination Context declarations.
     #[serde(default)]
     coordination_contexts: Vec<RuntimeCoordinationContext>,
-    /// Direct peer channel descriptors and lifecycle state.
+    /// Direct peer channel descriptors, lifecycle, and endpoint acknowledgements.
     #[serde(default)]
     peer_channels: Vec<RuntimePeerChannel>,
+    /// Strong localization evidence retained for current logical attempts.
+    #[serde(default)]
+    spatial_evidence: Vec<SharedSpatialEvidence>,
 }
 
 /// Whether a validated dispatch must be sent through Integration.
@@ -234,7 +237,7 @@ pub struct RuntimeExecutionManager {
     /// Last accepted execution-local sequence across sessions and snapshot replay.
     execution_sequences: BTreeMap<String, u64>,
     /// Node that first reported or received each stable execution identity.
-    execution_nodes: BTreeMap<String, NodeId>,
+    pub(crate) execution_nodes: BTreeMap<String, NodeId>,
     /// Current authoritative execution identity for each Group Task role.
     pub(crate) active_executions: BTreeMap<(ExecutionGroupId, TaskRef, RoleId), String>,
     /// Commands restored from durable state that must never be implicitly sent again.
@@ -253,6 +256,9 @@ pub struct RuntimeExecutionManager {
     pub(crate) coordination_contexts: BTreeMap<CoordinationKey, RuntimeCoordinationContext>,
     /// Direct Local EAIOS peer channel lifecycle without owning transport traffic.
     pub(crate) peer_channels: BTreeMap<CoordinationKey, RuntimePeerChannel>,
+    /// Strong map/frame evidence by current Group Task role slot.
+    pub(crate) spatial_evidence:
+        BTreeMap<(ExecutionGroupId, TaskRef, RoleId), SharedSpatialEvidence>,
 }
 
 impl RuntimeExecutionManager {
@@ -272,6 +278,7 @@ impl RuntimeExecutionManager {
             relation_proofs: BTreeMap::new(),
             coordination_contexts: BTreeMap::new(),
             peer_channels: BTreeMap::new(),
+            spatial_evidence: BTreeMap::new(),
         }
     }
 
@@ -325,6 +332,7 @@ impl RuntimeExecutionManager {
                 .collect(),
             coordination_contexts: self.coordination_contexts.values().cloned().collect(),
             peer_channels: self.peer_channels.values().cloned().collect(),
+            spatial_evidence: self.spatial_evidence.values().cloned().collect(),
         }
     }
 
@@ -341,10 +349,24 @@ impl RuntimeExecutionManager {
             checkpoint.coordination_contexts.clone(),
             checkpoint.peer_channels.clone(),
         )?;
+        let mut spatial_evidence = BTreeMap::new();
+        for evidence in checkpoint.spatial_evidence {
+            if evidence.execution_id.trim().is_empty() || evidence.frame_id.trim().is_empty() {
+                return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                    "checkpoint contains invalid shared spatial evidence".to_string(),
+                ));
+            }
+            if spatial_evidence.insert(evidence.slot(), evidence).is_some() {
+                return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                    "checkpoint contains duplicate shared spatial evidence".to_string(),
+                ));
+            }
+        }
         for channel in peer_channels.values_mut() {
             if channel.lifecycle() == crate::PeerChannelLifecycle::Ready {
                 channel.lifecycle = crate::PeerChannelLifecycle::Fenced;
             }
+            channel.readiness.clear();
         }
         let restored_executions = checkpoint.executions.keys().cloned().collect();
         let activated_tasks = checkpoint
@@ -379,6 +401,16 @@ impl RuntimeExecutionManager {
                 (execution_id, restored_status)
             })
             .collect();
+        for (slot, evidence) in &spatial_evidence {
+            if active_executions.get(slot) != Some(&evidence.execution_id)
+                || checkpoint.execution_nodes.get(&evidence.execution_id) != Some(&evidence.node_id)
+            {
+                return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                    "checkpoint shared spatial evidence is not owned by the current attempt"
+                        .to_string(),
+                ));
+            }
+        }
         let mut restored = Self {
             executions: checkpoint.executions,
             execution_status,
@@ -393,6 +425,7 @@ impl RuntimeExecutionManager {
             relation_proofs,
             coordination_contexts,
             peer_channels,
+            spatial_evidence,
         };
         restored.refresh_all_relations_after_restore();
         Ok(restored)
@@ -457,8 +490,15 @@ impl RuntimeExecutionManager {
             },
         );
         self.execution_nodes.insert(execution_id.clone(), node_id);
-        self.active_executions
-            .insert(execution_role, execution_id.clone());
+        let previous = self
+            .active_executions
+            .insert(execution_role.clone(), execution_id.clone());
+        if previous
+            .as_ref()
+            .is_some_and(|current| current != &execution_id)
+        {
+            self.spatial_evidence.remove(&execution_role);
+        }
         self.execution_status
             .insert(execution_id, ExecutionStatus::Dispatched);
         Ok(())

@@ -6,8 +6,9 @@ use crate::{
     ArtifactStager, CapabilityReadinessFact, CompiledCapability, CompiledLocalCatalog,
     ExecutionJournal, ExecutionSpec, FilesystemMemoryLedger, JournalError, JournalExecution,
     JournalStatus, LocalHealthState, LocalMemoryLedger, MappedExecutionFact, MappedExecutionPhase,
-    MemoryQuery, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifact, PreparedArtifactRecord,
-    ReplicaEvidenceStatus, StateExportFact, WorkflowContext,
+    MemoryQuery, PeerChannelReadinessFact, PrepareArtifactFreeze, PrepareDispatch,
+    PreparedArtifact, PreparedArtifactRecord, ReplicaEvidenceStatus, StateExportFact,
+    WorkflowContext,
 };
 use domain::{
     LocalSystemId, MapArtifactManifest, MemoryArtifactManifest, MissionId, NodeId, TaskId, TaskRef,
@@ -33,6 +34,46 @@ pub struct LocalExecutionEvent {
     pub phase: ExecutionPhase,
     /// Local diagnostic detail.
     pub reason: String,
+}
+
+/// Local EAIOS acknowledgement that one direct peer channel endpoint is ready or unavailable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalPeerChannelReadiness {
+    /// Mission-level Group containing the coordination Context.
+    pub group_id: String,
+    /// Coordination Context declaring the channel.
+    pub context_id: String,
+    /// Logical ContextRole represented by this Local EAIOS.
+    pub context_role_id: String,
+    /// Registered node-local EAIOS that established this endpoint.
+    pub local_system_id: String,
+    /// Shared channel instance identity established by the Local EAIOS peers.
+    pub channel_instance_id: String,
+    /// Descriptor profile confirmed by the local channel implementation.
+    pub profile_id: String,
+    /// Descriptor message schema confirmed by the local channel implementation.
+    pub message_schema: String,
+    /// Whether the local endpoint currently confirms readiness.
+    pub ready: bool,
+    /// Receive-relative readiness lifetime requested by the Local EAIOS.
+    pub valid_for_ms: u64,
+}
+
+impl From<PeerChannelReadinessFact> for LocalPeerChannelReadiness {
+    /// Preserves the fixed observer owner and endpoint identity for protocol publication.
+    fn from(fact: PeerChannelReadinessFact) -> Self {
+        Self {
+            group_id: fact.group_id,
+            context_id: fact.context_id,
+            context_role_id: fact.context_role_id,
+            local_system_id: fact.local_system_id,
+            channel_instance_id: fact.channel_instance_id,
+            profile_id: fact.profile_id,
+            message_schema: fact.message_schema,
+            ready: fact.ready,
+            valid_for_ms: fact.valid_for_ms,
+        }
+    }
 }
 
 /// One complete node observation used for registration readiness and heartbeat health.
@@ -88,6 +129,8 @@ struct EngineInner {
     artifact_finalizations_in_flight: Mutex<BTreeSet<String>>,
     /// Process-level fact bus surviving Node Protocol sessions.
     events: broadcast::Sender<LocalExecutionEvent>,
+    /// Process-level readiness facts emitted by Local EAIOS channel adapters.
+    peer_readiness: broadcast::Sender<LocalPeerChannelReadiness>,
     /// Optional Spatial Memory artifact stager configured independently of Node Protocol.
     artifact_stager: Option<ArtifactStager>,
     /// Node-side ledgers keyed by configured Local Memory Provider identity.
@@ -153,6 +196,7 @@ impl LocalIntegrationEngine {
             }
         }
         let (events, _) = broadcast::channel(256);
+        let (peer_readiness, _) = broadcast::channel(256);
         Ok(Self {
             inner: Arc::new(EngineInner {
                 catalog: Arc::new(catalog),
@@ -162,6 +206,7 @@ impl LocalIntegrationEngine {
                 cancellations_in_flight: Mutex::new(BTreeSet::new()),
                 artifact_finalizations_in_flight: Mutex::new(BTreeSet::new()),
                 events,
+                peer_readiness,
                 artifact_stager,
                 memory_ledgers,
             }),
@@ -535,6 +580,18 @@ impl LocalIntegrationEngine {
         self.inner.events.subscribe()
     }
 
+    /// Publishes one Local EAIOS peer-channel acknowledgement for the Node Service session.
+    pub fn publish_peer_channel_readiness(&self, fact: LocalPeerChannelReadiness) {
+        let _ = self.inner.peer_readiness.send(fact);
+    }
+
+    /// Subscribes one Node Protocol session to Local EAIOS peer-channel acknowledgements.
+    pub fn subscribe_peer_channel_readiness(
+        &self,
+    ) -> broadcast::Receiver<LocalPeerChannelReadiness> {
+        self.inner.peer_readiness.subscribe()
+    }
+
     /// Observes every configured Local EAIOS and aggregates a truthful Node heartbeat status.
     pub async fn status(&self) -> integration::grpc::v0_3::NodeStatus {
         let mut tasks = tokio::task::JoinSet::new();
@@ -704,6 +761,57 @@ impl LocalIntegrationEngine {
             }
         }
         facts.sort_by(|left, right| left.export_id.cmp(&right.export_id));
+        facts
+    }
+
+    /// Samples selected fixed Local EAIOS peer-channel observers.
+    ///
+    /// Failed or malformed observations are omitted. Existing positive evidence then expires at
+    /// the Controller rather than being silently renewed or converted into an invented negative.
+    pub async fn observe_peer_channel_readiness(
+        &self,
+        observer_ids: &BTreeSet<String>,
+    ) -> Vec<LocalPeerChannelReadiness> {
+        let mut tasks = tokio::task::JoinSet::new();
+        for observer_id in observer_ids {
+            let Some(observer) = self
+                .inner
+                .catalog
+                .peer_channel_observers()
+                .get(observer_id)
+                .cloned()
+            else {
+                continue;
+            };
+            let engine = self.clone();
+            tasks.spawn(async move {
+                let mut context = WorkflowContext::new(serde_json::json!({}));
+                engine
+                    .run_steps(std::slice::from_ref(observer.step()), &mut context)
+                    .await?;
+                observer.map(&context).map_err(EngineError::Mapping)
+            });
+        }
+        let mut facts = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            if let Ok(Ok(observed)) = result {
+                facts.extend(observed.into_iter().map(LocalPeerChannelReadiness::from));
+            }
+        }
+        facts.sort_by(|left, right| {
+            (
+                left.group_id.as_str(),
+                left.context_id.as_str(),
+                left.context_role_id.as_str(),
+                left.local_system_id.as_str(),
+            )
+                .cmp(&(
+                    right.group_id.as_str(),
+                    right.context_id.as_str(),
+                    right.context_role_id.as_str(),
+                    right.local_system_id.as_str(),
+                ))
+        });
         facts
     }
 

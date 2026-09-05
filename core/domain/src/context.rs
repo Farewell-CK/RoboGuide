@@ -208,6 +208,14 @@ impl CoordinationContext {
                 ),
             });
         }
+        if mode.requires(CoordinationMechanism::DirectPeerChannel) && self.roles.len() < 2 {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} direct peer channel requires at least two ContextRoles",
+                    self.context_id
+                ),
+            });
+        }
         Ok(())
     }
 }

@@ -11,8 +11,8 @@ use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, ResourceConfig, SensorConfig,
-    StateExportConfig, WorkflowConfig, WorkflowStepConfig,
+    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, PeerChannelObserverConfig,
+    ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -33,6 +33,10 @@ pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
 pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
 /// Schema identity adding executable heterogeneous Memory provider workflows.
 pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
+/// Maximum peer endpoints accepted from one bounded local observation.
+const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
+/// Maximum JSON bytes accepted from one local peer readiness response.
+const MAX_PEER_CHANNEL_OBSERVATION_BYTES: usize = 64 * 1024;
 
 /// Compiled local systems paired with their deferred health configuration.
 type CompiledLocalSystems = (
@@ -67,6 +71,8 @@ pub struct CompiledLocalCatalog {
     sensors: BTreeMap<String, CompiledSensor>,
     /// Selective source-aware State channels by node-wide export identity.
     state_exports: BTreeMap<String, CompiledStateExport>,
+    /// Fixed peer-channel readiness observations by node-wide observer identity.
+    peer_channel_observers: BTreeMap<String, CompiledPeerChannelObserver>,
     /// Selective Memory discovery/exchange providers by node-wide identity.
     memory_providers: BTreeMap<String, CompiledMemoryProvider>,
     /// Optional independent Spatial Memory artifact data-plane configuration.
@@ -186,6 +192,46 @@ pub struct StateExportFact {
     pub source_observed_at_ms: Option<u64>,
     /// Optional confidence in millionths.
     pub confidence_millionths: Option<u32>,
+}
+
+/// Immutable fixed observation of Local EAIOS-established peer-channel endpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledPeerChannelObserver {
+    /// Node-wide observer identity.
+    id: String,
+    /// Configuration-owned Local EAIOS identity injected into every fact.
+    owner: String,
+    /// Period between observations.
+    interval_ms: u64,
+    /// Receive-relative lifetime applied to every returned endpoint.
+    valid_for_ms: u64,
+    /// Fixed read-only local operation.
+    step: CompiledWorkflowStep,
+    /// Response-relative array pointer.
+    channels_pointer: String,
+}
+
+/// One Local EAIOS acknowledgement for a logical peer-channel endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerChannelReadinessFact {
+    /// Mission-level Group containing the coordination Context.
+    pub group_id: String,
+    /// Coordination Context declaring the channel.
+    pub context_id: String,
+    /// Logical ContextRole represented by this Local EAIOS.
+    pub context_role_id: String,
+    /// Configured node-local EAIOS that owns this endpoint.
+    pub local_system_id: String,
+    /// Shared channel instance identity established by the Local EAIOS peers.
+    pub channel_instance_id: String,
+    /// Descriptor profile confirmed by the local channel implementation.
+    pub profile_id: String,
+    /// Descriptor message schema confirmed by the local channel implementation.
+    pub message_schema: String,
+    /// Whether the local endpoint currently confirms readiness.
+    pub ready: bool,
+    /// Receive-relative readiness lifetime fixed by Node configuration.
+    pub valid_for_ms: u64,
 }
 
 /// Immutable Memory provider declaration without a local storage implementation requirement.
@@ -459,6 +505,7 @@ impl CompiledLocalCatalog {
             config.schema.as_str(),
             CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
         );
+        let supports_peer_observers = config.schema == CONFIG_SCHEMA_V0_6;
         require(
             matches!(
                 config.schema.as_str(),
@@ -509,6 +556,16 @@ impl CompiledLocalCatalog {
         )?;
         let state_exports =
             compile_state_exports(config.state_exports, &local_systems, &connections)?;
+        require(
+            supports_peer_observers || config.peer_channel_observers.is_empty(),
+            "peer_channel_observers",
+            format!("requires schema `{CONFIG_SCHEMA_V0_6}`"),
+        )?;
+        let peer_channel_observers = compile_peer_channel_observers(
+            config.peer_channel_observers,
+            &local_systems,
+            &connections,
+        )?;
         let memory_providers = compile_memory_providers(
             config.memory_providers,
             &local_systems,
@@ -551,6 +608,7 @@ impl CompiledLocalCatalog {
             resources,
             sensors,
             state_exports,
+            peer_channel_observers,
             memory_providers,
             artifacts,
         })
@@ -614,6 +672,11 @@ impl CompiledLocalCatalog {
     /// Returns selective State channels in deterministic export identity order.
     pub const fn state_exports(&self) -> &BTreeMap<String, CompiledStateExport> {
         &self.state_exports
+    }
+
+    /// Returns fixed peer-channel observation sources in deterministic identity order.
+    pub const fn peer_channel_observers(&self) -> &BTreeMap<String, CompiledPeerChannelObserver> {
+        &self.peer_channel_observers
     }
 
     /// Returns selective Memory providers in deterministic provider identity order.
@@ -797,7 +860,7 @@ impl CompiledStateExport {
         if serde_json::to_vec(&value)
             .map_err(|_| MappingError::InvalidFunctionArguments("state JSON".to_string()))?
             .len()
-            > domain::MAX_STATE_PAYLOAD_BYTES
+            > MAX_PEER_CHANNEL_OBSERVATION_BYTES
         {
             return Err(MappingError::InvalidFunctionArguments(
                 "state payload exceeds 64 KiB".to_string(),
@@ -832,6 +895,102 @@ impl CompiledStateExport {
             confidence_millionths,
         })
     }
+}
+
+impl CompiledPeerChannelObserver {
+    /// Returns the node-wide observer identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the configuration-owned Local EAIOS identity.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the configured observation interval.
+    pub const fn interval_ms(&self) -> u64 {
+        self.interval_ms
+    }
+
+    /// Returns the fixed read-only observation step.
+    pub const fn step(&self) -> &CompiledWorkflowStep {
+        &self.step
+    }
+
+    /// Maps a bounded local response into owner-qualified readiness facts.
+    pub fn map(
+        &self,
+        context: &WorkflowContext,
+    ) -> Result<Vec<PeerChannelReadinessFact>, MappingError> {
+        let response_pointer = format!("/steps/{}", escape_pointer_segment(self.step.id()));
+        let response = context
+            .as_json()
+            .pointer(&response_pointer)
+            .ok_or_else(|| MappingError::MissingSource(response_pointer.clone()))?;
+        if serde_json::to_vec(response)
+            .map_err(|_| MappingError::InvalidFunctionArguments("peer readiness JSON".to_string()))?
+            .len()
+            > domain::MAX_STATE_PAYLOAD_BYTES
+        {
+            return Err(MappingError::InvalidFunctionArguments(
+                "peer readiness response exceeds 64 KiB".to_string(),
+            ));
+        }
+        let channels = response
+            .pointer(&self.channels_pointer)
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| MappingError::MissingSource(self.channels_pointer.clone()))?;
+        if channels.len() > MAX_PEER_CHANNELS_PER_OBSERVATION {
+            return Err(MappingError::InvalidFunctionArguments(
+                "peer readiness observation exceeds 64 endpoints".to_string(),
+            ));
+        }
+        let facts = channels
+            .iter()
+            .map(|channel| {
+                Ok(PeerChannelReadinessFact {
+                    group_id: peer_channel_string(channel, "group_id")?,
+                    context_id: peer_channel_string(channel, "context_id")?,
+                    context_role_id: peer_channel_string(channel, "context_role_id")?,
+                    local_system_id: self.owner.clone(),
+                    channel_instance_id: peer_channel_string(channel, "channel_instance_id")?,
+                    profile_id: peer_channel_string(channel, "profile_id")?,
+                    message_schema: peer_channel_string(channel, "message_schema")?,
+                    ready: channel
+                        .get("ready")
+                        .and_then(serde_json::Value::as_bool)
+                        .ok_or_else(|| {
+                            MappingError::MissingSource("peer readiness ready".to_string())
+                        })?,
+                    valid_for_ms: self.valid_for_ms,
+                })
+            })
+            .collect::<Result<Vec<_>, MappingError>>()?;
+        let mut identities = BTreeSet::new();
+        for fact in &facts {
+            if !identities.insert((
+                fact.group_id.as_str(),
+                fact.context_id.as_str(),
+                fact.context_role_id.as_str(),
+            )) {
+                return Err(MappingError::InvalidFunctionArguments(
+                    "peer readiness observation contains a duplicate logical endpoint".to_string(),
+                ));
+            }
+        }
+        Ok(facts)
+    }
+}
+
+/// Reads one required nonblank string from a peer-channel observation object.
+fn peer_channel_string(channel: &serde_json::Value, field: &str) -> Result<String, MappingError> {
+    channel
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| MappingError::MissingSource(format!("peer readiness {field}")))
 }
 
 impl CompiledMemoryProvider {
@@ -1641,7 +1800,7 @@ fn compile_state_exports(
         )?;
         let field = format!("state_exports.{}", config.id);
         validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
-        validate_state_export_operation(&config.step.operation, &field)?;
+        validate_read_only_observation_operation(&config.step.operation, &field, "State export")?;
         if config
             .step
             .request
@@ -1693,22 +1852,105 @@ fn compile_state_exports(
     Ok(exports)
 }
 
-/// Restricts periodic State sampling to operations that are mechanically read-only.
-fn validate_state_export_operation(
+/// Compiles fixed Local EAIOS peer-readiness observers without granting channel authority.
+fn compile_peer_channel_observers(
+    configs: Vec<PeerChannelObserverConfig>,
+    systems: &BTreeMap<String, CompiledLocalSystem>,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<BTreeMap<String, CompiledPeerChannelObserver>, CatalogError> {
+    let mut observers = BTreeMap::new();
+    let mut owners = BTreeSet::new();
+    for config in configs {
+        validate_identity(&config.id, "peer_channel_observers.id")?;
+        require(
+            systems.contains_key(&config.owner),
+            format!("peer_channel_observers.{}.owner", config.id),
+            format!("unknown local system `{}`", config.owner),
+        )?;
+        require(
+            owners.insert(config.owner.clone()),
+            format!("peer_channel_observers.{}.owner", config.id),
+            format!(
+                "local system `{}` already has a peer-channel observer",
+                config.owner
+            ),
+        )?;
+        require(
+            config.interval_ms >= 100,
+            format!("peer_channel_observers.{}.interval_ms", config.id),
+            "must be at least 100ms",
+        )?;
+        require(
+            (1..=60_000).contains(&config.valid_for_ms),
+            format!("peer_channel_observers.{}.valid_for_ms", config.id),
+            "must be between 1ms and 60000ms",
+        )?;
+        require(
+            config.valid_for_ms >= config.interval_ms,
+            format!("peer_channel_observers.{}.valid_for_ms", config.id),
+            "must be at least the observation interval",
+        )?;
+        let field = format!("peer_channel_observers.{}", config.id);
+        validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;
+        validate_read_only_observation_operation(
+            &config.step.operation,
+            &field,
+            "Peer-channel observation",
+        )?;
+        if config
+            .step
+            .request
+            .bindings
+            .iter()
+            .any(|binding| contains_pointer_expression(&binding.value))
+        {
+            return Err(validation(
+                format!("{field}.step"),
+                "Peer-channel observation requests must use deployment constants only",
+            ));
+        }
+        validate_pointer(&config.channels_pointer).map_err(|source| CatalogError::Mapping {
+            step: field.clone(),
+            source,
+        })?;
+        let mut step_ids = BTreeSet::new();
+        let mut steps =
+            compile_steps(vec![config.step], &config.owner, connections, &mut step_ids)?;
+        let id = config.id.clone();
+        let observer = CompiledPeerChannelObserver {
+            id: config.id,
+            owner: config.owner,
+            interval_ms: config.interval_ms,
+            valid_for_ms: config.valid_for_ms,
+            step: steps
+                .pop()
+                .expect("one peer-channel observer step compiles into one step"),
+            channels_pointer: config.channels_pointer,
+        };
+        insert_unique(&mut observers, id, observer, "peer_channel_observers.id")?;
+    }
+    Ok(observers)
+}
+
+/// Restricts periodic observations to operations that are mechanically read-only.
+fn validate_read_only_observation_operation(
     operation: &LocalOperationConfig,
     field: &str,
+    label: &str,
 ) -> Result<(), CatalogError> {
     match operation {
         LocalOperationConfig::Http { method, .. } if method == "GET" => Ok(()),
         LocalOperationConfig::Http { .. } => Err(validation(
             format!("{field}.step.operation"),
-            "State export HTTP operations must use GET",
+            format!("{label} HTTP operations must use GET"),
         )),
         LocalOperationConfig::GrpcUnary { .. }
         | LocalOperationConfig::GrpcServerStream { .. }
         | LocalOperationConfig::McpTool { .. } => Err(validation(
             format!("{field}.step.operation"),
-            "State export gRPC and MCP operations require an explicit read-only contract and are not enabled in v0.1",
+            format!(
+                "{label} gRPC and MCP operations require an explicit read-only contract and are not enabled"
+            ),
         )),
     }
 }
@@ -3095,6 +3337,7 @@ mod tests {
             }],
             artifacts: None,
             state_exports: Vec::new(),
+            peer_channel_observers: Vec::new(),
             memory_providers: Vec::new(),
         }
     }
@@ -3463,6 +3706,129 @@ mod tests {
                 .readiness()
                 .is_some()
         );
+    }
+
+    /// v0.6 maps only fixed-owner, bounded, read-only peer-channel observations.
+    #[test]
+    fn compiles_and_maps_peer_channel_observer() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        config.peer_channel_observers = vec![PeerChannelObserverConfig {
+            id: "motion-peers".to_string(),
+            owner: "motion".to_string(),
+            interval_ms: 1_000,
+            valid_for_ms: 3_000,
+            step: WorkflowStepConfig {
+                id: "observe-peers".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".to_string(),
+                    path: "/coordination/peers".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            channels_pointer: "/channels".to_string(),
+        }];
+
+        let catalog = CompiledLocalCatalog::compile(config, directory.path())
+            .expect("peer observer compiles");
+        let observer = &catalog.peer_channel_observers()["motion-peers"];
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step(
+                "observe-peers",
+                serde_json::json!({
+                    "channels": [{
+                        "group_id": "group-a",
+                        "context_id": "guidance",
+                        "context_role_id": "dog",
+                        "local_system_id": "untrusted-response-owner",
+                        "channel_instance_id": "peer-session-a",
+                        "profile_id": "guidance-peer",
+                        "message_schema": "guidance/v1",
+                        "ready": true
+                    }]
+                }),
+            )
+            .expect("response records");
+        let facts = observer.map(&context).expect("response maps");
+
+        assert!(matches!(
+            facts.as_slice(),
+            [PeerChannelReadinessFact {
+                group_id,
+                local_system_id,
+                valid_for_ms: 3_000,
+                ready: true,
+                ..
+            }] if group_id == "group-a" && local_system_id == "motion"
+        ));
+
+        let mut duplicate_context = WorkflowContext::new(serde_json::json!({}));
+        let duplicate = serde_json::json!({
+            "group_id": "group-a",
+            "context_id": "guidance",
+            "context_role_id": "dog",
+            "channel_instance_id": "peer-session-a",
+            "profile_id": "guidance-peer",
+            "message_schema": "guidance/v1",
+            "ready": true
+        });
+        duplicate_context
+            .record_step(
+                "observe-peers",
+                serde_json::json!({"channels": [duplicate.clone(), duplicate]}),
+            )
+            .expect("duplicate response records");
+        assert!(matches!(
+            observer.map(&duplicate_context),
+            Err(MappingError::InvalidFunctionArguments(reason))
+                if reason.contains("duplicate logical endpoint")
+        ));
+    }
+
+    /// Peer observers reject non-read-only routes and unusable renewal lifetimes at startup.
+    #[test]
+    fn rejects_unsafe_peer_channel_observers() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let descriptor = directory.path().join("local.pb");
+        std::fs::write(&descriptor, b"descriptor fixture").expect("descriptor writes");
+        let mut config = valid_config(descriptor);
+        config.schema = CONFIG_SCHEMA_V0_6.to_string();
+        add_readiness(&mut config);
+        config.peer_channel_observers = vec![PeerChannelObserverConfig {
+            id: "motion-peers".to_string(),
+            owner: "motion".to_string(),
+            interval_ms: 1_000,
+            valid_for_ms: 500,
+            step: WorkflowStepConfig {
+                id: "observe-peers".to_string(),
+                connection: "motion-http".to_string(),
+                operation: LocalOperationConfig::Http {
+                    method: "POST".to_string(),
+                    path: "/coordination/peers".to_string(),
+                },
+                request: RequestMappingConfig::default(),
+            },
+            channels_pointer: "/channels".to_string(),
+        }];
+
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config.clone(), directory.path()),
+            Err(CatalogError::Validation { field, .. })
+                if field == "peer_channel_observers.motion-peers.valid_for_ms"
+        ));
+        config.peer_channel_observers[0].valid_for_ms = 3_000;
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, reason })
+                if field == "peer_channel_observers.motion-peers.step.operation"
+                    && reason.contains("must use GET")
+        ));
     }
 
     /// Artifact operations are typed in v0.3 and rejected under the v0.2 schema.

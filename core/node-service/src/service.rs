@@ -7,9 +7,9 @@ use integration::grpc::v0_3::server_message::Message as ServerPayload;
 use integration::grpc::v0_3::{
     Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
     MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NODE_CONTRACT_VERSION,
-    NodeMessage, NodeRegistration, PROTOCOL_VERSION, ProtocolError, Register, RegistrationUpdate,
-    Resource, Sensor, ServerMessage, StateExportDescriptor, StateObjectClass, StateObservation,
-    StateObservationBatch, StateSemantic,
+    NodeMessage, NodeRegistration, PROTOCOL_VERSION, PeerChannelReadiness, ProtocolError, Register,
+    RegistrationUpdate, Resource, Sensor, ServerMessage, StateExportDescriptor, StateObjectClass,
+    StateObservation, StateObservationBatch, StateSemantic,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -100,6 +100,7 @@ impl NodeService {
             ));
         };
         let mut local_events = self.engine.subscribe();
+        let mut peer_readiness_events = self.engine.subscribe_peer_channel_readiness();
         self.replay_snapshots(&registered.session_id, &outbound)?;
         let management_sequence = Arc::new(tokio::sync::Mutex::new(0_u64));
         let heartbeat_task = self.spawn_heartbeat(
@@ -113,7 +114,12 @@ impl NodeService {
         let state_task = self.spawn_state_observations(
             registered.session_id.clone(),
             outbound.clone(),
-            management_sequence,
+            Arc::clone(&management_sequence),
+        );
+        let peer_observation_task = self.spawn_peer_channel_observations(
+            registered.session_id.clone(),
+            outbound.clone(),
+            Arc::clone(&management_sequence),
         );
         let memory_task = self.spawn_memory_exports(registered.session_id.clone());
         let session_result: Result<(), NodeServiceError> = async {
@@ -136,11 +142,30 @@ impl NodeService {
                         Err(broadcast::error::RecvError::Lagged(_)) => self.replay_snapshots(&registered.session_id, &outbound)?,
                         Err(broadcast::error::RecvError::Closed) => return Err(NodeServiceError::Closed),
                     },
+                    event = peer_readiness_events.recv() => match event {
+                        Ok(event) => {
+                            let mut sequence = management_sequence.lock().await;
+                            *sequence = sequence.saturating_add(1);
+                            outbound.send(peer_readiness_message(
+                                &registered.session_id,
+                                *sequence,
+                                event,
+                            )).map_err(|_| NodeServiceError::Closed)?;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            return Err(NodeServiceError::Protocol(
+                                "peer readiness stream lagged; reconnect is required to fence stale evidence"
+                                    .to_string(),
+                            ));
+                        }
+                        Err(broadcast::error::RecvError::Closed) => return Err(NodeServiceError::Closed),
+                    },
                 }
             }
         }.await;
         heartbeat_task.abort();
         state_task.abort();
+        peer_observation_task.abort();
         memory_task.abort();
         session_result
     }
@@ -240,6 +265,63 @@ impl NodeService {
                                 },
                             )),
                         })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Periodically observes channels already established by configured Local EAIOS endpoints.
+    fn spawn_peer_channel_observations(
+        &self,
+        session_id: String,
+        outbound: mpsc::UnboundedSender<NodeMessage>,
+        sequence: Arc<tokio::sync::Mutex<u64>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let engine = self.engine.clone();
+        tokio::spawn(async move {
+            let intervals = engine
+                .catalog()
+                .peer_channel_observers()
+                .iter()
+                .map(|(id, observer)| (id.clone(), observer.interval_ms()))
+                .collect::<BTreeMap<_, _>>();
+            let Some(minimum_interval) = intervals.values().copied().min() else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            let mut next_due = intervals
+                .keys()
+                .cloned()
+                .map(|id| (id, tokio::time::Instant::now()))
+                .collect::<BTreeMap<_, _>>();
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_millis(minimum_interval));
+            loop {
+                ticker.tick().await;
+                let now = tokio::time::Instant::now();
+                let due = next_due
+                    .iter_mut()
+                    .filter_map(|(id, due_at)| {
+                        if now < *due_at {
+                            return None;
+                        }
+                        *due_at = now + std::time::Duration::from_millis(intervals[id]);
+                        Some(id.clone())
+                    })
+                    .collect::<BTreeSet<_>>();
+                let facts = engine.observe_peer_channel_readiness(&due).await;
+                if facts.is_empty() {
+                    continue;
+                }
+                let mut sequence = sequence.lock().await;
+                for fact in facts {
+                    *sequence = sequence.saturating_add(1);
+                    if outbound
+                        .send(peer_readiness_message(&session_id, *sequence, fact))
                         .is_err()
                     {
                         return;
@@ -435,6 +517,29 @@ impl NodeService {
                 .map_err(|_| NodeServiceError::Closed)?;
         }
         Ok(())
+    }
+}
+
+/// Attaches current Node session ordering to one Local EAIOS peer readiness fact.
+fn peer_readiness_message(
+    session_id: &str,
+    sequence: u64,
+    fact: crate::LocalPeerChannelReadiness,
+) -> NodeMessage {
+    NodeMessage {
+        message: Some(NodePayload::PeerChannelReadiness(PeerChannelReadiness {
+            session_id: session_id.to_string(),
+            sequence,
+            group_id: fact.group_id,
+            context_id: fact.context_id,
+            context_role_id: fact.context_role_id,
+            local_system_id: fact.local_system_id,
+            channel_instance_id: fact.channel_instance_id,
+            profile_id: fact.profile_id,
+            message_schema: fact.message_schema,
+            ready: fact.ready,
+            valid_for_ms: fact.valid_for_ms,
+        })),
     }
 }
 
@@ -1255,6 +1360,7 @@ mod tests {
                 sensors: Vec::new(),
                 artifacts,
                 state_exports: Vec::new(),
+                peer_channel_observers: Vec::new(),
                 memory_providers: Vec::new(),
             },
             std::path::Path::new("."),
@@ -1344,6 +1450,37 @@ mod tests {
             [NodeMessage {
                 message: Some(NodePayload::Heartbeat(Heartbeat { sequence: 3, .. }))
             }]
+        ));
+    }
+
+    /// Node Service attaches session ordering without interpreting Local EAIOS channel semantics.
+    #[test]
+    fn peer_readiness_fact_maps_to_identified_protocol_message() {
+        let message = peer_readiness_message(
+            "session-peer",
+            7,
+            crate::LocalPeerChannelReadiness {
+                group_id: "group-a".to_string(),
+                context_id: "guidance".to_string(),
+                context_role_id: "dog".to_string(),
+                local_system_id: "motion".to_string(),
+                channel_instance_id: "channel-a".to_string(),
+                profile_id: "guidance-peer".to_string(),
+                message_schema: "guidance/v1".to_string(),
+                ready: true,
+                valid_for_ms: 5_000,
+            },
+        );
+
+        assert!(matches!(
+            message.message,
+            Some(NodePayload::PeerChannelReadiness(PeerChannelReadiness {
+                session_id,
+                sequence: 7,
+                context_role_id,
+                ready: true,
+                ..
+            })) if session_id == "session-peer" && context_role_id == "dog"
         ));
     }
 
@@ -1755,6 +1892,7 @@ mod tests {
                 requirement.task_ref(),
                 &role_id,
                 intent,
+                TimestampMs::new(3),
                 correlation.clone(),
             )
             .expect("bound command routes");

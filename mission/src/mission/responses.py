@@ -123,6 +123,7 @@ class ResponsesMissionPlanner:
             schema=cast(JSONObject, self._provider_schema(schema)),
         )
         plan = MissionPlan.from_json(self._extract_output_json(response))
+        plan.validate_implementation_support()
         if plan.mission.mission_id != mission_id:
             raise MissionProviderError("model changed the requested mission id")
         if plan.mission.objective != grounded_intent.objective:

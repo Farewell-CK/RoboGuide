@@ -31,7 +31,7 @@ checkpoint schema；`core/orchestration` 只把 transport fact 接到既有 auth
 `roboguide-node` 的配置编译器先整体校验并冻结配置，再允许进程连接任何 endpoint。版本
 `roboguide.node-config/v0.6` 是 Extension Conformance 的当前版本；v0.5 仍可作为
 metadata-only Memory provider 配置启动，v0.2-v0.4 仍可解析为
-空 State/Memory declaration，但不满足当前 conformance。Node Protocol v0.2 endpoint 只返回
+空 State/Memory/peer observer declaration，但不满足当前 conformance。Node Protocol v0.2 endpoint 只返回
 明确迁移诊断，不再接受 session。
 
 成功编译只证明以下静态部署不变量：
@@ -44,6 +44,9 @@ metadata-only Memory provider 配置启动，v0.2-v0.4 仍可解析为
   visibility、schema 和 media type；v0.6 可再声明固定 discover/export/import workflow。`discover`
   workflow 返回的必须是 provider 已授权 RoboGuide 发布的 publish-eligible manifest 集合，不能
   把 Local EAIOS 的全部 Memory 暴露给 Node Service；Node 只执行 publication mechanism；
+- 可选 peer-channel observer 为每个 LocalSystem 固定唯一 owner、HTTP GET route、采样周期、
+  receive-relative TTL 和有界 response pointer；它只观察 Local EAIOS 已建立的 endpoint，响应
+  不能选择 owner/TTL，采样失败让旧证据自然到期而不是改变 execution/health；
 - Memory conformance 为 v0.1 兼容保留 `local_backend` 字段，但它只表示 Node manifest
   ledger/reference fallback 可用，不表示真实 EAIOS authority；独立 workflow flags 表示 EAIOS
   operation routes，`shared_data_plane` 表示 Catalog/Artifact exchange；
@@ -81,6 +84,8 @@ timeout/unknown fencing、identity conflict 和 restart no-replay。它们不是
    该样例在同一个 Node 中声明 HTTP、dynamic gRPC reflection 和 MCP 三种 connection，
    每个 capability 都有 readiness、required resource 和 execute/status/cancel workflow；样例还
    声明 State export 以及 Execution/Spatial/Semantic/Experience/Artifact 五类 Memory provider。
+   需要 tightly-coupled coordination 的部署还可声明 `peer_channel_observers`，让既有 Local
+   EAIOS facade 以只读方式报告已建立端点；这不是 Controller-to-Node setup command。
 3. 在不启动 facade、不启动 Controller 的情况下运行：
 
    ```bash

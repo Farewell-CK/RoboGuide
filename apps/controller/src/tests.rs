@@ -120,6 +120,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::ExecutionGroupCreated { .. }
         | EventPayload::ExecutionRelationRegistered { .. }
         | EventPayload::ExecutionRelationStateChanged { .. }
+        | EventPayload::PeerChannelReadinessObserved { .. }
         | EventPayload::ContextBindingsReleased { .. }
         | EventPayload::NodeObservation(NodeEvent::SafeStopped { .. }) => None,
     }

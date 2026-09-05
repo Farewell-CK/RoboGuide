@@ -22,3 +22,9 @@ existing recovery-pending meaning.
 `SequentialHandoff` reuses DAG readiness and Task lifecycle evidence. Concurrent modes require a
 declared shared view and relation evidence; tightly coupled mode additionally requires a
 deployment-confirmed peer channel. These are mechanism requirements, not control algorithms.
+
+Contract validity is intentionally broader than implementation support. The current Controller
+profile executes `requires-active` and `shared-spatial-reference`; all other reserved relation kinds
+are rejected by preflight before Group creation. Strong localization evidence must prove both live
+attempts use the declared immutable map revision and frame. The Mission schema does not encode
+distance/angle thresholds or Local EAIOS control formulas.

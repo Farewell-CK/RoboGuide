@@ -3,13 +3,103 @@
 use crate::{ExecutionEvent, ExecutionStatus, RuntimeExecutionManager};
 use domain::{
     ExecutionCouplingMode, ExecutionGroupId, ExecutionRelationId, ExecutionRelationKind,
-    ExecutionRelationSpec, ExecutionRelationState, ExecutionRelationType, MissionId, RoleId,
-    TaskRef,
+    ExecutionRelationSpec, ExecutionRelationState, ExecutionRelationType,
+    LocalizationVerificationEvidence, MapRevisionSelector, MissionId, NodeId, RoleId, TaskRef,
+    TimestampMs,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Stable Runtime key for one Mission relation inside its Execution Group.
 pub(crate) type RelationKey = (ExecutionGroupId, ExecutionRelationId);
+
+/// Strong map/frame evidence attached to one current logical execution attempt.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SharedSpatialEvidence {
+    /// Mission-level Group containing the execution.
+    pub(crate) group_id: ExecutionGroupId,
+    /// Mission-scoped Task represented by the execution.
+    pub(crate) task_ref: TaskRef,
+    /// Task-local Role represented by the execution.
+    pub(crate) role_id: RoleId,
+    /// Current execution attempt identity that produced the evidence.
+    pub(crate) execution_id: String,
+    /// Node that produced the evidence; placement is evidence, not relation identity.
+    pub(crate) node_id: NodeId,
+    /// Strongly verified immutable map revision.
+    pub(crate) selector: MapRevisionSelector,
+    /// Common frame observed by the Local EAIOS.
+    pub(crate) frame_id: String,
+    /// RoboGuide-local receive time for evidence inspection.
+    pub(crate) received_at: TimestampMs,
+}
+
+impl SharedSpatialEvidence {
+    /// Converts an existing strong localization evidence record into Runtime evidence.
+    pub fn from_localization(
+        evidence: &LocalizationVerificationEvidence,
+        received_at: TimestampMs,
+    ) -> Self {
+        Self {
+            group_id: evidence.group_id().clone(),
+            task_ref: evidence.task_ref().clone(),
+            role_id: evidence.role_id().clone(),
+            execution_id: evidence.execution_id().to_string(),
+            node_id: evidence.node_id().clone(),
+            selector: evidence.artifact().selector().clone(),
+            frame_id: evidence.frames().map().to_string(),
+            received_at,
+        }
+    }
+
+    /// Returns the logical Group/Task/Role slot represented by this evidence.
+    pub(crate) fn slot(&self) -> (ExecutionGroupId, TaskRef, RoleId) {
+        (
+            self.group_id.clone(),
+            self.task_ref.clone(),
+            self.role_id.clone(),
+        )
+    }
+
+    /// Returns the Mission-level Group containing the logical execution slot.
+    pub const fn group_id(&self) -> &ExecutionGroupId {
+        &self.group_id
+    }
+
+    /// Returns the Mission-scoped Task containing the logical execution slot.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
+    /// Returns the Task-local Role containing the logical execution slot.
+    pub const fn role_id(&self) -> &RoleId {
+        &self.role_id
+    }
+
+    /// Returns the current execution attempt identity that produced this evidence.
+    pub fn execution_id(&self) -> &str {
+        &self.execution_id
+    }
+
+    /// Returns the physical Node that produced this evidence.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the strongly verified map revision.
+    pub const fn selector(&self) -> &MapRevisionSelector {
+        &self.selector
+    }
+
+    /// Returns the map frame observed by the Local EAIOS.
+    pub fn frame_id(&self) -> &str {
+        &self.frame_id
+    }
+
+    /// Returns the RoboGuide-local evidence receive time.
+    pub const fn received_at(&self) -> TimestampMs {
+        self.received_at
+    }
+}
 
 /// Accepted relation with Mission and Group identity applied to both logical endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -133,7 +223,7 @@ pub(crate) struct RelationProofCheckpoint {
     pub(crate) group_id: ExecutionGroupId,
     /// Relation identity portion of the key.
     pub(crate) relation_id: ExecutionRelationId,
-    /// Target attempt that was observed while its source was active.
+    /// Target attempt observed while this relation was satisfied.
     pub(crate) target_execution_id: String,
 }
 
@@ -180,6 +270,71 @@ impl RuntimeRelationSnapshot {
 }
 
 impl RuntimeExecutionManager {
+    /// Returns whether evidence names the current logical execution attempt.
+    pub fn shared_spatial_evidence_matches_current_execution(
+        &self,
+        evidence: &SharedSpatialEvidence,
+    ) -> bool {
+        self.active_executions.get(&evidence.slot()) == Some(&evidence.execution_id)
+    }
+
+    /// Returns whether evidence names the current attempt and its current physical owner.
+    pub fn shared_spatial_evidence_targets_current_attempt(
+        &self,
+        evidence: &SharedSpatialEvidence,
+    ) -> bool {
+        let slot = evidence.slot();
+        self.active_executions.get(&slot) == Some(&evidence.execution_id)
+            && self.execution_nodes.get(&evidence.execution_id) == Some(&evidence.node_id)
+    }
+
+    /// Records strong localization evidence for one current logical execution attempt.
+    pub fn observe_shared_spatial_evidence(
+        &mut self,
+        evidence: SharedSpatialEvidence,
+    ) -> Result<Vec<ExecutionEvent>, crate::ExecutionRuntimeError> {
+        let slot = evidence.slot();
+        if self.active_executions.get(&slot) != Some(&evidence.execution_id) {
+            return Err(crate::ExecutionRuntimeError::ReconciliationRequired(
+                "localization evidence does not belong to the current execution attempt"
+                    .to_string(),
+            ));
+        }
+        if self.execution_nodes.get(&evidence.execution_id) != Some(&evidence.node_id) {
+            return Err(crate::ExecutionRuntimeError::NodeOwnership(
+                "localization evidence node differs from execution owner".to_string(),
+            ));
+        }
+        if let Some(current) = self.spatial_evidence.get(&slot) {
+            if evidence.received_at < current.received_at {
+                return Err(crate::ExecutionRuntimeError::ReconciliationRequired(
+                    "older localization evidence cannot replace current evidence".to_string(),
+                ));
+            }
+            if evidence.received_at == current.received_at {
+                return if current == &evidence {
+                    Ok(Vec::new())
+                } else {
+                    Err(crate::ExecutionRuntimeError::ExecutionConflict(
+                        evidence.execution_id,
+                    ))
+                };
+            }
+        }
+        self.spatial_evidence.insert(slot.clone(), evidence);
+        Ok(self.refresh_relations_for_slot(&slot))
+    }
+
+    /// Returns strong spatial evidence for one current logical execution slot.
+    pub fn shared_spatial_evidence(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<&SharedSpatialEvidence> {
+        self.current_spatial_evidence(&(group_id.clone(), task_ref.clone(), role_id.clone()))
+    }
+
     /// Registers exact Mission relation specifications without selecting physical endpoints.
     pub fn register_relations(
         &mut self,
@@ -422,21 +577,13 @@ impl RuntimeExecutionManager {
             target_execution_id: target_execution_id.clone(),
         }];
         if current.requires_reconciliation() {
+            let reason = relation_reconciliation_reason(&relation, current);
             events.push(ExecutionEvent::RelationReconciliationRequired {
                 relation,
                 state: current,
                 source_execution_id,
                 target_execution_id,
-                reason: match current {
-                    ExecutionRelationState::Violated => {
-                        "required source execution is terminal while target remains active"
-                            .to_string()
-                    }
-                    ExecutionRelationState::Unknown => {
-                        "execution relation cannot prove current physical coordination".to_string()
-                    }
-                    _ => unreachable!("only violation states request reconciliation"),
-                },
+                reason,
             });
         }
         events
@@ -478,12 +625,57 @@ impl RuntimeExecutionManager {
                     Some(ExecutionStatus::Dispatched) | None => ExecutionRelationState::Pending,
                 }
             }
+            ExecutionRelationKind::SharedSpatialReference => {
+                match self.current_status(&relation.source_key()) {
+                    Some(ExecutionStatus::Accepted | ExecutionStatus::Running) => {}
+                    Some(ExecutionStatus::Unknown) => return ExecutionRelationState::Unknown,
+                    Some(
+                        ExecutionStatus::Completed
+                        | ExecutionStatus::Failed
+                        | ExecutionStatus::Cancelled,
+                    ) => return ExecutionRelationState::Violated,
+                    Some(ExecutionStatus::Dispatched) | None => {
+                        return self.missing_spatial_evidence_state(relation);
+                    }
+                }
+                let ExecutionRelationType::SharedSpatialReference { reference } =
+                    relation.relation_type()
+                else {
+                    return ExecutionRelationState::Unknown;
+                };
+                let Some(source) = self.current_spatial_evidence(&relation.source_key()) else {
+                    return self.missing_spatial_evidence_state(relation);
+                };
+                let Some(target) = self.current_spatial_evidence(&relation.target_key()) else {
+                    return self.missing_spatial_evidence_state(relation);
+                };
+                if source.selector != *reference.selector()
+                    || target.selector != *reference.selector()
+                    || source.frame_id != reference.frame_id()
+                    || target.frame_id != reference.frame_id()
+                {
+                    ExecutionRelationState::Violated
+                } else {
+                    ExecutionRelationState::Satisfied
+                }
+            }
             ExecutionRelationKind::GroupMemberState
-            | ExecutionRelationKind::SharedSpatialReference
             | ExecutionRelationKind::RelativePose
             | ExecutionRelationKind::RelativeDistance
             | ExecutionRelationKind::StateRequirement
             | ExecutionRelationKind::FreshnessRequirement => ExecutionRelationState::Unknown,
+        }
+    }
+
+    /// Distinguishes initial proof collection from loss of previously established coordination.
+    fn missing_spatial_evidence_state(
+        &self,
+        relation: &RuntimeExecutionRelation,
+    ) -> ExecutionRelationState {
+        if self.relation_proofs.contains_key(&relation.key()) {
+            ExecutionRelationState::Unknown
+        } else {
+            ExecutionRelationState::Pending
         }
     }
 
@@ -496,6 +688,45 @@ impl RuntimeExecutionManager {
             .get(slot)
             .and_then(|execution_id| self.execution_status.get(execution_id))
             .copied()
+    }
+
+    /// Returns evidence only when it belongs to the current attempt and physical owner.
+    fn current_spatial_evidence(
+        &self,
+        slot: &(ExecutionGroupId, TaskRef, RoleId),
+    ) -> Option<&SharedSpatialEvidence> {
+        let evidence = self.spatial_evidence.get(slot)?;
+        let execution_id = self.active_executions.get(slot)?;
+        (execution_id == &evidence.execution_id
+            && self.execution_nodes.get(execution_id) == Some(&evidence.node_id))
+        .then_some(evidence)
+    }
+}
+
+/// Returns a typed reconciliation diagnostic without embedding a control algorithm.
+fn relation_reconciliation_reason(
+    relation: &RuntimeExecutionRelation,
+    state: ExecutionRelationState,
+) -> String {
+    match (relation.kind(), state) {
+        (ExecutionRelationKind::RequiresActive, ExecutionRelationState::Violated) => {
+            "required source execution is terminal while target remains active".to_string()
+        }
+        (ExecutionRelationKind::SharedSpatialReference, ExecutionRelationState::Violated) => {
+            "current endpoint localization evidence differs from the required shared spatial reference"
+                .to_string()
+        }
+        (ExecutionRelationKind::SharedSpatialReference, ExecutionRelationState::Unknown) => {
+            "current endpoint localization evidence cannot prove the required shared spatial reference"
+                .to_string()
+        }
+        (_, ExecutionRelationState::Unknown) => {
+            "execution relation cannot prove current physical coordination".to_string()
+        }
+        (_, ExecutionRelationState::Violated) => {
+            "execution relation evidence violates its typed requirement".to_string()
+        }
+        _ => unreachable!("only violation states request reconciliation"),
     }
 }
 
@@ -594,7 +825,8 @@ mod tests {
     use crate::{ExecutionRuntimeError, ObservedTaskResult};
     use domain::{
         CapabilityContractRef, CorrelationId, ExecutionCommand, ExecutionIntent,
-        ExecutionRelationSpec, NodeId, PlannedExecutionRef, TaskId,
+        ExecutionRelationSpec, ExecutionRelationType, MapId, MapRevisionId, NodeId,
+        PlannedExecutionRef, SharedSpatialReference, TaskId,
     };
 
     /// Builds one committed command for a logical relation endpoint.
@@ -629,6 +861,190 @@ mod tests {
             ExecutionRelationKind::RequiresActive,
         )
         .expect("relation valid")
+    }
+
+    /// Builds a typed shared-map/frame relation over the same logical endpoint pair.
+    fn spatial_relation() -> ExecutionRelationSpec {
+        ExecutionRelationSpec::new_typed(
+            ExecutionRelationId::new("shared-localization").expect("relation valid"),
+            PlannedExecutionRef::new(
+                TaskId::new("observe").expect("task valid"),
+                RoleId::new("safety").expect("role valid"),
+            ),
+            PlannedExecutionRef::new(
+                TaskId::new("navigate").expect("task valid"),
+                RoleId::new("navigator").expect("role valid"),
+            ),
+            ExecutionRelationType::SharedSpatialReference {
+                reference: SharedSpatialReference::new(selector("r1"), "map")
+                    .expect("spatial reference valid"),
+            },
+        )
+        .expect("typed relation valid")
+    }
+
+    /// Builds one immutable map selector for relation evidence tests.
+    fn selector(revision: &str) -> MapRevisionSelector {
+        MapRevisionSelector::new(
+            MapId::new("building-a").expect("map id valid"),
+            MapRevisionId::new(revision).expect("revision id valid"),
+        )
+    }
+
+    /// Builds strong spatial evidence for one dispatched command and attempt.
+    fn spatial_evidence(
+        command: &ExecutionCommand,
+        execution_id: &str,
+        revision: &str,
+        frame_id: &str,
+        received_at: u64,
+    ) -> SharedSpatialEvidence {
+        SharedSpatialEvidence {
+            group_id: command.group_id().clone(),
+            task_ref: command.task_ref().clone(),
+            role_id: command.role_id().clone(),
+            execution_id: execution_id.to_string(),
+            node_id: command.node_id().clone(),
+            selector: selector(revision),
+            frame_id: frame_id.to_string(),
+            received_at: TimestampMs::new(received_at),
+        }
+    }
+
+    /// Strong map/frame evidence drives Pending, Satisfied, and Violated relation states.
+    #[test]
+    fn shared_spatial_relation_reduces_current_attempt_evidence() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let group_id = ExecutionGroupId::new("group-relation").expect("group valid");
+        runtime
+            .register_relations(
+                &group_id,
+                &MissionId::new("mission-relation").expect("mission valid"),
+                &[spatial_relation()],
+            )
+            .expect("relation registers");
+        let source = command("observe", "safety", "cane-a");
+        let target = command("navigate", "navigator", "dog-a");
+        runtime
+            .record_dispatched("attempt-source".to_string(), source.clone(), Vec::new())
+            .expect("source dispatch records");
+        runtime
+            .record_dispatched("attempt-target".to_string(), target.clone(), Vec::new())
+            .expect("target dispatch records");
+        runtime
+            .observe_execution(
+                "attempt-target",
+                target.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("target running records");
+        assert_eq!(
+            runtime.relation_snapshots(&group_id)[0].state(),
+            ExecutionRelationState::Pending
+        );
+        assert!(!runtime.relation_snapshots(&group_id)[0].reconciliation_required());
+        runtime
+            .observe_execution(
+                "attempt-source",
+                source.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "",
+            )
+            .expect("source running records");
+
+        runtime
+            .observe_shared_spatial_evidence(spatial_evidence(
+                &source,
+                "attempt-source",
+                "r1",
+                "map",
+                10,
+            ))
+            .expect("source localization records");
+        let satisfied = runtime
+            .observe_shared_spatial_evidence(spatial_evidence(
+                &target,
+                "attempt-target",
+                "r1",
+                "map",
+                11,
+            ))
+            .expect("target localization records");
+        assert!(satisfied.iter().any(|event| matches!(
+            event,
+            ExecutionEvent::RelationStateChanged {
+                current: ExecutionRelationState::Satisfied,
+                ..
+            }
+        )));
+        assert!(!runtime.relation_snapshots(&group_id)[0].reconciliation_required());
+
+        let violated = runtime
+            .observe_shared_spatial_evidence(spatial_evidence(
+                &source,
+                "attempt-source",
+                "r2",
+                "map",
+                12,
+            ))
+            .expect("newer conflicting localization records");
+        assert!(violated.iter().any(|event| matches!(
+            event,
+            ExecutionEvent::RelationReconciliationRequired {
+                state: ExecutionRelationState::Violated,
+                ..
+            }
+        )));
+    }
+
+    /// Rebind removes prior-attempt spatial evidence and rejects its later delivery.
+    #[test]
+    fn shared_spatial_evidence_follows_rebind_attempt_identity() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let source = command("observe", "safety", "cane-a");
+        runtime
+            .record_dispatched("attempt-source-1".to_string(), source.clone(), Vec::new())
+            .expect("first source dispatch records");
+        runtime
+            .observe_shared_spatial_evidence(spatial_evidence(
+                &source,
+                "attempt-source-1",
+                "r1",
+                "map",
+                10,
+            ))
+            .expect("first attempt evidence records");
+        let replacement = command("observe", "safety", "cane-b");
+        runtime
+            .record_dispatched(
+                "attempt-source-2".to_string(),
+                replacement.clone(),
+                Vec::new(),
+            )
+            .expect("replacement dispatch records");
+
+        assert!(
+            runtime
+                .shared_spatial_evidence(
+                    replacement.group_id(),
+                    replacement.task_ref(),
+                    replacement.role_id()
+                )
+                .is_none()
+        );
+        assert!(matches!(
+            runtime.observe_shared_spatial_evidence(spatial_evidence(
+                &source,
+                "attempt-source-1",
+                "r1",
+                "map",
+                11,
+            )),
+            Err(ExecutionRuntimeError::ReconciliationRequired(_))
+        ));
     }
 
     /// A relation follows the current logical-slot attempt and ignores old-attempt late facts.

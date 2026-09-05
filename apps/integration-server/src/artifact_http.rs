@@ -59,6 +59,16 @@ pub trait MemoryProviderAdmission: Send + Sync {
     ) -> Result<(), String>;
 }
 
+/// Composition callback that projects durable strong localization evidence into Runtime.
+pub trait LocalizationEvidenceObserver: Send + Sync {
+    /// Applies one already-persisted evidence record using its RoboGuide-local receive time.
+    fn observe(
+        &self,
+        evidence: &domain::LocalizationVerificationEvidence,
+        received_at: TimestampMs,
+    ) -> Result<(), String>;
+}
+
 /// Node/session identity attached to one generic Memory mutation on the internal data plane.
 #[derive(Debug, Clone)]
 pub struct MemoryPublicationIdentity {
@@ -245,7 +255,7 @@ impl ArtifactCatalog {
     }
 
     /// Appends and projects one map event atomically from the HTTP caller's perspective.
-    fn append(&self, payload: EventPayload) -> Result<(), HttpError> {
+    fn append(&self, payload: EventPayload) -> Result<TimestampMs, HttpError> {
         self.append_with_admission(payload, None)
     }
 
@@ -257,6 +267,7 @@ impl ArtifactCatalog {
         publisher: Option<&MemoryPublicationIdentity>,
     ) -> Result<(), HttpError> {
         self.append_with_admission(payload, Some((admission, publisher)))
+            .map(|_| ())
     }
 
     /// Serializes optional Memory admission with Controller registration updates and persistence.
@@ -267,7 +278,7 @@ impl ArtifactCatalog {
             &dyn MemoryProviderAdmission,
             Option<&MemoryPublicationIdentity>,
         )>,
-    ) -> Result<(), HttpError> {
+    ) -> Result<TimestampMs, HttpError> {
         let _write_guard = self
             .write_gate
             .lock()
@@ -347,7 +358,28 @@ impl ArtifactCatalog {
         }
         *projection = candidate;
         *memory_projection = memory_candidate;
-        Ok(())
+        Ok(timestamp)
+    }
+
+    /// Returns durable strong localization evidence in event order for restart rehydration.
+    pub fn localization_evidence(
+        &self,
+    ) -> Result<Vec<(domain::LocalizationVerificationEvidence, TimestampMs)>, String> {
+        self.ensure_available().map_err(|error| error.message)?;
+        self.event_log
+            .decoded_events()
+            .map_err(|error| error.to_string())
+            .map(|events| {
+                events
+                    .into_iter()
+                    .filter_map(|event| match event.payload() {
+                        EventPayload::MapLocalizationEvidenceRecorded { evidence } => {
+                            Some((evidence.clone(), event.timestamp()))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
     }
 
     /// Allocates one process-local receive timestamp monotonically under the durable write gate.
@@ -683,6 +715,7 @@ pub async fn serve_artifact_http(
     store: FileSystemArtifactStore,
     catalog: ArtifactCatalog,
     memory_admission: Arc<dyn MemoryProviderAdmission>,
+    localization_observer: Arc<dyn LocalizationEvidenceObserver>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let uploads: Uploads = Arc::new(Mutex::new(UploadRegistry::production()));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
@@ -695,6 +728,7 @@ pub async fn serve_artifact_http(
                 let shared_catalog = catalog.clone();
                 let shared_uploads = uploads.clone();
                 let shared_memory_admission = Arc::clone(&memory_admission);
+                let shared_localization_observer = Arc::clone(&localization_observer);
                 tokio::spawn(async move {
                     if let Err(error) =
                         handle_connection(
@@ -703,6 +737,7 @@ pub async fn serve_artifact_http(
                             &shared_catalog,
                             &shared_uploads,
                             shared_memory_admission.as_ref(),
+                            shared_localization_observer.as_ref(),
                         ).await
                     {
                         let _ = write_json(&mut stream, error.status(), &error.body()).await;
@@ -725,6 +760,7 @@ async fn handle_connection(
     catalog: &ArtifactCatalog,
     uploads: &Uploads,
     memory_admission: &dyn MemoryProviderAdmission,
+    localization_observer: &dyn LocalizationEvidenceObserver,
 ) -> Result<(), HttpError> {
     let mut head = read_request_head(stream).await?;
     let method = head.method.clone();
@@ -769,7 +805,7 @@ async fn handle_connection(
             if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
         {
             let request = head.read_json(stream).await?;
-            record_localization_evidence(catalog, &request, path)?
+            record_localization_evidence(catalog, localization_observer, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
@@ -1016,6 +1052,7 @@ fn map_memory_view(snapshot: domain::MapRevisionSnapshot) -> serde_json::Value {
 /// Records one complete strong localization evidence event after path identity validation.
 fn record_localization_evidence(
     catalog: &ArtifactCatalog,
+    observer: &dyn LocalizationEvidenceObserver,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -1036,7 +1073,12 @@ fn record_localization_evidence(
             "localization evidence selector does not match path",
         ));
     }
-    catalog.append(EventPayload::MapLocalizationEvidenceRecorded { evidence })?;
+    let received_at = catalog.append(EventPayload::MapLocalizationEvidenceRecorded {
+        evidence: evidence.clone(),
+    })?;
+    observer
+        .observe(&evidence, received_at)
+        .map_err(HttpError::service_unavailable)?;
     Ok(Response::Json(
         "201 Created",
         serde_json::json!({"status": "strongly-verified"}),
@@ -1878,6 +1920,20 @@ mod tests {
     /// Test-only admission that isolates catalog behavior from Controller registration fixtures.
     struct AllowTestMemoryAdmission;
 
+    /// Test observer that leaves Runtime integration to dedicated composition tests.
+    struct IgnoreTestLocalizationEvidence;
+
+    impl LocalizationEvidenceObserver for IgnoreTestLocalizationEvidence {
+        /// Accepts already-validated strong evidence without adding another test authority.
+        fn observe(
+            &self,
+            _evidence: &domain::LocalizationVerificationEvidence,
+            _received_at: TimestampMs,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     impl MemoryProviderAdmission for AllowTestMemoryAdmission {
         /// Accepts fixture manifests whose provider semantics are tested separately.
         fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
@@ -2130,6 +2186,7 @@ mod tests {
                 &server_catalog,
                 &server_uploads,
                 memory_admission.as_ref(),
+                &IgnoreTestLocalizationEvidence,
             )
             .await
             {
@@ -2179,6 +2236,7 @@ mod tests {
                 &server_catalog,
                 &server_uploads,
                 memory_admission.as_ref(),
+                &IgnoreTestLocalizationEvidence,
             )
             .await
             {
@@ -2433,6 +2491,7 @@ mod tests {
             store.clone(),
             catalog.clone(),
             Arc::new(AllowTestMemoryAdmission),
+            Arc::new(IgnoreTestLocalizationEvidence),
         ));
         let endpoint = format!("http://{address}");
         let client = node_service::ArtifactClient::new(&endpoint, 4, 1024, 1_000, 1_000)

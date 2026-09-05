@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://roboguide.local/contracts/node/v0.6/node-config.schema.json",
   "title": "RoboGuide Node Service configuration v0.6",
-  "description": "Strict declarative configuration for one roboguide-node process, local workflows, selective State exports, Memory providers, and the independent Artifact data plane.",
+  "description": "Strict declarative configuration for one roboguide-node process, local workflows, selective State exports, peer-channel observers, Memory providers, and the independent Artifact data plane.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -81,6 +81,13 @@
         "$ref": "#/$defs/stateExport"
       }
     },
+    "peer_channel_observers": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/peerChannelObserver"
+      }
+    },
     "memory_providers": {
       "type": "array",
       "default": [],
@@ -120,6 +127,26 @@
         "value_pointer": { "$ref": "#/$defs/jsonPointer" },
         "source_observed_at_pointer": { "$ref": "#/$defs/jsonPointer" },
         "confidence_pointer": { "$ref": "#/$defs/jsonPointer" }
+      }
+    },
+    "peerChannelObserver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "interval_ms",
+        "valid_for_ms",
+        "step",
+        "channels_pointer"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "owner": { "$ref": "#/$defs/nonBlankString" },
+        "interval_ms": { "type": "integer", "minimum": 100, "maximum": 60000 },
+        "valid_for_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "step": { "$ref": "#/$defs/workflowStep" },
+        "channels_pointer": { "$ref": "#/$defs/jsonPointer" }
       }
     },
     "memoryProvider": {

@@ -130,6 +130,17 @@ pub struct StateExportConformance {
     pub step: StepConformance,
 }
 
+/// One fixed Local EAIOS peer-channel readiness observation source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PeerChannelObserverConformance {
+    /// Node-wide observer identity.
+    pub id: String,
+    /// Configuration-owned Local EAIOS identity injected into every fact.
+    pub owner: String,
+    /// Fixed, mechanically read-only observation step.
+    pub step: StepConformance,
+}
+
 /// One selective Memory provider declaration retained in the extension report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MemoryProviderConformance {
@@ -231,6 +242,8 @@ pub struct ExtensionConformanceReport {
     pub capabilities: Vec<CapabilityConformance>,
     /// Selective fixed-route State exports.
     pub state_exports: Vec<StateExportConformance>,
+    /// Fixed Local EAIOS peer-channel readiness observation sources.
+    pub peer_channel_observers: Vec<PeerChannelObserverConformance>,
     /// Selective heterogeneous Memory providers.
     pub memory_providers: Vec<MemoryProviderConformance>,
     /// Static checks guaranteed by successful production compilation.
@@ -385,6 +398,15 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
                 owner: export.owner().to_string(),
                 semantic: export.semantic().to_string(),
                 step: step_report(export.step()),
+            })
+            .collect(),
+        peer_channel_observers: catalog
+            .peer_channel_observers()
+            .values()
+            .map(|observer| PeerChannelObserverConformance {
+                id: observer.id().to_string(),
+                owner: observer.owner().to_string(),
+                step: step_report(observer.step()),
             })
             .collect(),
         memory_providers: catalog

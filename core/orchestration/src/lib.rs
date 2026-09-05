@@ -14,13 +14,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 mod integration_bridge;
+mod mechanism_profile;
 mod mission_contract;
 
 pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
-    GroupViewFreshness, IntegrationRuntimeBridge, IntegrationRuntimeError, ObservedTaskOutcome,
-    ObservedTaskResult, RemoteExecutionStatus,
+    GroupSpatialVerification, GroupViewFreshness, IntegrationRuntimeBridge,
+    IntegrationRuntimeError, ObservedTaskOutcome, ObservedTaskResult, RemoteExecutionStatus,
 };
+pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission_contract::decode_mission_plan;
 
 /// Mission execution lifecycle owned by orchestration rather than Runtime.
@@ -143,6 +145,7 @@ impl MissionOrchestrator {
                 decode_mission_plan(&serde_json::to_string(plan_value).map_err(|error| {
                     OrchestrationError::Mission(format!("invalid MissionPlan checkpoint: {error}"))
                 })?)?;
+            SupportedMechanismProfile::current().validate(&plan)?;
             let group_id = ExecutionGroupId::new(
                 value
                     .get("group_id")
@@ -184,6 +187,7 @@ impl MissionOrchestrator {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<&MissionExecution, OrchestrationError> {
+        SupportedMechanismProfile::current().validate(&plan)?;
         let mission_id = plan.goal().mission_id().clone();
         if self.executions.contains_key(&mission_id) {
             let existing = self
@@ -277,8 +281,30 @@ impl MissionOrchestrator {
         Ok(())
     }
 
-    /// Returns all currently Ready Task identities in deterministic plan order.
+    /// Returns all unbound Ready Task identities in deterministic plan order.
     pub fn ready_tasks(&self, mission_id: &MissionId, control: &ControlPlane) -> Vec<TaskRef> {
+        let Some(execution) = self.executions.get(mission_id) else {
+            return Vec::new();
+        };
+        let Some(group) = control.group(execution.group_id()) else {
+            return Vec::new();
+        };
+        self.dispatchable_tasks(mission_id, control)
+            .into_iter()
+            .filter(|task_ref| {
+                group
+                    .task_execution(task_ref)
+                    .is_some_and(|task| task.assignments().is_empty())
+            })
+            .collect()
+    }
+
+    /// Returns Ready Tasks including committed bindings waiting for Runtime coordination.
+    pub fn dispatchable_tasks(
+        &self,
+        mission_id: &MissionId,
+        control: &ControlPlane,
+    ) -> Vec<TaskRef> {
         let Some(execution) = self.executions.get(mission_id) else {
             return Vec::new();
         };
@@ -296,7 +322,6 @@ impl MissionOrchestrator {
                     .task_execution(task_ref)
                     .filter(|task_execution| {
                         task_execution.lifecycle() == TaskExecutionLifecycle::Ready
-                            && task_execution.assignments().is_empty()
                     })
                     .map(|_| task_ref.clone())
             })
@@ -980,6 +1005,47 @@ mod tests {
         let decoded = decode_mission_plan(&encoded.to_string())
             .expect("canonical v0.4 MissionPlan should round trip");
         assert_eq!(decoded, plan);
+    }
+
+    /// Implementation preflight rejects future typed syntax before Control creates a Group.
+    #[test]
+    fn unsupported_relation_never_reaches_control_authority() {
+        let source = include_str!("../../../scenarios/execution-relations-v0.1/mission-plan.json");
+        let mut document: serde_json::Value =
+            serde_json::from_str(source).expect("fixture is JSON");
+        document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+        document["contexts"][0]["coupling_mode"] = serde_json::json!("concurrent-cooperation");
+        document["contexts"][0]["shared_view"] = serde_json::json!({
+            "bindings": [{"context_role_id": "guide", "field": "execution"}],
+            "include_freshness": false
+        });
+        document["contexts"][0]["relations"][0] = serde_json::json!({
+            "id": "relative-guidance",
+            "kind": "relative-pose",
+            "frame_id": "map",
+            "source": {"task_id": "observe-safety", "role_id": "safety-observer"},
+            "target": {"task_id": "navigate", "role_id": "navigator"}
+        });
+        let plan = decode_mission_plan(&document.to_string()).expect("contract syntax is valid");
+        let mut orchestrator = MissionOrchestrator::new();
+        let mut control = ControlPlane::new();
+        let mut events = InMemoryEventLog::new();
+        let result = orchestrator.submit(
+            plan,
+            ExecutionGroupId::new("group-unsupported").expect("group id is valid"),
+            &mut control,
+            TimestampMs::new(1),
+            &CorrelationId::new("unsupported-profile").expect("correlation is valid"),
+            &mut events,
+        );
+
+        assert!(matches!(
+            result,
+            Err(OrchestrationError::Mission(reason))
+                if reason.contains("valid contract syntax but is not executable")
+        ));
+        assert!(control.group_ids().is_empty());
+        assert!(events.records().is_empty());
     }
 
     /// v0.4 rejects a Task mode override whose Context lacks its static mechanisms.

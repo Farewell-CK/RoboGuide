@@ -6,11 +6,23 @@ Integration Engine. Node Protocol remains v0.3.
 
 Each `state_exports` entry fixes its local-system owner, Node/World object identity,
 Reported/Observed semantic, JSON payload schema, receive-relative validity, sample interval, and
-one fixed HTTP, dynamic gRPC, or MCP observation workflow step. Mission input cannot select the
-endpoint, method, service, tool, object, or schema. The deployment facade is responsible for
-keeping observation side-effect free; offline conformance cannot prove that external behavior.
+one fixed HTTP GET observation workflow step. Mission input cannot select the endpoint, method,
+object, or schema. Dynamic gRPC and MCP observations remain disabled until their contracts can
+declare a mechanically enforceable read-only operation. The deployment facade is responsible for
+keeping the HTTP observation side-effect free; offline conformance cannot prove external behavior.
 Sampling failure does not change node health, capability
 readiness, execution lifecycle, or recovery; the last accepted record instead becomes stale.
+
+Each optional `peer_channel_observers` entry likewise fixes an owner, HTTP GET operation, sample
+interval, receive-relative lifetime, and response array pointer. Every array item contains
+`group_id`, `context_id`, `context_role_id`, `channel_instance_id`, `profile_id`,
+`message_schema`, and `ready`; it cannot choose `local_system_id` or TTL. Node Service injects both
+from startup-validated configuration and accepts at most 64 items and 64 KiB per response. The
+response is evidence about endpoints that the Local EAIOS has already established, not a request to
+create a transport. One observer owns the complete set for one Local EAIOS; duplicate owner
+declarations or duplicate logical Role endpoints are rejected rather than resolved by arrival order. A
+missing/malformed response emits no fact, so previously accepted readiness expires
+and fences instead of being refreshed or converted into an invented negative.
 
 Each `memory_providers` entry declares local ownership, one of the Execution, Spatial, Semantic,
 Experience, or Artifact kinds, maximum local/global scope, discoverable/exchangeable visibility,
@@ -58,12 +70,25 @@ publication or exchange can run.
 Consumer selection and a durable Controller-to-Node import command remain outside Protocol v0.3;
 the node never turns discovery into implicit full replication.
 
-Protocol v0.3 adds complete provider snapshots to Register/RegistrationUpdate and adds a bounded,
-management-sequenced `StateObservationBatch`. `Registered` and `Ack` retain application plus durable
+Protocol v0.3 adds complete provider snapshots to Register/RegistrationUpdate, a bounded
+management-sequenced `StateObservationBatch`, and identified `PeerChannelReadiness` evidence.
+The latter reports only Local EAIOS channel establishment for one logical ContextRole and exact
+registered `local_system_id`; RoboGuide does not carry peer traffic or implement high-frequency
+coordination. Controller checks that Node, Local EAIOS, committed ContextRole, and capability owner
+agree. All declared peers must name the same channel instance/profile/schema with a non-expired
+1-60000 ms receive-relative lifetime before Runtime marks it Ready; negative/conflicting facts,
+expiry, route loss, and restart fence it. `Registered` and `Ack` retain application plus durable
 checkpoint acceptance semantics. The v0.2 gRPC endpoint is retained only to return an explicit
 `FailedPrecondition` migration diagnostic.
+Protocol v0.3 does not contain a channel-setup command: deployment integration establishes the
+actual channel idempotently from the accepted Context/binding identities and reports evidence
+through the fixed `peer_channel_observers` workflow (or the equivalent embedded engine API).
+Adding reliable setup/close delivery remains a separate protocol decision.
+If Node Service overruns its local readiness fact stream, it reconnects so route loss fences any
+possibly missed negative evidence; it never leaves an old `Ready` state live until a best-effort retry.
 
-Node configs v0.2 through v0.4 remain parseable and normalize to empty State/Memory declarations.
-v0.5 remains bootable with metadata-only providers; v0.6 is the current extension baseline.
+Node configs v0.2 through v0.4 remain parseable and normalize to empty State/Memory/peer-observer
+declarations. v0.5 remains bootable with metadata-only providers and no peer observers; v0.6 is the
+current extension baseline.
 Existing typed map bindings remain the strong Spatial Memory workflow and retain localization
 evidence rules. Generic Spatial Memory cannot bypass the typed map schema or verification API.

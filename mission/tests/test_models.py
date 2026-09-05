@@ -127,6 +127,29 @@ def test_v0_4_coupling_and_typed_relation_round_trip() -> None:
     assert execution_plan.to_json() == execution_view
 
 
+def test_implementation_profile_rejects_valid_future_relation() -> None:
+    """Planner preflight separates valid contract syntax from executable mechanisms."""
+    plan = MissionPlan.from_json(_v0_4_fixture_json())
+    with pytest.raises(MissionPlanError, match="valid contract syntax but is not executable"):
+        plan.validate_implementation_support()
+
+    executable = _v0_4_fixture_json()
+    contexts = cast(list[JSONObject], executable["contexts"])
+    relations = cast(list[JSONObject], contexts[0]["relations"])
+    relations[0] = {
+        "id": "shared-localization",
+        "kind": "shared-spatial-reference",
+        "reference": {
+            "map_id": "campus",
+            "revision_id": "r1",
+            "frame_id": "map",
+        },
+        "source": {"task_id": "observe-safety", "role_id": "safety-observer"},
+        "target": {"task_id": "navigate", "role_id": "navigator"},
+    }
+    MissionPlan.from_json(executable).validate_implementation_support()
+
+
 def test_v0_4_rejects_incomplete_relation_and_unknown_view_member() -> None:
     """Typed relation payloads and Group view members fail closed at the Mission boundary."""
     incomplete = _v0_4_fixture_json()

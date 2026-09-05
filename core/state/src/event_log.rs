@@ -33,8 +33,11 @@ const EVENT_PAYLOAD_SCHEMA_V6: &str = "domain.EventPayload.json/v6";
 /// JSON payload codec including provider-qualified generic Memory replica identity.
 const EVENT_PAYLOAD_SCHEMA_V7: &str = "domain.EventPayload.json/v7";
 
-/// Current JSON payload codec including typed execution relation and coupling evidence.
+/// Previous JSON payload codec including typed execution relation and coupling evidence.
 const EVENT_PAYLOAD_SCHEMA_V8: &str = "domain.EventPayload.json/v8";
+
+/// Current JSON payload codec including identified peer-channel readiness evidence.
+const EVENT_PAYLOAD_SCHEMA_V9: &str = "domain.EventPayload.json/v9";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -462,6 +465,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V6 => Ok(6),
         EVENT_PAYLOAD_SCHEMA_V7 => Ok(7),
         EVENT_PAYLOAD_SCHEMA_V8 => Ok(8),
+        EVENT_PAYLOAD_SCHEMA_V9 => Ok(9),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -526,6 +530,7 @@ fn validate_payload_schema(
             }
         }
         EventPayload::MapLocalizationEvidenceRecorded { .. } => 4,
+        EventPayload::PeerChannelReadinessObserved { .. } => 9,
         EventPayload::MapArtifactDeclared { .. }
         | EventPayload::MapArtifactPublished { .. }
         | EventPayload::MapArtifactStaged { .. }
@@ -605,7 +610,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V8,
+                    EVENT_PAYLOAD_SCHEMA_V9,
                     payload_json,
                 ],
             )
@@ -692,13 +697,13 @@ fn table_columns(
 mod tests {
     use super::*;
     use domain::{
-        ContentDigest, CorrelationId, EventPayload, ExecutionGroupId, LocalSystemId,
-        LocalizationFrames, LocalizationVerificationEvidence, MapArtifactManifest, MapArtifactRef,
-        MapId, MapRevisionId, MapRevisionSelector, MemoryArtifactManifest, MemoryArtifactRef,
-        MemoryId, MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope, MemorySelector,
-        MemoryVisibility, MissionId, NodeId, PoseQualityComparison, PoseQualityEvidence, RoleId,
-        SpatialAnchorId, StateObjectClass, StateObjectRef, StateRecord, StateSemantic, StateSource,
-        TaskId, TaskRef, TimestampMs,
+        ContentDigest, ContextRoleId, CoordinationContextId, CorrelationId, EventPayload,
+        ExecutionGroupId, LocalSystemId, LocalizationFrames, LocalizationVerificationEvidence,
+        MapArtifactManifest, MapArtifactRef, MapId, MapRevisionId, MapRevisionSelector,
+        MemoryArtifactManifest, MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner,
+        MemoryRevisionId, MemoryScope, MemorySelector, MemoryVisibility, MissionId, NodeId,
+        PoseQualityComparison, PoseQualityEvidence, RoleId, SpatialAnchorId, StateObjectClass,
+        StateObjectRef, StateRecord, StateSemantic, StateSource, TaskId, TaskRef, TimestampMs,
     };
     use ports::MemoryCatalogReader;
     use tempfile::tempdir;
@@ -817,6 +822,24 @@ mod tests {
         }
     }
 
+    /// Builds one v9-only admitted Local EAIOS peer readiness payload.
+    fn peer_channel_readiness_payload() -> EventPayload {
+        EventPayload::PeerChannelReadinessObserved {
+            group_id: ExecutionGroupId::new("group-guidance").expect("group id is valid"),
+            context_id: CoordinationContextId::new("guidance").expect("context id is valid"),
+            context_role_id: ContextRoleId::new("guide").expect("ContextRole id is valid"),
+            node_id: NodeId::new("dog-a").expect("Node id is valid"),
+            local_system_id: LocalSystemId::new("motion").expect("Local System id is valid"),
+            session_id: "session-dog-a".to_string(),
+            channel_instance_id: "channel-guidance-1".to_string(),
+            profile_id: "guidance-peer".to_string(),
+            message_schema: "guidance/v1".to_string(),
+            sequence: 4,
+            expires_at: TimestampMs::new(5_000),
+            ready: true,
+        }
+    }
+
     /// Builds one v6-only source-aware State evidence payload.
     fn state_record_payload() -> EventPayload {
         EventPayload::StateRecordObserved {
@@ -906,7 +929,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V8);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V9);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(
@@ -1077,6 +1100,34 @@ mod tests {
         assert!(matches!(
             log.decoded_events(),
             Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v8")
+        ));
+    }
+
+    /// A v8 marker cannot masquerade identified readiness evidence introduced by codec v9.
+    #[test]
+    fn event_decoder_rejects_peer_readiness_payload_under_v8_marker() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("events-peer-readiness-v8.sqlite3");
+        let correlation = CorrelationId::new("peer-readiness-version").expect("correlation valid");
+        let mut log = SqliteEventLog::open(&path).expect("event log opens");
+        log.append(
+            TimestampMs::new(31),
+            &correlation,
+            None,
+            peer_channel_readiness_payload(),
+        );
+        log.connection
+            .lock()
+            .expect("event connection lock is available")
+            .execute(
+                "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+                [EVENT_PAYLOAD_SCHEMA_V8],
+            )
+            .expect("fixture marker changes to v8");
+
+        assert!(matches!(
+            log.decoded_events(),
+            Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v9")
         ));
     }
 

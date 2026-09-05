@@ -39,6 +39,10 @@
 - [`decisions/0021-device-extension-boundary-conformance.md`](decisions/0021-device-extension-boundary-conformance.md)：Node Protocol transport、Controller composition、Local Integration Engine 与 device-extension conformance ownership。
 - [`decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)：退役旧 HTTP adapter，迁移 smoke 到 Node Protocol，并隔离 Artifact Store 基础设施。
 - [`decisions/0023-application-accepted-node-protocol-facts.md`](decisions/0023-application-accepted-node-protocol-facts.md)：由 Controller durable acceptance 决定 Node Protocol `Registered`/`Ack`。
+- [`decisions/0024-federated-state-and-selective-memory.md`](decisions/0024-federated-state-and-selective-memory.md)：联邦 State 语义、Memory catalog 与选择性交换边界。
+- [`decisions/0025-memory-provider-backend-and-workflow.md`](decisions/0025-memory-provider-backend-and-workflow.md)：Local Memory Provider、Node ledger/reference backend 与 EAIOS authority。
+- [`decisions/0026-execution-coupling-and-group-views.md`](decisions/0026-execution-coupling-and-group-views.md)：Execution Coupling Mode、Group view 与 peer channel lifecycle。
+- [`decisions/0027-runtime-coordination-evidence-completion.md`](decisions/0027-runtime-coordination-evidence-completion.md)：State restore freshness、typed shared-spatial relation、双端 peer readiness 与 implementation support gate。
 
 ## 历史架构
 

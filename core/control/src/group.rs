@@ -307,7 +307,7 @@ impl ExecutionGroup {
     }
 
     /// Returns Control's immutable role metadata captured from the accepted MissionPlan.
-    pub(crate) fn role_requirement(
+    pub fn role_requirement(
         &self,
         task_ref: &TaskRef,
         role_id: &RoleId,

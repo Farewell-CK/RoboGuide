@@ -17,6 +17,7 @@ message NodeMessage {
     ExecutionSnapshot execution_snapshot = 6;
     ProtocolError error = 7;
     StateObservationBatch state_observation_batch = 8;
+    PeerChannelReadiness peer_channel_readiness = 9;
   }
 }
 
@@ -184,6 +185,23 @@ message StateObservation {
   uint64 source_observed_at_ms = 4;
   bool has_confidence = 5;
   uint32 confidence_millionths = 6;
+}
+
+// Identified Local EAIOS acknowledgement for one logical peer-channel endpoint.
+// The named Local EAIOS creates the actual channel; RoboGuide only orchestrates and fences it.
+// valid_for_ms is evaluated from Controller receive time, never from a remote clock.
+message PeerChannelReadiness {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string group_id = 3;
+  string context_id = 4;
+  string context_role_id = 5;
+  string channel_instance_id = 6;
+  string profile_id = 7;
+  string message_schema = 8;
+  bool ready = 9;
+  uint64 valid_for_ms = 10;
+  string local_system_id = 11;
 }
 
 message Execute {

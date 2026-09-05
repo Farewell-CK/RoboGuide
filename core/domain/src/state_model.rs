@@ -296,11 +296,6 @@ pub struct StateRecord {
 }
 
 impl StateRecord {
-    /// Rebases the RoboGuide-local receive timestamp after process restart.
-    pub fn with_received_at(mut self, received_at: TimestampMs) -> Self {
-        self.received_at = received_at;
-        self
-    }
     /// Creates a validated bounded State record without fusing it with other sources.
     #[allow(clippy::too_many_arguments)]
     pub fn new(

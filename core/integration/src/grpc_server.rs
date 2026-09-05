@@ -555,6 +555,7 @@ async fn run_grpc_session(
                 Some(NodePayload::Heartbeat(value)) => value.sequence,
                 Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
                 Some(NodePayload::StateObservationBatch(value)) => value.sequence,
+                Some(NodePayload::PeerChannelReadiness(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
@@ -745,6 +746,27 @@ fn accept_current_message(
                     return Ok(false);
                 }
                 validate_state_observation_batch(value, &route.state_export_ids)?;
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
+            Some(NodePayload::PeerChannelReadiness(value)) => {
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.group_id.trim().is_empty()
+                    || value.context_id.trim().is_empty()
+                    || value.context_role_id.trim().is_empty()
+                    || value.local_system_id.trim().is_empty()
+                    || value.channel_instance_id.trim().is_empty()
+                    || value.profile_id.trim().is_empty()
+                    || value.message_schema.trim().is_empty()
+                    || value.valid_for_ms == 0
+                    || value.valid_for_ms > 60_000
+                {
+                    return Err(Status::invalid_argument(
+                        "PeerChannelReadiness identities and bounded validity must be valid",
+                    ));
+                }
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
@@ -1090,6 +1112,82 @@ mod tests {
                 tonic::Code::InvalidArgument
             );
         }
+    }
+
+    /// Peer readiness is admitted only as one bounded fact on the current management sequence.
+    #[test]
+    fn peer_readiness_requires_current_session_identity_and_bounds() {
+        let router = GrpcNodeRouter::default();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        router.sessions.lock().expect("registry lock").insert(
+            "dog-a".to_string(),
+            RoutedSession {
+                session_id: "session-current".to_string(),
+                sender,
+                lease_id: "lease-current".to_string(),
+                last_heartbeat: std::time::Instant::now(),
+                lease_duration: std::time::Duration::from_secs(15),
+                management_sequence: 1,
+                state_export_ids: BTreeSet::new(),
+                active: true,
+            },
+        );
+        let readiness = |session_id: &str, sequence: u64, valid_for_ms: u64| NodeMessage {
+            message: Some(NodePayload::PeerChannelReadiness(
+                crate::grpc::v0_3::PeerChannelReadiness {
+                    session_id: session_id.to_string(),
+                    sequence,
+                    group_id: "group-guidance".to_string(),
+                    context_id: "guidance".to_string(),
+                    context_role_id: "guide".to_string(),
+                    channel_instance_id: "channel-1".to_string(),
+                    profile_id: "guidance-peer".to_string(),
+                    message_schema: "guidance/v1".to_string(),
+                    ready: true,
+                    valid_for_ms,
+                    local_system_id: "motion".to_string(),
+                },
+            )),
+        };
+
+        assert!(
+            accept_current_message(
+                &router,
+                "dog-a",
+                "session-current",
+                &readiness("session-current", 2, 5_000),
+            )
+            .expect("valid peer readiness is admitted")
+        );
+        assert!(
+            !accept_current_message(
+                &router,
+                "dog-a",
+                "session-current",
+                &readiness("session-current", 2, 5_000),
+            )
+            .expect("duplicate sequence is ignored")
+        );
+        assert!(
+            !accept_current_message(
+                &router,
+                "dog-a",
+                "session-current",
+                &readiness("session-other", 3, 5_000),
+            )
+            .expect("wrong payload session is ignored")
+        );
+        assert_eq!(
+            accept_current_message(
+                &router,
+                "dog-a",
+                "session-current",
+                &readiness("session-current", 3, 0),
+            )
+            .expect_err("zero validity is rejected")
+            .code(),
+            tonic::Code::InvalidArgument
+        );
     }
 
     /// Transport emits success only after application authority explicitly accepts the fact.

@@ -26,6 +26,8 @@ RELATION_KINDS: Final = frozenset(
         "freshness-requirement",
     }
 )
+# This is an implementation profile, not the MissionPlan schema vocabulary.
+EXECUTABLE_RELATION_KINDS: Final = frozenset({"requires-active", "shared-spatial-reference"})
 COUPLING_MODES: Final = frozenset(
     {
         "independent",
@@ -90,6 +92,8 @@ def _validate_coordination_mechanisms(context: MissionContext, mode: str, path: 
             raise MissionPlanError(f"{path} mode {mode} requires an execution relation")
     if mode == "tightly-coupled-cooperation" and context.peer_channel is None:
         raise MissionPlanError(f"{path} mode {mode} requires a direct peer channel")
+    if mode == "tightly-coupled-cooperation" and len(context.roles) < 2:
+        raise MissionPlanError(f"{path} mode {mode} requires at least two context roles")
 
 
 @dataclass(frozen=True, slots=True)
@@ -786,6 +790,16 @@ class MissionPlan:
                 ):
                     raise MissionPlanError(
                         f"relation {relation.relation_id} connects tasks ordered by the DAG"
+                    )
+
+    def validate_implementation_support(self) -> None:
+        """Reject valid relation syntax without a Controller/Runtime evidence reducer."""
+        for context in self.contexts:
+            for relation in context.relations:
+                if relation.kind not in EXECUTABLE_RELATION_KINDS:
+                    raise MissionPlanError(
+                        f"relation {relation.relation_id} uses {relation.kind}, which is valid "
+                        "contract syntax but is not executable by this RoboGuide build"
                     )
 
     def _task_depends_on(self, task_id: str, candidate_dependency: str) -> bool:

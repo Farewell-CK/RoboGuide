@@ -33,6 +33,7 @@ class FixturePlanner:
             )
         raw = cast(JSONObject, json.loads(self._fixture_path.read_text(encoding="utf-8")))
         plan = MissionPlan.from_json(raw)
+        plan.validate_implementation_support()
         if plan.mission.mission_id != mission_id:
             raise ValueError(
                 f"fixture mission {plan.mission.mission_id} does not match request {mission_id}"

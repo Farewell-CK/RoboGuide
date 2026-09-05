@@ -47,18 +47,6 @@ impl StateRecordProjection {
         }
         Ok(projection)
     }
-
-    /// Restores records into a fresh receive-time domain after process restart.
-    pub fn restore_rebased(
-        records: Vec<StateRecord>,
-        restored_at: domain::TimestampMs,
-    ) -> Result<Self, StateRecordError> {
-        let mut projection = Self::new();
-        for record in records {
-            projection.record_state(record.with_received_at(restored_at))?;
-        }
-        Ok(projection)
-    }
 }
 
 impl StateRecordReader for StateRecordProjection {
@@ -225,5 +213,17 @@ mod tests {
             .record_state(second.clone())
             .expect("new session record should replace it");
         assert_eq!(projection.records(), vec![second]);
+    }
+
+    /// Restore preserves receive time so an expired record cannot become fresh after restart.
+    #[test]
+    fn restore_preserves_receive_time_for_freshness() {
+        let record = record("cane-a", 10, 1, true);
+        let projection = StateRecordProjection::restore(vec![record.clone()])
+            .expect("checkpoint record should restore");
+        let restored = &projection.records()[0];
+        assert_eq!(restored.received_at(), record.received_at());
+        assert!(restored.is_stale_at(TimestampMs::new(1_011)));
+        assert!(!restored.is_stale_at(TimestampMs::new(1_009)));
     }
 }

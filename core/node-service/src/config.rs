@@ -48,6 +48,9 @@ pub struct NodeServiceConfig {
     /// Selective periodically sampled State channels introduced by node-config/v0.5.
     #[serde(default)]
     pub state_exports: Vec<StateExportConfig>,
+    /// Fixed read-only observations of peer channels established by Local EAIOS.
+    #[serde(default)]
+    pub peer_channel_observers: Vec<PeerChannelObserverConfig>,
     /// Selective Memory discovery and exchange providers introduced by node-config/v0.5.
     #[serde(default)]
     pub memory_providers: Vec<MemoryProviderConfig>,
@@ -85,6 +88,24 @@ pub struct StateExportConfig {
     /// Optional JSON Pointer locating confidence in the inclusive range zero through one.
     #[serde(default)]
     pub confidence_pointer: Option<String>,
+}
+
+/// One fixed observation source for Local EAIOS-established peer-channel endpoints.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeerChannelObserverConfig {
+    /// Node-wide observer identity.
+    pub id: String,
+    /// Local system that owns every endpoint returned by this observer.
+    pub owner: String,
+    /// Period between local observations.
+    pub interval_ms: u64,
+    /// Receive-relative lifetime applied to every returned endpoint.
+    pub valid_for_ms: u64,
+    /// Fixed, read-only local observation operation.
+    pub step: WorkflowStepConfig,
+    /// JSON Pointer locating the array of established endpoint facts in the response.
+    pub channels_pointer: String,
 }
 
 /// One Memory discovery/exchange provider owned by a heterogeneous local system.

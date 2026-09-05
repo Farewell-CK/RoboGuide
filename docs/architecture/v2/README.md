@@ -112,9 +112,18 @@ v0.4 增加 `Independent`、`SequentialHandoff`、`ConcurrentCooperation` 和
 Runtime/Orchestration 以只读方式从 State evidence 组装视图，并按现有 receive-time/TTL
 返回 Fresh/Stale/Unknown，不从 channel 名称猜测字段语义。
 Tightly-coupled Context 可声明 transport-neutral peer channel descriptor 与 Runtime 生命周期；
-高频 relative-state 计算、纠偏、formation/grasp/safety control 保留在 Local EAIOS，Node Protocol
-不承载这些消息。Typed relation 的 state key、frame、freshness 等字段不包含阈值、公式或 DSL。
-详见 [`ADR-0026`](../../decisions/0026-execution-coupling-and-group-views.md)。
+Node Protocol 只承载当前 session 与注册 Local EAIOS 识别的双端、receive-relative readiness
+evidence，不承载 peer data-plane 消息。等待 readiness 的 committed/bound Task 保持 Ready，待
+两端证据成立后由现有事件循环 dispatch，不把等待误作 Mission 提交失败。
+Node config v0.6 可为每个 LocalSystem 声明至多一个固定 HTTP GET observer，读取该 Local
+EAIOS 已建立端点的有界 readiness set；owner 与 TTL 来自启动配置而非响应。采样失败不制造
+负证据，旧确认按 receive-time 到期并由 Runtime fence。
+高频 relative-state 计算、纠偏、formation/grasp/safety control 保留在 Local EAIOS。Typed relation
+的 state key、frame、freshness 等字段不包含阈值、公式或 DSL。当前 executable profile 只开放
+`requires-active` 和 `shared-spatial-reference`；后者复用 typed localization evidence 校验当前
+attempt/owner/map revision/frame 并进入现有 relation fence。详见
+[`ADR-0026`](../../decisions/0026-execution-coupling-and-group-views.md) 与
+[`ADR-0027`](../../decisions/0027-runtime-coordination-evidence-completion.md)。
 
 ## 4. 决策与承诺语义
 
@@ -249,6 +258,9 @@ replica 和 localization evidence 校验。通用合同见
 [`contracts/memory/v0.1`](../../../contracts/memory/v0.1/README.md)，State 合同见
 [`contracts/state/v0.1`](../../../contracts/state/v0.1/README.md)，完整 ownership 决策见
 [`ADR-0024`](../../decisions/0024-federated-state-and-selective-memory.md)。
+强 localization evidence 同时可投影到当前 attempt 的 Runtime relation 与 Group spatial view；
+Spatial Memory 仍是 durable evidence authority，Runtime 只保留 live reducer 所需的 identity，
+不会保存 map bytes、pose stream 或本地控制状态。
 
 ```text
 Observation → Source / Provenance → Timestamp → Freshness / Uncertainty
@@ -358,10 +370,11 @@ Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assura
 和 Resource Commitment Semantics。跟踪列表以及 MVP 决策见
 [`implementation-backlog.md`](../../implementation-backlog.md)。
 
-Execution Coordination Relation v0.1 只从 execution lifecycle 推导 `requires-active`，不解析
-hazard、距离、速度或触觉等领域信号，也不提供硬实时 stop/pause actuation。版本化条件事实、
-deadline/window、目标侧协调命令和安全认证必须在获得真实场景证据后分别演进；Local Safety
-始终保留最终权威。
+Execution Coordination Relation 当前从 execution lifecycle 推导 `requires-active`，并从 strong
+localization evidence 推导 `shared-spatial-reference`；它仍不解析 hazard、距离、速度或触觉等
+领域信号，也不提供硬实时 stop/pause actuation。其余 typed relation 虽可由 contract 表达，
+但会被 implementation profile 在 Group 创建前拒绝。版本化条件事实、deadline/window、目标侧
+协调命令和安全认证必须在获得真实场景证据后分别演进；Local Safety 始终保留最终权威。
 
 ## 10. 版本关系
 

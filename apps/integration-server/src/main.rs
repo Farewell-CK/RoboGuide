@@ -11,7 +11,7 @@ use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProto
 use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
 use orchestration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
-    ObservedTaskResult,
+    IntegrationRuntimeError, ObservedTaskResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::{Clock, SharedNodeStateReader, StateRecordReader};
@@ -25,10 +25,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
 
 /// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -68,6 +68,86 @@ struct ControllerMemoryAdmission {
     controller: Arc<Mutex<ControllerState>>,
     /// Current gRPC routes used only to bind Memory writes to an active Node session.
     router: integration::GrpcNodeRouter,
+}
+
+/// Composition adapter that admits durable localization evidence to current Runtime attempts.
+struct ControllerLocalizationObserver {
+    /// Shared Controller state installed only after its checkpoint commits.
+    controller: Arc<Mutex<ControllerState>>,
+    /// Durable event/checkpoint store shared with the Integration path.
+    event_log: state::SqliteEventLog,
+    /// Process-local writer ordering shared by every Controller mutation path.
+    write_gate: Arc<Mutex<()>>,
+}
+
+impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObserver {
+    /// Persists Runtime relation transitions and the resulting checkpoint before publishing state.
+    fn observe(
+        &self,
+        evidence: &domain::LocalizationVerificationEvidence,
+        received_at: domain::TimestampMs,
+    ) -> Result<(), String> {
+        let _write_guard = self
+            .write_gate
+            .lock()
+            .map_err(|_| "event-log write gate is poisoned".to_string())?;
+        let log = self.event_log.clone();
+        log.begin_batch()
+            .map_err(|error| format!("localization Runtime projection is busy: {error}"))?;
+        let mut live = self.controller.lock().map_err(|_| {
+            let _ = log.rollback_batch();
+            "integration bridge lock is poisoned".to_string()
+        })?;
+        let mut candidate = live.clone();
+        let correlation = domain::CorrelationId::new("localization-runtime-projection")
+            .expect("static localization correlation identity is valid");
+        if let Err(error) =
+            candidate
+                .bridge
+                .observe_localization_evidence(evidence, received_at, &correlation)
+        {
+            let _ = log.rollback_batch();
+            return Err(format!("Runtime rejected localization evidence: {error}"));
+        }
+        match log.take_error() {
+            Ok(Some(error)) => {
+                let _ = log.rollback_batch();
+                return Err(format!(
+                    "localization Runtime evidence persistence failed: {error}"
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let _ = log.rollback_batch();
+                return Err(format!(
+                    "localization Runtime event sink is unavailable: {error}"
+                ));
+            }
+        }
+        let checkpoint_json = match server_checkpoint_json(&candidate) {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                let _ = log.rollback_batch();
+                return Err(format!(
+                    "localization checkpoint serialization failed: {error}"
+                ));
+            }
+        };
+        if let Err(error) = log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json) {
+            let _ = log.rollback_batch();
+            return Err(format!(
+                "localization checkpoint persistence failed: {error}"
+            ));
+        }
+        if let Err(error) = log.commit_batch() {
+            let _ = log.rollback_batch();
+            return Err(format!(
+                "localization Runtime projection commit failed: {error}"
+            ));
+        }
+        *live = candidate;
+        Ok(())
+    }
 }
 
 impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
@@ -298,6 +378,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             orchestrator: MissionOrchestrator::new(),
         },
     };
+    let mut restored_localization_evidence = false;
+    for (evidence, received_at) in artifact_catalog
+        .localization_evidence()
+        .map_err(|error| format!("localization evidence replay failed: {error}"))?
+    {
+        restored_localization_evidence |= controller
+            .bridge
+            .restore_localization_evidence(&evidence, received_at)
+            .map_err(|error| format!("localization Runtime replay failed: {error}"))?;
+    }
     if let Some(constraints) = actor_placement_constraints {
         for constraint in constraints {
             controller.bridge.control_mut().set_actor_node_constraint(
@@ -327,7 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         controller.bridge.control(),
         &controller.orchestrator,
     )?;
-    if initialize_checkpoint || actor_placement_path.is_some() {
+    if initialize_checkpoint || actor_placement_path.is_some() || restored_localization_evidence {
         let checkpoint_json =
             server_checkpoint_json(&controller).map_err(|error| error.to_string())?;
         event_log.begin_batch()?;
@@ -354,6 +444,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             controller: Arc::clone(&controller),
             router: memory_session_router,
         });
+    let localization_observer: Arc<dyn artifact_http::LocalizationEvidenceObserver> =
+        Arc::new(ControllerLocalizationObserver {
+            controller: Arc::clone(&controller),
+            event_log: event_log.clone(),
+            write_gate: event_write_gate.clone(),
+        });
     let (fatal_sender, fatal_receiver) = tokio::sync::oneshot::channel::<String>();
     tokio::spawn(async move {
         if let Err(error) = serve_http(
@@ -374,6 +470,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifact_store_for_server,
             artifact_catalog_for_server,
             memory_admission,
+            localization_observer,
         )
         .await
         {
@@ -817,8 +914,31 @@ fn apply_runtime_outcomes(
                 events,
             )?,
         }
+        close_terminal_mission_coordination(controller, &mission_id);
     }
     Ok(())
+}
+
+/// Closes live peer descriptors once Mission orchestration has made the Group terminal.
+fn close_terminal_mission_coordination(
+    controller: &mut ControllerState,
+    mission_id: &domain::MissionId,
+) {
+    let group_id = controller
+        .orchestrator
+        .execution(mission_id)
+        .filter(|execution| {
+            matches!(
+                execution.lifecycle(),
+                orchestration::MissionExecutionLifecycle::Completed
+                    | orchestration::MissionExecutionLifecycle::Failed
+                    | orchestration::MissionExecutionLifecycle::Cancelled
+            )
+        })
+        .map(|execution| execution.group_id().clone());
+    if let Some(group_id) = group_id {
+        controller.bridge.close_group_peer_channels(&group_id);
+    }
 }
 
 /// Drives dependency-ready Tasks through Control binding and Runtime dispatch.
@@ -829,14 +949,25 @@ fn drive_ready_tasks(
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for mission_id in controller.orchestrator.mission_ids() {
-        while let Some(task_ref) = controller
+        'ready: for task_ref in controller
             .orchestrator
-            .ready_tasks(&mission_id, controller.bridge.control())
-            .into_iter()
-            .next()
+            .dispatchable_tasks(&mission_id, controller.bridge.control())
         {
-            let state = controller.bridge.state().clone();
-            let prepared = {
+            let current = controller
+                .bridge
+                .control()
+                .group(
+                    controller
+                        .orchestrator
+                        .execution(&mission_id)
+                        .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?
+                        .group_id(),
+                )
+                .and_then(|group| group.task_execution(&task_ref))
+                .cloned()
+                .ok_or_else(|| "Ready TaskExecution disappeared".to_string())?;
+            let prepared = if current.assignments().is_empty() {
+                let state = controller.bridge.state().clone();
                 let ControllerState {
                     bridge,
                     orchestrator,
@@ -851,9 +982,11 @@ fn drive_ready_tasks(
                     events,
                 ) {
                     Ok(prepared) => prepared,
-                    Err(error) if deferred_dispatch(&error) => break,
+                    Err(error) if deferred_dispatch(&error) => continue 'ready,
                     Err(error) => return Err(error.into()),
                 }
+            } else {
+                current
             };
             let execution = controller
                 .orchestrator
@@ -883,18 +1016,33 @@ fn drive_ready_tasks(
             for (role_id, intent) in intents {
                 let execution_id =
                     format!("execution-{mission_id}-{}-{role_id}", task_ref.task_id());
-                controller.bridge.execute_task_bound(
+                let dispatched = controller.bridge.execute_task_bound(
                     execution_id,
                     &group_id,
                     &task_ref,
                     &role_id,
                     intent,
+                    timestamp,
                     correlation_id.clone(),
-                )?;
+                );
+                match dispatched {
+                    Ok(_) => {}
+                    Err(error) if coordination_dispatch_deferred(&error) => continue 'ready,
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
     }
     Ok(())
+}
+
+/// Identifies a bound Task waiting for declared Runtime coordination evidence.
+fn coordination_dispatch_deferred(error: &IntegrationRuntimeError) -> bool {
+    matches!(
+        error,
+        IntegrationRuntimeError::Protocol(reason)
+            if reason == "TaskExecution coordination mechanisms are not ready"
+    )
 }
 
 /// Identifies temporary scheduling failures that should leave a Task Ready for retry.
@@ -917,6 +1065,19 @@ fn deferred_dispatch(error: &OrchestrationError) -> bool {
             control::ControlError::ActorBindingRequiresReconciliation { .. }
         )
     )
+}
+
+/// Returns one stable Mission contract spelling for a Runtime relation family.
+fn relation_kind_name(kind: domain::ExecutionRelationKind) -> &'static str {
+    match kind {
+        domain::ExecutionRelationKind::RequiresActive => "requires-active",
+        domain::ExecutionRelationKind::GroupMemberState => "group-member-state",
+        domain::ExecutionRelationKind::SharedSpatialReference => "shared-spatial-reference",
+        domain::ExecutionRelationKind::RelativePose => "relative-pose",
+        domain::ExecutionRelationKind::RelativeDistance => "relative-distance",
+        domain::ExecutionRelationKind::StateRequirement => "state-requirement",
+        domain::ExecutionRelationKind::FreshnessRequirement => "freshness-requirement",
+    }
 }
 
 /// Serves the local Phase 1 Mission and operator diagnostics API.
@@ -1169,6 +1330,7 @@ async fn handle_http_connection(
             }
         }
         ("GET", path) if path.starts_with("/v1/missions/") => {
+            let now = clock.now();
             let mission_text = path
                 .trim_start_matches("/v1/missions/")
                 .trim_end_matches('/');
@@ -1203,7 +1365,7 @@ async fn handle_http_connection(
                             let relation = snapshot.relation();
                             serde_json::json!({
                                 "id": relation.relation_id().as_str(),
-                                "kind": "requires-active",
+                                "kind": relation_kind_name(relation.kind()),
                                 "source": {
                                     "task_id": relation.source_task_ref().task_id().as_str(),
                                     "role_id": relation.source_role_id().as_str(),
@@ -1219,6 +1381,31 @@ async fn handle_http_connection(
                             })
                         })
                         .collect::<Vec<_>>();
+                    let peer_channels = controller
+                        .bridge
+                        .peer_channel_snapshots_at(execution.group_id(), now)
+                        .into_iter()
+                        .map(|channel| {
+                            serde_json::json!({
+                                "context_id": channel.context_id().as_str(),
+                                "lifecycle": format!("{:?}", channel.lifecycle()),
+                                "profile_id": channel.descriptor().profile_id,
+                                "message_schema": channel.descriptor().message_schema,
+                                "peers": channel.peers().iter().map(domain::ContextRoleId::as_str).collect::<Vec<_>>(),
+                                "readiness": channel.readiness().iter().map(|evidence| serde_json::json!({
+                                    "context_role_id": evidence.context_role_id.as_str(),
+                                    "node_id": evidence.node_id.as_str(),
+                                    "local_system_id": evidence.local_system_id.as_str(),
+                                    "session_id": evidence.session_id,
+                                    "channel_instance_id": evidence.channel_instance_id,
+                                    "sequence": evidence.sequence,
+                                    "received_at_ms": evidence.received_at.as_millis(),
+                                    "expires_at_ms": evidence.expires_at.as_millis(),
+                                    "ready": evidence.ready,
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     (
                         "200 OK",
                         serde_json::json!({
@@ -1226,7 +1413,8 @@ async fn handle_http_connection(
                             "group_id": execution.group_id().as_str(),
                             "status": format!("{:?}", execution.lifecycle()),
                             "tasks": tasks,
-                            "relations": relations
+                            "relations": relations,
+                            "peer_channels": peer_channels
                         }),
                     )
                 }
@@ -1267,6 +1455,9 @@ async fn handle_http_connection(
                         &mut events,
                     )
                 };
+                if operation.is_ok() {
+                    close_terminal_mission_coordination(&mut candidate, &mission_id);
+                }
                 operation
                     .map_err(|error| error.to_string())
                     .and_then(|()| {

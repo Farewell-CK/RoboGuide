@@ -53,6 +53,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.
+- The current executable relation profile contains `RequiresActive` and `SharedSpatialReference`.
+  Strong localization evidence must match the current attempt, current Node owner, immutable map
+  revision, and frame; other typed relation syntax fails implementation preflight before Group
+  creation rather than remaining an indefinitely `Unknown` execution.
 - Mission Actor is logical metadata, not a physical-node selector. Deployment-owned
   actor placement constraints may narrow first-use Control Matching, but create no
   reservation or ActorBinding before Proposal -> Commit -> Group Bind succeeds.
@@ -69,6 +73,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Observation time semantics preserve source-local `NodeStatus.observed_at` while
   State ordering and Control freshness use RoboGuide-local `received_at`; do not
   compare independent source clocks or claim distributed clock synchronization.
+- State checkpoint restore preserves each record's original `received_at`; restart must never make
+  expired evidence Fresh. Group views and relation evidence use the same persisted receive-time
+  semantics.
 - Assigned-node reconciliation lives inside `core/control`, reuses the shared
   eligibility predicate and existing Group lifecycle APIs, and consumes an
   externally supplied recovery proposal; it never selects a replacement node.
@@ -96,10 +103,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   snapshots on change; Integration preserves exact readiness, State stores it, and Control
   consumes it only for later eligibility decisions. It also declares fixed State exports and
   Memory providers and optional provider-local discover/export/import workflows; v0.2-v0.4
-  configs normalize those declarations to empty and v0.5 providers remain metadata-only.
+  configs normalize those declarations to empty and v0.5 providers remain metadata-only. Optional
+  v0.6 peer-channel observers use fixed read-only routes and configuration-owned LocalSystem
+  identity; their response observes established endpoints and never requests transport setup.
 - Node Protocol v0.3 carries complete State/Memory provider snapshots and bounded periodic State
-  observation batches. Sampling failure only causes staleness and never changes health,
-  readiness, execution lifecycle, or recovery. The v0.2 endpoint is rejection-only.
+  observation batches plus identified peer-channel readiness facts. Local EAIOS establishes the
+  actual peer channel; Controller verifies Node/LocalSystem/committed ContextRole ownership, and all
+  logical peers must provide non-expired receive-relative acknowledgements for one
+  instance/profile/schema before Runtime marks it Ready. Expiry, route loss, and restart fence it;
+  a bound waiting Task remains durable Ready for later dispatch. Sampling failure only causes
+  staleness and never changes health, readiness, execution lifecycle, or recovery. The v0.2
+  endpoint is rejection-only.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
   Robonix map adapter); these adapters own vendor calls and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.

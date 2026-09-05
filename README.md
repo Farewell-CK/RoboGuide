@@ -200,7 +200,10 @@ Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integr
 
 正式 gRPC Node Protocol v0.3 支持一个 Node 聚合多个 Local System，所有 Capability、
 Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
-已 Commit 的 resource IDs。
+已 Commit 的 resource IDs。它还承载带当前 session/management sequence 的 peer-channel
+readiness evidence；实际 peer transport 和高频控制仍完全属于 Local EAIOS。
+Node config v0.6 可用固定、只读、owner-qualified 的 observer 周期读取 Local EAIOS 已建立端点；
+Local EAIOS 响应不能自行选择 `local_system_id` 或 TTL，采样失败由旧证据自然过期并 fence。
 `execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
 
 旧同步 HTTP NodeGateway、HTTP wire DTO 和早期 configured command backend 已全部退役；它们
@@ -211,7 +214,8 @@ Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`
 合同见
 [`contracts/node/v0.6/`](contracts/node/v0.6/README.md)。Node config v0.6 为每个 exact
 canonical contract 提供固定 readiness observation，并增加选择性的 State export 与 Memory
-provider declaration 和固定 discover/export/import workflow；通过完整 RegistrationUpdate
+provider declaration、固定 discover/export/import workflow，以及可选的 peer-channel
+readiness observer；通过完整 RegistrationUpdate
 snapshot 更新后续 Matching 和 discovery。v0.5 provider 仍可作为 metadata-only 配置启动；
 v0.2-v0.4 配置仍可解析为空 State/Memory declaration，但不满足当前 extension conformance；
 Node Protocol v0.2 endpoint 只返回明确迁移错误。
@@ -383,6 +387,12 @@ Relation、选择性的 Group shared view 和 transport-neutral peer channel；�
 `Dormant/Pending/Satisfied/Violated/Unknown`，并以 relation fence 阻止未经满足证明的 target
 Task 成功。rebind 改变 Node/attempt 而不改变关系语义，restart 则保守恢复为 `Unknown`；高频
 相对状态与安全控制仍由 Local EAIOS 负责。
+当前 `SupportedMechanismProfile` 只允许已实现 reducer 的 `requires-active` 与
+`shared-spatial-reference` 进入执行；后者由既有 strong localization evidence 证明当前双端
+attempt 使用相同 immutable map revision/frame。其余合法 typed relation 会在 Group 创建前
+fail-fast。Peer channel 只有在每个 committed ContextRole 的注册 Local EAIOS 对同一 channel
+instance/profile/schema 提供未过期确认后才 Ready，expiry、route loss、冲突或 restart 都会
+Fence；等待确认的已绑定 Task 保持 durable Ready，不回滚 Mission。
 Runtime-owned timer、取消状态与显式 resume/remote pause protocol 仍待后续实现。Matching、
 Scheduling、Reservation、Commit 和 replacement selection 仍属于
 Control；Node Protocol、Transport、Session 和 Router 属于 Integration；Node Service 的

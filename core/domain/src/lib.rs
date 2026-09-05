@@ -2440,6 +2440,33 @@ pub enum EventPayload {
         #[serde(default)]
         coupling_mode: ExecutionCouplingMode,
     },
+    /// One admitted Local EAIOS peer-channel readiness acknowledgement.
+    PeerChannelReadinessObserved {
+        /// Mission-level Group containing the coordination Context.
+        group_id: ExecutionGroupId,
+        /// Coordination Context declaring the peer channel.
+        context_id: CoordinationContextId,
+        /// Logical ContextRole represented by the endpoint.
+        context_role_id: ContextRoleId,
+        /// Current physical Node carrying the endpoint.
+        node_id: NodeId,
+        /// Registered Local EAIOS owning the endpoint capability.
+        local_system_id: LocalSystemId,
+        /// Current Node Protocol session that supplied the fact.
+        session_id: String,
+        /// Shared channel instance agreed by Local EAIOS peers.
+        channel_instance_id: String,
+        /// Transport-neutral channel profile confirmed by the endpoint.
+        profile_id: String,
+        /// Transport-neutral message schema confirmed by the endpoint.
+        message_schema: String,
+        /// Node-management sequence admitted for this acknowledgement.
+        sequence: u64,
+        /// RoboGuide-local receive-relative evidence deadline.
+        expires_at: TimestampMs,
+        /// Whether the Local EAIOS currently confirms readiness.
+        ready: bool,
+    },
     /// A role was rebound after a recoverable failure.
     RecoveryRebound {
         /// Group being adapted.

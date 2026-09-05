@@ -163,5 +163,23 @@ mod tests {
         let decoded = super::v0_3::StateObservationBatch::decode(batch.encode_to_vec().as_slice())
             .expect("v0.3 State batch decodes");
         assert_eq!(decoded, batch);
+
+        let readiness = super::v0_3::PeerChannelReadiness {
+            session_id: "session-1".to_string(),
+            sequence: 5,
+            group_id: "group-1".to_string(),
+            context_id: "guidance".to_string(),
+            context_role_id: "dog".to_string(),
+            local_system_id: "motion".to_string(),
+            channel_instance_id: "peer-channel-1".to_string(),
+            profile_id: "guidance-peer".to_string(),
+            message_schema: "guidance/v1".to_string(),
+            ready: true,
+            valid_for_ms: 5_000,
+        };
+        let decoded =
+            super::v0_3::PeerChannelReadiness::decode(readiness.encode_to_vec().as_slice())
+                .expect("v0.3 peer readiness decodes");
+        assert_eq!(decoded, readiness);
     }
 }

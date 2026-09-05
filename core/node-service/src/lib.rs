@@ -26,19 +26,21 @@ pub use config::{
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
     CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
     LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig,
-    RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig,
-    ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
+    PeerChannelObserverConfig, RequestBindingConfig, RequestMappingConfig, ResourceConfig,
+    SensorConfig, StateExportConfig, ValueExpressionConfig, ValueFunction, WorkflowConfig,
+    WorkflowStepConfig,
 };
 pub use conformance::{
     CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
     ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
     LifecycleConformanceInvariant, MemoryProviderConformance,
-    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance,
-    StepConformance, WorkflowConformance, compile_extension_config, compile_extension_config_json,
+    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, PeerChannelObserverConformance,
+    SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance, StepConformance, WorkflowConformance,
+    compile_extension_config, compile_extension_config_json,
 };
 pub use engine::{
-    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine, NodeObservation,
-    journal_path,
+    EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine,
+    LocalPeerChannelReadiness, NodeObservation, journal_path,
 };
 pub use journal::{
     ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, JournalError, JournalExecution,
@@ -57,8 +59,9 @@ pub use local_engine::{
     CONFIG_SCHEMA_V0_6, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
     CompiledCapability, CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck,
     CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryProvider, CompiledMemoryWorkflow,
-    CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
-    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase, StateExportFact,
+    CompiledPeerChannelObserver, CompiledResource, CompiledSensor, CompiledStateExport,
+    CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
+    MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,
 };
 pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};
