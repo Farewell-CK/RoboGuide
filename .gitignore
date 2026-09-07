@@ -44,5 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+windows/flutter/
+linux/flutter/
+macos/Flutter/
+RoboGuide-分布式任务调度
+
 # Widget Preview related
 .widget_preview/
+
+# Rust build artifacts
+/target/
