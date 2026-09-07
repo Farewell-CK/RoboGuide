@@ -76,7 +76,7 @@ authorized response set.
 
 The v0.1 Node engine exposes the explicit selective exchange operation used by composition and
 data-plane integration tests. A Controller-to-Node command that durably selects a consumer,
-provider, and exact revision is not part of Node Protocol v0.3 yet; Node Service therefore does not
+provider, and exact revision is not part of Node Protocol v0.4 yet; Node Service therefore does not
 autonomously pull catalog entries or interpret discovery as permission to replicate them.
 
 Typed `roboguide.spatial-memory/v0.1` maps continue to publish through `/v1/maps`; the generic list

@@ -2,7 +2,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-//! Formal RoboGuide Node Protocol v0.3 transport boundary.
+//! Formal RoboGuide Node Protocol v0.4 transport boundary.
 //!
 //! Integration owns generated tonic gRPC streaming, concurrent Node sessions,
 //! lease fencing, NodeId command routes, and wire validation/conversion. Controller

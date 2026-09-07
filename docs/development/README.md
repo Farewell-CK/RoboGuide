@@ -29,7 +29,7 @@ core/
   runtime/                 发现、调用、Heartbeat、Lease 和诊断
   state/                   Shared Node、Allocation、source-aware State 与 Memory Catalog projection
   artifact-store/          filesystem ArtifactBlobStore implementation
-  integration/             正式 gRPC Node Protocol v0.3 wire、session 和 router
+  integration/             正式 gRPC Node Protocol v0.4 wire、session 和 router
   orchestration/           Mission orchestration 与 Controller integration-fact composition
   node-service/            单一 Node Service、声明式本地引擎和 durable journal
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
@@ -38,7 +38,7 @@ apps/
   integration-server/      多 Node gRPC session 与独立 Artifact HTTP composition root
   mission-service/         文本 Mission Request、澄清/审批与内部 plan submission 组合根
   roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
-  real-node-smoke/         formal Node Protocol v0.3 probe 与合成 Execute simulation
+  real-node-smoke/         formal Node Protocol v0.4 probe 与合成 Execute simulation
 mission/
   src/mission/             Mission Request 状态机、规划、合同校验和模型/Controller 适配器
   prompts/v0/              可版本化、可评审的 Interpreter、Planner 与 Reviewer Prompt
@@ -110,7 +110,7 @@ Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP wo
 
 `NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含具体
 传输类型。该同步 port 仍由 Runtime/testkit 的 legacy 测试合同使用，但旧 HTTP 实现已退役。
-正式 registration/status/execute/state wire 属于 `core/integration` 的 Node Protocol v0.3。status
+正式 registration/status/execute/state wire 属于 `core/integration` 的 Node Protocol v0.4。status
 失败时 Runtime 只更新 liveness `Unreachable`，不会覆盖本地系统最后上报的 health。
 `SystemMonotonicClock` 为真实进程提供 RoboGuide-local receive time。
 
@@ -206,7 +206,7 @@ HLC 或全局时钟同步，也没有实现 Reconciliation。
 排序，独立来源不会互相覆盖。payload 是最大 64 KiB 的 versioned JSON，并保留 TTL、
 source-local time 与可选 confidence。
 
-Node Protocol v0.3 只接受当前完整 registration 已声明的 Reported/Observed export，单 batch
+Node Protocol v0.4 只接受当前完整 registration 已声明的 Reported/Observed export，单 batch
 最多 64 条、总 payload 最多 512 KiB，并使用 heartbeat/readiness 共用的 management
 sequence。`IntegrationRuntimeBridge` 在一个 candidate projection 中原子验证整个 batch，
 然后持久化 `StateRecordObserved` evidence；它不更新 health、lease、Control binding 或
@@ -404,12 +404,12 @@ coupling evidence；v7 为 generic Memory replica 补充 consumer provider ident
 该字段的 v6 历史 evidence 保守归入 reserved legacy bucket；v6 增加 source-aware State 与 generic
 Memory catalog/replica evidence，v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-外层 `roboguide.controller-checkpoint/v12` 包含内层 v11
+外层 `roboguide.controller-checkpoint/v13` 包含内层 v12
 Control/Shared Node/State records/Runtime projection；
 启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
-fail-closed；outer v12/inner v11 只接受各自的前一版本做一步迁移。State record 保留原始 `received_at`，因此
+fail-closed；outer v13/inner v12 只接受各自的前一版本做一步迁移。State record 保留原始 `received_at`，因此
 restart 不会让过期 evidence 重新变 Fresh；shared-spatial evidence 恢复后仍受 execution
 `Unknown` 和 relation fence 约束。
 Memory catalog 从 event evidence replay，不进入 Runtime checkpoint。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、

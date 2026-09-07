@@ -10,8 +10,8 @@ use domain::{
     StateExportDescriptor, StateObjectClass, StateObjectRef, StateRecord, StateSemantic,
     StateSource, TimestampMs,
 };
-use integration::grpc::v0_3::node_message::Message as NodePayload;
-use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
+use integration::grpc::v0_4::node_message::Message as NodePayload;
+use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
 use integration::{GrpcNodeEvent, GrpcNodeRouter};
 use ports::{
     EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader, StateRecordWriter,
@@ -26,11 +26,11 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 11 preserves source receive time and adds current-attempt coordination evidence.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
+/// Version 12 adds durable command intents and physical-attempt generation/history.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v10";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -244,6 +244,8 @@ pub struct IntegrationRuntimeBridge<E: Clone> {
     runtime: RuntimeExecutionManager,
     /// Canonical Runtime transitions awaiting application/orchestration consumption.
     runtime_events: VecDeque<ExecutionEvent>,
+    /// Whether restored Unknown attempts still need one application-visible recovery transition.
+    restored_recovery_pending: bool,
 }
 
 /// Complete durable projection required to reconstruct the controller process.
@@ -292,6 +294,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             router,
             runtime: RuntimeExecutionManager::new(),
             runtime_events: VecDeque::new(),
+            restored_recovery_pending: false,
         }
     }
 
@@ -344,6 +347,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             router,
             runtime,
             runtime_events: VecDeque::new(),
+            restored_recovery_pending: true,
         })
     }
 
@@ -477,6 +481,15 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             correlation_id,
                         )?;
                     }
+                    Some(NodePayload::CommandReceipt(receipt)) => {
+                        self.consume_command_receipt(
+                            &node_id,
+                            &session_id,
+                            receipt,
+                            received_at,
+                            correlation_id,
+                        )?;
+                    }
                     _ => {}
                 }
             }
@@ -502,9 +515,74 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     ),
                 )?;
                 self.runtime.fence_peer_channels_for_node(&node_id_value);
+                self.observe_node_unavailable(
+                    &node_id_value,
+                    "Node Protocol route became unavailable",
+                    received_at,
+                    correlation_id,
+                );
             }
         }
         Ok(())
+    }
+
+    /// Applies time-driven lease and coordination expiry using existing Control/Runtime authority.
+    pub fn tick(
+        &mut self,
+        now: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<Vec<NodeId>, IntegrationRuntimeError> {
+        self.runtime.refresh_peer_channel_deadlines(now);
+        if self.restored_recovery_pending {
+            self.restored_recovery_pending = false;
+            for attempt in self.runtime.attempt_history() {
+                if attempt.status() != ExecutionStatus::Unknown
+                    || self.runtime.current_attempt_id(
+                        attempt.command().group_id(),
+                        attempt.command().task_ref(),
+                        attempt.command().role_id(),
+                    ) != Some(attempt.execution_id())
+                {
+                    continue;
+                }
+                let event = ExecutionEvent::RecoveryRequired {
+                    execution_id: attempt.execution_id().to_string(),
+                    node_id: attempt.command().node_id().clone(),
+                    context: Some(attempt.command().clone()),
+                    reason: "Controller restart requires physical attempt reconciliation"
+                        .to_string(),
+                };
+                append_runtime_evidence(&mut self.events, &event, now, correlation_id);
+                self.runtime_events.push_back(event);
+            }
+        }
+        let expired =
+            self.control
+                .expire_leases(&mut self.state, now, correlation_id, &mut self.events)?;
+        for node_id in &expired {
+            self.runtime.fence_peer_channels_for_node(node_id);
+            self.observe_node_unavailable(
+                node_id,
+                "Controller application timer expired the Node lease",
+                now,
+                correlation_id,
+            );
+        }
+        Ok(expired)
+    }
+
+    /// Queues Runtime recovery facts after one Node loses current execution authority.
+    fn observe_node_unavailable(
+        &mut self,
+        node_id: &NodeId,
+        reason: &str,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) {
+        for event in self.runtime.observe_node_unavailable(node_id, reason) {
+            append_runtime_evidence(&mut self.events, &event, timestamp, correlation_id);
+            self.runtime_events.push_back(event);
+        }
     }
 
     /// Validates an identified Local EAIOS acknowledgement against current Group ownership.
@@ -512,7 +590,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         node_id: &str,
         session_id: &str,
-        readiness: integration::grpc::v0_3::PeerChannelReadiness,
+        readiness: integration::grpc::v0_4::PeerChannelReadiness,
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
@@ -618,7 +696,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
-    /// Routes an existing Runtime command to its Control-selected NodeId.
+    /// Prepares an existing Runtime command for durable application-level outbox delivery.
+    ///
+    /// This bridge deliberately performs no network side effect. The application must checkpoint
+    /// the returned Runtime state first and then call [`Self::flush_dispatch_outbox`].
     pub fn execute(
         &mut self,
         execution_id: String,
@@ -634,22 +715,104 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         resource_ids.sort();
         resource_ids.dedup();
-        self.router.execute(
-            command.node_id().as_str(),
-            execution_id.clone(),
-            invocation_from_command(&command),
-            resource_ids
-                .iter()
-                .map(|resource_id| resource_id.as_str().to_string())
-                .collect(),
-        )?;
         self.runtime
-            .record_dispatched(execution_id, command, resource_ids)
+            .prepare_dispatch(execution_id.clone(), command.clone(), resource_ids.clone())
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         Ok(())
     }
 
-    /// Builds and routes a command for a legacy single-Task Group role.
+    /// Delivers one already persisted Execute intent through the current Node route.
+    fn flush_dispatch_intent(
+        &mut self,
+        execution_id: &str,
+        command: &ExecutionCommand,
+        resource_ids: &mut Vec<ResourceId>,
+    ) -> Result<(), IntegrationRuntimeError> {
+        resource_ids.sort();
+        resource_ids.dedup();
+        let route_result = self.router.execute(
+            command.node_id().as_str(),
+            format!("dispatch-{execution_id}"),
+            execution_id.to_string(),
+            invocation_from_command(command),
+            resource_ids
+                .iter()
+                .map(|resource_id| resource_id.as_str().to_string())
+                .collect(),
+        );
+        self.runtime.record_dispatch_attempt(execution_id);
+        if let Err(error) = route_result {
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    /// Delivers every persisted Execute intent that is still waiting for a route.
+    pub fn flush_dispatch_outbox(&mut self) -> Result<usize, IntegrationRuntimeError> {
+        let intents = self.runtime.pending_dispatch_intents();
+        let mut delivered = 0;
+        let mut first_error = None;
+        for intent in intents {
+            let mut resources = intent.resource_ids.clone();
+            match self.flush_dispatch_intent(&intent.execution_id, &intent.command, &mut resources)
+            {
+                Ok(()) => delivered += 1,
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        first_error.map_or(Ok(delivered), Err)
+    }
+
+    /// Persists cancellation intent for every retained nonterminal physical attempt in one Group.
+    pub fn request_group_cancellation(
+        &mut self,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        let attempts = self.runtime.attempts_for_group(group_id);
+        for (execution_id, status) in &attempts {
+            if !status.is_terminal() {
+                self.runtime
+                    .request_cancellation(execution_id)
+                    .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+            }
+        }
+        Ok(attempts
+            .into_iter()
+            .filter(|(_, status)| !status.is_terminal())
+            .count())
+    }
+
+    /// Delivers every durable cancellation whose physical attempt remains nonterminal.
+    pub fn flush_cancellation_outbox(&self) -> Result<usize, IntegrationRuntimeError> {
+        let pending = self.runtime.pending_cancellations();
+        let mut delivered = 0;
+        let mut first_error = None;
+        for (execution_id, node_id) in &pending {
+            match self.router.cancel(
+                node_id.as_str(),
+                format!("cancel-{execution_id}"),
+                execution_id.clone(),
+            ) {
+                Ok(()) => delivered += 1,
+                Err(error) if first_error.is_none() => first_error = Some(error.into()),
+                Err(_) => {}
+            }
+        }
+        first_error.map_or(Ok(delivered), Err)
+    }
+
+    /// Delivers durable execution and cancellation intents after their checkpoint commits.
+    pub fn flush_command_outboxes(&mut self) -> Result<usize, IntegrationRuntimeError> {
+        let dispatches = self.flush_dispatch_outbox();
+        let cancellations = self.flush_cancellation_outbox();
+        match (dispatches, cancellations) {
+            (Ok(dispatches), Ok(cancellations)) => Ok(dispatches.saturating_add(cancellations)),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
+
+    /// Builds and prepares a command for a legacy single-Task Group role.
     ///
     /// Mission-level Groups must use [`Self::execute_task_bound`] so Integration never guesses a
     /// Task identity from the compatibility `ExecutionGroup::task_ref` field.
@@ -681,9 +844,32 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         )
     }
 
-    /// Builds and routes a command for one specific Task execution inside a Group.
+    /// Builds and prepares a command for one specific Task execution inside a Group.
     #[allow(clippy::too_many_arguments)]
     pub fn execute_task_bound(
+        &mut self,
+        execution_id: String,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+        intent: domain::ExecutionIntent,
+        now: TimestampMs,
+        correlation_id: CorrelationId,
+    ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        self.prepare_task_bound(
+            execution_id,
+            group_id,
+            task_ref,
+            role_id,
+            intent,
+            now,
+            correlation_id,
+        )
+    }
+
+    /// Prepares one Task-bound dispatch intent without producing a network side effect.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_task_bound(
         &mut self,
         execution_id: String,
         group_id: &domain::ExecutionGroupId,
@@ -699,7 +885,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         })?;
         if !matches!(
             group.lifecycle(),
-            control::GroupLifecycle::Bound | control::GroupLifecycle::Active
+            control::GroupLifecycle::Bound
+                | control::GroupLifecycle::Active
+                | control::GroupLifecycle::Adapted
         ) {
             return Err(IntegrationRuntimeError::Protocol(
                 "execution group is not bound".to_string(),
@@ -777,19 +965,29 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             intent,
             correlation_id,
         );
-        self.execute(execution_id, command.clone(), resource_ids)?;
+        self.runtime
+            .prepare_dispatch(execution_id, command.clone(), resource_ids)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         Ok(command)
     }
 
-    /// Routes cancellation without claiming local cancellation completion.
-    pub fn cancel(&self, execution_id: &str) -> Result<(), IntegrationRuntimeError> {
-        let node_id = self
-            .runtime
-            .cancellation_node(execution_id)
-            .ok_or_else(|| IntegrationRuntimeError::Protocol("unknown execution id".to_string()))?;
-        self.router
-            .cancel(node_id.as_str(), execution_id.to_string())
-            .map_err(Into::into)
+    /// Allocates the next physical attempt identity for one committed logical role slot.
+    pub fn allocate_task_attempt_id(
+        &mut self,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+    ) -> Result<String, IntegrationRuntimeError> {
+        self.runtime
+            .allocate_attempt_id(group_id, task_ref, role_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
+    /// Records one cancellation for application checkpointing before network delivery.
+    pub fn cancel(&mut self, execution_id: &str) -> Result<(), IntegrationRuntimeError> {
+        self.runtime
+            .request_cancellation(execution_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
     }
 
     /// Returns current Control authority.
@@ -817,6 +1015,36 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime
             .execution_status(execution_id)
             .map(remote_status)
+    }
+
+    /// Returns every retained physical attempt in deterministic identity order.
+    pub fn attempt_history(&self) -> Vec<runtime::ExecutionAttemptSnapshot> {
+        self.runtime.attempt_history()
+    }
+
+    /// Returns exact current commands whose physical attempt still requires reconciliation.
+    pub fn current_unknown_attempts(&self) -> Vec<ExecutionCommand> {
+        self.runtime.current_unknown_attempts()
+    }
+
+    /// Returns whether all retained physical attempts in one Group are terminal.
+    pub fn group_attempts_terminal(&self, group_id: &domain::ExecutionGroupId) -> bool {
+        self.runtime
+            .attempts_for_group(group_id)
+            .into_iter()
+            .all(|(_, status)| status.is_terminal())
+    }
+
+    /// Returns whether the current physical attempt already represents this exact binding.
+    pub fn current_attempt_matches_binding(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+        node_id: &domain::NodeId,
+    ) -> bool {
+        self.runtime
+            .current_attempt_matches_node(group_id, task_ref, role_id, node_id)
     }
 
     /// Installs Mission-owned relation specifications into the sole Runtime live registry.
@@ -913,7 +1141,22 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime.relation_snapshots(group_id)
     }
 
+    /// Returns whether typed localization evidence names the exact current attempt and Node owner.
+    pub fn localization_evidence_is_current(
+        &self,
+        evidence: &domain::LocalizationVerificationEvidence,
+    ) -> bool {
+        self.runtime
+            .shared_spatial_evidence_targets_current_attempt(
+                &SharedSpatialEvidence::from_localization(evidence, TimestampMs::new(0)),
+            )
+    }
+
     /// Applies durable strong localization evidence to the current Runtime execution attempt.
+    ///
+    /// Evidence for a known current logical slot must match its exact attempt and Node owner.
+    /// Evidence unrelated to any live slot remains valid Spatial Memory catalog evidence and is
+    /// deliberately ignored by Runtime.
     pub fn observe_localization_evidence(
         &mut self,
         evidence: &domain::LocalizationVerificationEvidence,
@@ -921,12 +1164,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
         let spatial_evidence = SharedSpatialEvidence::from_localization(evidence, received_at);
-        // Spatial Memory verification is useful outside an active execution relation. In that
-        // case the durable catalog remains the authority and Runtime simply has no live slot to
-        // update; evidence for a matching current slot is still validated strictly below.
         if !self
             .runtime
-            .shared_spatial_evidence_matches_current_execution(&spatial_evidence)
+            .shared_spatial_evidence_targets_current_attempt(&spatial_evidence)
         {
             return Ok(());
         }
@@ -1222,13 +1462,89 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
+    /// Applies one Node command receipt to the durable Runtime dispatch intent.
+    fn consume_command_receipt(
+        &mut self,
+        node_id: &str,
+        session_id: &str,
+        receipt: integration::grpc::v0_4::CommandReceipt,
+        received_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        if receipt.session_id != session_id {
+            return Err(IntegrationRuntimeError::Protocol(
+                "command receipt session does not match the admitted Node route".to_string(),
+            ));
+        }
+        let kind = integration::grpc::v0_4::CommandKind::try_from(receipt.kind).map_err(|_| {
+            IntegrationRuntimeError::Protocol("command receipt kind is invalid".to_string())
+        })?;
+        if kind == integration::grpc::v0_4::CommandKind::Unspecified {
+            return Err(IntegrationRuntimeError::Protocol(
+                "command receipt kind is unspecified".to_string(),
+            ));
+        }
+        let node_id = NodeId::new(node_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        let status = integration::grpc::v0_4::CommandReceiptStatus::try_from(receipt.status)
+            .map_err(|_| {
+                IntegrationRuntimeError::Protocol("command receipt status is invalid".to_string())
+            })?;
+        if status == integration::grpc::v0_4::CommandReceiptStatus::Unspecified {
+            return Err(IntegrationRuntimeError::Protocol(
+                "command receipt status is unspecified".to_string(),
+            ));
+        }
+        if kind == integration::grpc::v0_4::CommandKind::CommandCancel {
+            let runtime_events = self
+                .runtime
+                .observe_cancellation_receipt(
+                    &receipt.execution_id,
+                    &receipt.command_id,
+                    &node_id,
+                    status == integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted,
+                    receipt.reason,
+                )
+                .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+            for event in runtime_events {
+                append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
+                self.runtime_events.push_back(event);
+            }
+            return Ok(());
+        }
+        let persisted = match status {
+            integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted => true,
+            integration::grpc::v0_4::CommandReceiptStatus::CommandRejected => false,
+            integration::grpc::v0_4::CommandReceiptStatus::Unspecified => {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "command receipt status is unspecified".to_string(),
+                ));
+            }
+        };
+        let runtime_events = self
+            .runtime
+            .observe_dispatch_receipt(
+                &receipt.execution_id,
+                &receipt.command_id,
+                &node_id,
+                persisted,
+                receipt.reason,
+            )
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        for event in runtime_events {
+            append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
+            self.runtime_events.push_back(event);
+        }
+        Ok(())
+    }
+
     /// Converts one accepted protocol batch into an atomic State projection update and evidence.
     fn consume_state_observations(
         &mut self,
         node_id: &str,
         session_id: &str,
         sequence: u64,
-        observations: Vec<integration::grpc::v0_3::StateObservation>,
+        observations: Vec<integration::grpc::v0_4::StateObservation>,
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
@@ -1559,26 +1875,26 @@ fn registration_from_wire(
 
 /// Converts one wire State export through the node-owned authority invariants.
 fn state_export_from_wire(
-    wire: &integration::grpc::v0_3::StateExportDescriptor,
+    wire: &integration::grpc::v0_4::StateExportDescriptor,
 ) -> Result<StateExportDescriptor, IntegrationRuntimeError> {
-    let object_class = match integration::grpc::v0_3::StateObjectClass::try_from(wire.object_class)
+    let object_class = match integration::grpc::v0_4::StateObjectClass::try_from(wire.object_class)
     {
-        Ok(integration::grpc::v0_3::StateObjectClass::Node) => StateObjectClass::Node,
-        Ok(integration::grpc::v0_3::StateObjectClass::World) => StateObjectClass::World,
-        Ok(integration::grpc::v0_3::StateObjectClass::Roboguide) => StateObjectClass::RoboGuide,
+        Ok(integration::grpc::v0_4::StateObjectClass::Node) => StateObjectClass::Node,
+        Ok(integration::grpc::v0_4::StateObjectClass::World) => StateObjectClass::World,
+        Ok(integration::grpc::v0_4::StateObjectClass::Roboguide) => StateObjectClass::RoboGuide,
         _ => {
             return Err(IntegrationRuntimeError::Protocol(
                 "unknown State object class".to_string(),
             ));
         }
     };
-    let semantic = match integration::grpc::v0_3::StateSemantic::try_from(wire.semantic) {
-        Ok(integration::grpc::v0_3::StateSemantic::Reported) => StateSemantic::Reported,
-        Ok(integration::grpc::v0_3::StateSemantic::Observed) => StateSemantic::Observed,
-        Ok(integration::grpc::v0_3::StateSemantic::Desired) => StateSemantic::Desired,
-        Ok(integration::grpc::v0_3::StateSemantic::Committed) => StateSemantic::Committed,
-        Ok(integration::grpc::v0_3::StateSemantic::Derived) => StateSemantic::Derived,
-        Ok(integration::grpc::v0_3::StateSemantic::Belief) => StateSemantic::Belief,
+    let semantic = match integration::grpc::v0_4::StateSemantic::try_from(wire.semantic) {
+        Ok(integration::grpc::v0_4::StateSemantic::Reported) => StateSemantic::Reported,
+        Ok(integration::grpc::v0_4::StateSemantic::Observed) => StateSemantic::Observed,
+        Ok(integration::grpc::v0_4::StateSemantic::Desired) => StateSemantic::Desired,
+        Ok(integration::grpc::v0_4::StateSemantic::Committed) => StateSemantic::Committed,
+        Ok(integration::grpc::v0_4::StateSemantic::Derived) => StateSemantic::Derived,
+        Ok(integration::grpc::v0_4::StateSemantic::Belief) => StateSemantic::Belief,
         _ => {
             return Err(IntegrationRuntimeError::Protocol(
                 "unknown State semantic".to_string(),
@@ -1601,39 +1917,39 @@ fn state_export_from_wire(
 
 /// Converts one wire Memory provider without creating a new storage authority.
 fn memory_provider_from_wire(
-    wire: &integration::grpc::v0_3::MemoryProviderDescriptor,
+    wire: &integration::grpc::v0_4::MemoryProviderDescriptor,
 ) -> Result<MemoryProviderDescriptor, IntegrationRuntimeError> {
-    let kind = match integration::grpc::v0_3::MemoryKind::try_from(wire.kind) {
-        Ok(integration::grpc::v0_3::MemoryKind::Execution) => MemoryKind::Execution,
-        Ok(integration::grpc::v0_3::MemoryKind::Spatial) => MemoryKind::Spatial,
-        Ok(integration::grpc::v0_3::MemoryKind::Semantic) => MemoryKind::Semantic,
-        Ok(integration::grpc::v0_3::MemoryKind::Experience) => MemoryKind::Experience,
-        Ok(integration::grpc::v0_3::MemoryKind::Artifact) => MemoryKind::Artifact,
+    let kind = match integration::grpc::v0_4::MemoryKind::try_from(wire.kind) {
+        Ok(integration::grpc::v0_4::MemoryKind::Execution) => MemoryKind::Execution,
+        Ok(integration::grpc::v0_4::MemoryKind::Spatial) => MemoryKind::Spatial,
+        Ok(integration::grpc::v0_4::MemoryKind::Semantic) => MemoryKind::Semantic,
+        Ok(integration::grpc::v0_4::MemoryKind::Experience) => MemoryKind::Experience,
+        Ok(integration::grpc::v0_4::MemoryKind::Artifact) => MemoryKind::Artifact,
         _ => {
             return Err(IntegrationRuntimeError::Protocol(
                 "unknown Memory kind".to_string(),
             ));
         }
     };
-    let scope = match integration::grpc::v0_3::MemoryScopeKind::try_from(wire.scope) {
-        Ok(integration::grpc::v0_3::MemoryScopeKind::Local) => MemoryScopeLimit::Local,
-        Ok(integration::grpc::v0_3::MemoryScopeKind::ExecutionGroup) => {
+    let scope = match integration::grpc::v0_4::MemoryScopeKind::try_from(wire.scope) {
+        Ok(integration::grpc::v0_4::MemoryScopeKind::Local) => MemoryScopeLimit::Local,
+        Ok(integration::grpc::v0_4::MemoryScopeKind::ExecutionGroup) => {
             return Err(IntegrationRuntimeError::Protocol(
                 "Memory provider scope cannot contain an execution Group identity".to_string(),
             ));
         }
-        Ok(integration::grpc::v0_3::MemoryScopeKind::Global) => MemoryScopeLimit::Global,
+        Ok(integration::grpc::v0_4::MemoryScopeKind::Global) => MemoryScopeLimit::Global,
         _ => {
             return Err(IntegrationRuntimeError::Protocol(
                 "unknown Memory scope".to_string(),
             ));
         }
     };
-    let visibility = match integration::grpc::v0_3::MemoryVisibility::try_from(wire.visibility) {
-        Ok(integration::grpc::v0_3::MemoryVisibility::Discoverable) => {
+    let visibility = match integration::grpc::v0_4::MemoryVisibility::try_from(wire.visibility) {
+        Ok(integration::grpc::v0_4::MemoryVisibility::Discoverable) => {
             MemoryVisibility::Discoverable
         }
-        Ok(integration::grpc::v0_3::MemoryVisibility::Exchangeable) => {
+        Ok(integration::grpc::v0_4::MemoryVisibility::Exchangeable) => {
             MemoryVisibility::Exchangeable
         }
         _ => {
@@ -1655,7 +1971,7 @@ fn memory_provider_from_wire(
 
 /// Converts current protocol health into Domain health.
 fn status_from_wire(
-    status: Option<&integration::grpc::v0_3::NodeStatus>,
+    status: Option<&integration::grpc::v0_4::NodeStatus>,
     observed_at: TimestampMs,
 ) -> Result<NodeStatus, IntegrationRuntimeError> {
     let status = status.ok_or_else(|| {
@@ -1725,7 +2041,7 @@ fn invocation_from_command(command: &ExecutionCommand) -> CanonicalInvocation {
 }
 /// Converts one transport-neutral scalar.
 fn scalar(value: &ExecutionValue) -> ScalarValue {
-    use integration::grpc::v0_3::scalar_value::Value;
+    use integration::grpc::v0_4::scalar_value::Value;
     ScalarValue {
         value: Some(match value {
             ExecutionValue::Bool(value) => Value::BoolValue(*value),
@@ -1804,7 +2120,7 @@ impl From<tonic::Status> for IntegrationRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use integration::grpc::v0_3::{
+    use integration::grpc::v0_4::{
         Capability as WireCapability, LocalRuntime as WireRuntime, LocalSystemDescriptor,
     };
     use ports::{SharedNodeStateReader, StateRecordReader};
@@ -1953,9 +2269,9 @@ mod tests {
         assert_eq!(restored.relation_snapshots(&group_id).len(), 1);
     }
 
-    /// The v10 checkpoint migrates with empty newly introduced live coordination evidence.
+    /// The v11 checkpoint migrates with empty newly introduced command and attempt evidence.
     #[test]
-    fn v10_checkpoint_migrates_missing_live_coordination_evidence() {
+    fn v11_checkpoint_migrates_missing_command_and_attempt_evidence() {
         let bridge = IntegrationRuntimeBridge::new(
             ControlPlane::new(),
             InMemorySharedNodeState::new(),
@@ -1972,7 +2288,9 @@ mod tests {
         let runtime = checkpoint["runtime"]
             .as_object_mut()
             .expect("Runtime checkpoint is an object");
-        runtime.remove("spatial_evidence");
+        runtime.remove("attempt_generations");
+        runtime.remove("dispatch_outbox");
+        runtime.remove("cancellation_intents");
 
         let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
             &checkpoint.to_string(),
@@ -2073,12 +2391,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
+                    message: integration::grpc::v0_4::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_4::Heartbeat {
                             session_id: "session-1".to_string(),
                             lease_id: "lease-1".to_string(),
                             sequence: 1,
-                            status: Some(integration::grpc::v0_3::NodeStatus {
+                            status: Some(integration::grpc::v0_4::NodeStatus {
                                 health: "degraded".to_string(),
                                 detail: String::new(),
                             }),
@@ -2103,9 +2421,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-1".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            integration::grpc::v0_3::RegistrationUpdate {
+                            integration::grpc::v0_4::RegistrationUpdate {
                                 session_id: "session-1".to_string(),
                                 sequence: 2,
                                 registration: Some(NodeRegistration {
@@ -2180,13 +2498,13 @@ mod tests {
                         resources: Vec::new(),
                         metadata: Default::default(),
                         node_contract_version: "roboguide.node.v0.3".to_string(),
-                        state_exports: vec![integration::grpc::v0_3::StateExportDescriptor {
+                        state_exports: vec![integration::grpc::v0_4::StateExportDescriptor {
                             export_id: "hazard-state".to_string(),
                             local_system_id: "safety".to_string(),
-                            object_class: integration::grpc::v0_3::StateObjectClass::World as i32,
+                            object_class: integration::grpc::v0_4::StateObjectClass::World as i32,
                             object_type: "hazard".to_string(),
                             object_id: "crossing-a".to_string(),
-                            semantic: integration::grpc::v0_3::StateSemantic::Observed as i32,
+                            semantic: integration::grpc::v0_4::StateSemantic::Observed as i32,
                             payload_schema: "example.hazard/v1".to_string(),
                             valid_for_ms: 1_000,
                         }],
@@ -2209,12 +2527,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "cane-a".to_string(),
                     session_id: "session-state".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::StateObservationBatch(
-                            integration::grpc::v0_3::StateObservationBatch {
+                            integration::grpc::v0_4::StateObservationBatch {
                                 session_id: "session-state".to_string(),
                                 sequence: 1,
-                                observations: vec![integration::grpc::v0_3::StateObservation {
+                                observations: vec![integration::grpc::v0_4::StateObservation {
                                     export_id: "hazard-state".to_string(),
                                     json_value: br#"{"present":true}"#.to_vec(),
                                     has_source_observed_at: true,
@@ -2339,14 +2657,14 @@ mod tests {
                         node_contract_version: "roboguide.node.v0.3".to_string(),
                         state_exports: ["safety-pose", "pose-shadow"]
                             .into_iter()
-                            .map(|export_id| integration::grpc::v0_3::StateExportDescriptor {
+                            .map(|export_id| integration::grpc::v0_4::StateExportDescriptor {
                                 export_id: export_id.to_string(),
                                 local_system_id: "safety".to_string(),
-                                object_class: integration::grpc::v0_3::StateObjectClass::Node
+                                object_class: integration::grpc::v0_4::StateObjectClass::Node
                                     as i32,
                                 object_type: "pose".to_string(),
                                 object_id: "cane-a".to_string(),
-                                semantic: integration::grpc::v0_3::StateSemantic::Reported as i32,
+                                semantic: integration::grpc::v0_4::StateSemantic::Reported as i32,
                                 payload_schema: "roboguide.pose/v1".to_string(),
                                 valid_for_ms: 100,
                             })
@@ -2363,12 +2681,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "cane-a".to_string(),
                     session_id: "session-view".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
+                    message: integration::grpc::v0_4::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_4::Heartbeat {
                             session_id: "session-view".to_string(),
                             lease_id: "lease-view".to_string(),
                             sequence: 1,
-                            status: Some(integration::grpc::v0_3::NodeStatus {
+                            status: Some(integration::grpc::v0_4::NodeStatus {
                                 health: "online".to_string(),
                                 detail: String::new(),
                             }),
@@ -2488,13 +2806,13 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "cane-a".to_string(),
                     session_id: "session-view".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::StateObservationBatch(
-                            integration::grpc::v0_3::StateObservationBatch {
+                            integration::grpc::v0_4::StateObservationBatch {
                                 session_id: "session-view".to_string(),
                                 sequence: 2,
                                 observations: vec![
-                                    integration::grpc::v0_3::StateObservation {
+                                    integration::grpc::v0_4::StateObservation {
                                         export_id: "pose-shadow".to_string(),
                                         json_value: br#"{"x":999}"#.to_vec(),
                                         has_source_observed_at: false,
@@ -2502,7 +2820,7 @@ mod tests {
                                         has_confidence: false,
                                         confidence_millionths: 0,
                                     },
-                                    integration::grpc::v0_3::StateObservation {
+                                    integration::grpc::v0_4::StateObservation {
                                         export_id: "safety-pose".to_string(),
                                         json_value: br#"{"x":1}"#.to_vec(),
                                         has_source_observed_at: false,
@@ -2608,6 +2926,88 @@ mod tests {
         );
     }
 
+    /// Current-attempt admission rejects superseded typed evidence before durable catalog append.
+    #[test]
+    fn localization_admission_rejects_superseded_attempt_provenance() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("stale-localization-test").expect("correlation valid");
+        let command = ExecutionCommand::new(
+            domain::MissionId::new("mission-map").expect("mission valid"),
+            domain::TaskId::new("localize").expect("task valid"),
+            domain::ExecutionGroupId::new("group-map").expect("group valid"),
+            domain::RoleId::new("localizer").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("spatial.map", "localize", "v0")
+                    .expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            correlation.clone(),
+        );
+        bridge
+            .runtime
+            .prepare_dispatch("attempt-old".to_string(), command.clone(), Vec::new())
+            .expect("old attempt prepares");
+        let replacement = ExecutionCommand::new(
+            command.mission_id().clone(),
+            command.task_ref().task_id().clone(),
+            command.group_id().clone(),
+            command.role_id().clone(),
+            NodeId::new("dog-b").expect("node valid"),
+            command.intent().clone(),
+            correlation.clone(),
+        );
+        bridge
+            .runtime
+            .prepare_dispatch("attempt-new".to_string(), replacement, Vec::new())
+            .expect("replacement attempt prepares");
+        let evidence: domain::LocalizationVerificationEvidence =
+            serde_json::from_value(serde_json::json!({
+                "schema": domain::LOCALIZATION_EVIDENCE_SCHEMA_V0_1,
+                "map_id": "campus",
+                "revision_id": "r1",
+                "content_digest": format!("sha256:{}", "a".repeat(64)),
+                "byte_size": 1,
+                "mission_id": command.mission_id(),
+                "task_id": command.task_ref().task_id(),
+                "group_id": command.group_id(),
+                "role_id": command.role_id(),
+                "node_id": command.node_id(),
+                "execution_id": "attempt-old",
+                "local_attempt_id": "local-old",
+                "active_local_map_id": "campus-r1",
+                "mode": "localization",
+                "pose_quality": {
+                    "metric": "translation_stddev",
+                    "value": "0.05",
+                    "threshold": "0.10",
+                    "unit": "m",
+                    "comparison": "at_most"
+                },
+                "frames": {"map": "map", "odom": "odom", "base": "base_link"},
+                "anchor_id": "campus-origin",
+                "source_observed_at_ms": 49
+            }))
+            .expect("strong localization evidence validates");
+
+        assert!(!bridge.localization_evidence_is_current(&evidence));
+        bridge
+            .observe_localization_evidence(&evidence, TimestampMs::new(50), &correlation)
+            .expect("catalog replay may ignore historical evidence without mutating Runtime");
+        assert!(
+            bridge
+                .runtime
+                .shared_spatial_evidence(command.group_id(), command.task_ref(), command.role_id(),)
+                .is_none()
+        );
+    }
+
     /// Peer readiness is admitted only from each committed role's registered Local EAIOS owner.
     #[test]
     fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
@@ -2643,7 +3043,7 @@ mod tests {
              local_system: &str,
              contract: &str,
              kind: &str,
-             resources: Vec<integration::grpc::v0_3::Resource>| NodeRegistration {
+             resources: Vec<integration::grpc::v0_4::Resource>| NodeRegistration {
                 node_id: node.to_string(),
                 local_systems: vec![
                     LocalSystemDescriptor {
@@ -2691,7 +3091,7 @@ mod tests {
                 "motion",
                 "mobility.navigate@v1",
                 "mobility",
-                vec![integration::grpc::v0_3::Resource {
+                vec![integration::grpc::v0_4::Resource {
                     id: "guide-space".to_string(),
                     kind: "space".to_string(),
                     capacity: 1,
@@ -2716,13 +3116,13 @@ mod tests {
                     GrpcNodeEvent::NodeMessage {
                         node_id: node.to_string(),
                         session_id: format!("session-{node}"),
-                        message: integration::grpc::v0_3::NodeMessage {
+                        message: integration::grpc::v0_4::NodeMessage {
                             message: Some(NodePayload::Heartbeat(
-                                integration::grpc::v0_3::Heartbeat {
+                                integration::grpc::v0_4::Heartbeat {
                                     session_id: format!("session-{node}"),
                                     lease_id: lease.to_string(),
                                     sequence: 1,
-                                    status: Some(integration::grpc::v0_3::NodeStatus {
+                                    status: Some(integration::grpc::v0_4::NodeStatus {
                                         health: "online".to_string(),
                                         detail: String::new(),
                                     }),
@@ -2772,9 +3172,9 @@ mod tests {
             GrpcNodeEvent::NodeMessage {
                 node_id: node.to_string(),
                 session_id: format!("session-{node}"),
-                message: integration::grpc::v0_3::NodeMessage {
+                message: integration::grpc::v0_4::NodeMessage {
                     message: Some(NodePayload::PeerChannelReadiness(
-                        integration::grpc::v0_3::PeerChannelReadiness {
+                        integration::grpc::v0_4::PeerChannelReadiness {
                             session_id: format!("session-{node}"),
                             sequence,
                             group_id: group_id.as_str().to_string(),
@@ -2892,9 +3292,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-dog-a".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            integration::grpc::v0_3::RegistrationUpdate {
+                            integration::grpc::v0_4::RegistrationUpdate {
                                 session_id: "session-dog-a".to_string(),
                                 sequence: 5,
                                 registration: Some(registration(
@@ -2902,7 +3302,7 @@ mod tests {
                                     "motion",
                                     "mobility.navigate@v1",
                                     "mobility",
-                                    vec![integration::grpc::v0_3::Resource {
+                                    vec![integration::grpc::v0_4::Resource {
                                         id: "guide-space".to_string(),
                                         kind: "space".to_string(),
                                         capacity: 1,
@@ -2983,13 +3383,13 @@ mod tests {
                         resources: Vec::new(),
                         metadata: Default::default(),
                         node_contract_version: "roboguide.node.v0.3".to_string(),
-                        state_exports: vec![integration::grpc::v0_3::StateExportDescriptor {
+                        state_exports: vec![integration::grpc::v0_4::StateExportDescriptor {
                             export_id: "hazard-state".to_string(),
                             local_system_id: "safety".to_string(),
-                            object_class: integration::grpc::v0_3::StateObjectClass::World as i32,
+                            object_class: integration::grpc::v0_4::StateObjectClass::World as i32,
                             object_type: "hazard".to_string(),
                             object_id: "crossing-a".to_string(),
-                            semantic: integration::grpc::v0_3::StateSemantic::Observed as i32,
+                            semantic: integration::grpc::v0_4::StateSemantic::Observed as i32,
                             payload_schema: "example.hazard/v1".to_string(),
                             valid_for_ms: 1_000,
                         }],
@@ -3008,12 +3408,12 @@ mod tests {
                     GrpcNodeEvent::NodeMessage {
                         node_id: "cane-a".to_string(),
                         session_id: session_id.to_string(),
-                        message: integration::grpc::v0_3::NodeMessage {
+                        message: integration::grpc::v0_4::NodeMessage {
                             message: Some(NodePayload::StateObservationBatch(
-                                integration::grpc::v0_3::StateObservationBatch {
+                                integration::grpc::v0_4::StateObservationBatch {
                                     session_id: session_id.to_string(),
                                     sequence,
-                                    observations: vec![integration::grpc::v0_3::StateObservation {
+                                    observations: vec![integration::grpc::v0_4::StateObservation {
                                         export_id: "hazard-state".to_string(),
                                         json_value: serde_json::to_vec(
                                             &serde_json::json!({"present": present}),
@@ -3057,13 +3457,13 @@ mod tests {
     /// Wire conversion cannot reintroduce a live Group identity into static provider metadata.
     #[test]
     fn memory_provider_conversion_rejects_execution_group_scope() {
-        let wire = integration::grpc::v0_3::MemoryProviderDescriptor {
+        let wire = integration::grpc::v0_4::MemoryProviderDescriptor {
             provider_id: "experience".to_string(),
             local_system_id: "memory".to_string(),
-            kind: integration::grpc::v0_3::MemoryKind::Experience as i32,
-            scope: integration::grpc::v0_3::MemoryScopeKind::ExecutionGroup as i32,
+            kind: integration::grpc::v0_4::MemoryKind::Experience as i32,
+            scope: integration::grpc::v0_4::MemoryScopeKind::ExecutionGroup as i32,
             execution_group_id: "group-a".to_string(),
-            visibility: integration::grpc::v0_3::MemoryVisibility::Discoverable as i32,
+            visibility: integration::grpc::v0_4::MemoryVisibility::Discoverable as i32,
             payload_schema: "example.experience/v1".to_string(),
             media_type: "application/json".to_string(),
         };
@@ -3183,12 +3583,12 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
-                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_3::Heartbeat {
+                    message: integration::grpc::v0_4::NodeMessage {
+                        message: Some(NodePayload::Heartbeat(integration::grpc::v0_4::Heartbeat {
                             session_id: "session-a".to_string(),
                             lease_id: "lease-a".to_string(),
                             sequence: 1,
-                            status: Some(integration::grpc::v0_3::NodeStatus {
+                            status: Some(integration::grpc::v0_4::NodeStatus {
                                 health: "online".to_string(),
                                 detail: String::new(),
                             }),
@@ -3228,9 +3628,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-a".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::RegistrationUpdate(
-                            integration::grpc::v0_3::RegistrationUpdate {
+                            integration::grpc::v0_4::RegistrationUpdate {
                                 session_id: "session-a".to_string(),
                                 sequence: 2,
                                 registration: Some(wire_registration(true)),
@@ -3290,9 +3690,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            integration::grpc::v0_3::ExecutionSnapshot {
+                            integration::grpc::v0_4::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 3,
@@ -3311,9 +3711,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::ExecutionEvent(
-                            integration::grpc::v0_3::ExecutionEvent {
+                            integration::grpc::v0_4::ExecutionEvent {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 sequence: 2,
@@ -3489,6 +3889,66 @@ mod tests {
         )));
     }
 
+    /// A receipt cannot borrow one Node route while carrying another session provenance.
+    #[test]
+    fn command_receipt_requires_exact_admitted_session() {
+        let command = ExecutionCommand::new(
+            domain::MissionId::new("mission").expect("mission valid"),
+            domain::TaskId::new("task").expect("task valid"),
+            domain::ExecutionGroupId::new("group").expect("group valid"),
+            domain::RoleId::new("role").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("compute", "noop", "v1").expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            CorrelationId::new("receipt-session-test").expect("correlation valid"),
+        );
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        bridge
+            .runtime
+            .prepare_dispatch("attempt-1".to_string(), command, Vec::new())
+            .expect("dispatch intent prepares");
+        let event = GrpcNodeEvent::NodeMessage {
+            node_id: "dog-a".to_string(),
+            session_id: "session-current".to_string(),
+            message: integration::grpc::v0_4::NodeMessage {
+                message: Some(NodePayload::CommandReceipt(
+                    integration::grpc::v0_4::CommandReceipt {
+                        session_id: "session-stale".to_string(),
+                        sequence: 1,
+                        command_id: "dispatch-attempt-1".to_string(),
+                        execution_id: "attempt-1".to_string(),
+                        kind: integration::grpc::v0_4::CommandKind::CommandExecute as i32,
+                        status: integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                            as i32,
+                        reason: String::new(),
+                    },
+                )),
+            },
+        };
+
+        assert!(matches!(
+            bridge.consume(
+                event,
+                TimestampMs::new(1),
+                &CorrelationId::new("receipt-session-test").expect("correlation valid"),
+            ),
+            Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("session")
+        ));
+        assert_eq!(
+            bridge.runtime.pending_dispatch_intents().len(),
+            1,
+            "rejected provenance must not acknowledge the dispatch"
+        );
+    }
+
     /// A reconnect snapshot without a current Runtime command cannot be silently re-dispatched.
     #[test]
     fn observed_reconnect_execution_requires_reconciliation_before_route() {
@@ -3504,9 +3964,9 @@ mod tests {
                 GrpcNodeEvent::NodeMessage {
                     node_id: "dog-a".to_string(),
                     session_id: "session-new".to_string(),
-                    message: integration::grpc::v0_3::NodeMessage {
+                    message: integration::grpc::v0_4::NodeMessage {
                         message: Some(NodePayload::ExecutionSnapshot(
-                            integration::grpc::v0_3::ExecutionSnapshot {
+                            integration::grpc::v0_4::ExecutionSnapshot {
                                 session_id: "session-new".to_string(),
                                 execution_id: "execution-1".to_string(),
                                 last_sequence: 1,
@@ -3631,6 +4091,172 @@ mod tests {
             restored.execute("execution-1".to_string(), command, Vec::new()),
             Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("controller restart")
         ));
+    }
+
+    /// A crash after intent checkpoint but before receipt fences replay and emits recovery once.
+    #[test]
+    fn durable_dispatch_crash_window_restores_as_one_recovery_event() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("dispatch-crash-test").expect("correlation valid");
+        let command = ExecutionCommand::new(
+            domain::MissionId::new("mission-crash").expect("mission valid"),
+            domain::TaskId::new("task-crash").expect("task valid"),
+            domain::ExecutionGroupId::new("group-crash").expect("group valid"),
+            domain::RoleId::new("carrier").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("mobility", "move", "v1").expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            correlation.clone(),
+        );
+        bridge
+            .execute("attempt-crash".to_string(), command, Vec::new())
+            .expect("intent prepares without routing");
+        let checkpoint = bridge.checkpoint_json().expect("intent checkpoints");
+
+        let mut restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+            &checkpoint,
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+            TimestampMs::new(10),
+        )
+        .expect("intent restores conservatively");
+        assert_eq!(
+            restored.execution_status("attempt-crash"),
+            Some(RemoteExecutionStatus::Unknown)
+        );
+        assert_eq!(
+            restored
+                .flush_dispatch_outbox()
+                .expect("Unknown intent is not eligible to route"),
+            0
+        );
+        restored
+            .tick(TimestampMs::new(11), &correlation)
+            .expect("first post-restore tick succeeds");
+        assert!(matches!(
+            restored.take_runtime_events().as_slice(),
+            [ExecutionEvent::RecoveryRequired { execution_id, .. }]
+                if execution_id == "attempt-crash"
+        ));
+        restored
+            .tick(TimestampMs::new(12), &correlation)
+            .expect("later tick succeeds");
+        assert!(restored.take_runtime_events().is_empty());
+    }
+
+    /// Group cancellation includes superseded ambiguous attempts and waits for every terminal fact.
+    #[test]
+    fn group_cancellation_covers_rebind_attempt_history() {
+        let mut bridge = IntegrationRuntimeBridge::new(
+            ControlPlane::new(),
+            InMemorySharedNodeState::new(),
+            InMemoryEventLog::new(),
+            GrpcNodeRouter::default(),
+        );
+        let correlation = CorrelationId::new("cancel-history-test").expect("correlation valid");
+        let group_id = domain::ExecutionGroupId::new("group-cancel").expect("group valid");
+        let original = ExecutionCommand::new(
+            domain::MissionId::new("mission-cancel").expect("mission valid"),
+            domain::TaskId::new("task-cancel").expect("task valid"),
+            group_id.clone(),
+            domain::RoleId::new("carrier").expect("role valid"),
+            NodeId::new("dog-a").expect("node valid"),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("mobility", "move", "v1").expect("contract valid"),
+                BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            correlation.clone(),
+        );
+        bridge
+            .runtime
+            .prepare_dispatch("attempt-old".to_string(), original.clone(), Vec::new())
+            .expect("old attempt prepares");
+        assert_eq!(
+            bridge
+                .runtime
+                .observe_node_unavailable(original.node_id(), "route lost")
+                .len(),
+            1
+        );
+        let replacement = ExecutionCommand::new(
+            original.mission_id().clone(),
+            original.task_ref().task_id().clone(),
+            group_id.clone(),
+            original.role_id().clone(),
+            NodeId::new("dog-b").expect("replacement node valid"),
+            original.intent().clone(),
+            correlation,
+        );
+        bridge
+            .runtime
+            .prepare_dispatch(
+                "attempt-replacement".to_string(),
+                replacement.clone(),
+                Vec::new(),
+            )
+            .expect("replacement attempt prepares");
+
+        assert_eq!(
+            bridge
+                .request_group_cancellation(&group_id)
+                .expect("cancellation records"),
+            2
+        );
+        assert_eq!(bridge.runtime.pending_cancellations().len(), 2);
+        assert!(!bridge.group_attempts_terminal(&group_id));
+        bridge
+            .runtime
+            .observe_cancellation_receipt(
+                "attempt-replacement",
+                "cancel-attempt-replacement",
+                replacement.node_id(),
+                true,
+                "persisted",
+            )
+            .expect("nonterminal receipt is accepted");
+        assert_eq!(
+            bridge
+                .flush_dispatch_outbox()
+                .expect("fact-driven flush must not retry Cancel"),
+            0,
+        );
+        assert_eq!(
+            bridge.runtime.pending_cancellations().len(),
+            2,
+            "timer retains cancellation retry authority"
+        );
+        bridge
+            .runtime
+            .observe_execution(
+                "attempt-replacement",
+                replacement.node_id().clone(),
+                1,
+                ExecutionStatus::Cancelled,
+                "replacement cancelled",
+            )
+            .expect("replacement terminal fact records");
+        assert!(!bridge.group_attempts_terminal(&group_id));
+        bridge
+            .runtime
+            .observe_execution(
+                "attempt-old",
+                original.node_id().clone(),
+                1,
+                ExecutionStatus::Cancelled,
+                "old ambiguous attempt cancelled",
+            )
+            .expect("old terminal fact records");
+        assert!(bridge.group_attempts_terminal(&group_id));
+        assert!(bridge.runtime.pending_cancellations().is_empty());
     }
 
     /// Group aggregation and dispatch validation follow the current TaskExecution.
@@ -4083,9 +4709,9 @@ mod tests {
         GrpcNodeEvent::NodeMessage {
             node_id: node_id.to_string(),
             session_id: "session-test".to_string(),
-            message: integration::grpc::v0_3::NodeMessage {
+            message: integration::grpc::v0_4::NodeMessage {
                 message: Some(NodePayload::ExecutionSnapshot(
-                    integration::grpc::v0_3::ExecutionSnapshot {
+                    integration::grpc::v0_4::ExecutionSnapshot {
                         session_id: "session-test".to_string(),
                         execution_id: execution_id.to_string(),
                         last_sequence: sequence,

@@ -270,14 +270,6 @@ impl RuntimeRelationSnapshot {
 }
 
 impl RuntimeExecutionManager {
-    /// Returns whether evidence names the current logical execution attempt.
-    pub fn shared_spatial_evidence_matches_current_execution(
-        &self,
-        evidence: &SharedSpatialEvidence,
-    ) -> bool {
-        self.active_executions.get(&evidence.slot()) == Some(&evidence.execution_id)
-    }
-
     /// Returns whether evidence names the current attempt and its current physical owner.
     pub fn shared_spatial_evidence_targets_current_attempt(
         &self,
@@ -908,6 +900,71 @@ mod tests {
             selector: selector(revision),
             frame_id: frame_id.to_string(),
             received_at: TimestampMs::new(received_at),
+        }
+    }
+
+    /// Route loss and rejected command receipts immediately fence a previously satisfied relation.
+    #[test]
+    fn physical_ambiguity_refreshes_relation_fences_without_another_fact() {
+        let mut baseline = RuntimeExecutionManager::new();
+        let source = command("observe", "safety", "cane-a");
+        let target = command("navigate", "navigator", "dog-a");
+        baseline
+            .register_relations(source.group_id(), source.mission_id(), &[relation()])
+            .expect("relation registers");
+        for (id, command) in [("source", &source), ("target", &target)] {
+            baseline
+                .prepare_dispatch(id.to_string(), command.clone(), Vec::new())
+                .expect("attempt prepares");
+            baseline
+                .observe_execution(
+                    id,
+                    command.node_id().clone(),
+                    1,
+                    ExecutionStatus::Running,
+                    "",
+                )
+                .expect("running evidence records");
+        }
+        assert_eq!(
+            baseline.relation_snapshots(source.group_id())[0].state(),
+            ExecutionRelationState::Satisfied
+        );
+        for fault in 0..3 {
+            let mut runtime = baseline.clone();
+            let events = match fault {
+                0 => runtime.observe_node_unavailable(source.node_id(), "route lost"),
+                1 => runtime
+                    .observe_dispatch_receipt(
+                        "source",
+                        "dispatch-source",
+                        source.node_id(),
+                        false,
+                        "rejected",
+                    )
+                    .expect("Execute rejection reduces"),
+                _ => {
+                    runtime
+                        .request_cancellation("source")
+                        .expect("cancel intent records");
+                    runtime
+                        .observe_cancellation_receipt(
+                            "source",
+                            "cancel-source",
+                            source.node_id(),
+                            false,
+                            "rejected",
+                        )
+                        .expect("Cancel rejection reduces")
+                }
+            };
+            let snapshot = &runtime.relation_snapshots(source.group_id())[0];
+            assert_eq!(snapshot.state(), ExecutionRelationState::Unknown);
+            assert!(snapshot.reconciliation_required());
+            assert!(events.iter().any(|event| matches!(
+                event,
+                ExecutionEvent::RelationReconciliationRequired { .. }
+            )));
         }
     }
 

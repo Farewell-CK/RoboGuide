@@ -87,6 +87,9 @@ pub const NODE_CONTRACT_VERSION_V0_2: &str = "roboguide.node.v0.2";
 /// Version identifier carrying selective State and Memory provider declarations.
 pub const NODE_CONTRACT_VERSION_V0_3: &str = "roboguide.node.v0.3";
 
+/// Version identifier carrying durable command identity and admission receipts.
+pub const NODE_CONTRACT_VERSION_V0_4: &str = "roboguide.node.v0.4";
+
 /// Errors raised when a domain value violates an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
@@ -251,6 +254,11 @@ impl NodeContractVersion {
     /// Returns the contract version carrying State and Memory extension declarations.
     pub fn v0_3() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_3.to_string())
+    }
+
+    /// Returns the contract version carrying durable command admission evidence.
+    pub fn v0_4() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_4.to_string())
     }
 }
 

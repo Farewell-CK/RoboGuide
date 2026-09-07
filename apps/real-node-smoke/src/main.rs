@@ -2,19 +2,19 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-//! Explicit smoke probe for the formal RoboGuide Node Protocol v0.3.
+//! Explicit smoke probe for the formal RoboGuide Node Protocol v0.4.
 //!
 //! The program acts as a small protocol participant: it registers a synthetic node,
 //! sends one heartbeat, and optionally simulates one server-issued Execute. It never
 //! calls a Local EAIOS or performs a physical action.
 
-use integration::grpc::v0_3::node_message::Message as NodePayload;
-use integration::grpc::v0_3::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
-use integration::grpc::v0_3::server_message::Message as ServerPayload;
-use integration::grpc::v0_3::{
-    Capability, ExecutionEvent, ExecutionPhase, Heartbeat, Hello, LocalRuntime,
-    LocalSystemDescriptor, NODE_CONTRACT_VERSION, NodeMessage, NodeRegistration, NodeStatus,
-    PROTOCOL_VERSION, Register, Resource, ServerMessage,
+use integration::grpc::v0_4::node_message::Message as NodePayload;
+use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
+use integration::grpc::v0_4::server_message::Message as ServerPayload;
+use integration::grpc::v0_4::{
+    Capability, CommandKind, CommandReceipt, CommandReceiptStatus, ExecutionEvent, ExecutionPhase,
+    Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor, NODE_CONTRACT_VERSION, NodeMessage,
+    NodeRegistration, NodeStatus, PROTOCOL_VERSION, Register, Resource, ServerMessage,
 };
 use std::env;
 use std::time::Duration;
@@ -182,7 +182,7 @@ async fn run(options: SmokeOptions) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds a valid synthetic registration accepted by the v0.3 server validator.
+/// Builds a valid synthetic registration accepted by the v0.4 server validator.
 fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistration {
     NodeRegistration {
         node_id: node_id.to_string(),
@@ -357,6 +357,9 @@ async fn simulate_one_execute(
     if execute.session_id != session_id {
         return Err("server Execute carried a stale session identity".to_string());
     }
+    if execute.command_id != format!("dispatch-{}", execute.execution_id) {
+        return Err("server Execute carried an invalid command identity".to_string());
+    }
     let invocation = execute
         .invocation
         .ok_or_else(|| "server Execute omitted its canonical invocation".to_string())?;
@@ -369,6 +372,20 @@ async fn simulate_one_execute(
         "simulating execution={} capability={} resources={:?}",
         execute.execution_id, invocation.capability_contract, execute.resource_ids
     );
+    outbound
+        .send(NodeMessage {
+            message: Some(NodePayload::CommandReceipt(CommandReceipt {
+                session_id: session_id.to_string(),
+                sequence: 2,
+                command_id: execute.command_id.clone(),
+                execution_id: execute.execution_id.clone(),
+                kind: CommandKind::CommandExecute as i32,
+                status: CommandReceiptStatus::CommandPersisted as i32,
+                reason: String::new(),
+            })),
+        })
+        .map_err(|_| "Node Protocol outbound stream closed before command receipt".to_string())?;
+    await_ack(inbound, 2).await?;
     for (sequence, phase) in [
         (1_u64, ExecutionPhase::Accepted),
         (2_u64, ExecutionPhase::Started),

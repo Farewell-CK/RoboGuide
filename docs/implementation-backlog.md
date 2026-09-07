@@ -51,7 +51,7 @@ identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变
 [`ADR-0024`](decisions/0024-federated-state-and-selective-memory.md) 已建立 Node/World/RoboGuide
 对象、六类 State semantic、source/channel/time/TTL/confidence，以及对 Mission、Control、
 Shared Node State、Runtime/Orchestration projection 的只读 federation。Node Config v0.5 和
-Protocol v0.3 支持选择性 Reported/Observed push；State observation 不自动触发 recovery。
+Protocol v0.4 继承选择性 Reported/Observed push；State observation 不自动触发 recovery。
 
 同一切片建立五类 Memory 的 provider discovery、immutable manifest catalog 和基于现有 CAS
 的 selective exchange evidence。它解决共同上层语义与 local ownership，不关闭 Q1：Belief
@@ -73,39 +73,38 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 
 ## 真机 Runtime 稳定基线 Gate
 
-当前 [`ADR-0015`](decisions/0015-runtime-execution-boundary.md) 实现可作为 Runtime
-职责边界和正常路径的开发基线，也可用于有人值守、低风险、允许人工停止的真机 smoke
-experiment；在以下阻塞项闭环前，不得描述为支持断线恢复、进程重启恢复、可靠取消或
-无人值守运行的稳定 Runtime 基线：
+[`ADR-0028`](decisions/0028-durable-command-recovery-and-attempts.md) 已完成 Runtime reliability
+的最小软件闭环。它不等于真机断电、网络分区、exactly-once physical action 或无人值守安全认证；
+这些仍必须由 deployment/hardware evidence 和明确 safety policy 关闭：
 
-| ID | 阻塞项 | 稳定基线验收条件 |
+| ID | 当前状态 | 验收边界 |
 | --- | --- | --- |
-| RT-G1 | Durable dispatch | Controller 在产生网络副作用前持久化不可变 dispatch intent；崩溃窗口内不得产生无法关联 Group/Task/Role 的孤立物理执行 |
-| RT-G2 | Recovery closed loop | `Unknown`、session loss、timeout 和 restart fencing 能进入 Assess -> Partial Release -> Match -> Propose -> Commit -> Rebind，并明确 Resume、Redispatch 或最终失败 |
-| RT-G3 | Attempt identity | logical Task/Role execution 与每次 physical attempt 分离；rebind 到新 Node 不复用冲突 identity，旧 attempt 被显式 supersede/fence |
-| RT-G4 | Durable cancellation | Runtime 持久化 CancelRequested、ack、deadline、retry 和 completion race；Mission cancel 会覆盖所有仍在运行的 execution，且不伪造物理终态 |
-| RT-G5 | Timer and liveness driving | Runtime timer 将 heartbeat/lease/session observation 转为 execution ambiguity evidence，并触发外部 Control reconciliation，而不是让 Running 无限悬挂 |
-| RT-G6 | Fault-injection evidence | 系统测试覆盖 dispatch 前后崩溃、Controller/Node 重启、断线重连、重复/乱序事实、取消竞态和 recovery rebind，并输出可检查事件轨迹 |
-| RT-G7 | Capability readiness | Node/WebUI process health 与每个 canonical capability 的 readiness 分离；ROS discovery、Router 和 vendor service 缺失必须可观察，不能仅凭进程存活进入 Matching |
-| RT-G8 | Verification evidence | localization verification 需要 active map identity、mode、pose quality 与 coordinate-frame evidence；`has_map=true` 只保留为 smoke 证据 |
-| RT-G9 | Relation actuation | Execution Relation violation/unknown 在 progression fence 之外需要版本化 pause/stop command、durable acknowledgement、deadline 与 completion race；Local Safety authority 不得被远程动作覆盖 |
+| RT-G1 Durable dispatch | 软件闭环已完成 | Controller 在网络副作用前持久化 immutable dispatch intent；Node receipt 只证明 journal admission，restart ambiguity 不自动重放 |
+| RT-G2 Recovery closed loop | 单 Role bootstrap slice 已完成 | `Unknown`、session loss、lease expiry 和 restart fencing 进入 Partial Release -> Match -> Propose -> Commit -> Rebind；无 candidate 时保持 pending。multi-role joint recovery 与 physical-world fencing 仍未实现 |
+| RT-G3 Attempt identity | 已完成 | logical `(GroupId, TaskRef, RoleId)` 与 durable-generation physical attempt 分离；rebind 保留旧 attempt history |
+| RT-G4 Durable cancellation | 最小两阶段语义已完成 | Mission `Cancelling`、per-attempt cancel intent、Node cancel-before-execute tombstone 与 terminal-evidence finalization 已持久化；远程安全 stop deadline/policy 仍属于 RT-G9 |
+| RT-G5 Timer and liveness driving | 已完成 | application timer 推进 lease/session expiry、recovery、cancel、Ready Task 与 outbox，失败时 fail-stop |
+| RT-G6 Fault-injection evidence | 离线确定性矩阵已完成 | [`runtime-reliability-fault-matrix.md`](development/runtime-reliability-fault-matrix.md) 覆盖 crash/restart/disconnect/duplicate/cancel/rebind；真机断电与真实网络分区证据仍缺失 |
+| RT-G7 Capability readiness | 软件闭环已完成，真机证据待补 | Node/WebUI process health 与 exact canonical capability readiness 分离；真实 ROS/EAIOS probe 仍需部署验证 |
+| RT-G8 Verification evidence | 强类型链路已完成，field mapping 待真机验证 | localization evidence 包含 active map identity、mode、pose quality、frame、current attempt/Node/session provenance；`has_map=true` 仅为 legacy smoke |
+| RT-G9 Relation actuation | 未完成 | relation violation/unknown 在 progression fence 之外仍需版本化 pause/stop command、durable acknowledgement、deadline 与 completion race；Local Safety authority 不得被远程动作覆盖 |
 
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7
-复用 Node Protocol v0.3 的 `RegistrationUpdate`，其 v0.5 config、精确 contract readiness 和
+复用 Node Protocol v0.4 的 `RegistrationUpdate`，其 v0.5 config、精确 contract readiness 和
 后续 Matching 传播已实现。双狗配置和 Robonix adapter 已按历史现场证据接入 exact ROS
 service discovery probe，但仍需全新真机故障注入。RT-G8 已建立独立结构化合同、Node journal
 持久化接口、Artifact transition 与 State projection；Node completion extraction 和真实 adapter
 mapping 仍未闭环。双狗验收条件见
 [`scenarios/distributed-spatial-memory-v0.1/acceptance.md`](../scenarios/distributed-spatial-memory-v0.1/acceptance.md)。
 
-Node Service 已有 durable execution journal 和本地幂等保护，但它不能替代 Controller
-dispatch intent、Runtime attempt history 和 Mission-level recovery transaction。Gate 的实现不得
-把 Recovery Decision 下沉到 Runtime，也不得让 Integration 获得 execution lifecycle authority。
+Node Service durable journal、本地幂等保护、Controller dispatch outbox、Runtime attempt history
+和 Mission-level cancellation/recovery transaction 已分别落在各自 authority。后续实现仍不得把
+Recovery Decision 下沉到 Runtime，也不得让 Integration 获得 execution lifecycle authority。
 
 [`ADR-0020`](decisions/0020-execution-coordination-relations.md) 建立 lifecycle-derived
-`requires-active` relation、Runtime live state、checkpoint 和 progression fence，但不关闭 RT-G3
-或 RT-G9。hazard/距离/速度等条件事实、relation composition 和硬实时 actuation 需要独立合同、
+`requires-active` relation、Runtime live state、checkpoint 和 progression fence；ADR-0028 已关闭
+其 RT-G3 attempt-identity 依赖，但不关闭 RT-G9。hazard/距离/速度等条件事实、relation composition 和硬实时 actuation 需要独立合同、
 现场时序证据与安全决策，不能用自由字符串表达式提前固化。
 
 ## 历史 Bootstrap 提案

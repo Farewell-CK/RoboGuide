@@ -120,6 +120,62 @@
         );
     }
 
+    /// Runtime ambiguity becomes a durable pending need that later Node evidence can resume.
+    #[test]
+    fn execution_ambiguity_recovery_resumes_after_candidate_registration() {
+        let mut fixture = recovery_fixture(false);
+        let need = fixture
+            .control
+            .begin_execution_recovery(
+                &fixture.group_id,
+                &fixture.task_ref,
+                &fixture.transport_role,
+                &fixture.node_a_id,
+                TimestampMs::new(1),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("Runtime ambiguity should be validated against current Control ownership");
+        assert_eq!(fixture.control.pending_role_recoveries(), vec![need.clone()]);
+        assert!(
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(2)).is_empty()
+        );
+
+        fixture
+            .control
+            .register_node(
+                &mut fixture.state,
+                registration("node-b", CapabilityKind::Transport, "space-b"),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(3)),
+                TimestampMs::new(3),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("replacement registration should become later recovery evidence");
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
+        fixture
+            .control
+            .rebind_role(
+                &committed,
+                TimestampMs::new(6),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            )
+            .expect("later candidate should complete the pending recovery");
+        assert!(fixture.control.pending_role_recoveries().is_empty());
+        assert_eq!(
+            fixture
+                .control
+                .group(&fixture.group_id)
+                .expect("Group remains")
+                .lifecycle(),
+            GroupLifecycle::Adapted
+        );
+    }
+
     /// The complete role-scoped pipeline commits before rebinding and preserves Group context.
     #[test]
     fn recovery_pipeline_commits_then_rebinds_external_choice() {

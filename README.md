@@ -61,7 +61,7 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
-  默认 probe formal Node Protocol v0.3，显式 `--simulate-execute` 经 Controller synthetic
+  默认 probe formal Node Protocol v0.4，显式 `--simulate-execute` 经 Controller synthetic
   Mission 触发正式 dispatch 后只发送合成生命周期事实；
 - Python 工具链由 `uv` 和项目级 `pyproject.toml` 管理；
 - 目标目录、依赖方向和首个异构任务闭环见
@@ -86,6 +86,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)；node-config/v0.6
   provider backend、discover/export/import workflow 与 scope 边界见
   [`ADR-0025`](docs/decisions/0025-memory-provider-backend-and-workflow.md)。
+- durable command outbox、两阶段 Mission cancellation、physical attempt history、Control-owned
+  recovery composition 与 application timer 见
+  [`ADR-0028`](docs/decisions/0028-durable-command-recovery-and-attempts.md)；离线故障证据见
+  [`runtime-reliability-fault-matrix.md`](docs/development/runtime-reliability-fault-matrix.md)。
 
 完整 MVP 切片仍需单独冻结。后续目录按首次真实实现按需创建，不提交空目录，
 不允许绕过已接受的模块边界。
@@ -198,20 +202,23 @@ SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式
 Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integration Engine 负责
 将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
-正式 gRPC Node Protocol v0.3 支持一个 Node 聚合多个 Local System，所有 Capability、
+正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System，所有 Capability、
 Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
 已 Commit 的 resource IDs。它还承载带当前 session/management sequence 的 peer-channel
 readiness evidence；实际 peer transport 和高频控制仍完全属于 Local EAIOS。
 Node config v0.6 可用固定、只读、owner-qualified 的 observer 周期读取 Local EAIOS 已建立端点；
 Local EAIOS 响应不能自行选择 `local_system_id` 或 TTL，采样失败由旧证据自然过期并 fence。
 `execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
+Execute/Cancel 还携带不可变 `command_id`；Node journal durable receipt 只证明命令已持久接受，
+不替代有序 execution lifecycle fact。Controller 先 checkpoint intent 再发送，restart 后把非终态
+physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是自动重放动作。
 
 旧同步 HTTP NodeGateway、HTTP wire DTO 和早期 configured command backend 已全部退役；它们
 不再是正式 Node Protocol 或生产节点执行路径。正式异步 lifecycle、配置驱动执行、SQLite
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-合同见
+Protocol 合同见 [`contracts/node/v0.7/`](contracts/node/v0.7/README.md)，Node config 合同见
 [`contracts/node/v0.6/`](contracts/node/v0.6/README.md)。Node config v0.6 为每个 exact
 canonical contract 提供固定 readiness observation，并增加选择性的 State export 与 Memory
 provider declaration、固定 discover/export/import workflow，以及可选的 peer-channel
@@ -432,7 +439,7 @@ Detect → Reconcile → Adapt
 
 恢复目标不是盲目重放旧命令，而是在当前物理世界中恢复任务进展，并且只升级到必要层级。
 
-## 启动 Node Protocol v0.3
+## 启动 Node Protocol v0.4
 
 Server 使用正式 gRPC bidirectional streaming：
 
@@ -526,7 +533,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission/v0.2/ + v0.3/ + v0.4/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/
-│   ├── node/v0.2/ ... v0.6/
+│   ├── node/v0.2/ ... v0.7/
 │   ├── state/v0.1/
 │   ├── memory/v0.1/
 │   ├── spatial/v0.1/
@@ -549,7 +556,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── control/             # node/match/proposal/coordination/group/scheduler/recovery/allocation
 │   ├── runtime/
 │   ├── artifact-store/      # filesystem ArtifactBlobStore implementation
-│   ├── integration/         # formal gRPC Node Protocol v0.3 wire/session/router
+│   ├── integration/         # formal gRPC Node Protocol v0.4 wire/session/router
 │   ├── orchestration/       # Controller Mission orchestration + IntegrationRuntimeBridge composition
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/

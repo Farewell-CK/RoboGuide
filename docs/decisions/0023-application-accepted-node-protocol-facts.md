@@ -2,6 +2,7 @@
 
 > ADR-0024 将 wire 升级为 Node Protocol v0.3；本 ADR 决定的 application-accepted
 > `Registered`/`Ack` 语义保持不变。
+> ADR-0028 将当前 wire 升级为 v0.4，并让 durable command receipt 经过同一 acceptance 边界。
 
 - 状态：Accepted
 - 日期：2026-09-01

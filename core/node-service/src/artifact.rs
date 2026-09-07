@@ -513,6 +513,7 @@ impl ArtifactClient {
     pub async fn record_localization_evidence(
         &self,
         evidence: &LocalizationVerificationEvidence,
+        session_id: &str,
     ) -> Result<(), ArtifactError> {
         let selector = evidence.artifact().selector();
         let endpoint = self.path(&[
@@ -526,6 +527,8 @@ impl ArtifactClient {
         let response = self
             .client
             .post(endpoint.clone())
+            .header("X-RoboGuide-Node-Id", evidence.node_id().as_str())
+            .header("X-RoboGuide-Session-Id", session_id)
             .json(evidence)
             .send()
             .await
@@ -1241,8 +1244,11 @@ impl ArtifactStager {
     pub async fn record_localization_evidence(
         &self,
         evidence: &LocalizationVerificationEvidence,
+        session_id: &str,
     ) -> Result<(), ArtifactError> {
-        self.client.record_localization_evidence(evidence).await
+        self.client
+            .record_localization_evidence(evidence, session_id)
+            .await
     }
 
     /// Fetches and validates the exact published manifest selected by one input binding.

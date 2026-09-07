@@ -32,6 +32,8 @@ pub enum MissionExecutionLifecycle {
     Accepted,
     /// At least one Task is Ready, Active, Blocked, or completed while later Tasks remain.
     Running,
+    /// An explicit cancellation was durably requested; active attempts are draining.
+    Cancelling,
     /// Every Task in the accepted plan completed and the Group was released.
     Completed,
     /// Mission policy declared a final failure and released the Group.
@@ -251,6 +253,15 @@ impl MissionOrchestrator {
                             | GroupLifecycle::Blocked
                     )
                 }
+                MissionExecutionLifecycle::Cancelling => {
+                    matches!(
+                        group.lifecycle(),
+                        GroupLifecycle::Bound
+                            | GroupLifecycle::Active
+                            | GroupLifecycle::Adapted
+                            | GroupLifecycle::Blocked
+                    )
+                }
                 MissionExecutionLifecycle::Completed => {
                     group.lifecycle() == GroupLifecycle::Released
                         && group
@@ -286,6 +297,9 @@ impl MissionOrchestrator {
         let Some(execution) = self.executions.get(mission_id) else {
             return Vec::new();
         };
+        if execution.lifecycle() == MissionExecutionLifecycle::Cancelling {
+            return Vec::new();
+        }
         let Some(group) = control.group(execution.group_id()) else {
             return Vec::new();
         };
@@ -308,6 +322,9 @@ impl MissionOrchestrator {
         let Some(execution) = self.executions.get(mission_id) else {
             return Vec::new();
         };
+        if execution.lifecycle() != MissionExecutionLifecycle::Running {
+            return Vec::new();
+        }
         let Some(group) = control.group(execution.group_id()) else {
             return Vec::new();
         };
@@ -521,6 +538,92 @@ impl MissionOrchestrator {
                 events,
             )?;
         }
+        control.fail_group(
+            &group_id,
+            "Mission cancelled",
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        for context in execution.plan().contexts() {
+            control.release_context_bindings(
+                &group_id,
+                context.context_id(),
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+        }
+        control.release_group(&group_id, timestamp, correlation_id, events)?;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .lifecycle = MissionExecutionLifecycle::Cancelled;
+        Ok(())
+    }
+
+    /// Persists a cancellation request while retaining the Group for in-flight attempts.
+    pub fn request_cancel<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        let execution = self
+            .executions
+            .get(mission_id)
+            .ok_or_else(|| OrchestrationError::Mission(format!("unknown Mission {mission_id}")))?;
+        if matches!(
+            execution.lifecycle(),
+            MissionExecutionLifecycle::Completed
+                | MissionExecutionLifecycle::Failed
+                | MissionExecutionLifecycle::Cancelled
+        ) {
+            return Err(OrchestrationError::Mission(
+                "Mission is already terminal".to_string(),
+            ));
+        }
+        let group_id = execution.group_id().clone();
+        if control
+            .group(&group_id)
+            .is_some_and(|group| group.lifecycle() != GroupLifecycle::Blocked)
+        {
+            control.block_group(
+                &group_id,
+                "Mission cancellation requested",
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+        }
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .lifecycle = MissionExecutionLifecycle::Cancelling;
+        Ok(())
+    }
+
+    /// Finalizes a durable cancellation once no physical attempt remains active.
+    pub fn finalize_cancel<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        let execution = self
+            .executions
+            .get(mission_id)
+            .ok_or_else(|| OrchestrationError::Mission(format!("unknown Mission {mission_id}")))?;
+        if execution.lifecycle() != MissionExecutionLifecycle::Cancelling {
+            return Err(OrchestrationError::Mission(
+                "Mission is not cancelling".to_string(),
+            ));
+        }
+        let group_id = execution.group_id().clone();
         control.fail_group(
             &group_id,
             "Mission cancelled",
@@ -1621,6 +1724,83 @@ mod tests {
             control
                 .group(&group_id)
                 .expect("Group retained")
+                .lifecycle(),
+            GroupLifecycle::Released
+        );
+    }
+
+    /// A cancellation request survives checkpoint restore before terminal attempt evidence arrives.
+    #[test]
+    fn cancelling_mission_restores_and_waits_for_explicit_finalization() {
+        let source = include_str!("../../../scenarios/phase1-mission-v0.2/mission-plan.json");
+        let plan = decode_mission_plan(source).expect("fixture should decode");
+        let mission_id = plan.goal().mission_id().clone();
+        let group_id = ExecutionGroupId::new("group-cancel-durable").expect("group id valid");
+        let correlation = CorrelationId::new("cancel-durable-test").expect("trace valid");
+        let mut control = ControlPlane::new();
+        let mut events = InMemoryEventLog::new();
+        let mut orchestrator = MissionOrchestrator::new();
+        orchestrator
+            .submit(
+                plan,
+                group_id.clone(),
+                &mut control,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("Mission should be accepted");
+        orchestrator
+            .request_cancel(
+                &mission_id,
+                &mut control,
+                TimestampMs::new(2),
+                &correlation,
+                &mut events,
+            )
+            .expect("cancellation request should persist");
+
+        let checkpoint = orchestrator
+            .checkpoint_json()
+            .expect("cancelling Mission serializes");
+        let mut restored =
+            MissionOrchestrator::restore_json(&checkpoint).expect("cancelling Mission restores");
+        restored
+            .validate_control_authority(&control)
+            .expect("Cancelling Mission retains a blocked Group");
+        assert_eq!(
+            restored
+                .execution(&mission_id)
+                .expect("Mission retained")
+                .lifecycle(),
+            MissionExecutionLifecycle::Cancelling
+        );
+        assert!(
+            restored
+                .dispatchable_tasks(&mission_id, &control)
+                .is_empty()
+        );
+
+        restored
+            .finalize_cancel(
+                &mission_id,
+                &mut control,
+                TimestampMs::new(3),
+                &correlation,
+                &mut events,
+            )
+            .expect("terminal attempt evidence permits finalization");
+        assert_eq!(
+            restored
+                .execution(&mission_id)
+                .expect("Mission retained")
+                .lifecycle(),
+            MissionExecutionLifecycle::Cancelled
+        );
+        assert_eq!(
+            control
+                .group(&group_id)
+                .expect("Group retained as history")
                 .lifecycle(),
             GroupLifecycle::Released
         );

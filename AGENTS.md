@@ -36,7 +36,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   configured EAIOS imports do not copy payload bytes into that ledger.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
-  monotonic after Imported. Node Protocol v0.3 has no durable selective-import command; discovery
+  monotonic after Imported. Node Protocol v0.4 has no durable selective-import command; discovery
   never authorizes automatic replication.
 - ExecutionGroup-scoped Memory currently has a domain model and Node-local invocation validation
   only. Do not claim or implement complete distributed Group authorization/handoff until its
@@ -64,7 +64,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   health and separately records RoboGuide-observed liveness; it does not trigger
   reconciliation or automatic recovery.
 - `core/runtime` owns the transport-neutral live execution registry, stable execution
-  identity, ordered fact reduction, recovery-required fencing, and its checkpoint.
+  identity, logical-slot versus physical-attempt history, durable command intents, ordered fact
+  reduction, recovery-required fencing, and its checkpoint.
   `core/orchestration::IntegrationRuntimeBridge` is the Controller composition facade
   and must not keep a second authoritative execution map or directly mutate Task lifecycle.
 - Runtime `Unknown` means recovery-pending physical ambiguity, never terminal Task or
@@ -90,7 +91,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   inspect reservations, validate proposals, commit resources, or mutate State/Groups.
 - `core/artifact-store/` contains the filesystem implementation of the transport-neutral
   ArtifactBlobStore port; it stores opaque bytes and does not own map, task, or execution policy.
-- `core/integration/` owns the formal gRPC Node Protocol v0.3 transport;
+- `core/integration/` owns the formal gRPC Node Protocol v0.4 transport;
   `core/node-service/` owns node-side lifecycle, configuration, durable execution
   continuity, and the declarative Local Integration Engine.
 - `core/integration/` contains only formal Node Protocol wire/session/router code;
@@ -106,12 +107,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   configs normalize those declarations to empty and v0.5 providers remain metadata-only. Optional
   v0.6 peer-channel observers use fixed read-only routes and configuration-owned LocalSystem
   identity; their response observes established endpoints and never requests transport setup.
-- Node Protocol v0.3 carries complete State/Memory provider snapshots and bounded periodic State
+- Node Protocol v0.4 carries complete State/Memory provider snapshots, bounded periodic State
   observation batches plus identified peer-channel readiness facts. Local EAIOS establishes the
   actual peer channel; Controller verifies Node/LocalSystem/committed ContextRole ownership, and all
   logical peers must provide non-expired receive-relative acknowledgements for one
   instance/profile/schema before Runtime marks it Ready. Expiry, route loss, and restart fence it;
-  a bound waiting Task remains durable Ready for later dispatch. Sampling failure only causes
+  a bound waiting Task remains durable Ready for later dispatch. It also carries immutable Execute/
+  Cancel command identities and Node-journal receipts; receipts prove durable command admission, not
+  execution outcome. Sampling failure only causes
   staleness and never changes health, readiness, execution lifecycle, or recovery. The v0.2
   endpoint is rejection-only.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
@@ -125,7 +128,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.
-- `apps/real-node-smoke/` probes the formal Node Protocol v0.3 handshake by default; its explicit
+- `apps/real-node-smoke/` probes the formal Node Protocol v0.4 handshake by default; its explicit
   `--simulate-execute` mode submits a synthetic Mission through the Controller HTTP API, emits only
   synthetic lifecycle facts after formal dispatch, uses a session-unique capability contract so it
   cannot select an existing Node, and never performs hardware I/O.

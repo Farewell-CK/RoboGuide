@@ -1,10 +1,10 @@
-//! Formal Node Protocol v0.3 lifecycle around the generic Local Integration Engine.
+//! Formal Node Protocol v0.4 lifecycle around the generic Local Integration Engine.
 
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
-use integration::grpc::v0_3::node_message::Message as NodePayload;
-use integration::grpc::v0_3::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
-use integration::grpc::v0_3::server_message::Message as ServerPayload;
-use integration::grpc::v0_3::{
+use integration::grpc::v0_4::node_message::Message as NodePayload;
+use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
+use integration::grpc::v0_4::server_message::Message as ServerPayload;
+use integration::grpc::v0_4::{
     Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
     MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NODE_CONTRACT_VERSION,
     NodeMessage, NodeRegistration, PROTOCOL_VERSION, PeerChannelReadiness, ProtocolError, Register,
@@ -48,7 +48,7 @@ impl NodeService {
         }
     }
 
-    /// Runs one Hello -> Welcome -> Register -> Registered v0.3 session.
+    /// Runs one Hello -> Welcome -> Register -> Registered v0.4 session.
     pub async fn run_session(&self) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
         let mut client =
@@ -129,7 +129,12 @@ impl NodeService {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
-                        self.handle_server_message(message, &registered.session_id, &outbound)?;
+                        self.handle_server_message(
+                            message,
+                            &registered.session_id,
+                            &outbound,
+                            &management_sequence,
+                        ).await?;
                     }
                     event = local_events.recv() => match event {
                         Ok(event) => outbound.send(NodeMessage { message: Some(NodePayload::ExecutionEvent(ExecutionEvent {
@@ -445,11 +450,12 @@ impl NodeService {
     }
 
     /// Handles commands without allowing Server input to select Local How.
-    fn handle_server_message(
+    async fn handle_server_message(
         &self,
         message: ServerMessage,
         session_id: &str,
         outbound: &mpsc::UnboundedSender<NodeMessage>,
+        management_sequence: &Arc<tokio::sync::Mutex<u64>>,
     ) -> Result<(), NodeServiceError> {
         match message.message {
             Some(ServerPayload::Execute(execute)) if execute.session_id == session_id => {
@@ -457,11 +463,21 @@ impl NodeService {
                     NodeServiceError::Protocol("Execute lacks canonical invocation".to_string())
                 })?;
                 let execution_id = execute.execution_id;
-                match self
-                    .engine
-                    .execute(execution_id.clone(), invocation, execute.resource_ids)
-                {
-                    Ok(ExecuteDisposition::Started) => {}
+                let command_id = execute.command_id;
+                if command_id != format!("dispatch-{execution_id}") {
+                    return Err(NodeServiceError::Protocol(
+                        "Execute command identity does not match attempt".to_string(),
+                    ));
+                }
+                let mut receipt_reason = String::new();
+                let receipt_status = match self.engine.execute(
+                    execution_id.clone(),
+                    invocation,
+                    execute.resource_ids,
+                ) {
+                    Ok(ExecuteDisposition::Started) => {
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                    }
                     Ok(ExecuteDisposition::Existing(mut snapshot)) => {
                         snapshot.session_id = session_id.to_string();
                         outbound
@@ -469,22 +485,46 @@ impl NodeService {
                                 message: Some(NodePayload::ExecutionSnapshot(snapshot)),
                             })
                             .map_err(|_| NodeServiceError::Closed)?;
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
                     }
-                    Err(error) => send_local_rejection(
-                        outbound,
-                        session_id,
-                        &execution_id,
-                        "execute_rejected",
-                        &error,
-                    )?,
-                }
+                    Err(error) => {
+                        receipt_reason = error.to_string();
+                        send_local_rejection(
+                            outbound,
+                            session_id,
+                            &execution_id,
+                            "execute_rejected",
+                            &error,
+                        )?;
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                    }
+                };
+                send_command_receipt(
+                    outbound,
+                    session_id,
+                    command_id,
+                    execution_id,
+                    integration::grpc::v0_4::CommandKind::CommandExecute,
+                    receipt_status,
+                    receipt_reason,
+                    management_sequence,
+                )
+                .await?;
                 Ok(())
             }
             Some(ServerPayload::Cancel(Cancel {
                 session_id: command_session,
                 execution_id,
+                command_id,
             })) if command_session == session_id => {
-                if let Err(error) = self.engine.cancel(&execution_id) {
+                if command_id != format!("cancel-{execution_id}") {
+                    return Err(NodeServiceError::Protocol(
+                        "Cancel command identity does not match attempt".to_string(),
+                    ));
+                }
+                let mut receipt_reason = String::new();
+                let receipt_status = if let Err(error) = self.engine.cancel(&execution_id) {
+                    receipt_reason = error.to_string();
                     send_local_rejection(
                         outbound,
                         session_id,
@@ -492,7 +532,39 @@ impl NodeService {
                         "cancel_rejected",
                         &error,
                     )?;
-                }
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                } else {
+                    let mut snapshot = self
+                        .engine
+                        .snapshots()?
+                        .into_iter()
+                        .find(|snapshot| snapshot.execution_id == execution_id)
+                        .unwrap_or_else(|| integration::grpc::v0_4::ExecutionSnapshot {
+                            execution_id: execution_id.clone(),
+                            session_id: session_id.to_string(),
+                            last_sequence: 1,
+                            phase: integration::grpc::v0_4::ExecutionPhase::Cancelled as i32,
+                            reason: "cancelled before Execute reached Node journal".to_string(),
+                        });
+                    snapshot.session_id = session_id.to_string();
+                    outbound
+                        .send(NodeMessage {
+                            message: Some(NodePayload::ExecutionSnapshot(snapshot)),
+                        })
+                        .map_err(|_| NodeServiceError::Closed)?;
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                };
+                send_command_receipt(
+                    outbound,
+                    session_id,
+                    command_id,
+                    execution_id,
+                    integration::grpc::v0_4::CommandKind::CommandCancel,
+                    receipt_status,
+                    receipt_reason,
+                    management_sequence,
+                )
+                .await?;
                 Ok(())
             }
             Some(ServerPayload::Ack(_)) | Some(ServerPayload::Error(_)) => Ok(()),
@@ -518,6 +590,37 @@ impl NodeService {
         }
         Ok(())
     }
+}
+
+/// Sends command-admission evidence with monotonic management ordering.
+#[allow(clippy::too_many_arguments)]
+async fn send_command_receipt(
+    outbound: &mpsc::UnboundedSender<NodeMessage>,
+    session_id: &str,
+    command_id: String,
+    execution_id: String,
+    kind: integration::grpc::v0_4::CommandKind,
+    status: integration::grpc::v0_4::CommandReceiptStatus,
+    reason: String,
+    management_sequence: &Arc<tokio::sync::Mutex<u64>>,
+) -> Result<(), NodeServiceError> {
+    let mut sequence = management_sequence.lock().await;
+    *sequence = sequence.saturating_add(1);
+    outbound
+        .send(NodeMessage {
+            message: Some(NodePayload::CommandReceipt(
+                integration::grpc::v0_4::CommandReceipt {
+                    session_id: session_id.to_string(),
+                    sequence: *sequence,
+                    command_id,
+                    execution_id,
+                    kind: kind as i32,
+                    status: status as i32,
+                    reason,
+                },
+            )),
+        })
+        .map_err(|_| NodeServiceError::Closed)
 }
 
 /// Attaches current Node session ordering to one Local EAIOS peer readiness fact.
@@ -1543,7 +1646,7 @@ mod tests {
             }) as Arc<dyn LocalDriver>],
         )
         .expect("engine initializes");
-        let invocation = integration::grpc::v0_3::CanonicalInvocation {
+        let invocation = integration::grpc::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -1588,7 +1691,7 @@ mod tests {
             }) as Arc<dyn LocalDriver>],
         )
         .expect("engine initializes");
-        let invocation = integration::grpc::v0_3::CanonicalInvocation {
+        let invocation = integration::grpc::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-timeout".to_string(),
             group_id: "group-a".to_string(),
@@ -1613,7 +1716,7 @@ mod tests {
             .expect("timeout evidence exists");
         assert_eq!(
             event.phase,
-            integration::grpc::v0_3::ExecutionPhase::Unknown
+            integration::grpc::v0_4::ExecutionPhase::Unknown
         );
         let journal =
             crate::ExecutionJournal::open(crate::journal_path(engine.catalog().state_directory()))
@@ -1655,7 +1758,7 @@ mod tests {
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(
-                    integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
+                    integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer::new(
                         grpc_service,
                     ),
                 )
@@ -1698,7 +1801,11 @@ mod tests {
         ));
         assert_eq!(
             router
-                .cancel("dog-a", "execution-rejected".to_string())
+                .cancel(
+                    "dog-a",
+                    "cancel-execution-rejected".to_string(),
+                    "execution-rejected".to_string(),
+                )
                 .expect_err("rejected registration has no route")
                 .code(),
             tonic::Code::Unavailable
@@ -1718,8 +1825,8 @@ mod tests {
             RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
         };
         use integration::GrpcIntegrationService;
-        use integration::grpc::v0_3::CanonicalInvocation;
-        use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+        use integration::grpc::v0_4::CanonicalInvocation;
+        use integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
         use orchestration::{IntegrationRuntimeBridge, RemoteExecutionStatus};
         use state::InMemorySharedNodeState;
         use testkit::InMemoryEventLog;
@@ -1756,7 +1863,7 @@ mod tests {
         let registration = DomainRegistration::new_with_contracts(
             NodeId::new("dog-a").expect("node valid"),
             LocalRuntime::new("configured-runtime", "1").expect("runtime valid"),
-            NodeContractVersion::new(integration::grpc::v0_3::NODE_CONTRACT_VERSION)
+            NodeContractVersion::new(integration::grpc::v0_4::NODE_CONTRACT_VERSION)
                 .expect("contract version valid"),
             vec![Capability::new(CapabilityKind::Mobility, true)],
             vec![contract.clone()],
@@ -1895,7 +2002,10 @@ mod tests {
                 TimestampMs::new(3),
                 correlation.clone(),
             )
-            .expect("bound command routes");
+            .expect("bound command prepares");
+        bridge
+            .flush_command_outboxes()
+            .expect("persisted command routes");
         assert_eq!(command.node_id().as_str(), "dog-a");
         while bridge.execution_status("execution-e2e") != Some(RemoteExecutionStatus::Running) {
             let event =
@@ -2006,7 +2116,7 @@ mod tests {
         )
         .expect("engine reopens journal");
         engine.recover().expect("ambiguous execution is fenced");
-        let competing = integration::grpc::v0_3::CanonicalInvocation {
+        let competing = integration::grpc::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-a".to_string(),
             group_id: "group-a".to_string(),
@@ -2085,10 +2195,10 @@ mod tests {
         assert_eq!(event.execution_id, "handle-recovered");
         assert_eq!(
             event.phase,
-            integration::grpc::v0_3::ExecutionPhase::Started
+            integration::grpc::v0_4::ExecutionPhase::Started
         );
 
-        let competing = integration::grpc::v0_3::CanonicalInvocation {
+        let competing = integration::grpc::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "task-b".to_string(),
             group_id: "group-a".to_string(),
@@ -2261,7 +2371,7 @@ mod tests {
             "restart must not status-poll a completed local execution and freeze the source again"
         );
 
-        let invocation = integration::grpc::v0_3::CanonicalInvocation {
+        let invocation = integration::grpc::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),
             task_id: "build-map".to_string(),
             group_id: "group-a".to_string(),
@@ -2309,8 +2419,8 @@ mod tests {
             ContentDigest, MapArtifactManifest, MapArtifactRef, MapId, MapRevisionId,
             MapRevisionSelector, MissionId, NodeId, SpatialAnchorId, TimestampMs,
         };
-        use integration::grpc::v0_3::scalar_value::Value as Scalar;
-        use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ScalarValue};
+        use integration::grpc::v0_4::scalar_value::Value as Scalar;
+        use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase, ScalarValue};
         use sha2::Digest;
         use std::collections::HashMap;
         use std::sync::atomic::AtomicUsize;

@@ -1,5 +1,8 @@
 # ADR-0027: Runtime Coordination Evidence Completion
 
+> ADR-0028 将当前 Node Protocol 升级为 v0.4、inner checkpoint 升级为 v12、server wrapper
+> 升级为 v13；本 ADR 的 coordination evidence 与 conservative restore 语义保持不变。
+
 ## Status
 
 Accepted

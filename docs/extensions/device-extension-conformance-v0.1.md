@@ -5,7 +5,7 @@ driver。正式链路保持：
 
 ```text
 ExecutionIntent
-  -> Node Protocol v0.3
+  -> Node Protocol v0.4
   -> roboguide-node
   -> Local Integration Engine
   -> configured HTTP / dynamic gRPC / MCP
@@ -16,7 +16,7 @@ ExecutionIntent
 
 | 位置 | 正式责任 | 明确不负责 |
 | --- | --- | --- |
-| `core/integration` | Node Protocol v0.3 protobuf wire、gRPC session、lease/session fencing、NodeId command router 和 wire 校验 | Control reservation/recovery、Runtime/Task lifecycle、Local How |
+| `core/integration` | Node Protocol v0.4 protobuf wire、gRPC session、lease/session fencing、NodeId command router 和 wire 校验 | Control reservation/recovery、Runtime/Task lifecycle、Local How |
 | `core/orchestration` | Controller application composition，包括 `IntegrationRuntimeBridge` 对 Control/State/Runtime 的事实归约 | transport framing、endpoint 选择、Local EAIOS 调用 |
 | `core/artifact-store` | 独立 filesystem CAS、分块上传和 digest/path 安全 | Map/Task/Group 状态、Control ownership、Local EAIOS workflow |
 | `core/node-service` | 每台机器唯一的 `roboguide-node`、配置编译、HTTP/dynamic gRPC/MCP driver、journal、local lock 和 status/cancel lifecycle | 物理 safety、Immediate How、Control commitment/recovery |

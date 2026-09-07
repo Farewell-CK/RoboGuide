@@ -5,7 +5,7 @@ or `RoboGuide` object and one of `Desired`, `Committed`, `Reported`, `Observed`,
 `Belief` semantics. Source and channel remain part of the key, so independent observations never
 collapse into an implicit global truth.
 
-Node Protocol v0.3 accepts only State exports declared by the current complete registration
+Node Protocol v0.4 accepts only State exports declared by the current complete registration
 snapshot. Node exports are limited to `Reported` and `Observed`; authoritative `Desired` and
 `Committed` views remain with Mission Orchestration and Control. Payloads are bounded JSON with a
 versioned payload schema, receive-relative TTL, optional source-local time, and optional confidence.

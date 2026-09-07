@@ -11,6 +11,59 @@ use domain::{ExecutionCommand, ExecutionGroupId, NodeId, ResourceId, RoleId, Tas
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
+/// Logical execution slot that may be occupied by multiple physical attempts over time.
+pub type ExecutionSlot = (ExecutionGroupId, TaskRef, RoleId);
+
+/// Durable state for one Controller-to-Node dispatch intent.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DispatchIntent {
+    /// Stable physical attempt identity carried by the Node Protocol execution field.
+    pub execution_id: String,
+    /// Immutable command prepared for delivery.
+    pub command: ExecutionCommand,
+    /// Stable sorted resources covered by the commitment.
+    pub resource_ids: Vec<ResourceId>,
+    /// Number of delivery attempts made by the Controller process.
+    pub delivery_attempts: u32,
+    /// Whether Node journal acceptance has been proven by a receipt or execution fact.
+    pub delivered: bool,
+}
+
+impl DispatchIntent {
+    /// Returns the deterministic command identity for this immutable Execute intent.
+    pub fn command_id(&self) -> String {
+        format!("dispatch-{}", self.execution_id)
+    }
+}
+
+/// Serializable generation allocated to one logical Group/Task/Role slot.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct AttemptGenerationCheckpoint {
+    /// Group owning the logical slot.
+    group_id: ExecutionGroupId,
+    /// Mission-scoped Task owning the logical slot.
+    task_ref: TaskRef,
+    /// Role occupying the logical slot.
+    role_id: RoleId,
+    /// Last allocated physical attempt generation.
+    generation: u64,
+}
+
+/// Serializable dispatch intent retained in the Runtime checkpoint.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct DispatchIntentCheckpoint {
+    /// Stable physical attempt identity.
+    execution_id: String,
+    /// Immutable command prepared for delivery.
+    command: ExecutionCommand,
+    /// Committed resources covered by the intent.
+    resource_ids: Vec<ResourceId>,
+    /// Number of Router delivery attempts.
+    delivery_attempts: u32,
+    /// Whether Node journal acceptance was proven by a receipt or execution fact.
+    delivered: bool,
+}
+
 /// Runtime lifecycle of one stable role execution identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExecutionStatus {
@@ -54,7 +107,7 @@ pub enum ObservedTaskResult {
 /// Canonical Runtime event produced after reducing one Node execution fact.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionEvent {
-    /// The first authoritative Node fact activated a committed Task execution.
+    /// The first authoritative Node fact activated a committed Task or its rebound attempt.
     TaskActivated {
         /// Mission-level Group containing the Task.
         group_id: ExecutionGroupId,
@@ -126,6 +179,34 @@ pub struct ExecutionContext {
     resource_ids: Vec<ResourceId>,
 }
 
+/// Immutable audit view of one physical attempt and its latest reduced status.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecutionAttemptSnapshot {
+    /// Stable attempt identity used by command receipts and ordered facts.
+    execution_id: String,
+    /// Logical execution identity and physical Node selected for this attempt.
+    command: ExecutionCommand,
+    /// Latest Runtime-reduced lifecycle status.
+    status: ExecutionStatus,
+}
+
+impl ExecutionAttemptSnapshot {
+    /// Returns the physical attempt identity.
+    pub fn execution_id(&self) -> &str {
+        &self.execution_id
+    }
+
+    /// Returns the immutable logical context and physical owner.
+    pub const fn command(&self) -> &ExecutionCommand {
+        &self.command
+    }
+
+    /// Returns the latest reduced attempt status.
+    pub const fn status(&self) -> ExecutionStatus {
+        self.status
+    }
+}
+
 impl ExecutionContext {
     /// Returns the canonical committed execution command.
     pub const fn command(&self) -> &ExecutionCommand {
@@ -181,6 +262,15 @@ pub struct RuntimeExecutionCheckpoint {
     /// Strong localization evidence retained for current logical attempts.
     #[serde(default)]
     spatial_evidence: Vec<SharedSpatialEvidence>,
+    /// Last physical attempt generation allocated for each logical slot.
+    #[serde(default)]
+    attempt_generations: Vec<AttemptGenerationCheckpoint>,
+    /// Durable Execute intents waiting for or retaining delivery evidence.
+    #[serde(default)]
+    dispatch_outbox: Vec<DispatchIntentCheckpoint>,
+    /// Attempts whose cancellation must survive Controller restart and be retried until terminal.
+    #[serde(default)]
+    cancellation_intents: BTreeSet<String>,
 }
 
 /// Whether a validated dispatch must be sent through Integration.
@@ -244,6 +334,8 @@ pub struct RuntimeExecutionManager {
     restored_executions: BTreeSet<String>,
     /// Tasks for which Runtime already emitted an activation transition.
     activated_tasks: BTreeSet<(ExecutionGroupId, TaskRef)>,
+    /// Replacement attempts that must reactivate an Adapted Group after Node acceptance.
+    reactivation_attempts: BTreeSet<String>,
     /// Mission-owned relation specifications resolved to Group/Task/Role logical slots.
     pub(crate) relations: BTreeMap<RelationKey, RuntimeExecutionRelation>,
     /// Current Runtime-derived state for every accepted relation.
@@ -259,6 +351,12 @@ pub struct RuntimeExecutionManager {
     /// Strong map/frame evidence by current Group Task role slot.
     pub(crate) spatial_evidence:
         BTreeMap<(ExecutionGroupId, TaskRef, RoleId), SharedSpatialEvidence>,
+    /// Last physical attempt generation allocated for each logical slot.
+    attempt_generations: BTreeMap<ExecutionSlot, u64>,
+    /// Durable Controller-to-Node Execute intents.
+    dispatch_outbox: BTreeMap<String, DispatchIntent>,
+    /// Durable cancellation requests, retaining physical ambiguity until terminal evidence.
+    cancellation_intents: BTreeSet<String>,
 }
 
 impl RuntimeExecutionManager {
@@ -272,6 +370,7 @@ impl RuntimeExecutionManager {
             active_executions: BTreeMap::new(),
             restored_executions: BTreeSet::new(),
             activated_tasks: BTreeSet::new(),
+            reactivation_attempts: BTreeSet::new(),
             relations: BTreeMap::new(),
             relation_states: BTreeMap::new(),
             relation_fences: BTreeSet::new(),
@@ -279,12 +378,16 @@ impl RuntimeExecutionManager {
             coordination_contexts: BTreeMap::new(),
             peer_channels: BTreeMap::new(),
             spatial_evidence: BTreeMap::new(),
+            attempt_generations: BTreeMap::new(),
+            dispatch_outbox: BTreeMap::new(),
+            cancellation_intents: BTreeSet::new(),
         }
     }
 
     /// Returns a durable transport-neutral Runtime projection.
     pub fn checkpoint(&self) -> RuntimeExecutionCheckpoint {
         RuntimeExecutionCheckpoint {
+            cancellation_intents: self.cancellation_intents.clone(),
             executions: self.executions.clone(),
             execution_status: self.execution_status.clone(),
             execution_sequences: self.execution_sequences.clone(),
@@ -333,6 +436,29 @@ impl RuntimeExecutionManager {
             coordination_contexts: self.coordination_contexts.values().cloned().collect(),
             peer_channels: self.peer_channels.values().cloned().collect(),
             spatial_evidence: self.spatial_evidence.values().cloned().collect(),
+            attempt_generations: self
+                .attempt_generations
+                .iter()
+                .map(
+                    |((group_id, task_ref, role_id), generation)| AttemptGenerationCheckpoint {
+                        group_id: group_id.clone(),
+                        task_ref: task_ref.clone(),
+                        role_id: role_id.clone(),
+                        generation: *generation,
+                    },
+                )
+                .collect(),
+            dispatch_outbox: self
+                .dispatch_outbox
+                .values()
+                .map(|intent| DispatchIntentCheckpoint {
+                    execution_id: intent.execution_id.clone(),
+                    command: intent.command.clone(),
+                    resource_ids: intent.resource_ids.clone(),
+                    delivery_attempts: intent.delivery_attempts,
+                    delivered: intent.delivered,
+                })
+                .collect(),
         }
     }
 
@@ -412,6 +538,7 @@ impl RuntimeExecutionManager {
             }
         }
         let mut restored = Self {
+            cancellation_intents: checkpoint.cancellation_intents,
             executions: checkpoint.executions,
             execution_status,
             execution_sequences: checkpoint.execution_sequences,
@@ -419,6 +546,7 @@ impl RuntimeExecutionManager {
             active_executions,
             restored_executions,
             activated_tasks,
+            reactivation_attempts: BTreeSet::new(),
             relations,
             relation_states,
             relation_fences,
@@ -426,7 +554,39 @@ impl RuntimeExecutionManager {
             coordination_contexts,
             peer_channels,
             spatial_evidence,
+            attempt_generations: checkpoint
+                .attempt_generations
+                .into_iter()
+                .map(|entry| {
+                    (
+                        (entry.group_id, entry.task_ref, entry.role_id),
+                        entry.generation,
+                    )
+                })
+                .collect(),
+            dispatch_outbox: checkpoint
+                .dispatch_outbox
+                .into_iter()
+                .map(|intent| {
+                    (
+                        intent.execution_id.clone(),
+                        DispatchIntent {
+                            execution_id: intent.execution_id,
+                            command: intent.command,
+                            resource_ids: intent.resource_ids,
+                            delivery_attempts: intent.delivery_attempts,
+                            delivered: intent.delivered,
+                        },
+                    )
+                })
+                .collect(),
         };
+        for active in restored.active_executions.keys() {
+            restored
+                .attempt_generations
+                .entry(active.clone())
+                .or_insert(1);
+        }
         restored.refresh_all_relations_after_restore();
         Ok(restored)
     }
@@ -464,20 +624,214 @@ impl RuntimeExecutionManager {
         Ok(DispatchDecision::Route)
     }
 
-    /// Records one successfully routed committed execution context.
-    pub fn record_dispatched(
+    /// Allocates an unused physical attempt identity, rejecting exhausted generation counters.
+    pub fn allocate_attempt_id(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Result<String, ExecutionRuntimeError> {
+        let slot = (group_id.clone(), task_ref.clone(), role_id.clone());
+        let mut generation = self.attempt_generations.get(&slot).copied().unwrap_or(0);
+        loop {
+            generation = generation.checked_add(1).ok_or_else(|| {
+                ExecutionRuntimeError::ReconciliationRequired(
+                    "physical attempt generation is exhausted".to_string(),
+                )
+            })?;
+            let execution_id = format!(
+                "attempt-{}:{}-{}:{}-{}:{}-{}",
+                group_id.as_str().len(),
+                group_id,
+                task_ref.task_id().as_str().len(),
+                task_ref.task_id(),
+                role_id.as_str().len(),
+                role_id,
+                generation
+            );
+            if !self.executions.contains_key(&execution_id)
+                && !self.dispatch_outbox.contains_key(&execution_id)
+            {
+                self.attempt_generations.insert(slot, generation);
+                return Ok(execution_id);
+            }
+        }
+    }
+
+    /// Returns all Execute intents that have not yet been durably delivered.
+    pub fn pending_dispatch_intents(&self) -> Vec<DispatchIntent> {
+        self.dispatch_outbox
+            .values()
+            .filter(|intent| {
+                !intent.delivered
+                    && !self.cancellation_intents.contains(&intent.execution_id)
+                    && self.execution_status(&intent.execution_id)
+                        == Some(ExecutionStatus::Dispatched)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Marks one intent acknowledged after Node journal acceptance has been proven.
+    pub fn mark_dispatch_delivered(
+        &mut self,
+        execution_id: &str,
+    ) -> Result<(), ExecutionRuntimeError> {
+        let intent = self.dispatch_outbox.get_mut(execution_id).ok_or_else(|| {
+            ExecutionRuntimeError::ReconciliationRequired(format!(
+                "dispatch intent {execution_id} is absent"
+            ))
+        })?;
+        intent.delivered = true;
+        Ok(())
+    }
+
+    /// Applies a durable Node command receipt to an immutable dispatch intent.
+    pub fn observe_dispatch_receipt(
+        &mut self,
+        execution_id: &str,
+        command_id: &str,
+        node_id: &NodeId,
+        persisted: bool,
+        reason: impl Into<String>,
+    ) -> Result<Vec<ExecutionEvent>, ExecutionRuntimeError> {
+        let intent = self.dispatch_outbox.get(execution_id).ok_or_else(|| {
+            ExecutionRuntimeError::ReconciliationRequired(format!(
+                "dispatch intent {execution_id} is absent"
+            ))
+        })?;
+        if intent.command_id() != command_id {
+            return Err(ExecutionRuntimeError::ExecutionConflict(
+                execution_id.to_string(),
+            ));
+        }
+        if intent.command.node_id() != node_id {
+            return Err(ExecutionRuntimeError::NodeOwnership(
+                "command receipt node differs from execution owner".to_string(),
+            ));
+        }
+        if persisted {
+            self.mark_dispatch_delivered(execution_id)?;
+            return Ok(Vec::new());
+        }
+        if self
+            .execution_status(execution_id)
+            .is_some_and(ExecutionStatus::is_terminal)
+        {
+            return Ok(Vec::new());
+        }
+        if self.execution_status(execution_id) == Some(ExecutionStatus::Unknown) {
+            return Ok(Vec::new());
+        }
+        let reason = reason.into();
+        // A rejected duplicate can describe conflicting input, not the outcome of physical work.
+        self.execution_status
+            .insert(execution_id.to_string(), ExecutionStatus::Unknown);
+        let command = self
+            .executions
+            .get(execution_id)
+            .map(|execution| execution.command.clone())
+            .ok_or_else(|| {
+                ExecutionRuntimeError::ReconciliationRequired(format!(
+                    "execution context {execution_id} is absent"
+                ))
+            })?;
+        let slot = (
+            command.group_id().clone(),
+            command.task_ref().clone(),
+            command.role_id().clone(),
+        );
+        if self.active_executions.get(&slot).map(String::as_str) != Some(execution_id) {
+            return Ok(Vec::new());
+        }
+        let mut events = vec![ExecutionEvent::RecoveryRequired {
+            execution_id: execution_id.to_string(),
+            node_id: command.node_id().clone(),
+            context: Some(command),
+            reason,
+        }];
+        events.extend(self.refresh_relations_for_slot(&slot));
+        Ok(events)
+    }
+
+    /// Reduces a Cancel receipt without treating command admission as terminal execution evidence.
+    pub fn observe_cancellation_receipt(
+        &mut self,
+        execution_id: &str,
+        command_id: &str,
+        node_id: &NodeId,
+        persisted: bool,
+        reason: impl Into<String>,
+    ) -> Result<Vec<ExecutionEvent>, ExecutionRuntimeError> {
+        if command_id != format!("cancel-{execution_id}")
+            || !self.cancellation_intents.contains(execution_id)
+        {
+            return Err(ExecutionRuntimeError::ReconciliationRequired(format!(
+                "cancellation intent {execution_id} is absent or conflicts with its receipt"
+            )));
+        }
+        if self.cancellation_node(execution_id) != Some(node_id) {
+            return Err(ExecutionRuntimeError::NodeOwnership(
+                "cancellation receipt node differs from execution owner".to_string(),
+            ));
+        }
+        if persisted
+            || self
+                .execution_status(execution_id)
+                .is_some_and(ExecutionStatus::is_terminal)
+            || self.execution_status(execution_id) == Some(ExecutionStatus::Unknown)
+        {
+            return Ok(Vec::new());
+        }
+        self.execution_status
+            .insert(execution_id.to_string(), ExecutionStatus::Unknown);
+        let command = self
+            .executions
+            .get(execution_id)
+            .map(|context| context.command.clone())
+            .ok_or_else(|| {
+                ExecutionRuntimeError::ReconciliationRequired(format!(
+                    "execution context {execution_id} is absent"
+                ))
+            })?;
+        let slot = (
+            command.group_id().clone(),
+            command.task_ref().clone(),
+            command.role_id().clone(),
+        );
+        if self.active_executions.get(&slot).map(String::as_str) != Some(execution_id) {
+            return Ok(Vec::new());
+        }
+        let mut events = vec![ExecutionEvent::RecoveryRequired {
+            execution_id: execution_id.to_string(),
+            node_id: node_id.clone(),
+            context: Some(command),
+            reason: reason.into(),
+        }];
+        events.extend(self.refresh_relations_for_slot(&slot));
+        Ok(events)
+    }
+
+    /// Records one Router delivery attempt while retaining the intent until Node acknowledgement.
+    pub fn record_dispatch_attempt(&mut self, execution_id: &str) {
+        if let Some(intent) = self.dispatch_outbox.get_mut(execution_id) {
+            intent.delivery_attempts = intent.delivery_attempts.saturating_add(1);
+        }
+    }
+
+    /// Prepares one immutable Execute intent before any network side effect occurs.
+    pub fn prepare_dispatch(
         &mut self,
         execution_id: String,
         command: ExecutionCommand,
         resource_ids: Vec<ResourceId>,
-    ) -> Result<(), ExecutionRuntimeError> {
-        if self.validate_dispatch(&execution_id, &command, &resource_ids)?
-            == DispatchDecision::AlreadyRouted
-        {
-            return Ok(());
+    ) -> Result<DispatchDecision, ExecutionRuntimeError> {
+        let decision = self.validate_dispatch(&execution_id, &command, &resource_ids)?;
+        if decision == DispatchDecision::AlreadyRouted {
+            return Ok(decision);
         }
-        let node_id = command.node_id().clone();
-        let execution_role = (
+        let resources = normalized_resources(&resource_ids);
+        let slot = (
             command.group_id().clone(),
             command.task_ref().clone(),
             command.role_id().clone(),
@@ -485,22 +839,49 @@ impl RuntimeExecutionManager {
         self.executions.insert(
             execution_id.clone(),
             ExecutionContext {
-                command,
-                resource_ids: normalized_resources(&resource_ids),
+                command: command.clone(),
+                resource_ids: resources.clone(),
             },
         );
-        self.execution_nodes.insert(execution_id.clone(), node_id);
+        self.execution_nodes
+            .insert(execution_id.clone(), command.node_id().clone());
         let previous = self
             .active_executions
-            .insert(execution_role.clone(), execution_id.clone());
+            .insert(slot.clone(), execution_id.clone());
         if previous
             .as_ref()
             .is_some_and(|current| current != &execution_id)
         {
-            self.spatial_evidence.remove(&execution_role);
+            self.spatial_evidence.remove(&slot);
+            if let Some(previous) = previous {
+                self.reactivation_attempts.remove(&previous);
+            }
+            self.reactivation_attempts.insert(execution_id.clone());
         }
         self.execution_status
-            .insert(execution_id, ExecutionStatus::Dispatched);
+            .insert(execution_id.clone(), ExecutionStatus::Dispatched);
+        self.dispatch_outbox.insert(
+            execution_id.clone(),
+            DispatchIntent {
+                execution_id,
+                command,
+                resource_ids: resources,
+                delivery_attempts: 0,
+                delivered: false,
+            },
+        );
+        Ok(DispatchDecision::Route)
+    }
+
+    /// Records one successfully routed committed execution context.
+    pub fn record_dispatched(
+        &mut self,
+        execution_id: String,
+        command: ExecutionCommand,
+        resource_ids: Vec<ResourceId>,
+    ) -> Result<(), ExecutionRuntimeError> {
+        self.prepare_dispatch(execution_id.clone(), command, resource_ids)?;
+        self.mark_dispatch_delivered(&execution_id)?;
         Ok(())
     }
 
@@ -509,6 +890,13 @@ impl RuntimeExecutionManager {
         self.executions
             .get(execution_id)
             .map(|execution| execution.command.node_id())
+    }
+
+    /// Returns the committed resource identities for one prepared execution attempt.
+    pub fn execution_resources(&self, execution_id: &str) -> Option<Vec<ResourceId>> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.resource_ids.clone())
     }
 
     /// Returns the latest accepted Runtime status for one execution identity.
@@ -527,6 +915,179 @@ impl RuntimeExecutionManager {
             .get(&(group_id.clone(), task_ref.clone(), role_id.clone()))
             .and_then(|execution_id| self.execution_status.get(execution_id))
             .copied()
+    }
+
+    /// Returns current physical attempts for one Group, including terminal evidence.
+    pub fn active_attempts_for_group(
+        &self,
+        group_id: &ExecutionGroupId,
+    ) -> Vec<(String, ExecutionStatus)> {
+        self.active_executions
+            .iter()
+            .filter(|((current_group, _, _), _)| current_group == group_id)
+            .filter_map(|(_, execution_id)| {
+                self.execution_status
+                    .get(execution_id)
+                    .copied()
+                    .map(|status| (execution_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// Returns every retained physical attempt for one Group, including superseded history.
+    pub fn attempts_for_group(
+        &self,
+        group_id: &ExecutionGroupId,
+    ) -> Vec<(String, ExecutionStatus)> {
+        self.executions
+            .iter()
+            .filter(|(_, context)| context.command.group_id() == group_id)
+            .filter_map(|(execution_id, _)| {
+                self.execution_status(execution_id)
+                    .map(|status| (execution_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// Returns the physical attempt occupying an exact logical slot, including terminal history.
+    pub fn current_attempt_id(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<&str> {
+        self.active_executions
+            .get(&(group_id.clone(), task_ref.clone(), role_id.clone()))
+            .map(String::as_str)
+    }
+
+    /// Returns whether the current logical-slot attempt targets one exact committed Node.
+    pub fn current_attempt_matches_node(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+        node_id: &NodeId,
+    ) -> bool {
+        self.current_attempt_id(group_id, task_ref, role_id)
+            .and_then(|execution_id| self.executions.get(execution_id))
+            .is_some_and(|context| context.command.node_id() == node_id)
+    }
+
+    /// Records cancellation before delivery; Unknown remains pending until physical evidence resolves it.
+    pub fn request_cancellation(
+        &mut self,
+        execution_id: &str,
+    ) -> Result<(), ExecutionRuntimeError> {
+        if !self.executions.contains_key(execution_id) {
+            return Err(ExecutionRuntimeError::ReconciliationRequired(
+                "unknown cancellation attempt".to_string(),
+            ));
+        }
+        self.cancellation_intents.insert(execution_id.to_string());
+        Ok(())
+    }
+
+    /// Returns cancellations that still need terminal physical evidence, even after a receipt.
+    pub fn pending_cancellations(&self) -> Vec<(String, NodeId)> {
+        self.cancellation_intents
+            .iter()
+            .filter(|id| {
+                !self
+                    .execution_status(id)
+                    .is_some_and(ExecutionStatus::is_terminal)
+            })
+            .filter_map(|id| {
+                self.cancellation_node(id)
+                    .map(|node| (id.clone(), node.clone()))
+            })
+            .collect()
+    }
+
+    /// Converts each nonterminal attempt on an unavailable Node into recovery evidence.
+    pub fn observe_node_unavailable(
+        &mut self,
+        node_id: &NodeId,
+        reason: impl Into<String>,
+    ) -> Vec<ExecutionEvent> {
+        let reason = reason.into();
+        let current_attempts = self
+            .active_executions
+            .values()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let execution_ids = self
+            .execution_nodes
+            .iter()
+            .filter(|(execution_id, owner)| {
+                current_attempts.contains(execution_id.as_str())
+                    && *owner == node_id
+                    && self
+                        .execution_status(execution_id.as_str())
+                        .is_some_and(|status| {
+                            !status.is_terminal() && status != ExecutionStatus::Unknown
+                        })
+            })
+            .map(|(execution_id, _)| execution_id.clone())
+            .collect::<Vec<_>>();
+        execution_ids
+            .into_iter()
+            .flat_map(|execution_id| {
+                self.execution_status
+                    .insert(execution_id.clone(), ExecutionStatus::Unknown);
+                let context = self
+                    .executions
+                    .get(&execution_id)
+                    .map(|execution| execution.command.clone());
+                let slot = context.as_ref().map(|command| {
+                    (
+                        command.group_id().clone(),
+                        command.task_ref().clone(),
+                        command.role_id().clone(),
+                    )
+                });
+                let mut events = vec![ExecutionEvent::RecoveryRequired {
+                    context,
+                    execution_id,
+                    node_id: node_id.clone(),
+                    reason: reason.clone(),
+                }];
+                if let Some(slot) = slot {
+                    events.extend(self.refresh_relations_for_slot(&slot));
+                }
+                events
+            })
+            .collect()
+    }
+
+    /// Exposes immutable attempt contexts and their status for audit without changing active slots.
+    pub fn attempt_history(&self) -> Vec<ExecutionAttemptSnapshot> {
+        self.executions
+            .iter()
+            .filter_map(|(execution_id, context)| {
+                self.execution_status(execution_id)
+                    .map(|status| ExecutionAttemptSnapshot {
+                        execution_id: execution_id.clone(),
+                        command: context.command.clone(),
+                        status,
+                    })
+            })
+            .collect()
+    }
+
+    /// Returns current logical-slot commands whose physical attempt remains ambiguous.
+    pub fn current_unknown_attempts(&self) -> Vec<ExecutionCommand> {
+        self.active_executions
+            .values()
+            .filter(|execution_id| {
+                self.execution_status(execution_id) == Some(ExecutionStatus::Unknown)
+            })
+            .filter_map(|execution_id| {
+                self.executions
+                    .get(execution_id)
+                    .map(|context| context.command.clone())
+            })
+            .collect()
     }
 
     /// Reduces one ordered Node execution fact into canonical Runtime events.
@@ -578,6 +1139,9 @@ impl RuntimeExecutionManager {
             .or_insert(node_id);
         self.execution_status
             .insert(execution_id.to_string(), status);
+        if let Some(intent) = self.dispatch_outbox.get_mut(execution_id) {
+            intent.delivered = true;
+        }
 
         let reason = reason.into();
         let Some(execution) = self.executions.get(execution_id) else {
@@ -603,29 +1167,43 @@ impl RuntimeExecutionManager {
             command.task_ref().clone(),
             command.role_id().clone(),
         );
+        let is_current_attempt = self
+            .active_executions
+            .get(&execution_role)
+            .is_some_and(|current| current == execution_id);
         let mut events = Vec::new();
-        if status.proves_activation() && self.activated_tasks.insert(task_key.clone()) {
+        let replacement_activated = is_current_attempt
+            && status.proves_activation()
+            && self.reactivation_attempts.remove(execution_id);
+        if is_current_attempt
+            && status.proves_activation()
+            && (self.activated_tasks.insert(task_key.clone()) || replacement_activated)
+        {
             events.push(ExecutionEvent::TaskActivated {
                 group_id: task_key.0,
                 task_ref: task_key.1,
             });
         }
-        match status {
-            ExecutionStatus::Completed => {
-                events.push(ExecutionEvent::RoleCompleted { command });
+        if is_current_attempt {
+            match status {
+                ExecutionStatus::Completed => {
+                    events.push(ExecutionEvent::RoleCompleted { command });
+                }
+                ExecutionStatus::Failed | ExecutionStatus::Cancelled => {
+                    events.push(ExecutionEvent::RoleFailed { command, reason });
+                }
+                ExecutionStatus::Unknown => events.push(ExecutionEvent::RecoveryRequired {
+                    execution_id: execution_id.to_string(),
+                    node_id: command.node_id().clone(),
+                    context: Some(command),
+                    reason,
+                }),
+                ExecutionStatus::Dispatched
+                | ExecutionStatus::Accepted
+                | ExecutionStatus::Running => {}
             }
-            ExecutionStatus::Failed | ExecutionStatus::Cancelled => {
-                events.push(ExecutionEvent::RoleFailed { command, reason });
-            }
-            ExecutionStatus::Unknown => events.push(ExecutionEvent::RecoveryRequired {
-                execution_id: execution_id.to_string(),
-                node_id: command.node_id().clone(),
-                context: Some(command),
-                reason,
-            }),
-            ExecutionStatus::Dispatched | ExecutionStatus::Accepted | ExecutionStatus::Running => {}
+            events.extend(self.refresh_relations_for_slot(&execution_role));
         }
-        events.extend(self.refresh_relations_for_slot(&execution_role));
         Ok(events)
     }
 
@@ -671,6 +1249,47 @@ fn normalized_resources(resource_ids: &[ResourceId]) -> Vec<ResourceId> {
 fn validate_checkpoint(
     checkpoint: &RuntimeExecutionCheckpoint,
 ) -> Result<(), ExecutionRuntimeError> {
+    let mut attempt_slots = BTreeSet::new();
+    for attempt in &checkpoint.attempt_generations {
+        let slot = (
+            attempt.group_id.clone(),
+            attempt.task_ref.clone(),
+            attempt.role_id.clone(),
+        );
+        if attempt.generation == 0 || !attempt_slots.insert(slot) {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                "checkpoint contains an invalid or duplicate attempt generation".to_string(),
+            ));
+        }
+    }
+    let mut dispatch_ids = BTreeSet::new();
+    for intent in &checkpoint.dispatch_outbox {
+        let Some(context) = checkpoint.executions.get(&intent.execution_id) else {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(format!(
+                "dispatch intent {} has no execution context",
+                intent.execution_id
+            )));
+        };
+        if intent.execution_id.trim().is_empty()
+            || !dispatch_ids.insert(intent.execution_id.clone())
+            || context.command != intent.command
+            || context.resource_ids != normalized_resources(&intent.resource_ids)
+        {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(format!(
+                "dispatch intent {} differs from its immutable execution context",
+                intent.execution_id
+            )));
+        }
+    }
+    if checkpoint
+        .cancellation_intents
+        .iter()
+        .any(|execution_id| !checkpoint.executions.contains_key(execution_id))
+    {
+        return Err(ExecutionRuntimeError::InvalidCheckpoint(
+            "checkpoint cancellation references an unknown execution".to_string(),
+        ));
+    }
     for (execution_id, context) in &checkpoint.executions {
         if execution_id.is_empty() {
             return Err(ExecutionRuntimeError::InvalidCheckpoint(
@@ -765,6 +1384,225 @@ mod tests {
             .expect("intent valid"),
             CorrelationId::new("runtime-test").expect("correlation valid"),
         )
+    }
+
+    /// Persists dispatch intent and fences automatic replay after Controller restart.
+    #[test]
+    fn dispatch_outbox_survives_restore_and_receipt_is_idempotent() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let command = command();
+        runtime
+            .prepare_dispatch("attempt-1".to_string(), command.clone(), Vec::new())
+            .expect("intent prepares");
+        assert_eq!(runtime.pending_dispatch_intents().len(), 1);
+
+        let mut restored = RuntimeExecutionManager::restore(runtime.checkpoint())
+            .expect("unacknowledged dispatch restores");
+        assert!(
+            restored.pending_dispatch_intents().is_empty(),
+            "restored physical ambiguity requires recovery rather than implicit replay"
+        );
+        let events = restored
+            .observe_dispatch_receipt(
+                "attempt-1",
+                "dispatch-attempt-1",
+                command.node_id(),
+                true,
+                "",
+            )
+            .expect("receipt is accepted");
+        assert!(events.is_empty());
+        assert!(restored.pending_dispatch_intents().is_empty());
+        assert!(
+            restored
+                .observe_dispatch_receipt(
+                    "attempt-1",
+                    "dispatch-attempt-1",
+                    command.node_id(),
+                    true,
+                    "",
+                )
+                .is_ok()
+        );
+        assert!(matches!(
+            restored.observe_dispatch_receipt(
+                "attempt-1",
+                "dispatch-attempt-1",
+                &NodeId::new("wrong-node").expect("node valid"),
+                true,
+                "",
+            ),
+            Err(ExecutionRuntimeError::NodeOwnership(_))
+        ));
+    }
+
+    /// Durable cancellation suppresses Execute and survives until terminal Node evidence.
+    #[test]
+    fn cancellation_intent_survives_restart_and_terminal_fact_clears_delivery() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let command = command();
+        runtime
+            .prepare_dispatch("attempt-1".to_string(), command.clone(), Vec::new())
+            .expect("intent prepares");
+        runtime
+            .request_cancellation("attempt-1")
+            .expect("cancellation records");
+        assert!(runtime.pending_dispatch_intents().is_empty());
+
+        let mut restored =
+            RuntimeExecutionManager::restore(runtime.checkpoint()).expect("cancellation restores");
+        assert_eq!(restored.pending_cancellations().len(), 1);
+        restored
+            .observe_cancellation_receipt(
+                "attempt-1",
+                "cancel-attempt-1",
+                command.node_id(),
+                true,
+                "",
+            )
+            .expect("Cancel receipt matches durable intent");
+        assert_eq!(
+            restored.execution_status("attempt-1"),
+            Some(ExecutionStatus::Unknown),
+            "Cancel receipt must not synthesize a terminal lifecycle fact"
+        );
+        restored
+            .observe_execution(
+                "attempt-1",
+                command.node_id().clone(),
+                1,
+                ExecutionStatus::Cancelled,
+                "cancelled before local dispatch",
+            )
+            .expect("terminal cancellation records");
+        assert!(restored.pending_cancellations().is_empty());
+    }
+
+    /// Allocated physical attempt identities advance while the logical slot remains stable.
+    #[test]
+    fn attempt_identity_advances_per_logical_slot() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let group = ExecutionGroupId::new("group-a").expect("group valid");
+        let task = TaskRef::new(
+            MissionId::new("mission-a").expect("mission valid"),
+            TaskId::new("task-a").expect("task valid"),
+        );
+        let role = RoleId::new("carrier").expect("role valid");
+        assert_eq!(
+            runtime
+                .allocate_attempt_id(&group, &task, &role)
+                .expect("first attempt allocates"),
+            "attempt-7:group-a-6:task-a-7:carrier-1"
+        );
+        assert_eq!(
+            runtime
+                .allocate_attempt_id(&group, &task, &role)
+                .expect("second attempt allocates"),
+            "attempt-7:group-a-6:task-a-7:carrier-2"
+        );
+    }
+
+    /// Allocation skips a retained attempt identity when migrating pre-generation history.
+    #[test]
+    fn attempt_identity_does_not_collide_with_retained_history() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let command = command();
+        runtime
+            .prepare_dispatch(
+                "attempt-7:group-a-6:task-a-7:carrier-1".to_string(),
+                command.clone(),
+                Vec::new(),
+            )
+            .expect("historical attempt prepares");
+
+        assert_eq!(
+            runtime
+                .allocate_attempt_id(command.group_id(), command.task_ref(), command.role_id())
+                .expect("unused attempt allocates"),
+            "attempt-7:group-a-6:task-a-7:carrier-2"
+        );
+    }
+
+    /// Node loss fences one physical attempt once while a replacement retains immutable history.
+    #[test]
+    fn node_loss_emits_one_recovery_event_and_retains_attempt_history() {
+        let mut runtime = RuntimeExecutionManager::new();
+        let original = command();
+        runtime
+            .prepare_dispatch("attempt-1".to_string(), original.clone(), Vec::new())
+            .expect("original attempt prepares");
+        runtime
+            .observe_execution(
+                "attempt-1",
+                original.node_id().clone(),
+                1,
+                ExecutionStatus::Running,
+                "started",
+            )
+            .expect("running fact records");
+
+        let recovery = runtime.observe_node_unavailable(original.node_id(), "route lost");
+        assert!(matches!(
+            recovery.as_slice(),
+            [ExecutionEvent::RecoveryRequired { execution_id, .. }] if execution_id == "attempt-1"
+        ));
+        assert!(
+            runtime
+                .observe_node_unavailable(original.node_id(), "duplicate route loss")
+                .is_empty()
+        );
+
+        let replacement = command_for("task-a", "carrier", "node-b");
+        runtime
+            .prepare_dispatch("attempt-2".to_string(), replacement, Vec::new())
+            .expect("replacement attempt prepares");
+        assert_eq!(
+            runtime.current_attempt_id(
+                original.group_id(),
+                original.task_ref(),
+                original.role_id()
+            ),
+            Some("attempt-2")
+        );
+        let history = runtime.attempt_history();
+        assert_eq!(history.len(), 2);
+        assert_eq!(runtime.attempts_for_group(original.group_id()).len(), 2);
+        assert!(history.iter().any(|attempt| {
+            attempt.execution_id() == "attempt-1" && attempt.status() == ExecutionStatus::Unknown
+        }));
+        assert!(history.iter().any(|attempt| {
+            attempt.execution_id() == "attempt-2" && attempt.status() == ExecutionStatus::Dispatched
+        }));
+        assert!(
+            runtime
+                .observe_node_unavailable(original.node_id(), "historical route loss")
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .observe_execution(
+                    "attempt-1",
+                    original.node_id().clone(),
+                    2,
+                    ExecutionStatus::Cancelled,
+                    "late historical terminal fact",
+                )
+                .expect("historical terminal fact is retained")
+                .is_empty()
+        );
+        let reactivated = runtime
+            .observe_execution(
+                "attempt-2",
+                NodeId::new("node-b").expect("node valid"),
+                1,
+                ExecutionStatus::Accepted,
+                "replacement accepted",
+            )
+            .expect("replacement acceptance records");
+        assert!(matches!(
+            reactivated.as_slice(),
+            [ExecutionEvent::TaskActivated { .. }]
+        ));
     }
 
     /// Node acceptance activates a Task exactly once and terminal facts reduce its result.

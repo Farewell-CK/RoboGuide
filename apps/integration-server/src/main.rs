@@ -7,7 +7,7 @@
 mod artifact_http;
 
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer as LegacyRoboGuideNodeProtocolServer;
-use integration::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
+use integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
 use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
 use orchestration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
@@ -25,10 +25,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
 
 /// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -66,7 +66,7 @@ struct ControllerState {
 struct ControllerMemoryAdmission {
     /// Shared Controller composition whose State projection owns registration snapshots.
     controller: Arc<Mutex<ControllerState>>,
-    /// Current gRPC routes used only to bind Memory writes to an active Node session.
+    /// Current gRPC routes used to bind Node-authored evidence to an active Node session.
     router: integration::GrpcNodeRouter,
 }
 
@@ -222,11 +222,11 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
         expected_node_id: &domain::NodeId,
     ) -> Result<(), String> {
         let publisher = publisher.ok_or_else(|| {
-            "generic Memory mutation requires current Node/session identity".to_string()
+            "Node-authored mutation requires current Node/session identity".to_string()
         })?;
         if publisher.node_id() != expected_node_id {
             return Err(format!(
-                "Memory publisher node {} does not match semantic owner {expected_node_id}",
+                "publisher node {} does not match semantic owner {expected_node_id}",
                 publisher.node_id()
             ));
         }
@@ -234,8 +234,25 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             .session_is_current(expected_node_id.as_str(), publisher.session_id())
             .map_err(|error| error.to_string())?
             .then_some(())
+            .ok_or_else(|| format!("publisher session is not current for node {expected_node_id}"))
+    }
+
+    /// Requires typed evidence to name Runtime's exact current logical-slot attempt and owner.
+    fn admit_localization_evidence(
+        &self,
+        evidence: &domain::LocalizationVerificationEvidence,
+    ) -> Result<(), String> {
+        let controller = self
+            .controller
+            .lock()
+            .map_err(|_| "Controller Runtime authority is unavailable".to_string())?;
+        controller
+            .bridge
+            .localization_evidence_is_current(evidence)
+            .then_some(())
             .ok_or_else(|| {
-                format!("Memory publisher session is not current for node {expected_node_id}")
+                "localization evidence does not name the current physical attempt and Node owner"
+                    .to_string()
             })
     }
 }
@@ -437,6 +454,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_clock = process_clock.clone();
     let receiver_event_log = event_log.clone();
     let receiver_event_write_gate = event_write_gate.clone();
+    let receiver_clock = process_clock.clone();
+    let timer_controller = Arc::clone(&controller);
+    let timer_event_log = event_log.clone();
+    let timer_event_write_gate = event_write_gate.clone();
+    let timer_clock = process_clock.clone();
     let artifact_catalog_for_server = artifact_catalog.clone();
     let artifact_store_for_server = artifact_store.clone();
     let memory_admission: Arc<dyn artifact_http::MemoryProviderAdmission> =
@@ -450,7 +472,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             event_log: event_log.clone(),
             write_gate: event_write_gate.clone(),
         });
-    let (fatal_sender, fatal_receiver) = tokio::sync::oneshot::channel::<String>();
+    let (fatal_sender, mut fatal_receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let timer_fatal_sender = fatal_sender.clone();
     tokio::spawn(async move {
         if let Err(error) = serve_http(
             http_address,
@@ -475,6 +498,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         {
             eprintln!("artifact HTTP server stopped: {error}");
+        }
+    });
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Err(error) = drive_application_timer(
+                &timer_controller,
+                &timer_event_log,
+                &timer_event_write_gate,
+                timer_clock.now(),
+            ) {
+                let reason = format!("application timer stopped: {error}");
+                let _ = timer_fatal_sender.send(reason);
+                return;
+            }
         }
     });
     tokio::spawn(async move {
@@ -527,7 +567,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Evaluate the complete application transition on a private candidate. The
                     // live authority is replaced only after the durable batch commits below.
                     let mut candidate = controller.clone();
-                    let now = process_clock.now();
+                    let now = receiver_clock.now();
                     if let Err(error) = candidate.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
                         rejection = Some(error.to_string());
@@ -542,6 +582,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let reason = format!(
                             "Runtime lifecycle transition failed after fact acceptance: {error}"
                         );
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
+                        return;
+                    } else if !registration_fact
+                        && let Err(error) = begin_current_ambiguity_recoveries(
+                            &mut candidate,
+                            now,
+                            &correlation,
+                            &mut receiver_event_log.clone(),
+                        )
+                    {
+                        let _ = receiver_event_log.rollback_batch();
+                        let reason = format!("physical ambiguity recovery failed: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
+                        return;
+                    } else if !registration_fact
+                        && let Err(error) = resume_pending_recoveries(
+                            &mut candidate,
+                            now,
+                            &correlation,
+                            &mut receiver_event_log.clone(),
+                        )
+                    {
+                        let _ = receiver_event_log.rollback_batch();
+                        let reason = format!("pending recovery progression failed: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
+                        return;
+                    } else if let Err(error) = apply_pending_cancellations(
+                        &mut candidate,
+                        now,
+                        &correlation,
+                        &mut receiver_event_log.clone(),
+                    ) {
+                        let _ = receiver_event_log.rollback_batch();
+                        let reason = format!("Mission cancellation progression failed: {error}");
                         completion.unavailable(reason.clone());
                         let _ = fatal_sender.send(reason);
                         return;
@@ -569,6 +646,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = receiver_event_log.rollback_batch();
                         let reason =
                             format!("Mission Task dispatch failed after fact acceptance: {error}");
+                        completion.unavailable(reason.clone());
+                        let _ = fatal_sender.send(reason);
+                        return;
+                    } else if !registration_fact
+                        && let Err(error) =
+                            drive_rebound_attempts(&mut candidate, now, &correlation)
+                    {
+                        let _ = receiver_event_log.rollback_batch();
+                        let reason = format!("rebound Task dispatch failed: {error}");
                         completion.unavailable(reason.clone());
                         let _ = fatal_sender.send(reason);
                         return;
@@ -640,7 +726,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if accepted {
                 if let Some(candidate) = pending_controller {
                     match controller.lock() {
-                        Ok(mut live) => *live = candidate,
+                        Ok(mut live) => {
+                            *live = candidate;
+                            // Cancel receipts are nonterminal: retrying Cancel in response to its
+                            // own receipt/snapshot would form an unbounded feedback loop. The
+                            // application timer owns those retries until terminal evidence.
+                            if let Err(error) = live.bridge.flush_dispatch_outbox() {
+                                eprintln!("durable command outbox delivery deferred: {error}");
+                            }
+                        }
                         Err(_) => {
                             let reason = "integration bridge lock is poisoned after durable commit";
                             completion.unavailable(reason);
@@ -665,8 +759,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve(address);
     tokio::select! {
         result = server => result.map_err(Into::into),
-        fatal = fatal_receiver => Err(fatal.unwrap_or_else(|_| "fact consumer stopped unexpectedly".to_string()).into()),
+        fatal = fatal_receiver.recv() => Err(fatal.unwrap_or_else(|| "application driver stopped unexpectedly".to_string()).into()),
     }
+}
+
+/// Persists all time-driven application transitions before exposing their new live projection.
+fn drive_application_timer(
+    controller: &Arc<Mutex<ControllerState>>,
+    event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    now: domain::TimestampMs,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _write_guard = event_write_gate
+        .lock()
+        .map_err(|_| "event-log write gate is poisoned")?;
+    event_log.begin_batch()?;
+    let transition = (|| {
+        let live = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        let mut candidate = live.clone();
+        drop(live);
+        let correlation = domain::CorrelationId::new("application-timer")?;
+        candidate.bridge.tick(now, &correlation)?;
+        let mut events = event_log.clone();
+        apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
+        begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;
+        resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
+        apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
+        apply_runtime_outcomes(&mut candidate, now, &correlation, &mut events)?;
+        drive_ready_tasks(&mut candidate, now, &correlation, &mut events)?;
+        drive_rebound_attempts(&mut candidate, now, &correlation)?;
+        if let Some(error) = event_log.take_error()? {
+            return Err(format!("application timer event sink failed: {error}").into());
+        }
+        let checkpoint = server_checkpoint_json(&candidate)?;
+        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)?;
+        event_log.commit_batch()?;
+        let mut live = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        *live = candidate;
+        if let Err(error) = live.bridge.flush_command_outboxes() {
+            eprintln!("durable command outbox delivery deferred: {error}");
+        }
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    })();
+    if let Err(error) = transition {
+        let _ = event_log.rollback_batch();
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Loads and validates deployment-owned actor placement constraints from JSON.
@@ -811,13 +954,17 @@ fn apply_runtime_events(
     for event in controller.bridge.take_runtime_events() {
         match event {
             runtime::ExecutionEvent::TaskActivated { group_id, task_ref } => {
-                let should_activate = controller
+                let lifecycles = controller
                     .bridge
                     .control()
                     .group(&group_id)
-                    .and_then(|group| group.task_execution(&task_ref))
-                    .is_some_and(|task| task.lifecycle() == domain::TaskExecutionLifecycle::Ready);
-                if should_activate {
+                    .and_then(|group| {
+                        group
+                            .task_execution(&task_ref)
+                            .map(|task| (group.lifecycle(), task.lifecycle()))
+                    });
+                if lifecycles.is_some_and(|(_, task)| task == domain::TaskExecutionLifecycle::Ready)
+                {
                     controller.bridge.control_mut().activate_task_execution(
                         &group_id,
                         &task_ref,
@@ -825,16 +972,197 @@ fn apply_runtime_events(
                         correlation_id,
                         events,
                     )?;
+                } else if lifecycles.is_some_and(|(group, task)| {
+                    group == control::GroupLifecycle::Adapted
+                        && task == domain::TaskExecutionLifecycle::Active
+                }) {
+                    controller.bridge.control_mut().activate_group(
+                        &group_id,
+                        timestamp,
+                        correlation_id,
+                        events,
+                    )?;
                 }
             }
+            runtime::ExecutionEvent::RecoveryRequired {
+                context: Some(command),
+                ..
+            } => apply_recovery_required(controller, &command, timestamp, correlation_id, events)?,
             runtime::ExecutionEvent::RoleCompleted { .. }
             | runtime::ExecutionEvent::RoleFailed { .. }
-            | runtime::ExecutionEvent::RecoveryRequired { .. }
+            | runtime::ExecutionEvent::RecoveryRequired { context: None, .. }
             | runtime::ExecutionEvent::RelationRegistered { .. }
             | runtime::ExecutionEvent::RelationStateChanged { .. }
             | runtime::ExecutionEvent::RelationReconciliationRequired { .. } => {}
         }
     }
+    Ok(())
+}
+
+/// Runs the existing Control-owned recovery pipeline for one Runtime-ambiguous role.
+fn apply_recovery_required(
+    controller: &mut ControllerState,
+    command: &domain::ExecutionCommand,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if controller
+        .orchestrator
+        .execution(command.mission_id())
+        .is_some_and(|execution| {
+            execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+        })
+    {
+        return Ok(());
+    }
+    let Some(group) = controller.bridge.control().group(command.group_id()) else {
+        return Ok(());
+    };
+    if !matches!(
+        group.lifecycle(),
+        control::GroupLifecycle::Bound
+            | control::GroupLifecycle::Active
+            | control::GroupLifecycle::Adapted
+    ) {
+        return Ok(());
+    }
+    let assignments = group
+        .task_execution(command.task_ref())
+        .map(|task| task.assignments())
+        .unwrap_or_else(|| group.assignments());
+    if !assignments.iter().any(|assignment| {
+        assignment.role_id() == command.role_id() && assignment.node_id() == command.node_id()
+    }) {
+        // Control may have rebound while Runtime waits for replacement coordination readiness.
+        return Ok(());
+    }
+    controller.bridge.control_mut().begin_execution_recovery(
+        command.group_id(),
+        command.task_ref(),
+        command.role_id(),
+        command.node_id(),
+        timestamp,
+        correlation_id,
+        events,
+    )?;
+    Ok(())
+}
+
+/// Feeds current Runtime ambiguity into the single-role Control recovery slice over later ticks.
+fn begin_current_ambiguity_recoveries(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for command in controller.bridge.current_unknown_attempts() {
+        apply_recovery_required(controller, &command, timestamp, correlation_id, events)?;
+    }
+    Ok(())
+}
+
+/// Retries Control-owned pending recovery when later Node evidence provides a candidate.
+fn resume_pending_recoveries(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let pending = controller.bridge.control().pending_role_recoveries();
+    for need in pending {
+        if controller
+            .orchestrator
+            .execution(need.task_ref().mission_id())
+            .is_some_and(|execution| {
+                execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+            })
+        {
+            continue;
+        }
+        resume_role_recovery(controller, &need, timestamp, correlation_id, events)?;
+    }
+    Ok(())
+}
+
+/// Drives one already-unbound Control role through Match, Schedule, Commit, and Rebind.
+fn resume_role_recovery(
+    controller: &mut ControllerState,
+    need: &control::RoleRecoveryNeed,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let committed = controller
+        .bridge
+        .control()
+        .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
+        .cloned();
+    if let Some(committed) = committed {
+        controller.bridge.control_mut().rebind_role(
+            &committed,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        return Ok(());
+    }
+    let requirement = controller
+        .orchestrator
+        .execution(need.task_ref().mission_id())
+        .and_then(|execution| {
+            execution
+                .plan()
+                .task_graph()
+                .tasks()
+                .iter()
+                .find(|task| task.requirement().task_ref() == need.task_ref())
+        })
+        .map(|task| task.requirement().clone())
+        .ok_or_else(|| "pending recovery has no accepted Task requirement".to_string())?;
+    let state = controller.bridge.state().clone();
+    let candidates = controller.bridge.control().match_recovery_candidates(
+        &state,
+        need,
+        &requirement,
+        timestamp,
+        correlation_id,
+        events,
+    )?;
+    let scheduler = control::DeterministicBootstrapScheduler::new();
+    let selection = scheduler.schedule_recovery(
+        &state,
+        &requirement,
+        &candidates,
+        timestamp,
+        correlation_id,
+        events,
+    )?;
+    let control::RecoverySchedulingOutcome::Selected(selection) = selection else {
+        return Ok(());
+    };
+    let proposal = controller.bridge.control().propose_role_recovery(
+        &state,
+        &candidates,
+        &requirement,
+        selection.replacement_node_id().clone(),
+        selection.resource_ids().to_vec(),
+        timestamp,
+        correlation_id,
+        events,
+    )?;
+    let committed = controller.bridge.control_mut().commit_role_recovery(
+        &state,
+        &requirement,
+        &proposal,
+        timestamp,
+        correlation_id,
+        events,
+    )?;
+    controller
+        .bridge
+        .control_mut()
+        .rebind_role(&committed, timestamp, correlation_id, events)?;
     Ok(())
 }
 
@@ -885,6 +1213,7 @@ fn apply_runtime_outcomes(
                     execution.lifecycle(),
                     orchestration::MissionExecutionLifecycle::Completed
                         | orchestration::MissionExecutionLifecycle::Failed
+                        | orchestration::MissionExecutionLifecycle::Cancelling
                         | orchestration::MissionExecutionLifecycle::Cancelled
                 )
             })
@@ -914,6 +1243,43 @@ fn apply_runtime_outcomes(
                 events,
             )?,
         }
+        close_terminal_mission_coordination(controller, &mission_id);
+    }
+    Ok(())
+}
+
+/// Finalizes cancellation only after every retained physical attempt becomes terminal.
+fn apply_pending_cancellations(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let ready = controller
+        .orchestrator
+        .mission_ids()
+        .into_iter()
+        .filter_map(|mission_id| {
+            let execution = controller.orchestrator.execution(&mission_id)?;
+            (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+                && controller
+                    .bridge
+                    .group_attempts_terminal(execution.group_id()))
+            .then_some(mission_id)
+        })
+        .collect::<Vec<_>>();
+    for mission_id in ready {
+        let ControllerState {
+            bridge,
+            orchestrator,
+        } = controller;
+        orchestrator.finalize_cancel(
+            &mission_id,
+            bridge.control_mut(),
+            timestamp,
+            correlation_id,
+            events,
+        )?;
         close_terminal_mission_coordination(controller, &mission_id);
     }
     Ok(())
@@ -1007,16 +1373,29 @@ fn drive_ready_tasks(
                     planned
                         .execution_intent(assignment.role_id())
                         .cloned()
-                        .map(|intent| (assignment.role_id().clone(), intent))
+                        .map(|intent| {
+                            (
+                                assignment.role_id().clone(),
+                                assignment.node_id().clone(),
+                                intent,
+                            )
+                        })
                         .ok_or_else(|| {
                             format!("Task role {} has no ExecutionIntent", assignment.role_id())
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            for (role_id, intent) in intents {
-                let execution_id =
-                    format!("execution-{mission_id}-{}-{role_id}", task_ref.task_id());
-                let dispatched = controller.bridge.execute_task_bound(
+            for (role_id, node_id, intent) in intents {
+                if controller
+                    .bridge
+                    .current_attempt_matches_binding(&group_id, &task_ref, &role_id, &node_id)
+                {
+                    continue;
+                }
+                let execution_id = controller
+                    .bridge
+                    .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
+                let dispatched = controller.bridge.prepare_task_bound(
                     execution_id,
                     &group_id,
                     &task_ref,
@@ -1031,6 +1410,84 @@ fn drive_ready_tasks(
                     Err(error) => return Err(error.into()),
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// Creates a fresh physical attempt after Control has rebound an active logical Role.
+fn drive_rebound_attempts(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut pending = Vec::new();
+    for mission_id in controller.orchestrator.mission_ids() {
+        let Some(execution) = controller.orchestrator.execution(&mission_id) else {
+            continue;
+        };
+        let Some(group) = controller.bridge.control().group(execution.group_id()) else {
+            continue;
+        };
+        if group.lifecycle() != control::GroupLifecycle::Adapted {
+            continue;
+        }
+        for task_execution in group
+            .task_executions()
+            .filter(|task| task.lifecycle() == domain::TaskExecutionLifecycle::Active)
+        {
+            let Some(planned) = execution
+                .plan()
+                .task_graph()
+                .tasks()
+                .iter()
+                .find(|task| task.requirement().task_ref() == task_execution.task_ref())
+            else {
+                continue;
+            };
+            for assignment in task_execution.assignments() {
+                if controller.bridge.current_attempt_matches_binding(
+                    group.group_id(),
+                    task_execution.task_ref(),
+                    assignment.role_id(),
+                    assignment.node_id(),
+                ) {
+                    continue;
+                }
+                let intent = planned
+                    .execution_intent(assignment.role_id())
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "rebound role {} has no ExecutionIntent",
+                            assignment.role_id()
+                        )
+                    })?;
+                pending.push((
+                    group.group_id().clone(),
+                    task_execution.task_ref().clone(),
+                    assignment.role_id().clone(),
+                    intent,
+                ));
+            }
+        }
+    }
+    for (group_id, task_ref, role_id, intent) in pending {
+        let execution_id = controller
+            .bridge
+            .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
+        match controller.bridge.prepare_task_bound(
+            execution_id,
+            &group_id,
+            &task_ref,
+            &role_id,
+            intent,
+            timestamp,
+            correlation_id.clone(),
+        ) {
+            Ok(_) => {}
+            Err(error) if coordination_dispatch_deferred(&error) => {}
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())
@@ -1309,9 +1766,13 @@ async fn handle_http_connection(
                         ).await;
                     }
                     if let Some(candidate) = pending_controller {
-                        *controller
+                        let mut live = controller
                             .lock()
-                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                            .map_err(|_| "controller lock is poisoned")?;
+                        *live = candidate;
+                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                            eprintln!("durable command outbox delivery deferred: {error}");
+                        }
                     }
                     (
                         "202 Accepted",
@@ -1436,30 +1897,63 @@ async fn handle_http_connection(
             event_log.begin_batch()?;
             let now = clock.now();
             let mut pending_controller = None;
+            let mut cancellation_status = "Cancelling".to_string();
             let result: Result<String, String> = {
                 let controller = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
                 let mut candidate = controller.clone();
                 let mut events = event_log.clone();
-                let operation = {
+                let operation: Result<(), String> = (|| {
                     let ControllerState {
                         bridge,
                         orchestrator,
                     } = &mut candidate;
-                    orchestrator.cancel(
-                        &mission_id,
-                        bridge.control_mut(),
-                        now,
-                        &domain::CorrelationId::new(format!("cancel-{mission_id}"))?,
-                        &mut events,
-                    )
-                };
+                    orchestrator
+                        .request_cancel(
+                            &mission_id,
+                            bridge.control_mut(),
+                            now,
+                            &domain::CorrelationId::new(format!("cancel-{mission_id}"))
+                                .map_err(|error| error.to_string())?,
+                            &mut events,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    let group_id = orchestrator
+                        .execution(&mission_id)
+                        .ok_or_else(|| "Mission disappeared during cancellation".to_string())?
+                        .group_id()
+                        .clone();
+                    bridge
+                        .request_group_cancellation(&group_id)
+                        .map_err(|error| error.to_string())?;
+                    if bridge.group_attempts_terminal(&group_id) {
+                        orchestrator
+                            .finalize_cancel(
+                                &mission_id,
+                                bridge.control_mut(),
+                                now,
+                                &domain::CorrelationId::new(format!(
+                                    "cancel-finalize-{mission_id}"
+                                ))
+                                .map_err(|error| error.to_string())?,
+                                &mut events,
+                            )
+                            .map_err(|error| error.to_string())?;
+                    }
+                    cancellation_status = format!(
+                        "{:?}",
+                        orchestrator
+                            .execution(&mission_id)
+                            .expect("cancellation retained Mission authority")
+                            .lifecycle()
+                    );
+                    Ok(())
+                })();
                 if operation.is_ok() {
                     close_terminal_mission_coordination(&mut candidate, &mission_id);
                 }
                 operation
-                    .map_err(|error| error.to_string())
                     .and_then(|()| {
                         server_checkpoint_json(&candidate).map_err(|error| error.to_string())
                     })
@@ -1488,11 +1982,18 @@ async fn handle_http_connection(
                         ).await;
                     }
                     if let Some(candidate) = pending_controller {
-                        *controller
+                        let mut live = controller
                             .lock()
-                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                            .map_err(|_| "controller lock is poisoned")?;
+                        *live = candidate;
+                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                            eprintln!("durable command outbox delivery deferred: {error}");
+                        }
                     }
-                    ("202 Accepted", serde_json::json!({"status": "Cancelled"}))
+                    (
+                        "202 Accepted",
+                        serde_json::json!({"status": cancellation_status}),
+                    )
                 }
                 Err(error) => {
                     event_log.rollback_batch()?;
@@ -1500,6 +2001,35 @@ async fn handle_http_connection(
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
             }
+        }
+        ("GET", "/v1/execution-attempts") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let attempts = controller
+                .bridge
+                .attempt_history()
+                .into_iter()
+                .map(|attempt| {
+                    let command = attempt.command();
+                    serde_json::json!({
+                        "execution_id": attempt.execution_id(),
+                        "mission_id": command.mission_id(),
+                        "task_id": command.task_ref().task_id(),
+                        "group_id": command.group_id(),
+                        "role_id": command.role_id(),
+                        "node_id": command.node_id(),
+                        "status": format!("{:?}", attempt.status()),
+                    })
+                })
+                .collect::<Vec<_>>();
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema": "roboguide.execution-attempt-history/v0.1",
+                    "attempts": attempts,
+                }),
+            )
         }
         ("GET", path) if path.starts_with("/v1/executions/") => {
             let execution_id = path.trim_start_matches("/v1/executions/");
@@ -1522,19 +2052,53 @@ async fn handle_http_connection(
             let execution_id = path
                 .trim_start_matches("/v1/executions/")
                 .trim_end_matches("/cancel")
-                .trim_end_matches('/');
-            let controller = controller
+                .trim_end_matches('/')
+                .to_string();
+            let _write_guard = event_write_gate
                 .lock()
-                .map_err(|_| "controller lock is poisoned")?;
-            match controller.bridge.cancel(execution_id) {
-                Ok(()) => (
-                    "202 Accepted",
-                    serde_json::json!({"status": "cancel_requested"}),
-                ),
-                Err(error) => (
-                    "409 Conflict",
-                    serde_json::json!({"error": error.to_string()}),
-                ),
+                .map_err(|_| "event-log write gate is poisoned")?;
+            event_log.begin_batch()?;
+            let result: Result<(ControllerState, String), String> = (|| {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                let mut candidate = live.clone();
+                candidate
+                    .bridge
+                    .cancel(&execution_id)
+                    .map_err(|error| error.to_string())?;
+                let checkpoint =
+                    server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+                Ok((candidate, checkpoint))
+            })();
+            match result {
+                Ok((candidate, checkpoint)) => {
+                    if let Err(error) =
+                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+                    {
+                        event_log.rollback_batch()?;
+                        return Err(error.into());
+                    }
+                    if let Err(error) = event_log.commit_batch() {
+                        let _ = event_log.rollback_batch();
+                        return Err(error.into());
+                    }
+                    let mut live = controller
+                        .lock()
+                        .map_err(|_| "controller lock is poisoned")?;
+                    *live = candidate;
+                    if let Err(error) = live.bridge.flush_command_outboxes() {
+                        eprintln!("durable command outbox delivery deferred: {error}");
+                    }
+                    (
+                        "202 Accepted",
+                        serde_json::json!({"status": "cancel_requested"}),
+                    )
+                }
+                Err(error) => {
+                    event_log.rollback_batch()?;
+                    ("409 Conflict", serde_json::json!({"error": error}))
+                }
             }
         }
         _ => ("404 Not Found", serde_json::json!({"error": "not found"})),
@@ -1959,6 +2523,132 @@ fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str> {
 mod tests {
     use super::*;
 
+    /// A rejected execution cancellation closes its transaction and leaves the writer usable.
+    #[tokio::test]
+    async fn unknown_execution_cancel_rolls_back_transaction() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+            .expect("event log opens");
+        let controller = Arc::new(Mutex::new(ControllerState {
+            bridge: IntegrationRuntimeBridge::new(
+                control::ControlPlane::new(),
+                state::InMemorySharedNodeState::new(),
+                event_log.clone(),
+                integration::GrpcNodeRouter::default(),
+            ),
+            orchestrator: MissionOrchestrator::new(),
+        }));
+        let gate = Arc::new(Mutex::new(()));
+        let clock = runtime::SystemMonotonicClock::new();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let address = listener.local_addr().expect("listener has address");
+        let server = async {
+            let (mut stream, _) = listener.accept().await.expect("request connects");
+            handle_http_connection(&mut stream, &controller, &event_log, &gate, &clock)
+                .await
+                .expect("rejection is a valid HTTP response");
+        };
+        let client = async {
+            let mut stream = tokio::net::TcpStream::connect(address)
+                .await
+                .expect("client connects");
+            stream
+                .write_all(b"POST /v1/executions/missing/cancel HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .expect("request writes");
+            let mut response = String::new();
+            stream
+                .read_to_string(&mut response)
+                .await
+                .expect("response reads");
+            assert!(response.starts_with("HTTP/1.1 409 Conflict"));
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(server, client)
+        })
+        .await
+        .expect("HTTP rejection completes");
+        event_log
+            .begin_batch()
+            .expect("rejected cancellation left no open transaction");
+        event_log
+            .rollback_batch()
+            .expect("subsequent transaction rolls back");
+        assert!(
+            event_log
+                .load_checkpoint()
+                .expect("checkpoint reads")
+                .is_none()
+        );
+    }
+
+    /// Builds one actor-free Mission whose bound role may be rebound between eligible Nodes.
+    fn recovery_driver_plan() -> domain::MissionPlan {
+        let mission_id = domain::MissionId::new("mission-recovery-driver").expect("mission valid");
+        let role_id = domain::RoleId::new("worker").expect("role valid");
+        let requirement = domain::TaskRequirement::new(
+            mission_id.clone(),
+            domain::TaskId::new("work").expect("task valid"),
+            vec![domain::RoleRequirement::new(
+                role_id.clone(),
+                domain::CapabilityKind::Compute,
+                Some(domain::ResourceKind::Compute),
+            )],
+        )
+        .expect("requirement valid");
+        let intent = domain::ExecutionIntent::new(
+            domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid"),
+            std::collections::BTreeMap::new(),
+        )
+        .expect("intent valid");
+        let context_id =
+            domain::CoordinationContextId::new("recovery-context").expect("context valid");
+        let task = domain::PlannedTask::new(
+            "exercise committed recovery resumption",
+            requirement,
+            std::collections::BTreeMap::from([(role_id, intent)]),
+            Vec::new(),
+            domain::TaskContinuity::new(
+                context_id.clone(),
+                std::collections::BTreeMap::new(),
+                std::collections::BTreeMap::new(),
+            ),
+        )
+        .expect("task valid");
+        domain::MissionPlan::new(
+            domain::MissionGoal::new(mission_id.clone(), "recover committed replacement")
+                .expect("goal valid"),
+            domain::TaskGraph::new(mission_id, vec![task]).expect("graph valid"),
+            vec![domain::CoordinationContext::new(context_id, Vec::new()).expect("context valid")],
+        )
+        .expect("plan valid")
+    }
+
+    /// Builds one eligible node for the recovery-driver fixture.
+    fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistration {
+        domain::NodeRegistration::new_with_contracts(
+            domain::NodeId::new(node_id).expect("node valid"),
+            domain::LocalRuntime::new("fixture", "1").expect("runtime valid"),
+            domain::NodeContractVersion::v0_4(),
+            vec![domain::Capability::new(
+                domain::CapabilityKind::Compute,
+                true,
+            )],
+            Vec::new(),
+            vec![
+                domain::Resource::new(
+                    domain::ResourceId::new(resource_id).expect("resource valid"),
+                    domain::ResourceKind::Compute,
+                    1,
+                )
+                .expect("resource valid"),
+            ],
+        )
+    }
+
     /// State query filters are exact and can exclude only records explicitly marked stale.
     #[test]
     fn state_query_filters_semantics_sources_and_staleness() {
@@ -2291,6 +2981,180 @@ mod tests {
             },
         );
         assert!(deferred_dispatch(&error));
+    }
+
+    /// The application driver consumes a restored commitment before considering a new proposal.
+    #[test]
+    fn recovery_driver_rebinds_existing_commitment_first() {
+        let directory = tempfile::tempdir().expect("temporary directory exists");
+        let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+            .expect("event log opens");
+        let correlation =
+            domain::CorrelationId::new("committed-recovery-resume").expect("correlation valid");
+        let plan = recovery_driver_plan();
+        let mission_id = plan.goal().mission_id().clone();
+        let requirement = plan.task_graph().tasks()[0].requirement().clone();
+        let task_ref = requirement.task_ref().clone();
+        let role_id = requirement.roles()[0].role_id().clone();
+        let group_id = domain::ExecutionGroupId::new("group-recovery-driver").expect("group valid");
+        let node_a = domain::NodeId::new("node-a").expect("node valid");
+        let node_b = domain::NodeId::new("node-b").expect("node valid");
+        let mut state = state::InMemorySharedNodeState::new();
+        let mut control = control::ControlPlane::new();
+        for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
+            control
+                .register_node(
+                    &mut state,
+                    recovery_driver_node(node, resource),
+                    domain::NodeStatus::new(
+                        domain::NodeHealth::Online,
+                        domain::TimestampMs::new(1),
+                    ),
+                    domain::TimestampMs::new(1),
+                    &correlation,
+                    &mut event_log.clone(),
+                )
+                .expect("fixture node registers");
+        }
+        let mut orchestrator = MissionOrchestrator::new();
+        orchestrator
+            .submit(
+                plan,
+                group_id.clone(),
+                &mut control,
+                domain::TimestampMs::new(2),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("Mission submits");
+        orchestrator
+            .prepare_task(
+                &mission_id,
+                &task_ref,
+                &state,
+                &mut control,
+                domain::TimestampMs::new(3),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("Task binds deterministically");
+        control
+            .activate_task_execution(
+                &group_id,
+                &task_ref,
+                domain::TimestampMs::new(4),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("Task activates");
+        let need = control
+            .begin_execution_recovery(
+                &group_id,
+                &task_ref,
+                &role_id,
+                &node_a,
+                domain::TimestampMs::new(5),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("Runtime ambiguity begins recovery");
+        let candidates = control
+            .match_recovery_candidates(
+                &state,
+                &need,
+                &requirement,
+                domain::TimestampMs::new(6),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("replacement candidates match");
+        let proposal = control
+            .propose_role_recovery(
+                &state,
+                &candidates,
+                &requirement,
+                node_b.clone(),
+                vec![domain::ResourceId::new("cpu-b").expect("resource valid")],
+                domain::TimestampMs::new(7),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("replacement proposes");
+        control
+            .commit_role_recovery(
+                &state,
+                &requirement,
+                &proposal,
+                domain::TimestampMs::new(8),
+                &correlation,
+                &mut event_log.clone(),
+            )
+            .expect("replacement commits without rebind");
+        let mut controller = ControllerState {
+            bridge: IntegrationRuntimeBridge::new(
+                control,
+                state,
+                event_log.clone(),
+                integration::GrpcNodeRouter::default(),
+            ),
+            orchestrator,
+        };
+
+        resume_role_recovery(
+            &mut controller,
+            &need,
+            domain::TimestampMs::new(9),
+            &correlation,
+            &mut event_log.clone(),
+        )
+        .expect("existing commitment rebinds without a second Commit");
+
+        assert!(
+            controller
+                .bridge
+                .control()
+                .pending_recovery_commitment_for_task(&group_id, &task_ref, &role_id)
+                .is_none()
+        );
+        let assignment = controller
+            .bridge
+            .control()
+            .group(&group_id)
+            .and_then(|group| group.task_execution(&task_ref))
+            .and_then(|task| task.assignments().first())
+            .expect("rebound assignment remains");
+        assert_eq!(assignment.node_id(), &node_b);
+        let old_command = domain::ExecutionCommand::new(
+            task_ref.mission_id().clone(),
+            task_ref.task_id().clone(),
+            group_id.clone(),
+            role_id.clone(),
+            node_a,
+            domain::ExecutionIntent::new(
+                domain::CapabilityContractRef::new("compute", "work", "v1")
+                    .expect("contract valid"),
+                std::collections::BTreeMap::new(),
+            )
+            .expect("intent valid"),
+            correlation.clone(),
+        );
+        apply_recovery_required(
+            &mut controller,
+            &old_command,
+            domain::TimestampMs::new(10),
+            &correlation,
+            &mut event_log.clone(),
+        )
+        .expect("old ambiguity cannot invalidate a rebound role awaiting dispatch");
+        assert_eq!(
+            controller
+                .bridge
+                .control()
+                .group(&group_id)
+                .expect("group remains")
+                .lifecycle(),
+            control::GroupLifecycle::Adapted
+        );
     }
 
     /// Startup rejects a replacement placement policy that does not cover a restored Mission.

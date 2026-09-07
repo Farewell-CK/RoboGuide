@@ -14,8 +14,9 @@ pub use coordination::{
     CoordinationReadiness, PeerChannelLifecycle, PeerChannelReadinessEvidence, RuntimePeerChannel,
 };
 pub use execution::{
-    DispatchDecision, ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionStatus,
-    ObservedTaskResult, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
+    DispatchDecision, DispatchIntent, ExecutionAttemptSnapshot, ExecutionContext, ExecutionEvent,
+    ExecutionRuntimeError, ExecutionSlot, ExecutionStatus, ObservedTaskResult,
+    RuntimeExecutionCheckpoint, RuntimeExecutionManager,
 };
 pub use relation::{RuntimeExecutionRelation, RuntimeRelationSnapshot, SharedSpatialEvidence};
 

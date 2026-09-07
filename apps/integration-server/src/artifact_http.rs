@@ -38,7 +38,7 @@ const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Frequency at which idle sessions are removed even when no HTTP request arrives.
 const UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Composition-owned admission for generic Memory claims entering the catalog data plane.
+/// Composition-owned admission for Node-authored typed evidence and generic Memory claims.
 pub trait MemoryProviderAdmission: Send + Sync {
     /// Validates that one manifest is covered by a current provider declaration.
     fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), String>;
@@ -57,6 +57,12 @@ pub trait MemoryProviderAdmission: Send + Sync {
         publisher: Option<&MemoryPublicationIdentity>,
         expected_node_id: &NodeId,
     ) -> Result<(), String>;
+
+    /// Validates that typed localization evidence names the current physical attempt and owner.
+    fn admit_localization_evidence(
+        &self,
+        evidence: &domain::LocalizationVerificationEvidence,
+    ) -> Result<(), String>;
 }
 
 /// Composition callback that projects durable strong localization evidence into Runtime.
@@ -69,13 +75,35 @@ pub trait LocalizationEvidenceObserver: Send + Sync {
     ) -> Result<(), String>;
 }
 
-/// Node/session identity attached to one generic Memory mutation on the internal data plane.
+/// Node/session identity attached to one Node-authored mutation on the internal data plane.
 #[derive(Debug, Clone)]
 pub struct MemoryPublicationIdentity {
     /// Stable Node identity expected to own the current gRPC route.
     node_id: NodeId,
     /// Current session identity issued after Controller registration acceptance.
     session_id: String,
+}
+
+/// Admission check serialized with one durable catalog/evidence append.
+enum EvidenceWriteAdmission<'a> {
+    /// Validate the provider, semantic owner, and publishing session for generic Memory.
+    Memory {
+        /// Composition-owned provider and session authority.
+        authority: &'a dyn MemoryProviderAdmission,
+        /// Node/session identity parsed from the request.
+        publisher: Option<&'a MemoryPublicationIdentity>,
+    },
+    /// Validate only the current Node/session identity for typed Node-authored evidence.
+    NodePublisher {
+        /// Composition-owned session authority.
+        authority: &'a dyn MemoryProviderAdmission,
+        /// Node/session identity parsed from the request.
+        publisher: Option<&'a MemoryPublicationIdentity>,
+        /// Semantic Node owner carried by the typed evidence.
+        expected_node_id: &'a NodeId,
+        /// Typed evidence whose execution provenance must still be current.
+        evidence: &'a domain::LocalizationVerificationEvidence,
+    },
 }
 
 impl MemoryPublicationIdentity {
@@ -266,26 +294,66 @@ impl ArtifactCatalog {
         admission: &dyn MemoryProviderAdmission,
         publisher: Option<&MemoryPublicationIdentity>,
     ) -> Result<(), HttpError> {
-        self.append_with_admission(payload, Some((admission, publisher)))
-            .map(|_| ())
+        self.append_with_admission(
+            payload,
+            Some(EvidenceWriteAdmission::Memory {
+                authority: admission,
+                publisher,
+            }),
+        )
+        .map(|_| ())
+    }
+
+    /// Appends typed Node-authored evidence under an atomic current-session admission check.
+    fn append_node_evidence(
+        &self,
+        payload: EventPayload,
+        admission: &dyn MemoryProviderAdmission,
+        publisher: Option<&MemoryPublicationIdentity>,
+        evidence: &domain::LocalizationVerificationEvidence,
+    ) -> Result<TimestampMs, HttpError> {
+        self.append_with_admission(
+            payload,
+            Some(EvidenceWriteAdmission::NodePublisher {
+                authority: admission,
+                publisher,
+                expected_node_id: evidence.node_id(),
+                evidence,
+            }),
+        )
     }
 
     /// Serializes optional Memory admission with Controller registration updates and persistence.
     fn append_with_admission(
         &self,
         payload: EventPayload,
-        admission: Option<(
-            &dyn MemoryProviderAdmission,
-            Option<&MemoryPublicationIdentity>,
-        )>,
+        admission: Option<EvidenceWriteAdmission<'_>>,
     ) -> Result<TimestampMs, HttpError> {
         let _write_guard = self
             .write_gate
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
-        if let Some((admission, publisher)) = admission {
-            admit_memory_payload(&payload, admission, publisher)?;
+        if let Some(admission) = admission {
+            match admission {
+                EvidenceWriteAdmission::Memory {
+                    authority,
+                    publisher,
+                } => admit_memory_payload(&payload, authority, publisher)?,
+                EvidenceWriteAdmission::NodePublisher {
+                    authority,
+                    publisher,
+                    expected_node_id,
+                    evidence,
+                } => {
+                    authority
+                        .admit_publisher(publisher, expected_node_id)
+                        .map_err(HttpError::forbidden)?;
+                    authority
+                        .admit_localization_evidence(evidence)
+                        .map_err(HttpError::forbidden)?;
+                }
+            }
         }
         let timestamp = self.next_timestamp()?;
         let mut projection = self
@@ -805,7 +873,13 @@ async fn handle_connection(
             if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
         {
             let request = head.read_json(stream).await?;
-            record_localization_evidence(catalog, localization_observer, &request, path)?
+            record_localization_evidence(
+                catalog,
+                memory_admission,
+                localization_observer,
+                &request,
+                path,
+            )?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
@@ -1052,6 +1126,7 @@ fn map_memory_view(snapshot: domain::MapRevisionSnapshot) -> serde_json::Value {
 /// Records one complete strong localization evidence event after path identity validation.
 fn record_localization_evidence(
     catalog: &ArtifactCatalog,
+    admission: &dyn MemoryProviderAdmission,
     observer: &dyn LocalizationEvidenceObserver,
     request: &Request,
     path: &str,
@@ -1073,9 +1148,14 @@ fn record_localization_evidence(
             "localization evidence selector does not match path",
         ));
     }
-    let received_at = catalog.append(EventPayload::MapLocalizationEvidenceRecorded {
-        evidence: evidence.clone(),
-    })?;
+    let received_at = catalog.append_node_evidence(
+        EventPayload::MapLocalizationEvidenceRecorded {
+            evidence: evidence.clone(),
+        },
+        admission,
+        request.memory_publisher.as_ref(),
+        &evidence,
+    )?;
     observer
         .observe(&evidence, received_at)
         .map_err(HttpError::service_unavailable)?;
@@ -1487,7 +1567,7 @@ struct RequestHead {
     path: String,
     /// Declared request body length.
     content_length: u64,
-    /// Optional Node/session identity used only by generic Memory mutations.
+    /// Optional Node/session identity used by Node-authored typed evidence and Memory mutations.
     memory_publisher: Option<MemoryPublicationIdentity>,
     /// Body prefix already read while locating the header delimiter.
     prefetched_body: Vec<u8>,
@@ -1499,7 +1579,7 @@ struct Request {
     path: String,
     /// JSON request body bytes.
     body: Vec<u8>,
-    /// Optional Node/session identity used only by generic Memory mutations.
+    /// Optional Node/session identity used by Node-authored typed evidence and Memory mutations.
     memory_publisher: Option<MemoryPublicationIdentity>,
 }
 
@@ -1958,6 +2038,14 @@ mod tests {
         ) -> Result<(), String> {
             Ok(())
         }
+
+        /// Accepts fixture typed evidence whose Runtime authority is tested separately.
+        fn admit_localization_evidence(
+            &self,
+            _evidence: &domain::LocalizationVerificationEvidence,
+        ) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     /// Test-only admission that proves HTTP publication fails before catalog mutation.
@@ -1986,6 +2074,14 @@ mod tests {
             _expected_node_id: &NodeId,
         ) -> Result<(), String> {
             Err("fixture publisher session is not current".to_string())
+        }
+
+        /// Rejects typed evidence together with all other fixture admissions.
+        fn admit_localization_evidence(
+            &self,
+            _evidence: &domain::LocalizationVerificationEvidence,
+        ) -> Result<(), String> {
+            Err("fixture execution provenance is not current".to_string())
         }
     }
 
@@ -2024,6 +2120,51 @@ mod tests {
                 return Err("fixture publisher session is stale".to_string());
             }
             Ok(())
+        }
+
+        /// Accepts fixture execution provenance so the test isolates exact session fencing.
+        fn admit_localization_evidence(
+            &self,
+            _evidence: &domain::LocalizationVerificationEvidence,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// Test-only admission that accepts the owner session but fences stale attempt provenance.
+    struct DenyLocalizationAttemptAdmission;
+
+    impl MemoryProviderAdmission for DenyLocalizationAttemptAdmission {
+        /// Accepts provider semantics so this fixture isolates typed execution provenance.
+        fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Accepts replica semantics so this fixture isolates typed execution provenance.
+        fn admit_replica(
+            &self,
+            _node_id: &NodeId,
+            _consumer_provider_id: &str,
+            _manifest: &MemoryArtifactManifest,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        /// Reuses the exact current-session fixture boundary.
+        fn admit_publisher(
+            &self,
+            publisher: Option<&MemoryPublicationIdentity>,
+            expected_node_id: &NodeId,
+        ) -> Result<(), String> {
+            FixtureSessionMemoryAdmission.admit_publisher(publisher, expected_node_id)
+        }
+
+        /// Rejects evidence that represents a superseded physical attempt.
+        fn admit_localization_evidence(
+            &self,
+            _evidence: &domain::LocalizationVerificationEvidence,
+        ) -> Result<(), String> {
+            Err("fixture execution provenance is stale".to_string())
         }
     }
 
@@ -3446,14 +3587,55 @@ mod tests {
             "source_observed_at_ms": 50
         }))
         .expect("localization evidence serializes");
-        let evidence = raw_request(
-            "POST",
+        let stale_evidence = raw_memory_request(
             "/v1/maps/map-a/revisions/r1/localization-evidence",
             &evidence_body,
-            true,
+            "dog-b",
+            "session-old",
         );
         response_body(
-            &request_once(&store, &catalog, &uploads, evidence).await,
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &uploads,
+                stale_evidence,
+                Arc::new(FixtureSessionMemoryAdmission),
+            )
+            .await,
+            "403 Forbidden",
+        );
+        let stale_attempt_evidence = raw_memory_request(
+            "/v1/maps/map-a/revisions/r1/localization-evidence",
+            &evidence_body,
+            "dog-b",
+            "session-current",
+        );
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &uploads,
+                stale_attempt_evidence,
+                Arc::new(DenyLocalizationAttemptAdmission),
+            )
+            .await,
+            "403 Forbidden",
+        );
+        let evidence = raw_memory_request(
+            "/v1/maps/map-a/revisions/r1/localization-evidence",
+            &evidence_body,
+            "dog-b",
+            "session-current",
+        );
+        response_body(
+            &request_once_with_admission(
+                &store,
+                &catalog,
+                &uploads,
+                evidence,
+                Arc::new(FixtureSessionMemoryAdmission),
+            )
+            .await,
             "201 Created",
         );
         let selector = MapRevisionSelector::new(

@@ -397,11 +397,48 @@ impl ExecutionJournal {
                 resource_ids,
             ],
         )?;
+        let cancelled: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cancellation_intents WHERE execution_id = ?1)",
+            [execution_id],
+            |row| row.get(0),
+        )?;
+        if cancelled {
+            transaction.execute("UPDATE executions SET status = 'cancelled', sequence = 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1", [execution_id])?;
+        }
         let record = load_execution(&transaction, execution_id)?.ok_or_else(|| {
             JournalError::Corrupt("new dispatch record could not be read".to_string())
         })?;
         transaction.commit()?;
-        Ok(PrepareDispatch::Start(record))
+        Ok(if cancelled {
+            PrepareDispatch::Existing(record)
+        } else {
+            PrepareDispatch::Start(record)
+        })
+    }
+
+    /// Persists a cancellation tombstone even when Execute has not reached this Node yet.
+    pub fn request_cancellation(&self, execution_id: &str) -> Result<(), JournalError> {
+        if execution_id.trim().is_empty() {
+            return Err(JournalError::InvalidExecutionId);
+        }
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO cancellation_intents(execution_id) VALUES (?1)",
+            [execution_id],
+        )?;
+        transaction.execute("UPDATE executions SET status = 'cancelled', sequence = sequence + 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1 AND status = 'dispatching' AND NOT EXISTS(SELECT 1 FROM local_dispatch_authorizations WHERE execution_id = ?1)", [execution_id])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Reports durable cancellation demand without implying Local EAIOS accepted or completed it.
+    pub fn cancellation_pending(&self, execution_id: &str) -> Result<bool, JournalError> {
+        Ok(self.lock_connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cancellation_intents WHERE execution_id = ?1)",
+            [execution_id],
+            |row| row.get(0),
+        )?)
     }
 
     /// Persists the local handle returned by the single permitted physical dispatch.
@@ -906,6 +943,9 @@ fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
          CREATE TABLE IF NOT EXISTS local_dispatch_authorizations (
              execution_id TEXT PRIMARY KEY NOT NULL,
              FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+         );
+         CREATE TABLE IF NOT EXISTS cancellation_intents (
+             execution_id TEXT PRIMARY KEY NOT NULL
          );",
     )?;
     if prior_version < 2 {
@@ -917,7 +957,7 @@ fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
             [],
         )?;
     }
-    transaction.pragma_update(None, "user_version", 4_i64)?;
+    transaction.pragma_update(None, "user_version", 5_i64)?;
     transaction.commit()?;
     Ok(())
 }
@@ -1549,6 +1589,34 @@ mod tests {
             .expect("terminal cancellation persists");
         assert!(cancelled.cancellation_requested());
         assert_eq!(cancelled.status(), JournalStatus::Cancelled);
+    }
+
+    /// A Cancel that arrives first creates a tombstone and prevents later local dispatch.
+    #[test]
+    fn cancel_before_execute_is_durable_and_suppresses_dispatch() {
+        let (_directory, path, journal) = journal();
+        journal
+            .request_cancellation("execution-a")
+            .expect("early cancellation persists");
+        drop(journal);
+
+        let reopened = ExecutionJournal::open(&path).expect("journal reopens");
+        assert!(
+            reopened
+                .cancellation_pending("execution-a")
+                .expect("tombstone reads")
+        );
+        let prepared = reopened
+            .prepare_dispatch(
+                "execution-a",
+                &spec("{\"task\":\"reach\"}", "workflow-a", &["motor"]),
+            )
+            .expect("late Execute is reduced against tombstone");
+        let PrepareDispatch::Existing(record) = prepared else {
+            panic!("cancel tombstone must prevent local dispatch authorization");
+        };
+        assert_eq!(record.status(), JournalStatus::Cancelled);
+        assert!(reopened.authorize_local_dispatch("execution-a").is_err());
     }
 
     /// A crash before handle persistence becomes unknown and never grants redispatch.

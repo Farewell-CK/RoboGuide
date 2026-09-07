@@ -186,8 +186,9 @@ Node Config v0.6 允许不同 EAIOS 选择性声明 State exports 和 Memory pro
 observation workflow；采样失败只让旧记录变 stale。部署 facade 必须保证 observation
 无副作用，离线配置检查不能替代运行时验证。Memory provider 声明静态最大 scope，并可用固定
 HTTP、dynamic gRPC 或 MCP workflow 实现 discovery/export/import；底层数据库、文件布局和厂商
-接口保持异构。v0.5 provider 仍可作为 metadata-only 配置启动。Node Protocol v0.3 携带完整声明 snapshot 和有界
-`StateObservationBatch`，沿用 application-accepted durable ACK；v0.2 endpoint 已退役并明确
+接口保持异构。v0.5 provider 仍可作为 metadata-only 配置启动。Node Protocol v0.4 携带完整声明 snapshot 和有界
+`StateObservationBatch`，沿用 application-accepted durable ACK，并增加 immutable Execute/Cancel
+command identity 与 Node journal admission receipt；v0.2 endpoint 已退役并明确
 返回迁移错误。
 
 ### Selective Memory Catalog v0.1
@@ -245,7 +246,7 @@ manifest、provenance、lineage、固定物理 `SpatialAnchor` 和 Node replica 
 不同 Mission，Consumer 通过预分配 revision 显式 pull，不发生 Task-level handoff、ownership
 transfer 或 Runtime 动态 output binding。
 
-Node Protocol v0.3 不承载地图 bytes。Integration 提供 streaming Artifact transport，Node
+Node Protocol v0.4 不承载地图 bytes。Integration 提供 streaming Artifact transport，Node
 Service 在受控 cache/sandbox 中完成 digest 校验和本地路径映射，再交给 Local EAIOS。当前 v0
 只覆盖 immutable publish/import/localization verification；实时同步、融合、active-map 选择、
 删除/GC 和安全策略延后。完整边界见 [`ADR-0016`](../../decisions/0016-distributed-spatial-memory.md)
@@ -273,20 +274,21 @@ Group 专属上下文默认不向全局广播。
 
 ## 6. Runtime 与本地自治
 
-Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它维护
-Mission-level Group 的 live context、TaskExecution 状态、execution identity、依赖推进、
-timer、取消、事件归约以及 checkpoint/resume；它不执行 Matching、Scheduling、Reservation、
-Commit 或 replacement selection。
+Runtime 是持续归约已经 Commit 的分布式具身执行事实的运行环境。它维护 live execution
+registry、logical slot/physical attempt identity、ordered facts、command intent、relation state、
+fence 与 checkpoint/resume。Application composition 驱动 timer 与 durable cancellation，
+Orchestration 推进 DAG/Task lifecycle，Control 持有 Group/commit/recovery authority；Runtime
+不执行 Matching、Scheduling、Reservation、Commit 或 replacement selection。
 
 Runtime 同时维护已接受 Mission 的 live execution relations，但只对当前事实进行保守归约。
 进程恢复会把仍依赖非终态 execution 的关系恢复为 `Unknown` 并保持 reconciliation fence；
 新的 physical attempt 只要重新占据同一个 `(GroupId, TaskRef, RoleId)` 逻辑槽，关系即可重新
-解析，而无需修改 specification。当前中央 `execution_id` 与 physical attempt 的完整分离仍受
-RT-G3 Gate 约束，关系实现不得用 NodeId 或可复用 execution 字符串充当稳定语义端点。
+解析，而无需修改 specification。Runtime 已为每个逻辑槽维护 durable generation、当前 attempt
+与不可变 attempt history；关系实现不得用 NodeId 或可复用 execution 字符串充当稳定语义端点。
 
 Integration 定义 Node Protocol、Messaging、Transport、Session、Router 和 wire conversion。
 DDS、ROS 2、gRPC、MQTT 和序列化属于 Integration 实现选型，不因此获得 execution
-lifecycle authority。当前 `core/integration` 只包含 formal Node Protocol v0.3 wire/session/router，
+lifecycle authority。当前 `core/integration` 只包含 formal Node Protocol v0.4 wire/session/router，
 不依赖 Control、State 或 Runtime。依赖这些 authority 的 `IntegrationRuntimeBridge` 属于
 Controller application composition，位于 `core/orchestration`，只把已验证的 transport facts
 交给既有 Control/State/Runtime，不选择 replacement 或 Local How。
@@ -318,6 +320,14 @@ Node Protocol 的 `Registered` 与 sequence `Ack` 不是 transport receipt。Int
 completion envelope 等待 Controller composition 使用既有 authority 接受并持久化 fact，
 只有成功后才回复 Node；Integration 本身不解释或产生该 decision。语义见
 [`ADR-0023`](../../decisions/0023-application-accepted-node-protocol-facts.md)。
+
+Controller dispatch 采用 durable intent/outbox：Runtime 保存 logical slot 与每次 physical
+attempt，应用先提交 checkpoint 再路由命令。Node Protocol v0.4 的 identified command receipt
+只证明 Node journal 已持久接受 Execute/Cancel；生命周期仍由 execution facts 证明。restart 或
+route loss 后非终态 attempt 进入 `Unknown` 与既有 Control recovery pipeline，绝不依据消息发送
+结果盲目重放物理动作。Mission cancellation 先进入 durable `Cancelling` 并保留 Group ownership，
+直到各 attempt 有 terminal evidence 才释放。完整边界见
+[`ADR-0028`](../../decisions/0028-durable-command-recovery-and-attempts.md)。
 
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、

@@ -14,7 +14,7 @@ use domain::{
     LocalSystemId, MapArtifactManifest, MemoryArtifactManifest, MissionId, NodeId, TaskId, TaskRef,
     TimestampMs,
 };
-use integration::grpc::v0_3::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
+use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase, ExecutionSnapshot};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -80,14 +80,14 @@ impl From<PeerChannelReadinessFact> for LocalPeerChannelReadiness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeObservation {
     /// Process/local-system health, kept independent from exact capability readiness.
-    status: integration::grpc::v0_3::NodeStatus,
+    status: integration::grpc::v0_4::NodeStatus,
     /// Exact canonical contract readiness in deterministic contract order.
     capabilities: BTreeMap<String, CapabilityReadinessFact>,
 }
 
 impl NodeObservation {
     /// Returns the current process/local-system health observation.
-    pub const fn status(&self) -> &integration::grpc::v0_3::NodeStatus {
+    pub const fn status(&self) -> &integration::grpc::v0_4::NodeStatus {
         &self.status
     }
 
@@ -593,7 +593,7 @@ impl LocalIntegrationEngine {
     }
 
     /// Observes every configured Local EAIOS and aggregates a truthful Node heartbeat status.
-    pub async fn status(&self) -> integration::grpc::v0_3::NodeStatus {
+    pub async fn status(&self) -> integration::grpc::v0_4::NodeStatus {
         let mut tasks = tokio::task::JoinSet::new();
         let checks = self
             .inner
@@ -653,7 +653,7 @@ impl LocalIntegrationEngine {
             .map(|(owner, state, detail)| format!("{owner}={state:?}:{detail}"))
             .collect::<Vec<_>>()
             .join("; ");
-        integration::grpc::v0_3::NodeStatus {
+        integration::grpc::v0_4::NodeStatus {
             health: state.to_string(),
             detail,
         }
@@ -1003,20 +1003,20 @@ impl LocalIntegrationEngine {
 
     /// Submits a configured cancellation workflow without synthesizing terminal state.
     pub fn cancel(&self, execution_id: &str) -> Result<(), EngineError> {
-        let record = self
-            .inner
-            .journal
-            .get(execution_id)?
-            .ok_or_else(|| EngineError::UnknownExecution(execution_id.to_string()))?;
+        self.inner.journal.request_cancellation(execution_id)?;
+        let Some(record) = self.inner.journal.get(execution_id)? else {
+            return Ok(());
+        };
         if record.status().is_terminal() {
+            self.release_locks(execution_id);
             return Ok(());
         }
         if record.cancellation_requested() {
             return Ok(());
         }
-        let handle = record
-            .local_handle()
-            .ok_or_else(|| EngineError::ReconciliationRequired(execution_id.to_string()))?;
+        let Some(handle) = record.local_handle() else {
+            return Ok(());
+        };
         let invocation = decode_invocation_json(record.spec().invocation_content())?;
         let contract = invocation
             .get("capability_contract")
@@ -1136,6 +1136,14 @@ impl LocalIntegrationEngine {
         let engine = self.clone();
         tokio::spawn(async move {
             loop {
+                if engine
+                    .inner
+                    .journal
+                    .cancellation_pending(&execution_id)
+                    .unwrap_or(false)
+                {
+                    let _ = engine.cancel(&execution_id);
+                }
                 let mut context = WorkflowContext::new(invocation.clone());
                 context.set_local_handle(handle.clone());
                 if let Err(error) = engine
@@ -2232,7 +2240,7 @@ fn canonical_invocation_json(
                 .value
                 .as_ref()
                 .ok_or_else(|| EngineError::Protocol("invocation scalar is empty".to_string()))?;
-            use integration::grpc::v0_3::scalar_value::Value;
+            use integration::grpc::v0_4::scalar_value::Value;
             let value = match value {
                 Value::BoolValue(value) => serde_json::Value::Bool(*value),
                 Value::IntegerValue(value) => serde_json::Value::Number((*value).into()),

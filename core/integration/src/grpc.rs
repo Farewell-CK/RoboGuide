@@ -22,6 +22,17 @@ pub mod v0_3 {
     tonic::include_proto!("roboguide.node.v0_3");
 }
 
+/// Generated v0.4 protobuf messages and client/server service bindings.
+#[allow(clippy::all, clippy::missing_docs_in_private_items, missing_docs)]
+pub mod v0_4 {
+    /// Exact stream protocol version advertised during Hello negotiation.
+    pub const PROTOCOL_VERSION: &str = "roboguide.node-protocol/v0.4";
+    /// Exact semantic Node Contract version advertised during Hello negotiation.
+    pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.4";
+
+    tonic::include_proto!("roboguide.node.v0_4");
+}
+
 #[cfg(test)]
 mod tests {
     use super::v0_2::{
@@ -181,5 +192,33 @@ mod tests {
             super::v0_3::PeerChannelReadiness::decode(readiness.encode_to_vec().as_slice())
                 .expect("v0.3 peer readiness decodes");
         assert_eq!(decoded, readiness);
+    }
+
+    /// Proves v0.4 command identity and durable receipt evidence survive protobuf encoding.
+    #[test]
+    fn v0_4_round_trip_preserves_command_receipt_identity() {
+        let execute = super::v0_4::Execute {
+            session_id: "session-1".to_string(),
+            execution_id: "attempt-1".to_string(),
+            invocation: None,
+            resource_ids: vec!["motor".to_string()],
+            command_id: "dispatch-attempt-1".to_string(),
+        };
+        let decoded = super::v0_4::Execute::decode(execute.encode_to_vec().as_slice())
+            .expect("v0.4 Execute decodes");
+        assert_eq!(decoded, execute);
+
+        let receipt = super::v0_4::CommandReceipt {
+            session_id: "session-1".to_string(),
+            sequence: 7,
+            command_id: "dispatch-attempt-1".to_string(),
+            execution_id: "attempt-1".to_string(),
+            kind: super::v0_4::CommandKind::CommandExecute as i32,
+            status: super::v0_4::CommandReceiptStatus::CommandPersisted as i32,
+            reason: String::new(),
+        };
+        let decoded = super::v0_4::CommandReceipt::decode(receipt.encode_to_vec().as_slice())
+            .expect("v0.4 command receipt decodes");
+        assert_eq!(decoded, receipt);
     }
 }

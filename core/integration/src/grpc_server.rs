@@ -1,9 +1,9 @@
 //! Formal gRPC Node Protocol server and concurrent session command routing.
 
-use crate::grpc::v0_3::node_message::Message as NodePayload;
-use crate::grpc::v0_3::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
-use crate::grpc::v0_3::server_message::Message as ServerPayload;
-use crate::grpc::v0_3::{
+use crate::grpc::v0_4::node_message::Message as NodePayload;
+use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
+use crate::grpc::v0_4::server_message::Message as ServerPayload;
+use crate::grpc::v0_4::{
     Ack, Cancel, Execute, NODE_CONTRACT_VERSION, NodeMessage, PROTOCOL_VERSION, Registered,
     ServerMessage, Welcome,
 };
@@ -16,7 +16,7 @@ use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status};
 
 /// Current Integration Server implementation version.
-const SERVER_VERSION: &str = "roboguide.server/v0.3";
+const SERVER_VERSION: &str = "roboguide.server/v0.4";
 /// Maximum time transport waits for Controller composition to durably accept one fact.
 const APPLICATION_ACCEPTANCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -30,7 +30,7 @@ pub enum GrpcNodeEvent {
         /// Server-issued lease identity.
         lease_id: String,
         /// Accepted node registration.
-        registration: crate::grpc::v0_3::NodeRegistration,
+        registration: crate::grpc::v0_4::NodeRegistration,
     },
     /// A heartbeat or registration update was received.
     NodeMessage {
@@ -200,11 +200,13 @@ impl GrpcNodeRouter {
     pub fn execute(
         &self,
         node_id: &str,
+        command_id: String,
         execution_id: String,
-        invocation: crate::grpc::v0_3::CanonicalInvocation,
+        invocation: crate::grpc::v0_4::CanonicalInvocation,
         resource_ids: Vec<String>,
     ) -> Result<(), Status> {
-        if execution_id.trim().is_empty()
+        if command_id.trim().is_empty()
+            || execution_id.trim().is_empty()
             || invocation.mission_id.trim().is_empty()
             || invocation.task_id.trim().is_empty()
             || invocation.group_id.trim().is_empty()
@@ -246,13 +248,24 @@ impl GrpcNodeRouter {
                     execution_id,
                     invocation: Some(invocation),
                     resource_ids,
+                    command_id,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
     }
 
     /// Sends Cancel through the node's current session.
-    pub fn cancel(&self, node_id: &str, execution_id: String) -> Result<(), Status> {
+    pub fn cancel(
+        &self,
+        node_id: &str,
+        command_id: String,
+        execution_id: String,
+    ) -> Result<(), Status> {
+        if command_id.trim().is_empty() || execution_id.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "Cancel command and execution identities must be nonblank",
+            ));
+        }
         let sessions = self
             .sessions
             .lock()
@@ -272,6 +285,7 @@ impl GrpcNodeRouter {
                 message: Some(ServerPayload::Cancel(Cancel {
                     session_id: route.session_id.clone(),
                     execution_id,
+                    command_id,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -302,13 +316,13 @@ impl crate::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocol
         Box<dyn Stream<Item = Result<crate::grpc::v0_2::ServerMessage, Status>> + Send + 'static>,
     >;
 
-    /// Rejects v0.2 sessions because State/Memory declarations require Protocol v0.3.
+    /// Rejects v0.2 sessions because durable commands require Protocol v0.4.
     async fn node_session(
         &self,
         _request: Request<tonic::Streaming<crate::grpc::v0_2::NodeMessage>>,
     ) -> Result<Response<Self::NodeSessionStream>, Status> {
         Err(Status::failed_precondition(
-            "Node Protocol v0.2 is retired; configure roboguide.node-protocol/v0.3 and roboguide.node.v0.3",
+            "Node Protocol v0.2 is retired; configure roboguide.node-protocol/v0.4 and roboguide.node.v0.4",
         ))
     }
 }
@@ -556,6 +570,7 @@ async fn run_grpc_session(
                 Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
                 Some(NodePayload::StateObservationBatch(value)) => value.sequence,
                 Some(NodePayload::PeerChannelReadiness(value)) => value.sequence,
+                Some(NodePayload::CommandReceipt(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
@@ -770,6 +785,32 @@ fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::CommandReceipt(value)) => {
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.command_id.trim().is_empty() || value.execution_id.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "CommandReceipt requires command and execution identities",
+                    ));
+                }
+                if crate::grpc::v0_4::CommandKind::try_from(value.kind)
+                    .ok()
+                    .is_none_or(|kind| kind == crate::grpc::v0_4::CommandKind::Unspecified)
+                {
+                    return Err(Status::invalid_argument("CommandReceipt kind is invalid"));
+                }
+                if crate::grpc::v0_4::CommandReceiptStatus::try_from(value.status)
+                    .ok()
+                    .is_none_or(|status| {
+                        status == crate::grpc::v0_4::CommandReceiptStatus::Unspecified
+                    })
+                {
+                    return Err(Status::invalid_argument("CommandReceipt status is invalid"));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::ExecutionEvent(value)) => &value.session_id,
             Some(NodePayload::ExecutionSnapshot(value)) => &value.session_id,
             Some(NodePayload::Error(value)) => &value.session_id,
@@ -782,8 +823,8 @@ fn accept_current_message(
     Ok(true)
 }
 
-/// Validates complete v0.3 ownership without inferring Local How on the Server.
-fn validate_registration(registration: &crate::grpc::v0_3::NodeRegistration) -> Result<(), Status> {
+/// Validates complete v0.4 ownership without inferring Local How on the Server.
+fn validate_registration(registration: &crate::grpc::v0_4::NodeRegistration) -> Result<(), Status> {
     if registration.node_id.trim().is_empty()
         || registration.node_contract_version != NODE_CONTRACT_VERSION
     {
@@ -897,7 +938,7 @@ fn validate_registration(registration: &crate::grpc::v0_3::NodeRegistration) -> 
 
 /// Validates one bounded State batch against the current registration snapshot.
 fn validate_state_observation_batch(
-    batch: &crate::grpc::v0_3::StateObservationBatch,
+    batch: &crate::grpc::v0_4::StateObservationBatch,
     export_ids: &BTreeSet<String>,
 ) -> Result<(), Status> {
     const MAX_BATCH_RECORDS: usize = 64;
@@ -969,11 +1010,11 @@ mod tests {
     /// Registration accepts static local/global provider maxima and rejects a concrete Group scope.
     #[test]
     fn registration_rejects_execution_group_memory_provider_scope() {
-        let mut registration = crate::grpc::v0_3::NodeRegistration {
+        let mut registration = crate::grpc::v0_4::NodeRegistration {
             node_id: "dog-a".to_string(),
-            local_systems: vec![crate::grpc::v0_3::LocalSystemDescriptor {
+            local_systems: vec![crate::grpc::v0_4::LocalSystemDescriptor {
                 id: "memory".to_string(),
-                runtime: Some(crate::grpc::v0_3::LocalRuntime {
+                runtime: Some(crate::grpc::v0_4::LocalRuntime {
                     name: "memory-runtime".to_string(),
                     version: "1".to_string(),
                 }),
@@ -985,13 +1026,13 @@ mod tests {
             metadata: Default::default(),
             node_contract_version: NODE_CONTRACT_VERSION.to_string(),
             state_exports: Vec::new(),
-            memory_providers: vec![crate::grpc::v0_3::MemoryProviderDescriptor {
+            memory_providers: vec![crate::grpc::v0_4::MemoryProviderDescriptor {
                 provider_id: "experience".to_string(),
                 local_system_id: "memory".to_string(),
-                kind: crate::grpc::v0_3::MemoryKind::Experience as i32,
-                scope: crate::grpc::v0_3::MemoryScopeKind::Global as i32,
+                kind: crate::grpc::v0_4::MemoryKind::Experience as i32,
+                scope: crate::grpc::v0_4::MemoryScopeKind::Global as i32,
                 execution_group_id: String::new(),
-                visibility: crate::grpc::v0_3::MemoryVisibility::Discoverable as i32,
+                visibility: crate::grpc::v0_4::MemoryVisibility::Discoverable as i32,
                 payload_schema: "example.experience/v1".to_string(),
                 media_type: "application/json".to_string(),
             }],
@@ -999,7 +1040,7 @@ mod tests {
         validate_registration(&registration).expect("global provider maximum should be valid");
 
         registration.memory_providers[0].scope =
-            crate::grpc::v0_3::MemoryScopeKind::ExecutionGroup as i32;
+            crate::grpc::v0_4::MemoryScopeKind::ExecutionGroup as i32;
         registration.memory_providers[0].execution_group_id = "group-a".to_string();
         let error = validate_registration(&registration)
             .expect_err("static execution Group provider scope should be rejected");
@@ -1014,11 +1055,11 @@ mod tests {
     /// A bounded batch may carry independent valid JSON observations for registered exports.
     #[test]
     fn state_batch_accepts_registered_bounded_json() {
-        let batch = crate::grpc::v0_3::StateObservationBatch {
+        let batch = crate::grpc::v0_4::StateObservationBatch {
             session_id: "session-a".to_string(),
             sequence: 2,
             observations: vec![
-                crate::grpc::v0_3::StateObservation {
+                crate::grpc::v0_4::StateObservation {
                     export_id: "hazard-state".to_string(),
                     json_value: br#"{"present":true}"#.to_vec(),
                     has_source_observed_at: true,
@@ -1026,7 +1067,7 @@ mod tests {
                     has_confidence: true,
                     confidence_millionths: 900_000,
                 },
-                crate::grpc::v0_3::StateObservation {
+                crate::grpc::v0_4::StateObservation {
                     export_id: "contact-state".to_string(),
                     json_value: br#"{"connected":false}"#.to_vec(),
                     has_source_observed_at: false,
@@ -1044,7 +1085,7 @@ mod tests {
     /// State batches cannot smuggle undeclared channels or duplicate one channel in a batch.
     #[test]
     fn state_batch_rejects_undeclared_and_duplicate_exports() {
-        let observation = crate::grpc::v0_3::StateObservation {
+        let observation = crate::grpc::v0_4::StateObservation {
             export_id: "unknown-state".to_string(),
             json_value: b"true".to_vec(),
             has_source_observed_at: false,
@@ -1052,7 +1093,7 @@ mod tests {
             has_confidence: false,
             confidence_millionths: 0,
         };
-        let undeclared = crate::grpc::v0_3::StateObservationBatch {
+        let undeclared = crate::grpc::v0_4::StateObservationBatch {
             session_id: "session-a".to_string(),
             sequence: 2,
             observations: vec![observation],
@@ -1064,7 +1105,7 @@ mod tests {
             tonic::Code::InvalidArgument
         );
 
-        let observation = crate::grpc::v0_3::StateObservation {
+        let observation = crate::grpc::v0_4::StateObservation {
             export_id: "hazard-state".to_string(),
             json_value: b"true".to_vec(),
             has_source_observed_at: false,
@@ -1072,7 +1113,7 @@ mod tests {
             has_confidence: false,
             confidence_millionths: 0,
         };
-        let duplicate = crate::grpc::v0_3::StateObservationBatch {
+        let duplicate = crate::grpc::v0_4::StateObservationBatch {
             session_id: "session-a".to_string(),
             sequence: 2,
             observations: vec![observation.clone(), observation],
@@ -1093,10 +1134,10 @@ mod tests {
             (vec![b' '; 64 * 1024 + 1], false, 0),
             (b"true".to_vec(), true, 1_000_001),
         ] {
-            let batch = crate::grpc::v0_3::StateObservationBatch {
+            let batch = crate::grpc::v0_4::StateObservationBatch {
                 session_id: "session-a".to_string(),
                 sequence: 2,
-                observations: vec![crate::grpc::v0_3::StateObservation {
+                observations: vec![crate::grpc::v0_4::StateObservation {
                     export_id: "hazard-state".to_string(),
                     json_value,
                     has_source_observed_at: false,
@@ -1134,7 +1175,7 @@ mod tests {
         );
         let readiness = |session_id: &str, sequence: u64, valid_for_ms: u64| NodeMessage {
             message: Some(NodePayload::PeerChannelReadiness(
-                crate::grpc::v0_3::PeerChannelReadiness {
+                crate::grpc::v0_4::PeerChannelReadiness {
                     session_id: session_id.to_string(),
                     sequence,
                     group_id: "group-guidance".to_string(),
@@ -1285,8 +1326,9 @@ mod tests {
         let error = router
             .execute(
                 "dog-a",
+                "command-1".to_string(),
                 "execution-1".to_string(),
-                crate::grpc::v0_3::CanonicalInvocation {
+                crate::grpc::v0_4::CanonicalInvocation {
                     mission_id: "m".to_string(),
                     task_id: "t".to_string(),
                     group_id: "g".to_string(),
@@ -1323,8 +1365,9 @@ mod tests {
             router
                 .execute(
                     "dog-a",
+                    "command-1".to_string(),
                     "execution-1".to_string(),
-                    crate::grpc::v0_3::CanonicalInvocation {
+                    crate::grpc::v0_4::CanonicalInvocation {
                         mission_id: "m".to_string(),
                         task_id: "t".to_string(),
                         group_id: "g".to_string(),
@@ -1415,7 +1458,7 @@ mod tests {
             },
         );
         let message = NodeMessage {
-            message: Some(NodePayload::Heartbeat(crate::grpc::v0_3::Heartbeat {
+            message: Some(NodePayload::Heartbeat(crate::grpc::v0_4::Heartbeat {
                 session_id: "session-old".to_string(),
                 lease_id: "lease-old".to_string(),
                 sequence: 10,

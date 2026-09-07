@@ -13,6 +13,36 @@ use domain::{
 use ports::{EventSink, SharedNodeStateReader};
 
 impl ControlPlane {
+    /// Returns every Control-owned unbound recovery need in deterministic Group/Task/Role order.
+    pub fn pending_role_recoveries(&self) -> Vec<RoleRecoveryNeed> {
+        let mut pending = Vec::new();
+        for group in self
+            .groups
+            .values()
+            .filter(|group| group.lifecycle == GroupLifecycle::Blocked)
+        {
+            pending.extend(group.unbound_roles.iter().map(|(role_id, unbound)| {
+                RoleRecoveryNeed::new(
+                    group.group_id.clone(),
+                    group.task_ref.clone(),
+                    role_id.clone(),
+                    unbound.previous_node_id.clone(),
+                )
+            }));
+            pending.extend(group.task_unbound_roles.iter().map(
+                |((task_ref, role_id), unbound)| {
+                    RoleRecoveryNeed::new(
+                        group.group_id.clone(),
+                        task_ref.clone(),
+                        role_id.clone(),
+                        unbound.previous_node_id.clone(),
+                    )
+                },
+            ));
+        }
+        pending
+    }
+
     /// Returns the authoritative pending commitment for one Group role, if present.
     pub fn pending_recovery_commitment(
         &self,
@@ -99,7 +129,10 @@ impl ControlPlane {
             .groups
             .get(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
-        if group.lifecycle != GroupLifecycle::Active {
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         if group.task_ref != *requirement.task_ref()
@@ -168,7 +201,10 @@ impl ControlPlane {
             .groups
             .get(need.group_id())
             .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
-        if group.lifecycle != GroupLifecycle::Active {
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         let assignments = group
@@ -221,6 +257,43 @@ impl ControlPlane {
             task_ref: need.task_ref().clone(),
             role_id: need.role_id().clone(),
         })
+    }
+
+    /// Validates Runtime physical ambiguity and begins recovery for its exact current binding.
+    ///
+    /// Unlike [`Self::assess_group`], this transition does not infer ambiguity from Node health.
+    /// The caller supplies Runtime evidence; Control still verifies current ownership and performs
+    /// the only authoritative partial release before returning the durable pending need.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_execution_recovery<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &RoleId,
+        current_node_id: &NodeId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RoleRecoveryNeed, ControlError> {
+        let need = RoleRecoveryNeed::new(
+            group_id.clone(),
+            task_ref.clone(),
+            role_id.clone(),
+            current_node_id.clone(),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::ReconciliationRoleRecoveryRequired {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+                role_id: role_id.clone(),
+                node_id: current_node_id.clone(),
+            },
+        );
+        self.begin_role_recovery(&need, timestamp, correlation_id, events)?;
+        Ok(need)
     }
 
     /// Matches only the unbound recovery role against current Control eligibility.
