@@ -4,8 +4,8 @@
         ExecutionGroupId, ExecutionIntent, MissionGoal, MissionPlan, PlannedTask, TaskGraph,
         LeaseId, NodeHealth, NodeHealthObservation, NodeHeartbeat, NodeId, NodeLease,
         NodeLiveness, NodeLivenessObservation, NodeRegistration, NodeStatus, Resource, ResourceId,
-        ResourceKind, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRef, TaskRequirement,
-        TimestampMs,
+        ResourceKind, ResourceRequirement, RoleAssignment, RoleId, RoleRequirement, TaskId, TaskRef,
+        TaskRequirement, TimestampMs,
     };
     use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
     use ports::{AllocationStateReader, AllocationStateWriter};
@@ -131,11 +131,14 @@
             NodeId::new("node-b").expect("test node id must be valid"),
             domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("test runtime must be valid"),
             domain::NodeContractVersion::v0_1(),
-            vec![Capability::new(CapabilityKind::Transport, true)],
+            vec![
+                Capability::new(CapabilityKind::Transport, true),
+                Capability::new(CapabilityKind::Compute, true),
+            ],
             vec![
                 Resource::new(space_b.clone(), ResourceKind::Space, 1)
                     .expect("test resource must be valid"),
-                Resource::new(space_b_secondary.clone(), ResourceKind::Space, 1)
+                Resource::new(space_b_secondary.clone(), ResourceKind::Compute, 1)
                     .expect("test resource must be valid"),
             ],
         );
@@ -258,6 +261,46 @@
             compute_c,
             correlation_id,
         }
+    }
+
+    /// Upgrades an already-unbound transport Role to a legal two-dimension recovery requirement.
+    fn require_multi_resource_transport_recovery(fixture: &mut RecoveryFixture) {
+        let transport = RoleRequirement::new_scheduled(
+            fixture.transport_role.clone(),
+            None,
+            CapabilityKind::Transport,
+            None,
+            vec![
+                ResourceRequirement::new(ResourceKind::Space, 1)
+                    .expect("space demand must be valid"),
+                ResourceRequirement::new(ResourceKind::Compute, 1)
+                    .expect("compute demand must be valid"),
+            ],
+        )
+        .expect("multi-resource transport Role must be valid");
+        let compute = fixture
+            .requirement
+            .roles()
+            .iter()
+            .find(|role| role.role_id() == &fixture.compute_role)
+            .expect("fixture compute Role exists")
+            .clone();
+        fixture.requirement = TaskRequirement::new(
+            fixture.task_ref.mission_id().clone(),
+            fixture.task_ref.task_id().clone(),
+            vec![transport.clone(), compute],
+        )
+        .expect("multi-resource fixture requirement must be valid");
+        fixture
+            .control
+            .groups
+            .get_mut(&fixture.group_id)
+            .expect("fixture Group exists")
+            .role_requirements
+            .insert(
+                (fixture.task_ref.clone(), fixture.transport_role.clone()),
+                transport,
+            );
     }
 
     /// Builds a one-role task requirement for a control test.

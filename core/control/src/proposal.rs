@@ -96,13 +96,22 @@ impl ControlPlane {
                     role.role_id()
                 )));
             }
-            if assignment.resource_ids().iter().any(|resource_id| {
-                !node
-                    .registration()
-                    .owns_resource(resource_id, role.resource_kind())
-            }) {
+            let requirements = role.resource_requirements();
+            if assignment.resource_ids().len() != requirements.len()
+                || assignment
+                    .resource_ids()
+                    .iter()
+                    .zip(requirements.iter())
+                    .any(|(resource_id, required)| {
+                        !node.registration().resources().iter().any(|resource| {
+                            resource.id() == resource_id
+                                && resource.kind() == required.kind()
+                                && resource.capacity() >= required.units()
+                        })
+                    })
+            {
                 return Err(ControlError::InvalidProposal(format!(
-                    "role {} references a resource it does not own",
+                    "role {} resources do not exactly satisfy its declared kinds and capacities",
                     role.role_id()
                 )));
             }

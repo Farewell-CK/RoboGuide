@@ -33,7 +33,7 @@ FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 
 
 def test_request_contract_accepts_current_and_compatible_plan_versions() -> None:
-    """Durable request records retain v0.3 while admitting current v0.4 plans."""
+    """Durable request records retain v0.3/v0.4 while admitting current v0.5 plans."""
     schema = json.loads(
         Path("contracts/mission/request-v0.1/mission-request.schema.json").read_text(
             encoding="utf-8"
@@ -44,6 +44,7 @@ def test_request_contract_accepts_current_and_compatible_plan_versions() -> None
     assert references == {
         "../v0.3/mission-plan.schema.json",
         "../v0.4/mission-plan.schema.json",
+        "../v0.5/mission-plan.schema.json",
     }
 
 
@@ -508,4 +509,4 @@ def test_inventory_wire_parser_preserves_observation_and_readiness_facts() -> No
     snapshot = InventorySnapshot.from_json(wire)
 
     assert snapshot.to_json() == wire
-    assert snapshot.supports_requirement("transport", "mobility.move@v1", "space")
+    assert snapshot.supports_requirement("transport", "mobility.move@v1", (("space", 1),))

@@ -218,25 +218,37 @@ Control Group、Shared Node State、Mission/Runtime projection 和 external Stat
 [`contracts/state/v0.1`](../../contracts/state/v0.1/README.md) 和
 [`ADR-0024`](../decisions/0024-federated-state-and-selective-memory.md)。
 
-### Control Plane — Embodied Scheduler v0.1
+### Control Plane — Embodied Scheduler v0.2
 
-`DeterministicBootstrapScheduler` 是 stateless policy component，不存入 `ControlPlane`。
-Normal 输入 `TaskRequirement + CandidateSet + SharedNodeStateReader`，输出
-`TaskSchedulingDecision`；Recovery 输入 role-scoped `RecoveryCandidateSet`，输出
-`RecoverySchedulingDecision` 或 `NoSelection`。两条路径共用同一私有 `select_role`，不重新
-执行 health/freshness/liveness/lease/capability eligibility filtering，也不遍历 Candidate
-Set 之外的 State nodes。
+`BoundedJointScheduler` 是 stateless policy component，不存入 `ControlPlane`。Normal 输入
+`TaskRequirement + CandidateSet + SharedNodeStateReader + SchedulingSnapshot`，在固定
+expansion budget 内按 Task 声明顺序、NodeId、ResourceId 和最早时间稳定排序，对所有 Role、
+Node、独占 resource set 与半开 interval 做联合回溯。Recovery 输入 role-scoped
+`RecoveryCandidateSet + SchedulingSnapshot`，输出 `RecoverySchedulingDecision` 或
+`NoSelection`；当前不为 recovery 建立未来 reservation，但其无界执行占用必须避开已有 future
+interval。两条路径都不重新执行 eligibility filtering，也不遍历 Candidate Set 之外的 State
+nodes。
 
-Policy 对 Candidate NodeId 稳定排序；无 ResourceKind 时选择空 resource list，有
-ResourceKind 时对 selected Node 的同类 declared ResourceId 稳定排序，并选择一个尚未在
-当前 Task decision 使用的资源。多 Role 仅采用 declaration-order first-feasible greedy，
-不做 backtracking；无法形成完整 decision 时返回 `NoFeasibleSelection(RoleId)`。
+MissionPlan v0.5 的 Role 可声明多个不同 kind 的 `resources[]`；每个 `units` 是一项所选资源的
+minimum advertised capacity，v0.2 不做 divisible quota sharing。Task `timing` 相对 durable
+Mission acceptance，包含 earliest/latest start、completion deadline 和 planning-only estimated
+duration。无 estimated duration 的 Task 只能立即选择，不能占用未来 interval。
+Mission acceptance 先验证所有 offset 能安全锚定为 Controller timestamp；decision 同时保存由
+latest-start 与 `completion-deadline - duration` 收敛出的 inclusive latest activation time。
 
-Scheduler Decision 只是 selection evidence，不是 Assignment Proposal、reservation、Group
-binding 或 State truth。Composition layer 仍分别调用 `propose`/`propose_role_recovery`、
-Commit 和 Bind/Rebind。Scheduler 只回答 Who should；Capability Matching 回答 Who can；
-Shared Resource Coordination 决定资源能否 Commit；Execution Group Manager 应用 committed
-collaboration。
+Scheduler Decision 只是 selection evidence，不是 Assignment Proposal、physical reservation、
+Group binding 或 State truth。Control calendar 以 generation 防止 stale future admission，并
+持久化 `Scheduled/Activated/Invalidated` interval；到期时仍重新 Match、Propose、Commit、Bind。
+active interval 到 estimated end 后若 Task 未终止，resource 变为 open-ended occupancy，不执行
+preemption。Context-scoped Role 由 snapshot 携带 exact existing Node/resource constraint，保证
+跨 Task ownership continuity。所有 normal/recovery Commit 都拒绝覆盖其他 Task 的 future
+interval；scheduled Task 只能按所属 Group 的 exact decision 在有效 activation window 内 Commit。
+未绑定、过早或过期的 Task 不能 Activate；过期 interval 在窗口仍允许时重排，窗口已错过时
+保持 Ready、持久化一个去重的 `window-missed` 原因并退出自动 timer dispatch，等待显式 Mission
+policy。Composition layer 仍分别调用 Proposal、Commit 和 Bind/Rebind，application timer 将其他
+预期延期隔离为单 Task 重试而非全局 fatal error。
+Controller restore 会用 orchestration-owned acceptance time 与原始 Task timing 重算 calendar
+decision 的 earliest/end/latest activation，拒绝被扩宽的 checkpoint 证据。
 
 Mission Actor 的物理 placement 是独立的 Control deployment policy，不是 MissionPlan 字段。
 可选 `(MissionId, ActorId) -> NodeId` constraint 在首次 Matching 时生成 singleton candidate，
@@ -245,10 +257,11 @@ Mission Actor 的物理 placement 是独立的 Control deployment policy，不�
 不健康、无有效 lease、不可达或 capability/contract 不满足的 constrained Node 保持 Task
 Ready/deferred，不会回退选择其他 Node。
 
-v0.1 未实现 Capability × Compute × Space × Time optimization、load-aware placement、
-spatial/traffic/deadline scheduling、priority/fairness/preemption、batching、bidding/auction、
-RL/LLM policy 或 Scheduler persistence。演化这些能力前需要真实 Compute Load/Queue/GPU
-Memory、Pose/Travel/Traffic、Time Window/Deadline/Duration 与 contention evidence。
+v0.2 未实现 cost-optimal scheduling、divisible quota、load-aware placement、travel/traffic
+estimation、priority/fairness/preemption、batching、bidding/auction、RL/LLM policy 或 joint
+multi-role recovery。演化这些能力前需要真实 Compute Load/Queue/GPU Memory、
+Pose/Travel/Traffic 与 contention evidence。完整 authority 决策见
+[`ADR-0029`](../decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。
 
 ### State & Memory Plane — Allocation State v0.1
 
@@ -268,8 +281,8 @@ TaskExecution 后投影 Bound；partial release 删除受影响 record；Recover
 RecoveryPending；Rebind 后转 Bound；Abort/Release 后 record 消失。
 orphan 或 ownership 不一致的 Group reservation 会使 projection builder 返回 invariant error。
 该 ownership 记录在
-[`ADR-0005`](../decisions/0005-allocation-state-projection-authority.md)。Scheduler v0.1
-保持不变且不读取 Allocation View；Scheduler v0.2 是后续独立工作。
+[`ADR-0005`](../decisions/0005-allocation-state-projection-authority.md)。Scheduler v0.2
+只读取 Control 直接构造的 immutable calendar snapshot，不读取可能滞后的 Allocation View。
 
 ### Control Plane — Reconciliation & Recovery Slice v0.1
 
@@ -287,7 +300,7 @@ Blocked 并仅将失败 Role 置为 unbound。Reconciler 从不替 Scheduler 选
 `match_recovery_candidates` 只对失败 Role 使用共享 eligibility predicate，排除 failed
 node，并允许返回空 `RecoveryCandidateSet`。带 Actor 的 Role 还必须服从既有
 `ActorBinding`（首次绑定前服从 deployment placement）；v0 不隐式迁移 Actor，因此权威
-Node 就是 failed node 时返回空集合并保持 Group Blocked。外部 bootstrap Scheduler 必须从
+Node 就是 failed node 时返回空集合并保持 Group Blocked。外部 bounded Scheduler 必须从
 该 Set 显式选择 Node；`propose_role_recovery` 验证 candidate membership 与 resource
 declaration，但不创建 reservation 或修改 Group。
 
@@ -398,18 +411,18 @@ staged target 的 size/digest。中央 CAS 与 Node 路径解析逐级拒绝 sym
 
 `core/state::SqliteEventLog` 提供 SQLite WAL-backed immutable event envelope。它保存
 `event_id`、RoboGuide-local timestamp、correlation/causation identity、payload schema marker
-和 `domain.EventPayload.json/v9` 版本化 JSON payload，供 Integration Server 的事件查询使用；
-读取路径保留 v2-v8 兼容。v9 保存 identified peer-channel readiness，v8 保存 typed relation 与
+和 `domain.EventPayload.json/v10` 版本化 JSON payload，供 Integration Server 的事件查询使用；
+读取路径保留 v2-v9 兼容。v10 保存 scheduling reservation lifecycle，v9 保存 identified peer-channel readiness，v8 保存 typed relation 与
 coupling evidence；v7 为 generic Memory replica 补充 consumer provider identity，缺少
 该字段的 v6 历史 evidence 保守归入 reserved legacy bucket；v6 增加 source-aware State 与 generic
 Memory catalog/replica evidence，v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-外层 `roboguide.controller-checkpoint/v13` 包含内层 v12
+外层 `roboguide.controller-checkpoint/v14` 包含内层 v13
 Control/Shared Node/State records/Runtime projection；
 启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
-fail-closed；outer v13/inner v12 只接受各自的前一版本做一步迁移。State record 保留原始 `received_at`，因此
+fail-closed；outer v14/inner v13 只接受各自的前一版本做一步迁移。State record 保留原始 `received_at`，因此
 restart 不会让过期 evidence 重新变 Fresh；shared-spatial evidence 恢复后仍受 execution
 `Unknown` 和 relation fence 约束。
 Memory catalog 从 event evidence replay，不进入 Runtime checkpoint。该机制是单控制器恢复切片，不等同于完整 event-sourced projection replay、

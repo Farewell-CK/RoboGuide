@@ -45,11 +45,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
-- The current Mission boundary uses `roboguide.mission-plan/v0.4`: Context/ContextRole
+- The current Mission boundary uses `roboguide.mission-plan/v0.5`: Context/ContextRole
   continuity, coupling mode, selective Group view, peer descriptor, and Execution Relation
-  specifications are Mission Intelligence metadata, while Task/Context resource ownership is
-  recorded independently in Control and its Group projection. v0.2/v0.3 remain compatibility
-  inputs.
+  specifications are Mission Intelligence metadata; Role resource sizing and Task-relative timing
+  are Scheduler inputs, while Task/Context resource ownership is recorded independently in Control
+  and its Group projection. v0.2-v0.4 remain compatibility inputs.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.
@@ -86,9 +86,20 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Committed-but-not-bound recovery assignments are Control-owned pending
   commitments keyed by Group/Role; Rebind consumes, Abort releases replacement
   resources, and terminal Group release removes all related ownership.
-- `core/control/src/scheduler.rs` implements a stateless deterministic bootstrap
-  `Who should` policy over supplied Candidate Sets; it does not re-run eligibility,
-  inspect reservations, validate proposals, commit resources, or mutate State/Groups.
+- `core/control/src/scheduler.rs` implements the stateless deterministic bounded joint `Who should /
+  Where / When` policy over supplied Candidate Sets and immutable Control calendar snapshots. It
+  backtracks across Role/Node/exclusive-resource/time choices but does not re-run eligibility,
+  validate proposals, commit resources, or mutate State/Groups. `units` is a minimum selected
+  resource capacity, not divisible quota.
+- Control durably owns future Ready-Task scheduling intervals and their generation. Due intervals
+  re-run Match -> Propose -> Commit -> Bind before dispatch; activated intervals are planning
+  evidence beside the existing physical reservation authority. Overrun becomes open-ended
+  occupancy and never preempts running Local EAIOS work. Normal and recovery Commit both reject
+  conflicting future intervals; Recovery reads the same calendar snapshot but does not create a
+  future reservation. Scheduled activation requires exact committed Role coverage and a live
+  selected/latest/deadline-derived activation window. Window-missed deferrals are durable and
+  deduplicated per Task and leave automatic timer dispatch so one Mission cannot terminate or spin
+  the application timer.
 - `core/artifact-store/` contains the filesystem implementation of the transport-neutral
   ArtifactBlobStore port; it stores opaque bytes and does not own map, task, or execution policy.
 - `core/integration/` owns the formal gRPC Node Protocol v0.4 transport;
@@ -209,12 +220,14 @@ Recovery pipeline tests prove candidate membership, proposal/commit separation,
 atomic conflicts, committed-only rebind, and stable unaffected bindings.
 Commitment lifecycle tests cover one-pending-per-role, stale handles, atomic Abort,
 terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
-Scheduler tests require stable node/resource choices, CandidateSet confinement,
-normal/recovery policy consistency, decision-local exclusive-resource avoidance,
-NoSelection/NoFeasible outcomes, and Decision/Proposal/Commit separation.
+Scheduler tests require stable joint node/resource/time choices, bounded backtracking,
+CandidateSet confinement, normal/recovery policy consistency, decision-local exclusive-resource
+avoidance, Context binding reuse, future admission/restore/due/cancel/overrun behavior,
+deadline-derived activation bounds, Commit conflict protection, durable deferral deduplication,
+NoSelection/NoFeasible/SearchLimited outcomes, and Decision/Proposal/Commit separation.
 Allocation projection tests cover Committed/Bound/RecoveryPending, partial release,
 Abort/Rebind/Release, orphan rejection, stable ordering, projection lag, and
-Control-to-State one-way authority. Scheduler v0.1 must not read Allocation State.
+Control-to-State one-way authority. Scheduler v0.2 must not read Allocation State.
 Adapter tests cover contract-version rejection, wire/domain conversion, identity
 matching, transport errors, intent round trips, and heterogeneous local mappings.
 

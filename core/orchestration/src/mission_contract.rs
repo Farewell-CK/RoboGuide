@@ -1,4 +1,4 @@
-//! MissionPlan v0.2/v0.3/v0.4 JSON boundary owned by Mission orchestration.
+//! MissionPlan v0.2-v0.5 JSON boundary owned by Mission orchestration.
 
 use crate::OrchestrationError;
 use domain::{
@@ -6,13 +6,14 @@ use domain::{
     CoordinationContext, CoordinationContextId, ExecutionCouplingMode, ExecutionIntent,
     ExecutionRelationId, ExecutionRelationSpec, ExecutionRelationType, ExecutionValue,
     FreshnessPolicyRef, GroupSharedViewSpec, GroupViewBinding, GroupViewField,
-    MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3, MISSION_PLAN_SCHEMA_V0_4, MapId,
-    MapRevisionId, MapRevisionSelector, MissionGoal, MissionId, MissionPlan, PeerChannelSpec,
-    PlannedExecutionRef, PlannedTask, RelationStateRequirement, ResourceBindingScope, ResourceKind,
-    RoleId, RoleRequirement, SharedSpatialReference, TaskContinuity, TaskGraph, TaskId,
-    TaskRequirement,
+    MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3, MISSION_PLAN_SCHEMA_V0_4,
+    MISSION_PLAN_SCHEMA_V0_5, MapId, MapRevisionId, MapRevisionSelector, MissionGoal, MissionId,
+    MissionPlan, PeerChannelSpec, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
+    ResourceBindingScope, ResourceKind, ResourceRequirement, RoleId, RoleRequirement,
+    SharedSpatialReference, TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskTiming,
 };
-use serde::Deserialize;
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 
 /// Wire MissionPlan accepted by the Phase 1 HTTP boundary.
@@ -204,6 +205,63 @@ struct TaskDocument {
     /// Optional Task-level coupling mode override.
     #[serde(default)]
     coupling_mode: Option<CouplingModeDocument>,
+    /// Relative time constraints introduced by MissionPlan v0.5.
+    #[serde(default)]
+    timing: Option<TimingDocument>,
+}
+
+/// Wire relative scheduling constraints anchored to Mission acceptance.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TimingDocument {
+    /// Earliest permitted start offset.
+    earliest_start_offset_ms: u64,
+    /// Latest permitted start offset.
+    latest_start_offset_ms: NullableMillis,
+    /// Optional completion deadline offset.
+    completion_deadline_offset_ms: NullableMillis,
+    /// Optional planning duration.
+    estimated_duration_ms: NullableMillis,
+}
+
+/// Required JSON field whose value may explicitly be a millisecond count or null.
+struct NullableMillis(Option<u64>);
+
+impl<'de> Deserialize<'de> for NullableMillis {
+    /// Preserves the distinction between an absent contract key and a present null value.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NullableMillisVisitor)
+    }
+}
+
+/// Decodes a present nullable millisecond value without accepting a missing field.
+struct NullableMillisVisitor;
+
+impl<'de> Visitor<'de> for NullableMillisVisitor {
+    type Value = NullableMillis;
+
+    /// Describes the exact nullable integer contract for Serde diagnostics.
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a non-negative millisecond integer or null")
+    }
+
+    /// Accepts one present non-negative millisecond count.
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(NullableMillis(Some(value)))
+    }
+
+    /// Accepts an explicit JSON null value.
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(NullableMillis(None))
+    }
+
+    /// Accepts the unit representation used by JSON null.
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(NullableMillis(None))
+    }
 }
 
 /// Wire Task role requirement and continuity declaration.
@@ -219,13 +277,45 @@ struct RoleDocument {
     /// Exact capability contract.
     contract: ContractDocument,
     /// Optional exclusive resource category.
-    resource_kind: Option<ResourceDocument>,
+    #[serde(default, deserialize_with = "resource_kind_field")]
+    resource_kind: ResourceKindField,
+    /// Quantitative resource requirements introduced by MissionPlan v0.5.
+    #[serde(default)]
+    resources: Option<Vec<ResourceRequirementDocument>>,
     /// Canonical execution operation.
     execution: IntentDocument,
     /// Optional ContextRole identity.
     context_role: Option<String>,
     /// Resource lifetime for this role.
     resource_scope: ScopeDocument,
+}
+
+/// Presence-aware legacy resource field so v0.5 rejects even an explicit null value.
+#[derive(Default)]
+enum ResourceKindField {
+    /// The JSON object omitted the legacy field.
+    #[default]
+    Missing,
+    /// The JSON object supplied the legacy nullable field.
+    Present(Option<ResourceDocument>),
+}
+
+/// Decodes one present legacy resource field while Serde default handles absence.
+fn resource_kind_field<'de, D>(deserializer: D) -> Result<ResourceKindField, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<ResourceDocument>::deserialize(deserializer).map(ResourceKindField::Present)
+}
+
+/// Wire quantitative resource demand for one Role.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourceRequirementDocument {
+    /// Required resource category.
+    kind: ResourceDocument,
+    /// Minimum declared capacity.
+    units: u32,
 }
 
 /// Wire exact capability contract reference.
@@ -286,14 +376,17 @@ enum ScopeDocument {
     Context,
 }
 
-/// Decodes v0.2/v0.3 compatibility input or one complete MissionPlan v0.4 document.
+/// Decodes historical input or one current MissionPlan v0.5 document.
 pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError> {
     let document: PlanDocument = serde_json::from_str(json).map_err(|error| {
         OrchestrationError::Mission(format!("invalid MissionPlan JSON: {error}"))
     })?;
     if !matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_2 | MISSION_PLAN_SCHEMA_V0_3 | MISSION_PLAN_SCHEMA_V0_4
+        MISSION_PLAN_SCHEMA_V0_2
+            | MISSION_PLAN_SCHEMA_V0_3
+            | MISSION_PLAN_SCHEMA_V0_4
+            | MISSION_PLAN_SCHEMA_V0_5
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -302,9 +395,13 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     }
     let relation_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_3 | MISSION_PLAN_SCHEMA_V0_4
+        MISSION_PLAN_SCHEMA_V0_3 | MISSION_PLAN_SCHEMA_V0_4 | MISSION_PLAN_SCHEMA_V0_5
     );
-    let mode_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_4;
+    let mode_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_4 | MISSION_PLAN_SCHEMA_V0_5
+    );
+    let scheduling_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_5;
     let mission_id = MissionId::new(document.mission.id)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     let goal = MissionGoal::new(mission_id.clone(), document.mission.objective)
@@ -317,7 +414,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     let tasks = document
         .tasks
         .into_iter()
-        .map(|task| task_from_document(&mission_id, task, mode_contract))
+        .map(|task| task_from_document(&mission_id, task, mode_contract, scheduling_contract))
         .collect::<Result<Vec<_>, _>>()?;
     let graph = TaskGraph::new(mission_id, tasks)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -455,6 +552,7 @@ fn task_from_document(
     mission_id: &MissionId,
     task: TaskDocument,
     mode_contract: bool,
+    scheduling_contract: bool,
 ) -> Result<PlannedTask, OrchestrationError> {
     let task_id =
         TaskId::new(task.id).map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -485,14 +583,58 @@ fn task_from_document(
             ExecutionIntent::new(intent_contract, parameters)
                 .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
         );
-        roles.push(RoleRequirement::new_with_actor_and_contract(
-            role_id.clone(),
-            ActorId::new(role.actor)
-                .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
-            capability_from_document(role.capability),
-            contract,
-            role.resource_kind.map(resource_from_document),
-        ));
+        let actor_id = ActorId::new(role.actor)
+            .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
+        let requirement = if scheduling_contract {
+            if !matches!(role.resource_kind, ResourceKindField::Missing) {
+                return Err(OrchestrationError::Mission(
+                    "MissionPlan v0.5 Role must use resources instead of resource_kind".to_string(),
+                ));
+            }
+            let resources = role
+                .resources
+                .ok_or_else(|| {
+                    OrchestrationError::Mission(
+                        "MissionPlan v0.5 Role must declare resources".to_string(),
+                    )
+                })?
+                .into_iter()
+                .map(|resource| {
+                    ResourceRequirement::new(resource_from_document(resource.kind), resource.units)
+                        .map_err(|error| OrchestrationError::Mission(error.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            RoleRequirement::new_scheduled(
+                role_id.clone(),
+                Some(actor_id),
+                capability_from_document(role.capability),
+                Some(contract),
+                resources,
+            )
+            .map_err(|error| OrchestrationError::Mission(error.to_string()))?
+        } else {
+            if role.resources.is_some() {
+                return Err(OrchestrationError::Mission(
+                    "MissionPlan before v0.5 cannot declare quantitative resources".to_string(),
+                ));
+            }
+            let resource_kind = match role.resource_kind {
+                ResourceKindField::Present(resource) => resource.map(resource_from_document),
+                ResourceKindField::Missing => {
+                    return Err(OrchestrationError::Mission(
+                        "MissionPlan before v0.5 Role must declare resource_kind".to_string(),
+                    ));
+                }
+            };
+            RoleRequirement::new_with_actor_and_contract(
+                role_id.clone(),
+                actor_id,
+                capability_from_document(role.capability),
+                contract,
+                resource_kind,
+            )
+        };
+        roles.push(requirement);
         if let Some(context_role) = role.context_role {
             context_roles.insert(
                 role_id.clone(),
@@ -502,8 +644,31 @@ fn task_from_document(
         }
         scopes.insert(role_id, scope_from_document(role.resource_scope));
     }
-    let requirement = TaskRequirement::new(mission_id.clone(), task_id, roles)
-        .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
+    let requirement = if scheduling_contract {
+        let timing = task.timing.ok_or_else(|| {
+            OrchestrationError::Mission("MissionPlan v0.5 Task must declare timing".to_string())
+        })?;
+        TaskRequirement::new_scheduled(
+            mission_id.clone(),
+            task_id,
+            roles,
+            TaskTiming::new(
+                timing.earliest_start_offset_ms,
+                timing.latest_start_offset_ms.0,
+                timing.completion_deadline_offset_ms.0,
+                timing.estimated_duration_ms.0,
+            )
+            .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
+        )
+    } else {
+        if task.timing.is_some() {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan before v0.5 cannot declare task timing".to_string(),
+            ));
+        }
+        TaskRequirement::new(mission_id.clone(), task_id, roles)
+    }
+    .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     let dependencies = task
         .depends_on
         .into_iter()

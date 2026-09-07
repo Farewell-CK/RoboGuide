@@ -66,6 +66,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if self.scheduled_task(proposal.task_ref()).is_some() {
+            return Err(ControlError::InvalidProposal(
+                "a scheduled Task must commit through its owning Execution Group".to_string(),
+            ));
+        }
         for assignment in proposal.assignments() {
             for resource_id in assignment.resource_ids() {
                 if let Some(reservation) = self.reservations.get(resource_id) {
@@ -73,6 +78,15 @@ impl ControlPlane {
                         resource_id: resource_id.clone(),
                         owner_task_ref: reservation.task_ref.clone(),
                         owner_role_id: reservation.role_id.clone(),
+                    });
+                }
+                if let Some((owner_task_ref, owner_role_id)) =
+                    self.scheduled_resource_conflict(resource_id, proposal.task_ref())
+                {
+                    return Err(ControlError::ResourceConflict {
+                        resource_id: resource_id.clone(),
+                        owner_task_ref,
+                        owner_role_id,
                     });
                 }
             }
@@ -127,6 +141,25 @@ impl ControlPlane {
             ));
         }
         validate_task_assignments(execution, proposal.assignments())?;
+        if let Some(scheduled) = self.scheduled_task(proposal.task_ref())
+            && (scheduled.group_id() != group_id
+                || scheduled.phase() != crate::SchedulingReservationPhase::Scheduled
+                || scheduled.decision().starts_at() > timestamp
+                || scheduled
+                    .decision()
+                    .ends_at()
+                    .is_some_and(|ends_at| timestamp >= ends_at)
+                || scheduled
+                    .decision()
+                    .latest_activation_at()
+                    .is_some_and(|latest| timestamp > latest)
+                || scheduled.decision().proposed_assignments() != proposal.assignments())
+        {
+            return Err(ControlError::InvalidProposal(
+                "scheduled Task commit does not match its live Group decision and activation window"
+                    .to_string(),
+            ));
+        }
         let mut owners = Vec::new();
         for assignment in proposal.assignments() {
             let scope = *execution
@@ -160,6 +193,15 @@ impl ControlPlane {
                         resource_id: resource_id.clone(),
                         owner_task_ref: reservation.task_ref.clone(),
                         owner_role_id: reservation.role_id.clone(),
+                    });
+                }
+                if let Some((owner_task_ref, owner_role_id)) =
+                    self.scheduled_resource_conflict(resource_id, proposal.task_ref())
+                {
+                    return Err(ControlError::ResourceConflict {
+                        resource_id: resource_id.clone(),
+                        owner_task_ref,
+                        owner_role_id,
                     });
                 }
             }

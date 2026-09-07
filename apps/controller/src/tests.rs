@@ -72,6 +72,11 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
         EventPayload::CandidatesMatched { task_ref }
         | EventPayload::TaskSchedulingSelected { task_ref, .. }
+        | EventPayload::TaskSchedulingDeferred { task_ref, .. }
+        | EventPayload::SchedulingReservationCreated { task_ref, .. }
+        | EventPayload::SchedulingReservationActivated { task_ref, .. }
+        | EventPayload::SchedulingReservationInvalidated { task_ref, .. }
+        | EventPayload::SchedulingReservationReleased { task_ref, .. }
         | EventPayload::ProposalCreated { task_ref }
         | EventPayload::PlanCommitted { task_ref }
         | EventPayload::ExecutionGroupBound { task_ref, .. }
@@ -447,7 +452,7 @@ fn concurrent_missions_rebind_and_release_independently() {
     .expect("node registration should be valid");
 
     let mut control = ControlPlane::new();
-    let scheduler = DeterministicBootstrapScheduler::new();
+    let scheduler = BoundedJointScheduler::new();
     let mut state = InMemorySharedNodeState::new();
     let mut log = SharedEventLog::new();
     for registration in [&node_a, &node_b, &node_d, &edge_c, &edge_e] {
@@ -680,11 +685,13 @@ fn concurrent_missions_rebind_and_release_independently() {
             &mut log,
         )
         .expect("Mission A transport recovery matching should succeed");
+    let scheduling_snapshot = control.scheduling_snapshot(TimestampMs::new(1));
     let recovery_scheduling = scheduler
         .schedule_recovery(
             &state,
             &requirement_a,
             &recovery_candidates,
+            &scheduling_snapshot,
             TimestampMs::new(1),
             &trace_a,
             &mut log,

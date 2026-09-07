@@ -1,4 +1,4 @@
-"""Contract tests for MissionPlan v0.3 compatibility and v0.4 graph invariants."""
+"""Contract tests for MissionPlan compatibility and current scheduling invariants."""
 
 from __future__ import annotations
 
@@ -67,19 +67,40 @@ def _v0_4_fixture_json() -> JSONObject:
     return raw
 
 
+def _v0_5_fixture_json() -> JSONObject:
+    """Upgrade the coordination fixture with quantitative resources and Task timing."""
+    raw = _v0_4_fixture_json()
+    raw["schema_version"] = "roboguide.mission-plan/v0.5"
+    tasks = cast(list[JSONObject], raw["tasks"])
+    for task in tasks:
+        task["timing"] = {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": 10_000,
+            "completion_deadline_offset_ms": 20_000,
+            "estimated_duration_ms": 5_000,
+        }
+        roles = cast(list[JSONObject], task["roles"])
+        for role in roles:
+            resource_kind = role.pop("resource_kind")
+            role["resources"] = (
+                [] if resource_kind is None else [{"kind": resource_kind, "units": 2}]
+            )
+    return raw
+
+
 def test_valid_fixture_round_trips() -> None:
     """The approved fixture must parse and serialize without contract drift."""
     raw = _fixture_json()
     assert MissionPlan.from_json(raw).to_json() == raw
 
 
-def test_v0_4_schema_requires_typed_relation_fields() -> None:
-    """The current provider schema exposes v0.4 kinds and their required typed fields."""
+def test_v0_5_schema_requires_typed_relation_fields() -> None:
+    """The current provider schema retains relation kinds and their required typed fields."""
     schema = json.loads(
-        Path("contracts/mission/v0.4/mission-plan.schema.json").read_text(encoding="utf-8")
+        Path("contracts/mission/v0.5/mission-plan.schema.json").read_text(encoding="utf-8")
     )
     version = schema["properties"]["schema_version"]
-    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.4"}
+    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.5"}
     relation_kind = schema["$defs"]["relation"]["properties"]["kind"]
     assert "state-requirement" in relation_kind["enum"]
     conditional_requirements = {
@@ -125,6 +146,75 @@ def test_v0_4_coupling_and_typed_relation_round_trip() -> None:
     assert execution_plan.contexts[0].shared_view is not None
     assert execution_plan.contexts[0].shared_view.bindings[1].state_export_id is None
     assert execution_plan.to_json() == execution_view
+
+
+def test_v0_5_quantitative_resources_and_timing_round_trip() -> None:
+    """Current plans retain bounded Task timing and all exclusive resource demands."""
+    raw = _v0_5_fixture_json()
+    plan = MissionPlan.from_json(raw)
+    assert plan.tasks[0].timing is not None
+    assert plan.tasks[0].timing.estimated_duration_ms == 5_000
+    assert plan.tasks[1].roles[0].resources[0].units == 2
+    assert plan.to_json() == raw
+
+
+def test_v0_5_rejects_duplicate_resource_kind_and_infeasible_timing() -> None:
+    """Ambiguous capacity demands and impossible local windows fail at contract admission."""
+    duplicate = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], duplicate["tasks"])
+    roles = cast(list[JSONObject], tasks[1]["roles"])
+    resources = cast(list[JSONObject], roles[0]["resources"])
+    resources.append(deepcopy(resources[0]))
+    with pytest.raises(MissionPlanError, match="duplicate kinds"):
+        MissionPlan.from_json(duplicate)
+
+    infeasible = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], infeasible["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["latest_start_offset_ms"] = -1
+    with pytest.raises(MissionPlanError, match="nonnegative integer"):
+        MissionPlan.from_json(infeasible)
+
+    unprovable = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], unprovable["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["estimated_duration_ms"] = None
+    with pytest.raises(MissionPlanError, match="requires estimated duration"):
+        MissionPlan.from_json(unprovable)
+
+    null_earliest = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], null_earliest["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["earliest_start_offset_ms"] = None
+    with pytest.raises(MissionPlanError, match="earliest_start_offset_ms"):
+        MissionPlan.from_json(null_earliest)
+
+    oversized = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], oversized["tasks"])
+    roles = cast(list[JSONObject], tasks[1]["roles"])
+    resources = cast(list[JSONObject], roles[0]["resources"])
+    resources[0]["units"] = 1 << 32
+    with pytest.raises(MissionPlanError, match="32-bit"):
+        MissionPlan.from_json(oversized)
+
+    overflowing = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], overflowing["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["earliest_start_offset_ms"] = (1 << 64) - 1
+    timing["latest_start_offset_ms"] = None
+    timing["completion_deadline_offset_ms"] = (1 << 64) - 1
+    with pytest.raises(MissionPlanError, match="overflows"):
+        MissionPlan.from_json(overflowing)
+
+    duration_only_overflow = _v0_5_fixture_json()
+    tasks = cast(list[JSONObject], duration_only_overflow["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["earliest_start_offset_ms"] = (1 << 64) - 1
+    timing["latest_start_offset_ms"] = None
+    timing["completion_deadline_offset_ms"] = None
+    timing["estimated_duration_ms"] = 1
+    with pytest.raises(MissionPlanError, match="overflows earliest start"):
+        MissionPlan.from_json(duration_only_overflow)
 
 
 def test_implementation_profile_rejects_valid_future_relation() -> None:

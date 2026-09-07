@@ -7,6 +7,7 @@
 //! This crate intentionally contains no transport, serialization, SDK, or
 //! simulator dependency. It defines the first internal Node Contract shape.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
@@ -77,6 +78,9 @@ pub const MISSION_PLAN_SCHEMA_V0_3: &str = "roboguide.mission-plan/v0.3";
 
 /// Version identifier for Mission Plans carrying execution coupling modes and typed relations.
 pub const MISSION_PLAN_SCHEMA_V0_4: &str = "roboguide.mission-plan/v0.4";
+
+/// Version identifier for Mission Plans carrying joint resource and temporal requirements.
+pub const MISSION_PLAN_SCHEMA_V0_5: &str = "roboguide.mission-plan/v0.5";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
@@ -488,6 +492,119 @@ pub enum ResourceKind {
     Time,
 }
 
+/// One quantitative resource demand considered jointly with capability and time.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResourceRequirement {
+    /// Resource category required by the Role.
+    kind: ResourceKind,
+    /// Minimum declared capacity required from one selected resource.
+    units: u32,
+}
+
+impl ResourceRequirement {
+    /// Creates a positive quantitative resource requirement.
+    pub fn new(kind: ResourceKind, units: u32) -> Result<Self, DomainError> {
+        if units == 0 {
+            return Err(DomainError::EmptyValue {
+                kind: "resource requirement units",
+            });
+        }
+        Ok(Self { kind, units })
+    }
+
+    /// Returns the required resource category.
+    pub const fn kind(&self) -> ResourceKind {
+        self.kind
+    }
+
+    /// Returns the minimum declared capacity required from one resource.
+    pub const fn units(&self) -> u32 {
+        self.units
+    }
+}
+
+/// Relative scheduling constraints anchored to Mission acceptance time.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct TaskTiming {
+    /// Earliest permitted start offset from Mission acceptance.
+    earliest_start_offset_ms: u64,
+    /// Latest permitted start offset, when bounded.
+    latest_start_offset_ms: Option<u64>,
+    /// Completion deadline offset, when declared.
+    completion_deadline_offset_ms: Option<u64>,
+    /// Estimated execution duration used only for planning future occupancy.
+    estimated_duration_ms: Option<u64>,
+}
+
+impl TaskTiming {
+    /// Creates validated relative time constraints without granting completion authority.
+    pub fn new(
+        earliest_start_offset_ms: u64,
+        latest_start_offset_ms: Option<u64>,
+        completion_deadline_offset_ms: Option<u64>,
+        estimated_duration_ms: Option<u64>,
+    ) -> Result<Self, DomainError> {
+        if latest_start_offset_ms.is_some_and(|latest| latest < earliest_start_offset_ms) {
+            return Err(DomainError::InvalidDuration {
+                kind: "task start window",
+            });
+        }
+        if estimated_duration_ms == Some(0) {
+            return Err(DomainError::InvalidDuration {
+                kind: "task estimated duration",
+            });
+        }
+        if estimated_duration_ms
+            .is_some_and(|duration| earliest_start_offset_ms.checked_add(duration).is_none())
+        {
+            return Err(DomainError::InvalidDuration {
+                kind: "task estimated duration overflow",
+            });
+        }
+        if let Some(deadline) = completion_deadline_offset_ms {
+            let duration = estimated_duration_ms.ok_or(DomainError::InvalidDuration {
+                kind: "task completion deadline without estimated duration",
+            })?;
+            let earliest_completion = earliest_start_offset_ms.checked_add(duration).ok_or(
+                DomainError::InvalidDuration {
+                    kind: "task completion deadline overflow",
+                },
+            )?;
+            if deadline < earliest_completion {
+                return Err(DomainError::InvalidDuration {
+                    kind: "task completion deadline",
+                });
+            }
+        }
+        Ok(Self {
+            earliest_start_offset_ms,
+            latest_start_offset_ms,
+            completion_deadline_offset_ms,
+            estimated_duration_ms,
+        })
+    }
+
+    /// Returns the earliest start offset from Mission acceptance.
+    pub const fn earliest_start_offset_ms(&self) -> u64 {
+        self.earliest_start_offset_ms
+    }
+
+    /// Returns the latest start offset, when bounded.
+    pub const fn latest_start_offset_ms(&self) -> Option<u64> {
+        self.latest_start_offset_ms
+    }
+
+    /// Returns the completion deadline offset, when declared.
+    pub const fn completion_deadline_offset_ms(&self) -> Option<u64> {
+        self.completion_deadline_offset_ms
+    }
+
+    /// Returns the planning-only estimated duration.
+    pub const fn estimated_duration_ms(&self) -> Option<u64> {
+        self.estimated_duration_ms
+    }
+}
+
 /// A resource advertised by a node.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Resource {
@@ -539,11 +656,14 @@ pub struct RoleRequirement {
     contract: Option<CapabilityContractRef>,
     /// Optional resource category that must be bound to the role.
     resource_kind: Option<ResourceKind>,
+    /// Quantitative resource requirements evaluated together by Scheduler v0.2.
+    #[serde(default)]
+    resources: Vec<ResourceRequirement>,
 }
 
 impl RoleRequirement {
     /// Creates a role requirement for task matching.
-    pub const fn new(
+    pub fn new(
         role_id: RoleId,
         capability: CapabilityKind,
         resource_kind: Option<ResourceKind>,
@@ -554,6 +674,9 @@ impl RoleRequirement {
             actor_id: None,
             contract: None,
             resource_kind,
+            resources: resource_kind
+                .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
+                .unwrap_or_default(),
         }
     }
 
@@ -571,7 +694,40 @@ impl RoleRequirement {
             actor_id: Some(actor_id),
             contract: Some(contract),
             resource_kind,
+            resources: resource_kind
+                .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
+                .unwrap_or_default(),
         }
+    }
+
+    /// Creates a Role with multiple quantitative requirements for joint scheduling.
+    pub fn new_scheduled(
+        role_id: RoleId,
+        actor_id: Option<ActorId>,
+        capability: CapabilityKind,
+        contract: Option<CapabilityContractRef>,
+        resources: Vec<ResourceRequirement>,
+    ) -> Result<Self, DomainError> {
+        let mut kinds = BTreeSet::new();
+        if resources
+            .iter()
+            .any(|resource| !kinds.insert(resource.kind()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("role {role_id} has duplicate resource kinds"),
+            });
+        }
+        Ok(Self {
+            role_id,
+            capability,
+            actor_id,
+            contract,
+            resource_kind: match resources.as_slice() {
+                [resource] => Some(resource.kind()),
+                _ => None,
+            },
+            resources,
+        })
     }
 
     /// Returns the role identity.
@@ -598,6 +754,14 @@ impl RoleRequirement {
     pub const fn resource_kind(&self) -> Option<ResourceKind> {
         self.resource_kind
     }
+
+    /// Returns all quantitative requirements used by joint scheduling.
+    pub fn resource_requirements(&self) -> Cow<'_, [ResourceRequirement]> {
+        match (self.resources.is_empty(), self.resource_kind) {
+            (true, Some(kind)) => Cow::Owned(vec![ResourceRequirement { kind, units: 1 }]),
+            _ => Cow::Borrowed(&self.resources),
+        }
+    }
 }
 
 /// A mission task's role-level execution requirements.
@@ -607,6 +771,9 @@ pub struct TaskRequirement {
     task_ref: TaskRef,
     /// Role requirements in the task's declared order.
     roles: Vec<RoleRequirement>,
+    /// Relative time constraints used by scheduling and future reservation.
+    #[serde(default)]
+    timing: TaskTiming,
 }
 
 impl TaskRequirement {
@@ -632,7 +799,20 @@ impl TaskRequirement {
         Ok(Self {
             task_ref: TaskRef::new(mission_id, task_id),
             roles,
+            timing: TaskTiming::default(),
         })
+    }
+
+    /// Creates a task requirement with explicit relative time constraints.
+    pub fn new_scheduled(
+        mission_id: MissionId,
+        task_id: TaskId,
+        roles: Vec<RoleRequirement>,
+        timing: TaskTiming,
+    ) -> Result<Self, DomainError> {
+        let mut requirement = Self::new(mission_id, task_id, roles)?;
+        requirement.timing = timing;
+        Ok(requirement)
     }
 
     /// Returns the complete mission-scoped task identity.
@@ -653,6 +833,11 @@ impl TaskRequirement {
     /// Returns all role requirements in declaration order.
     pub fn roles(&self) -> &[RoleRequirement] {
         &self.roles
+    }
+
+    /// Returns relative time constraints anchored to Mission acceptance.
+    pub const fn timing(&self) -> &TaskTiming {
+        &self.timing
     }
 }
 
@@ -1051,7 +1236,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_4
+        MISSION_PLAN_SCHEMA_V0_5
     }
 
     /// Returns the original mission goal.
@@ -1846,10 +2031,10 @@ impl NodeRegistration {
         let has_contract = requirement.required_contract().is_none_or(|contract| {
             self.contract_is_available_for_kind(contract, requirement.capability())
         });
-        let has_resource = requirement.resource_kind().is_none_or(|kind| {
-            self.resources
-                .iter()
-                .any(|resource| resource.kind() == kind && resource.capacity() > 0)
+        let has_resource = requirement.resource_requirements().iter().all(|required| {
+            self.resources.iter().any(|resource| {
+                resource.kind() == required.kind() && resource.capacity() >= required.units()
+            })
         });
         has_capability && has_contract && has_resource
     }
@@ -2167,12 +2352,57 @@ pub enum EventPayload {
         /// Mission-scoped task for which candidates were produced.
         task_ref: TaskRef,
     },
-    /// The deterministic bootstrap Scheduler selected all normal task assignments.
+    /// The bounded joint Scheduler selected all normal Task assignments.
     TaskSchedulingSelected {
         /// Mission-scoped task represented by the selection decision.
         task_ref: TaskRef,
         /// Selected role, node, and proposed resource mappings.
         assignments: Vec<RoleAssignment>,
+    },
+    /// A Ready Task had no admissible bounded joint decision in the current tick.
+    TaskSchedulingDeferred {
+        /// Mission-scoped Task that remains Ready.
+        task_ref: TaskRef,
+        /// Stable scheduler outcome category, not a terminal Task failure.
+        reason: String,
+    },
+    /// Control durably admitted a future or active planning interval.
+    SchedulingReservationCreated {
+        /// Mission-level Group that owns the scheduling commitment.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped Task receiving the interval.
+        task_ref: TaskRef,
+        /// Inclusive Controller receive-time interval start.
+        starts_at: TimestampMs,
+        /// Exclusive planning end required for calendar admission.
+        ends_at: TimestampMs,
+        /// Control calendar generation used by the Scheduler decision.
+        snapshot_version: u64,
+    },
+    /// A due scheduling reservation became active after Proposal, Commit, and Bind.
+    SchedulingReservationActivated {
+        /// Mission-level Group owning the physical commitment.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped Task that activated.
+        task_ref: TaskRef,
+    },
+    /// Activation revalidation invalidated a scheduling reservation.
+    SchedulingReservationInvalidated {
+        /// Mission-level Group retaining the Ready Task.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped Task requiring a later scheduling pass.
+        task_ref: TaskRef,
+        /// Stable revalidation or conflict diagnostic.
+        reason: String,
+    },
+    /// A terminal Task or Mission released its scheduling interval.
+    SchedulingReservationReleased {
+        /// Mission-level Group that owned the interval.
+        group_id: ExecutionGroupId,
+        /// Mission-scoped Task whose interval was removed.
+        task_ref: TaskRef,
+        /// Stable terminal release reason.
+        reason: String,
     },
     /// A scheduler proposal was accepted for validation.
     ProposalCreated {
@@ -2295,7 +2525,7 @@ pub enum EventPayload {
         /// Eligible candidates in deterministic node order.
         candidate_node_ids: Vec<NodeId>,
     },
-    /// The deterministic bootstrap Scheduler selected one recovery replacement.
+    /// The bounded deterministic Scheduler selected one recovery replacement.
     RecoverySchedulingSelected {
         /// Blocked Group awaiting the selected replacement.
         group_id: ExecutionGroupId,
@@ -2599,6 +2829,17 @@ impl EventRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rejects duration arithmetic overflow even when no completion deadline is declared.
+    #[test]
+    fn task_timing_rejects_duration_overflow_without_deadline() {
+        assert!(matches!(
+            TaskTiming::new(u64::MAX, None, None, Some(1)),
+            Err(DomainError::InvalidDuration {
+                kind: "task estimated duration overflow"
+            })
+        ));
+    }
 
     /// Rejects ambiguous Task role declarations before Control persists role authority.
     #[test]

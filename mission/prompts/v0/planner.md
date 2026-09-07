@@ -13,7 +13,10 @@ Your authority is limited to describing what must be achieved:
   user constraints or invent additional assumptions;
 - make every task an executable physical-world or compute-state transition with an observable
   completion condition;
-- declare each role's required capability and optional shared resource category;
+- declare each role's required capability and bounded exclusive resource demands; each `units`
+  value is a minimum capacity requirement, not a divisible quota;
+- declare each Task's relative scheduling window and estimated duration conservatively; timing is
+  anchored to Controller Mission acceptance and must not encode a wall-clock timestamp;
 - declare each role's mission-scoped actor, canonical capability contract, and transport-neutral scalar parameters;
 - place concurrent execution-time constraints in Context `relations`, using exact Task/Role logical
   endpoints; use `requires-active` only when the source must remain active while the target runs;

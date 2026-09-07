@@ -25,10 +25,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
 
 /// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -1129,11 +1129,13 @@ fn resume_role_recovery(
         correlation_id,
         events,
     )?;
-    let scheduler = control::DeterministicBootstrapScheduler::new();
+    let scheduler = control::BoundedJointScheduler::new();
+    let scheduling_snapshot = controller.bridge.control().scheduling_snapshot(timestamp);
     let selection = scheduler.schedule_recovery(
         &state,
         &requirement,
         &candidates,
+        &scheduling_snapshot,
         timestamp,
         correlation_id,
         events,
@@ -1510,7 +1512,9 @@ fn deferred_dispatch(error: &OrchestrationError) -> bool {
     ) || matches!(
         error,
         OrchestrationError::Mission(reason)
-            if reason.contains("no feasible deterministic selection")
+            if reason.contains("no feasible")
+                || reason.contains("joint scheduling deferred")
+                || reason.contains("joint scheduling window missed")
     ) || matches!(
         error,
         OrchestrationError::Control(
@@ -2001,6 +2005,52 @@ async fn handle_http_connection(
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
             }
+        }
+        ("GET", "/v1/scheduling-reservations") => {
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let reservations = controller
+                .bridge
+                .control()
+                .scheduled_tasks()
+                .map(|reservation| {
+                    let decision = reservation.decision();
+                    serde_json::json!({
+                        "mission_id": decision.task_ref().mission_id(),
+                        "task_id": decision.task_ref().task_id(),
+                        "group_id": reservation.group_id(),
+                        "phase": format!("{:?}", reservation.phase()),
+                        "starts_at_ms": decision.starts_at().as_millis(),
+                        "ends_at_ms": decision.ends_at().map(domain::TimestampMs::as_millis),
+                        "latest_activation_at_ms": decision.latest_activation_at()
+                            .map(domain::TimestampMs::as_millis),
+                        "snapshot_version": decision.snapshot_version(),
+                        "expansions": decision.expansions(),
+                        "reason": reservation.reason(),
+                        "selections": decision.selections().iter().map(|selection| {
+                            serde_json::json!({
+                                "role_id": selection.role_id(),
+                                "node_id": selection.node_id(),
+                                "resources": selection.resource_ids().iter()
+                                    .zip(selection.resource_units())
+                                    .map(|(resource_id, units)| serde_json::json!({
+                                        "resource_id": resource_id,
+                                        "units": units,
+                                    }))
+                                    .collect::<Vec<_>>(),
+                            })
+                        }).collect::<Vec<_>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema": "roboguide.scheduling-reservations/v0.1",
+                    "reservations": reservations,
+                }),
+            )
         }
         ("GET", "/v1/execution-attempts") => {
             let controller = controller
@@ -2970,9 +3020,9 @@ mod tests {
         assert!(error.contains("unknown actors [robot-dog-typo]"));
     }
 
-    /// A temporarily unavailable bound Actor leaves dispatch pending for a later heartbeat.
+    /// Expected Actor and scheduling deferrals never stop the process-wide application timer.
     #[test]
-    fn unavailable_bound_actor_is_deferred_without_failing_server() {
+    fn expected_dispatch_deferrals_do_not_fail_server() {
         let error = orchestration::OrchestrationError::Control(
             control::ControlError::ActorBindingRequiresReconciliation {
                 mission_id: domain::MissionId::new("mission").expect("mission id is valid"),
@@ -2981,6 +3031,12 @@ mod tests {
             },
         );
         assert!(deferred_dispatch(&error));
+        assert!(deferred_dispatch(&OrchestrationError::Mission(
+            "joint scheduling deferred: invalid time window".to_string(),
+        )));
+        assert!(deferred_dispatch(&OrchestrationError::Mission(
+            "joint scheduling window missed".to_string(),
+        )));
     }
 
     /// The application driver consumes a restored commitment before considering a new proposal.

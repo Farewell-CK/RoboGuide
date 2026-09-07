@@ -2,7 +2,7 @@
 //!
 //! This module detects divergence between active Group assignments and Shared
 //! Node State. It performs role-scoped matching, but never selects replacement
-//! nodes; callers make a bootstrap scheduler choice before Control validates a
+//! nodes; callers make a bounded Scheduler choice before Control validates a
 //! proposal, commits resources, and rebinds the existing Group.
 
 use crate::{ControlError, ExecutionGroup};
@@ -337,9 +337,10 @@ pub(super) fn validate_recovery_resources(
     role: &RoleRequirement,
     resource_ids: &[ResourceId],
 ) -> Result<(), ControlError> {
-    if role.resource_kind().is_some() && resource_ids.is_empty() {
+    let requirements = role.resource_requirements();
+    if resource_ids.len() != requirements.len() {
         return Err(ControlError::InvalidProposal(format!(
-            "recovery role {} requires a resource binding",
+            "recovery role {} resources do not exactly cover its requirements",
             role.role_id()
         )));
     }
@@ -349,13 +350,19 @@ pub(super) fn validate_recovery_resources(
             "recovery proposal contains duplicate resources".to_string(),
         ));
     }
-    if resource_ids.iter().any(|resource_id| {
-        !node
-            .registration()
-            .owns_resource(resource_id, role.resource_kind())
-    }) {
+    if resource_ids
+        .iter()
+        .zip(requirements.iter())
+        .any(|(resource_id, required)| {
+            !node.registration().resources().iter().any(|resource| {
+                resource.id() == resource_id
+                    && resource.kind() == required.kind()
+                    && resource.capacity() >= required.units()
+            })
+        })
+    {
         return Err(ControlError::InvalidProposal(format!(
-            "recovery role {} references a resource not owned by its replacement node",
+            "recovery role {} resources do not satisfy replacement kind/capacity",
             role.role_id()
         )));
     }

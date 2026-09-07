@@ -137,7 +137,8 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 - Control Plane 的进程划分、Leader Election、高可用与一致性算法；
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；
-- Scheduler 采用规则、启发式、优化、拍卖、强化学习或混合策略；
+- Scheduler v0.2 已采用 deterministic bounded joint search；真实 cost model、priority/fairness、
+  travel/traffic prediction、divisible quota、auction 或 RL policy 仍待证据决定；
 - Shared Resource Coordination 的时空图、Reservation 和冲突求解；
 - Messaging / Invocation 使用 DDS、Zenoh、gRPC、MQTT、WebRTC 或其他协议；
 - Memory 使用向量库、图数据库、关系库、对象存储或组合；

@@ -494,13 +494,17 @@ class MissionRequestEngine:
             contracts = _plan_contracts(plan)
             missing = sorted(
                 {
-                    _requirement_label(role.capability, _contract_text(role), role.resource_kind)
+                    _requirement_label(
+                        role.capability,
+                        _contract_text(role),
+                        tuple((resource.kind, resource.units) for resource in role.resources),
+                    )
                     for task in plan.tasks
                     for role in task.roles
                     if not inventory.supports_requirement(
                         role.capability,
                         _contract_text(role),
-                        role.resource_kind,
+                        tuple((resource.kind, resource.units) for resource in role.resources),
                     )
                 }
             )
@@ -639,7 +643,11 @@ def _contract_text(role: RoleRequirement) -> str:
     return f"{contract.namespace}.{contract.name}@{contract.version}"
 
 
-def _requirement_label(capability: str, contract: str, resource_kind: str | None) -> str:
+def _requirement_label(
+    capability: str,
+    contract: str,
+    resources: tuple[tuple[str, int], ...],
+) -> str:
     """Format one stable advisory requirement for an inspectable Blocked reason."""
-    resource = "none" if resource_kind is None else resource_kind
+    resource = ",".join(f"{kind}:{units}" for kind, units in resources) or "none"
     return f"capability={capability}, contract={contract}, resource={resource}"

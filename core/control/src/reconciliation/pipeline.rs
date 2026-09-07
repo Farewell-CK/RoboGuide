@@ -525,6 +525,15 @@ impl ControlPlane {
                     owner_role_id: reservation.role_id.clone(),
                 });
             }
+            if let Some((owner_task_ref, owner_role_id)) =
+                self.scheduled_resource_conflict(resource_id, proposal.task_ref())
+            {
+                return Err(ControlError::ResourceConflict {
+                    resource_id: resource_id.clone(),
+                    owner_task_ref,
+                    owner_role_id,
+                });
+            }
         }
 
         let committed = CommittedRecoveryAssignment::new(

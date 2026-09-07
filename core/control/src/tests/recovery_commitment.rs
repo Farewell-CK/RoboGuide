@@ -364,6 +364,7 @@
     fn multi_resource_abort_is_atomic_on_ownership_mismatch() {
         let mut fixture = recovery_fixture(true);
         let need = begin_detected_transport_recovery(&mut fixture);
+        require_multi_resource_transport_recovery(&mut fixture);
         let candidates =
             match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
         let proposal = fixture

@@ -36,8 +36,11 @@ const EVENT_PAYLOAD_SCHEMA_V7: &str = "domain.EventPayload.json/v7";
 /// Previous JSON payload codec including typed execution relation and coupling evidence.
 const EVENT_PAYLOAD_SCHEMA_V8: &str = "domain.EventPayload.json/v8";
 
-/// Current JSON payload codec including identified peer-channel readiness evidence.
+/// Previous JSON payload codec including identified peer-channel readiness evidence.
 const EVENT_PAYLOAD_SCHEMA_V9: &str = "domain.EventPayload.json/v9";
+
+/// Current JSON payload codec including Control scheduling reservation evidence.
+const EVENT_PAYLOAD_SCHEMA_V10: &str = "domain.EventPayload.json/v10";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +469,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V7 => Ok(7),
         EVENT_PAYLOAD_SCHEMA_V8 => Ok(8),
         EVENT_PAYLOAD_SCHEMA_V9 => Ok(9),
+        EVENT_PAYLOAD_SCHEMA_V10 => Ok(10),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -503,6 +507,11 @@ fn validate_payload_schema(
                 7
             }
         }
+        EventPayload::TaskSchedulingDeferred { .. }
+        | EventPayload::SchedulingReservationCreated { .. }
+        | EventPayload::SchedulingReservationActivated { .. }
+        | EventPayload::SchedulingReservationInvalidated { .. }
+        | EventPayload::SchedulingReservationReleased { .. } => 10,
         EventPayload::StateRecordObserved { .. } | EventPayload::MemoryManifestPublished { .. } => {
             6
         }
@@ -610,7 +619,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V9,
+                    EVENT_PAYLOAD_SCHEMA_V10,
                     payload_json,
                 ],
             )
@@ -929,7 +938,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, "event-1");
         assert_eq!(events[0].correlation_id, "test-correlation");
-        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V9);
+        assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V10);
         let payload: EventPayload =
             serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
         assert!(matches!(

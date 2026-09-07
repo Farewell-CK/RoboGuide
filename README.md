@@ -121,24 +121,28 @@ Control Plane 负责全局决策与协调：
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
-当前实现 **Control Plane — Embodied Scheduler v0.1: Selection Contract &
-Deterministic Bootstrap Policy**。Capability Matching 先产生 Candidate Set 回答 `Who can`；
-无状态 `DeterministicBootstrapScheduler` 只在该 Set 内回答 `Who should`，返回
-`TaskSchedulingDecision` 或 role-scoped `RecoverySchedulingDecision`。Decision 仍须通过
-Normal/Recovery Proposal validation，Scheduler 不调用 Proposal、Commit、Rebind，也不读取
-reservation authority 或修改 State/Group。
+当前实现 **Control Plane — Embodied Scheduler v0.2: Bounded Joint Scheduling & Future
+Reservations**。Capability Matching 先产生 exact Candidate Set 回答 `Who can`；无状态
+`BoundedJointScheduler` 在固定搜索预算内联合选择所有 Role 的 Node、独占 Resource 与最早
+可行时间区间，能够回溯稳定排序下的多 Role dead end。MissionPlan v0.5 以
+`resources[].kind/units` 声明所选资源的最低 capacity，并以相对 durable Mission acceptance
+的 `timing` 声明 start window、deadline 与 planning duration。
 
-Bootstrap policy 对 NodeId 稳定排序并选择第一个可形成当前 Role selection 的 candidate。
-ResourceKind 为空时不建议资源；存在 ResourceKind 时，只从 selected Node declaration 中按
-ResourceId 稳定排序选择一个尚未在当前 Task decision 使用的资源。如果 declaration-order
-greedy selection 无法避免明显的 exclusive resource 重复，则返回
-`NoFeasibleSelection(RoleId)`，不执行 backtracking、retry 或优化。
+只有 DAG-Ready Task 进入 Scheduling。立即决策仍依次通过 Proposal、Commit、Bind；未来决策
+由 Control calendar 持久化，应用 timer 到期后重新执行 Matching 和完整 authority validation。
+`Scheduled/Activated/Invalidated` calendar record 不是第二份物理 reservation：实际 ownership
+仍只由现有 Control reservations 在 Commit 后建立。运行超过 estimated end 时资源被视为
+开放占用，冲突任务保持 Ready，不会抢占运行中的 Local EAIOS。Context-scoped binding 必须
+精确复用原 Node/resource。所有 normal/recovery Commit 都会拒绝覆盖其他 Task 的 future
+interval；scheduled Task 只允许在所属 Group 中以 exact decision Commit。decision 的最迟激活
+同时受 latest-start 和 completion deadline 约束，未完整绑定或过期的 Task 不得 Activate。
+过期 interval 可在窗口内重排，window-missed 则按 Task 持久化去重并保持 Ready。Normal 与
+上层 policy 确认前不再进入自动 timer dispatch。Normal 与 Recovery 共用 calendar-aware 的
+确定性 Role/resource primitive，但当前 future reservation 只用于 normal Ready Task。
 
-Normal 与 Recovery 共用同一个私有 role-selection primitive。Recovery Candidate Set 为空时
-返回 `NoSelection`，Group 继续 Blocked/Pending，不表示 recovery exhausted。该策略仅建立
-Scheduler ownership/contract，不声称 optimal，也没有实现 Capability × Compute × Space ×
-Time 联合优化、load/spatial/traffic/deadline awareness、priority、fairness、preemption、
-batching、auction、RL 或 LLM scheduling。
+本切片不声称 optimal，也未实现 divisible quota、priority/fairness、travel/traffic cost、
+preemption、batching、auction、RL/LLM scheduling 或 multi-role joint recovery。完整决策见
+[`ADR-0029`](docs/decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。
 
 当前实现 **Control Plane — Reconciliation & Recovery Slice v0.1: Assigned Node
 Unavailability**：Control 将 Active Group 的当前 assignment 作为 desired execution
@@ -151,7 +155,7 @@ Observed node unavailable
   -> Recovery Need
   -> Blocked + partial role release
   -> role-scoped Recovery Candidate Set
-  -> external bootstrap scheduler choice
+  -> external bounded scheduler choice
   -> Recovery Assignment Proposal
   -> Resource Coordinate / Commit
   -> committed replacement rebind
@@ -159,7 +163,7 @@ Observed node unavailable
 ```
 
 Reconciler 不选择 replacement node，也不实现 Scheduler。Controller 通过
-`DeterministicBootstrapScheduler` 在 role-scoped Candidate Set 上产生 selection，再通过
+`BoundedJointScheduler` 在 role-scoped Candidate Set 上产生 selection，再通过
 Control API 创建 proposal。Proposal 不写 reservation；Commit 阶段重新验证 node
 eligibility、Role capability、resource ownership/conflict、TaskRef/Group/Role identity 和
 failed binding，并原子建立 existing Group 的 replacement reservation；Rebind 只接受
@@ -190,7 +194,7 @@ commitments 及所有指向该 Group 的 reservations，确保 Released Group �
 Pending commitment 不是 Execution Group lifecycle state，也不写入 Shared Node State。
 Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit。
 
-本切片未实现 background reconciliation loop、自动 Scheduler、multi-role failure、
+本切片未实现 background reconciliation loop、multi-role joint recovery、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
 
@@ -324,8 +328,8 @@ replace。View 只表达：
 
 Projection refresh 独立发生，可以暂时滞后；State write 失败不回滚 Control Commit，State
 内容也不能授予、拒绝或释放 reservation。Projection builder 会拒绝 orphan、重复或同时
-Bound/RecoveryPending 的 Group reservation。Scheduler v0.1 当前不读取 Allocation View；
-未来 Scheduler v0.2 即使使用该 view，也仍须由 Commit 重新检查 authority。该边界记录在
+Bound/RecoveryPending 的 Group reservation。Scheduler v0.2 读取 Control 直接提供的 immutable
+calendar snapshot，不读取可能滞后的 Allocation View；Commit 仍重新检查 authority。该边界记录在
 [`ADR-0005`](docs/decisions/0005-allocation-state-projection-authority.md)。
 
 当前新增 **Source-aware State v0.1**。共同模型显式区分 `Node`、`World`、`RoboGuide`
@@ -388,7 +392,7 @@ Artifact HTTP v0 将未完成 upload 限制为最多 32 个、合计 8 GiB；单
 Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执行环境。它承载
 Mission-level Group 的 live execution context。当前 slice 已实现 TaskExecution 的 execution
 identity、事件顺序归约、checkpoint fencing、recovery-required evidence 和 lifecycle
-transition。MissionPlan v0.4 还允许 Context 声明 coupling mode、typed Execution Coordination
+transition。MissionPlan v0.5 还允许 Context 声明 coupling mode、typed Execution Coordination
 Relation、选择性的 Group shared view 和 transport-neutral peer channel；端点是稳定的
 `(TaskId, RoleId)` 逻辑槽，Runtime 将其解析到当前 attempt，归约
 `Dormant/Pending/Satisfied/Violated/Unknown`，并以 relation fence 阻止未经满足证明的 target

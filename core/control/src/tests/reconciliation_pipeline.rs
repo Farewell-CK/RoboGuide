@@ -382,6 +382,7 @@
     fn recovery_commit_conflict_is_atomic_and_multi_mission_isolated() {
         let mut fixture = recovery_fixture(true);
         let need = begin_detected_transport_recovery(&mut fixture);
+        require_multi_resource_transport_recovery(&mut fixture);
         let candidates =
             match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
         let proposal = fixture
@@ -405,12 +406,16 @@
                 .contains_key(&fixture.space_b_secondary)
         );
 
-        let mission_b_task = requirement_for_mission(
-            "mission-b",
-            "task-resource-owner",
-            "transport-b",
-            CapabilityKind::Transport,
-        );
+        let mission_b_task = TaskRequirement::new(
+            domain::MissionId::new("mission-b").expect("test mission id must be valid"),
+            TaskId::new("task-resource-owner").expect("test task id must be valid"),
+            vec![RoleRequirement::new(
+                RoleId::new("transport-b").expect("test role id must be valid"),
+                CapabilityKind::Compute,
+                Some(ResourceKind::Compute),
+            )],
+        )
+        .expect("Mission B requirement must be valid");
         let mission_b_candidates = fixture
             .control
             .match_capabilities(

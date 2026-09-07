@@ -299,7 +299,7 @@ fn actor_binding_survives_t1_to_t3_and_is_audited() {
     let node = actor_node_with_contracts("dog-b", CapabilityKind::Mobility, &["go-to-shelf", "return-user"], "space-b", ResourceKind::Space);
     control.register_node(&mut state, node, NodeStatus::new(NodeHealth::Online, now), now, &correlation_id, &mut events).expect("node registration valid");
     let candidates = control.match_capabilities_for_mission(&state, &mission, &t1, now, &correlation_id, &mut events).expect("matching succeeds");
-    let scheduler = DeterministicBootstrapScheduler::new();
+    let scheduler = BoundedJointScheduler::new();
     let decision = scheduler.schedule_task(&state, &t1, &candidates, now, &correlation_id, &mut events).expect("schedule succeeds");
     let proposal = control.propose(&state, &t1, &candidates, decision.proposed_assignments(), now, &correlation_id, &mut events).expect("proposal succeeds");
     let committed = control.commit(&proposal, now, &correlation_id, &mut events).expect("commit succeeds");
@@ -341,7 +341,7 @@ fn unavailable_bound_actor_requires_reconciliation() {
     let node = actor_node_with_contracts("dog-b", CapabilityKind::Mobility, &["go-to-shelf", "return-user"], "space-b", ResourceKind::Space);
     control.register_node(&mut state, node, NodeStatus::new(NodeHealth::Online, now), now, &correlation_id, &mut events).expect("node registration valid");
     let candidates = control.match_capabilities_for_mission(&state, &mission, &t1, now, &correlation_id, &mut events).expect("matching succeeds");
-    let decision = DeterministicBootstrapScheduler::new().schedule_task(&state, &t1, &candidates, now, &correlation_id, &mut events).expect("schedule succeeds");
+    let decision = BoundedJointScheduler::new().schedule_task(&state, &t1, &candidates, now, &correlation_id, &mut events).expect("schedule succeeds");
     let proposal = control.propose(&state, &t1, &candidates, decision.proposed_assignments(), now, &correlation_id, &mut events).expect("proposal succeeds");
     let committed = control.commit(&proposal, now, &correlation_id, &mut events).expect("commit succeeds");
     control.create_group_with_actor_bindings(ExecutionGroupId::new("group-t1").expect("group id valid"), &committed, &t1, now, &correlation_id, &mut events).expect("group bind succeeds");
@@ -421,7 +421,7 @@ fn actor_recovery_cannot_bypass_binding_or_placement_authority() {
             &mut events,
         )
         .expect("placement-constrained matching succeeds");
-    let decision = DeterministicBootstrapScheduler::new()
+    let decision = BoundedJointScheduler::new()
         .schedule_task(
             &state,
             &t1,

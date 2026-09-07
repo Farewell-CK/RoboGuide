@@ -26,11 +26,11 @@ use std::fmt::{Display, Formatter};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 12 adds durable command intents and physical-attempt generation/history.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
+/// Version 13 adds durable Control scheduling reservations and their calendar generation.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v11";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

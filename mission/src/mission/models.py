@@ -11,10 +11,13 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.4"
+MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.5"
 MISSION_PLAN_COMPAT_VERSION: Final = "roboguide.mission-plan/v0.3"
+MISSION_PLAN_COUPLING_VERSION: Final = "roboguide.mission-plan/v0.4"
 CAPABILITIES: Final = frozenset({"mobility", "transport", "compute", "observation"})
 RESOURCE_KINDS: Final = frozenset({"space", "compute", "time"})
+U32_MAX: Final = (1 << 32) - 1
+U64_MAX: Final = (1 << 64) - 1
 RELATION_KINDS: Final = frozenset(
     {
         "requires-active",
@@ -176,8 +179,33 @@ class ExecutionIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceRequirement:
+    """Require one exclusive resource whose declared capacity meets a minimum."""
+
+    kind: str
+    units: int
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> ResourceRequirement:
+        """Parse a positive resource demand from current MissionPlan JSON."""
+        item = _object(value, path)
+        _exact_keys(item, {"kind", "units"}, path)
+        kind = _text(item["kind"], f"{path}.kind")
+        if kind not in RESOURCE_KINDS:
+            raise MissionPlanError(f"{path}.kind is unsupported: {kind}")
+        units = item["units"]
+        if isinstance(units, bool) or not isinstance(units, int) or units <= 0 or units > U32_MAX:
+            raise MissionPlanError(f"{path}.units must be a positive 32-bit integer")
+        return cls(kind=kind, units=units)
+
+    def to_json(self) -> JSONObject:
+        """Serialize one provider-independent quantitative resource demand."""
+        return {"kind": self.kind, "units": self.units}
+
+
+@dataclass(frozen=True, slots=True)
 class RoleRequirement:
-    """Describe one role-level capability and optional resource requirement."""
+    """Describe one role-level capability and its exclusive resource demands."""
 
     role_id: str
     actor_id: str
@@ -186,23 +214,24 @@ class RoleRequirement:
     execution: ExecutionIntent
     context_role: str | None
     resource_scope: str
+    resources: tuple[ResourceRequirement, ...] = ()
 
     @classmethod
-    def from_json(cls, value: JSONValue, path: str) -> RoleRequirement:
+    def from_json(cls, value: JSONValue, path: str, version: str) -> RoleRequirement:
         """Parse and validate one role requirement from contract JSON."""
         item = _object(value, path)
+        common = {
+            "id",
+            "actor",
+            "capability",
+            "contract",
+            "execution",
+            "context_role",
+            "resource_scope",
+        }
         _exact_keys(
             item,
-            {
-                "id",
-                "actor",
-                "capability",
-                "contract",
-                "resource_kind",
-                "execution",
-                "context_role",
-                "resource_scope",
-            },
+            common | ({"resources"} if version == MISSION_PLAN_VERSION else {"resource_kind"}),
             path,
         )
         role_id = _text(item["id"], f"{path}.id")
@@ -213,11 +242,26 @@ class RoleRequirement:
         execution = ExecutionIntent.from_json(item["execution"], f"{path}.execution")
         if execution.capability_contract != contract:
             raise MissionPlanError(f"{path}.contract differs from execution.capability_contract")
-        resource_value = item["resource_kind"]
-        if resource_value is not None and not isinstance(resource_value, str):
-            raise MissionPlanError(f"{path}.resource_kind must be text or null")
-        if resource_value is not None and resource_value not in RESOURCE_KINDS:
-            raise MissionPlanError(f"{path}.resource_kind is unsupported: {resource_value}")
+        if version == MISSION_PLAN_VERSION:
+            resources = tuple(
+                ResourceRequirement.from_json(resource, f"{path}.resources[{index}]")
+                for index, resource in enumerate(_array(item["resources"], f"{path}.resources"))
+            )
+            if len({resource.kind for resource in resources}) != len(resources):
+                raise MissionPlanError(f"{path}.resources contains duplicate kinds")
+            resource_value = resources[0].kind if len(resources) == 1 else None
+        else:
+            legacy_resource = item["resource_kind"]
+            if legacy_resource is not None and not isinstance(legacy_resource, str):
+                raise MissionPlanError(f"{path}.resource_kind must be text or null")
+            resource_value = legacy_resource
+            if resource_value is not None and resource_value not in RESOURCE_KINDS:
+                raise MissionPlanError(f"{path}.resource_kind is unsupported: {resource_value}")
+            resources = (
+                ()
+                if resource_value is None
+                else (ResourceRequirement(kind=resource_value, units=1),)
+            )
         context_role_value = item["context_role"]
         if context_role_value is not None:
             context_role_value = _text(context_role_value, f"{path}.context_role")
@@ -234,20 +278,25 @@ class RoleRequirement:
             execution=execution,
             context_role=context_role_value,
             resource_scope=resource_scope,
+            resources=resources,
         )
 
-    def to_json(self) -> JSONObject:
+    def to_json(self, version: str) -> JSONObject:
         """Serialize the role requirement without provider-specific values."""
-        return {
+        result: JSONObject = {
             "id": self.role_id,
             "actor": self.actor_id,
             "capability": self.capability,
             "contract": self.execution.capability_contract.to_json(),
-            "resource_kind": self.resource_kind,
             "execution": self.execution.to_json(),
             "context_role": self.context_role,
             "resource_scope": self.resource_scope,
         }
+        if version == MISSION_PLAN_VERSION:
+            result["resources"] = [resource.to_json() for resource in self.resources]
+        else:
+            result["resource_kind"] = self.resource_kind
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,13 +646,86 @@ class MissionContext:
             "roles": [role.to_json() for role in self.roles],
             "relations": [relation.to_json() for relation in self.relations],
         }
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_COUPLING_VERSION, MISSION_PLAN_VERSION}:
             result["coupling_mode"] = self.coupling_mode
             if self.shared_view is not None:
                 result["shared_view"] = self.shared_view.to_json()
             if self.peer_channel is not None:
                 result["peer_channel"] = self.peer_channel.to_json()
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class TaskTiming:
+    """Declare receive-time scheduling constraints relative to Mission acceptance."""
+
+    earliest_start_offset_ms: int
+    latest_start_offset_ms: int | None
+    completion_deadline_offset_ms: int | None
+    estimated_duration_ms: int | None
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> TaskTiming:
+        """Parse one closed timing declaration and enforce its local bounds."""
+        item = _object(value, path)
+        _exact_keys(
+            item,
+            {
+                "earliest_start_offset_ms",
+                "latest_start_offset_ms",
+                "completion_deadline_offset_ms",
+                "estimated_duration_ms",
+            },
+            path,
+        )
+
+        def optional_nonnegative(name: str) -> int | None:
+            """Validate one nullable nonnegative millisecond value."""
+            value = item[name]
+            if value is None:
+                return None
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                or value > U64_MAX
+            ):
+                raise MissionPlanError(
+                    f"{path}.{name} must be null or a nonnegative integer within 64-bit range"
+                )
+            return value
+
+        earliest = optional_nonnegative("earliest_start_offset_ms")
+        if earliest is None:
+            raise MissionPlanError(
+                f"{path}.earliest_start_offset_ms must be a nonnegative integer within 64-bit range"
+            )
+        latest = optional_nonnegative("latest_start_offset_ms")
+        deadline = optional_nonnegative("completion_deadline_offset_ms")
+        duration = optional_nonnegative("estimated_duration_ms")
+        if duration == 0:
+            raise MissionPlanError(f"{path}.estimated_duration_ms must be positive when present")
+        if duration is not None and earliest > U64_MAX - duration:
+            raise MissionPlanError(f"{path}.estimated_duration_ms overflows earliest start")
+        if latest is not None and latest < earliest:
+            raise MissionPlanError(f"{path}.latest_start_offset_ms precedes earliest start")
+        if deadline is not None:
+            if duration is None:
+                raise MissionPlanError(
+                    f"{path}.completion_deadline_offset_ms requires estimated duration"
+                )
+            if deadline < earliest + duration:
+                raise MissionPlanError(f"{path}.completion_deadline_offset_ms is infeasible")
+        return cls(earliest, latest, deadline, duration)
+
+    def to_json(self) -> JSONObject:
+        """Serialize relative timing without converting it to a wall-clock timestamp."""
+        return {
+            "earliest_start_offset_ms": self.earliest_start_offset_ms,
+            "latest_start_offset_ms": self.latest_start_offset_ms,
+            "completion_deadline_offset_ms": self.completion_deadline_offset_ms,
+            "estimated_duration_ms": self.estimated_duration_ms,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -616,6 +738,7 @@ class MissionTask:
     roles: tuple[RoleRequirement, ...]
     context_id: str
     coupling_mode: str | None = None
+    timing: TaskTiming | None = None
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str, version: str) -> MissionTask:
@@ -624,6 +747,8 @@ class MissionTask:
         base_keys = {"id", "description", "depends_on", "roles", "context_id"}
         if version == MISSION_PLAN_COMPAT_VERSION:
             _exact_keys(item, base_keys, path)
+        elif version == MISSION_PLAN_VERSION:
+            _bounded_keys(item, base_keys | {"timing"}, {"coupling_mode"}, path)
         else:
             _bounded_keys(item, base_keys, {"coupling_mode"}, path)
         dependencies = tuple(
@@ -633,7 +758,7 @@ class MissionTask:
         if len(set(dependencies)) != len(dependencies):
             raise MissionPlanError(f"{path}.depends_on contains duplicates")
         roles = tuple(
-            RoleRequirement.from_json(role, f"{path}.roles[{index}]")
+            RoleRequirement.from_json(role, f"{path}.roles[{index}]", version)
             for index, role in enumerate(_array(item["roles"], f"{path}.roles"))
         )
         if not roles:
@@ -649,6 +774,11 @@ class MissionTask:
         )
         if coupling_mode is not None and coupling_mode not in COUPLING_MODES:
             raise MissionPlanError(f"{path}.coupling_mode is unsupported: {coupling_mode}")
+        timing = (
+            TaskTiming.from_json(item["timing"], f"{path}.timing")
+            if version == MISSION_PLAN_VERSION
+            else None
+        )
         return cls(
             task_id=_text(item["id"], f"{path}.id"),
             description=_text(item["description"], f"{path}.description"),
@@ -656,6 +786,7 @@ class MissionTask:
             roles=roles,
             context_id=_text(item["context_id"], f"{path}.context_id"),
             coupling_mode=coupling_mode,
+            timing=timing,
         )
 
     def to_json(self, version: str) -> JSONObject:
@@ -664,11 +795,18 @@ class MissionTask:
             "id": self.task_id,
             "description": self.description,
             "depends_on": list(self.depends_on),
-            "roles": [role.to_json() for role in self.roles],
+            "roles": [role.to_json(version) for role in self.roles],
             "context_id": self.context_id,
         }
-        if version == MISSION_PLAN_VERSION and self.coupling_mode is not None:
+        if (
+            version in {MISSION_PLAN_COUPLING_VERSION, MISSION_PLAN_VERSION}
+            and self.coupling_mode is not None
+        ):
             result["coupling_mode"] = self.coupling_mode
+        if version == MISSION_PLAN_VERSION:
+            if self.timing is None:
+                raise MissionPlanError(f"task {self.task_id} lacks required v0.5 timing")
+            result["timing"] = self.timing.to_json()
         return result
 
 
@@ -709,7 +847,11 @@ class MissionPlan:
         item = _object(value, "mission_plan")
         _exact_keys(item, {"schema_version", "mission", "contexts", "tasks"}, "mission_plan")
         version = _text(item["schema_version"], "schema_version")
-        if version not in {MISSION_PLAN_COMPAT_VERSION, MISSION_PLAN_VERSION}:
+        if version not in {
+            MISSION_PLAN_COMPAT_VERSION,
+            MISSION_PLAN_COUPLING_VERSION,
+            MISSION_PLAN_VERSION,
+        }:
             raise MissionPlanError(f"unsupported schema_version: {version}")
         tasks = tuple(
             MissionTask.from_json(task, f"tasks[{index}]", version)

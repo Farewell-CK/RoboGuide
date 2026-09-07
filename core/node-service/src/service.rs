@@ -1092,11 +1092,11 @@ mod tests {
                     && capability.contracts.iter().any(|item| item == &contract)
             })
             .count();
-        let has_resource = role.resource_kind().is_none_or(|kind| {
-            registration
-                .resources
-                .iter()
-                .any(|resource| resource.kind == resource_kind_name(kind) && resource.capacity > 0)
+        let has_resource = role.resource_requirements().iter().all(|required| {
+            registration.resources.iter().any(|resource| {
+                resource.kind == resource_kind_name(required.kind())
+                    && resource.capacity >= required.units()
+            })
         });
         matching_capabilities == 1 && has_resource
     }
@@ -1816,7 +1816,7 @@ mod tests {
     /// Control-bound command reaches the local engine and terminates only on a local terminal fact.
     #[tokio::test]
     async fn control_bound_command_round_trips_through_generic_engine() {
-        use control::{ControlPlane, DeterministicBootstrapScheduler};
+        use control::{BoundedJointScheduler, ControlPlane};
         use domain::{
             ActorId, Capability, CapabilityContractRef, CapabilityKind, CorrelationId,
             ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MissionId,
@@ -1927,7 +1927,7 @@ mod tests {
         let candidates = control
             .match_capabilities(&state, &requirement, now, &correlation, &mut log)
             .expect("matching succeeds");
-        let decision = DeterministicBootstrapScheduler::new()
+        let decision = BoundedJointScheduler::new()
             .schedule_task(
                 &state,
                 &requirement,

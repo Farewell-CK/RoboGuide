@@ -86,7 +86,7 @@ context 由 Runtime 承载并跨节点运行。State 只保存二者的事实和
 ### Execution Coordination Relation
 
 Task DAG 表达完成前置关系，不表达两个已经运行的执行单元之间持续成立的约束。
-MissionPlan v0.4 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation，并声明该 Context 的 Execution Coupling Mode。
+MissionPlan v0.5 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation，并声明该 Context 的 Execution Coupling Mode。
 关系端点引用 `(TaskId, RoleId)` 逻辑执行槽；Group 接受后补全 Mission/Group identity，Runtime
 再把逻辑槽解析到当前 execution attempt。关系绝不直接引用 NodeId，因此 replacement/rebind
 不会改变其 Mission 语义。
@@ -143,6 +143,20 @@ Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → E
    端点，持续归约跨 execution 约束；该状态不改变 Proposal/Commit/Binding authority。
 
 未提交的 Proposal 绝不能被当作已经生效的资源分配。
+
+当前 `BoundedJointScheduler` 只接收 DAG-Ready Task 的 exact Candidate Set 与 Control-owned
+calendar snapshot，在固定预算内对 Role、Node、独占 Resource 和最早可行半开时间区间做确定性
+回溯。MissionPlan v0.5 的 `resources[].units` 是所选资源的最低 declared capacity，不是可分割
+quota；`timing` 是相对 durable Mission acceptance 的窗口和 planning duration。Scheduler decision
+仍不是 Proposal 或 Commit。未来区间由 Control 持久化为 `Scheduled`，到期后重新执行
+Matching、Proposal、Commit、Bind 才能 dispatch；`Activated` 区间只是 planning evidence，实际
+resource ownership 仍由原 reservations authority 持有。运行超出 estimated end 时资源退化为
+开放占用，阻止冲突任务启动，不抢占本地执行。所有 normal/recovery Commit 都必须保护 future
+interval，Recovery 读取相同 calendar snapshot 但不建立新的 future reservation。decision 持有
+latest-start 与 completion deadline 共同约束的最迟激活时间；未完整绑定或已过期的 Task 不能
+Activate，window-missed evidence 按 Task 持久化去重并退出自动 timer dispatch，不会终止
+application timer。完整边界见
+[`ADR-0029`](../../decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。
 
 Mission Intelligence 中的 Actor 只表达跨 Task 的逻辑参与者和语义连续性，不携带物理
 Node identity。若部署或实验必须指定某个 Actor 由某个 Node 实现，该关系作为独立的

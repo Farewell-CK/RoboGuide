@@ -2,6 +2,7 @@
 
 use crate::{
     CommittedPlan, CommittedRecoveryAssignment, ControlError, ControlPlane, RecoveryOutcome,
+    SchedulingReservationPhase,
 };
 use domain::{
     ActorId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId, MissionPlan,
@@ -9,7 +10,7 @@ use domain::{
     TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::EventSink;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Runtime binding retained by a Mission Context independently of any one TaskExecution.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1087,6 +1088,61 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<(), ControlError> {
+        let activate_schedule = match self.scheduled_task(task_ref) {
+            Some(reservation) if reservation.phase() == SchedulingReservationPhase::Invalidated => {
+                return Err(ControlError::InvalidProposal(
+                    "invalidated scheduling reservation cannot activate".to_string(),
+                ));
+            }
+            Some(reservation) if reservation.decision().starts_at() > timestamp => {
+                return Err(ControlError::InvalidProposal(
+                    "scheduled Task cannot activate before its reserved start".to_string(),
+                ));
+            }
+            Some(reservation)
+                if reservation
+                    .decision()
+                    .ends_at()
+                    .is_some_and(|ends_at| timestamp >= ends_at) =>
+            {
+                return Err(ControlError::InvalidProposal(
+                    "scheduled Task cannot activate after its reserved interval".to_string(),
+                ));
+            }
+            Some(reservation)
+                if reservation
+                    .decision()
+                    .latest_activation_at()
+                    .is_some_and(|latest| timestamp > latest) =>
+            {
+                return Err(ControlError::InvalidProposal(
+                    "scheduled Task cannot activate after its allowed start window".to_string(),
+                ));
+            }
+            Some(reservation) => reservation.phase() == SchedulingReservationPhase::Scheduled,
+            None => false,
+        };
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        let expected_roles = execution.role_scopes().keys().collect::<BTreeSet<_>>();
+        let assigned_roles = execution
+            .assignments()
+            .iter()
+            .map(RoleAssignment::role_id)
+            .collect::<BTreeSet<_>>();
+        if expected_roles != assigned_roles || execution.assignments().len() != assigned_roles.len()
+        {
+            return Err(ControlError::InvalidProposal(
+                "Task execution requires committed assignments for every role before activation"
+                    .to_string(),
+            ));
+        }
         let group = self
             .groups
             .get_mut(group_id)
@@ -1119,6 +1175,18 @@ impl ControlPlane {
                 task_ref: task_ref.clone(),
             },
         );
+        if activate_schedule {
+            self.activate_scheduled_task(task_ref);
+            events.append(
+                timestamp,
+                correlation_id,
+                None,
+                EventPayload::SchedulingReservationActivated {
+                    group_id: group_id.clone(),
+                    task_ref: task_ref.clone(),
+                },
+            );
+        }
         Ok(())
     }
 

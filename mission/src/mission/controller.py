@@ -213,7 +213,10 @@ class InventorySnapshot:
         )
 
     def supports_requirement(
-        self, capability_kind: str, contract: str, resource_kind: str | None
+        self,
+        capability_kind: str,
+        contract: str,
+        resource_requirements: tuple[tuple[str, int], ...],
     ) -> bool:
         """Check whether one node currently advertises all advisory role requirement facts."""
         return any(
@@ -224,12 +227,12 @@ class InventorySnapshot:
                 capability.kind == capability_kind and capability.available
                 for capability in node.capabilities
             )
-            and (
-                resource_kind is None
-                or any(
-                    resource.kind == resource_kind and resource.capacity > 0
+            and all(
+                any(
+                    resource.kind == kind and resource.capacity >= units
                     for resource in node.resources
                 )
+                for kind, units in resource_requirements
             )
             for node in self.nodes
         )

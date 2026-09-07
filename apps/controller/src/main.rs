@@ -5,7 +5,7 @@
 //! Executable evidence for the first DEAIOS Node Contract vertical slice.
 
 use control::{
-    ControlPlane, DeterministicBootstrapScheduler, GroupLifecycle, ReconciliationAssessment,
+    BoundedJointScheduler, ControlPlane, GroupLifecycle, ReconciliationAssessment,
     RecoverySchedulingOutcome,
 };
 use domain::{
@@ -428,7 +428,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
     )?;
 
     let mut control = ControlPlane::new();
-    let scheduler = DeterministicBootstrapScheduler::new();
+    let scheduler = BoundedJointScheduler::new();
     let mut state = InMemorySharedNodeState::new();
     let mut allocation_state = InMemoryAllocationState::new();
     let mut log = SharedEventLog::new();
@@ -650,11 +650,13 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
             &mut log,
         )
         .map_err(|error| error.to_string())?;
+    let scheduling_snapshot = control.scheduling_snapshot(TimestampMs::new(1));
     let recovery_scheduling = scheduler
         .schedule_recovery(
             &state,
             &requirement,
             &recovery_candidates,
+            &scheduling_snapshot,
             TimestampMs::new(1),
             &correlation_id,
             &mut log,

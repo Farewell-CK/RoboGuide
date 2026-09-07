@@ -5,6 +5,7 @@
 //! Control Plane facade and composition root.
 
 mod allocation;
+mod calendar;
 mod coordination;
 mod group;
 mod matching;
@@ -14,6 +15,7 @@ mod reconciliation;
 mod scheduler;
 
 pub use allocation::AllocationProjectionError;
+pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
 pub use coordination::CommittedPlan;
 pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use matching::{CandidateSet, RoleCandidates};
@@ -23,8 +25,9 @@ pub use reconciliation::{
     RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
 };
 pub use scheduler::{
-    DeterministicBootstrapScheduler, RecoverySchedulingDecision, RecoverySchedulingOutcome,
-    RoleSchedulingSelection, SchedulerError, TaskSchedulingDecision,
+    BoundedJointScheduler, RecoverySchedulingDecision, RecoverySchedulingOutcome,
+    RoleSchedulingSelection, SchedulerError, SchedulingOccupancy, SchedulingRoleConstraint,
+    SchedulingSnapshot, TaskSchedulingDecision, TaskSchedulingOutcome,
 };
 
 use coordination::Reservation;
@@ -50,6 +53,12 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
 pub struct ControlCheckpoint {
     /// Unique resource commitments keyed by resource identity.
     reservations: BTreeMap<ResourceId, Reservation>,
+    /// Future Ready-Task reservations owned by the Control calendar.
+    #[serde(default)]
+    scheduled_tasks: Vec<ScheduledTaskReservation>,
+    /// Monotonic version invalidating stale Scheduler snapshots.
+    #[serde(default)]
+    calendar_version: u64,
     /// Mission-scoped actor bindings represented as values to avoid composite JSON map keys.
     actor_bindings: Vec<ActorBinding>,
     /// Deployment-owned actor placement constraints represented as values for stable JSON.
@@ -262,6 +271,10 @@ pub struct ControlPlane {
     pub(crate) leases: BTreeMap<NodeId, NodeLease>,
     /// Unique resource commitment authority.
     pub(crate) reservations: BTreeMap<ResourceId, Reservation>,
+    /// Future Ready-Task interval reservations keyed by mission-scoped Task.
+    pub(crate) scheduled_tasks: BTreeMap<TaskRef, ScheduledTaskReservation>,
+    /// Monotonic Control calendar version.
+    pub(crate) calendar_version: u64,
     /// Mission-scoped actor binding authority, populated only after successful binding.
     pub(crate) actor_bindings: BTreeMap<(MissionId, ActorId), ActorBinding>,
     /// Deployment-owned actor placement constraints applied before first successful binding.
@@ -293,6 +306,8 @@ impl ControlPlane {
         Self {
             leases: BTreeMap::new(),
             reservations: BTreeMap::new(),
+            scheduled_tasks: BTreeMap::new(),
+            calendar_version: 0,
             actor_bindings: BTreeMap::new(),
             actor_node_constraints: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -305,6 +320,8 @@ impl ControlPlane {
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
             reservations: self.reservations.clone(),
+            scheduled_tasks: self.scheduled_tasks.values().cloned().collect(),
+            calendar_version: self.calendar_version,
             actor_bindings: self.actor_bindings.values().cloned().collect(),
             actor_node_constraints: self.actor_node_constraints.values().cloned().collect(),
             groups: self.groups.values().cloned().collect(),
@@ -375,9 +392,49 @@ impl ControlPlane {
                 ));
             }
         }
+        let mut scheduled_tasks = BTreeMap::new();
+        for reservation in checkpoint.scheduled_tasks {
+            let group = groups.get(reservation.group_id()).ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "checkpoint scheduling reservation references an unknown Group".to_string(),
+                )
+            })?;
+            let task = group
+                .task_execution(reservation.task_ref())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "checkpoint scheduling reservation references an unknown Task".to_string(),
+                    )
+                })?;
+            let valid_phase = match reservation.phase() {
+                SchedulingReservationPhase::Scheduled | SchedulingReservationPhase::Invalidated => {
+                    task.lifecycle() == domain::TaskExecutionLifecycle::Ready
+                }
+                SchedulingReservationPhase::Activated => matches!(
+                    task.lifecycle(),
+                    domain::TaskExecutionLifecycle::Active
+                        | domain::TaskExecutionLifecycle::Blocked
+                ),
+            };
+            if !valid_phase {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint scheduling reservation conflicts with Task lifecycle".to_string(),
+                ));
+            }
+            if scheduled_tasks
+                .insert(reservation.task_ref().clone(), reservation)
+                .is_some()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains duplicate scheduled Task reservation".to_string(),
+                ));
+            }
+        }
         let restored = Self {
             leases: BTreeMap::new(),
             reservations: checkpoint.reservations,
+            scheduled_tasks,
+            calendar_version: checkpoint.calendar_version,
             actor_bindings,
             actor_node_constraints,
             groups,
@@ -385,6 +442,7 @@ impl ControlPlane {
             max_status_age_ms: checkpoint.max_status_age_ms,
         };
         restored.validate_group_checkpoint_authority()?;
+        restored.validate_scheduling_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;
         Ok(restored)
     }
