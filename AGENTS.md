@@ -157,6 +157,16 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; it must not mirror execution lifecycle or choose physical nodes.
+- `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
+  outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
+  ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace
+  evidence, and the `roboguide-eval` CLI. It never imports EMOS/Habitat-MAS packages, never
+  re-implements their internals, reaches external systems only across process boundaries
+  (machine-specific Conda/working-directory/credential configuration stays in Git-ignored
+  `evaluation/local.yaml` or `ROBOGUIDE_EVAL_*` variables), never modifies Core contracts or
+  Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
+  RoboGuide system runner must later drive the real Controller/Node/Runtime path instead of
+  bypassing RoboGuide.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
 
@@ -188,6 +198,16 @@ uv run mypy --strict mission/src mission/tests apps/mission-service tools/qualit
   integrations/robonix-map-service/tests
 uv run python tools/quality/check_python_function_docs.py \
   mission apps/mission-service integrations/robonix-map-service
+uv run pytest -q
+```
+
+For evaluation harness changes, run:
+
+```bash
+uv run ruff format --check evaluation
+uv run ruff check evaluation
+uv run mypy --strict evaluation/src evaluation/tests
+uv run python tools/quality/check_python_function_docs.py evaluation
 uv run pytest -q
 ```
 

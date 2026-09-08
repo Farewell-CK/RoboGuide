@@ -542,6 +542,10 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── memory/v0.1/
 │   ├── spatial/v0.1/
 │   └── spatial/localization-evidence-v0.1/
+├── evaluation/
+│   ├── specs/e1/           # 实验定义（E1 Mobility Smoke 等）
+│   ├── src/roboguide_eval/ # Eval Harness：进程编排 + 可复现结果基础设施
+│   └── tests/
 ├── mission/
 │   ├── src/mission/
 │   ├── prompts/v0/
@@ -657,3 +661,17 @@ uv run mission validate \
   --input scenarios/mvp-slice-v0.1/mission-plan.json
 uv run pytest -q
 ```
+
+## Eval Harness（实验驱动开发）
+
+仓库进入实验驱动阶段后，[`evaluation/`](evaluation/) 提供独立的 Eval Harness：
+它不属于 Core、Runtime、Control Plane、State & Memory Plane 或 Local EAIOS，
+不修改 Proposal / Commit / Binding / Runtime 语义，也不 import 或复制
+EMOS/Habitat-MAS；外部系统只通过进程边界访问。第一版提供 ExperimentSpec 合同、
+进程编排（超时/终止/日志持久化）、canonical metric schema、RunManifest 可复现
+身份和 `roboguide-eval` CLI（doctor / run / summarize），并以
+[`evaluation/specs/e1/mobility-smoke.yaml`](evaluation/specs/e1/mobility-smoke.yaml)
+（E1 Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。机器相关的
+Conda 环境、工作目录与凭据只来自 Git 忽略的 `evaluation/local.yaml` 或
+`ROBOGUIDE_EVAL_*` 环境变量；真实 results 不提交 Git。详见
+[`evaluation/README.md`](evaluation/README.md)。

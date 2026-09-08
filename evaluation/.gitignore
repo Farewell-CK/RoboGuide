@@ -1,0 +1,5 @@
+# Real experiment results are never committed.
+results/
+# Machine-specific local configuration carries paths, environment names, and
+# credential references; only the committed template is versioned.
+local.yaml

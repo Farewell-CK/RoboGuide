@@ -1,0 +1,53 @@
+# Machine-specific Eval Harness configuration (template).
+#
+# Copy this file to evaluation/local.yaml and fill in the real values for
+# this machine. evaluation/local.yaml is Git-ignored: it carries local
+# absolute paths, Conda environment names, and credential references, none
+# of which may be committed. ${VAR} values are resolved from the harness
+# shell environment at spawn time (run `set -a; source <emos.env>; set +a`
+# first, or export the keys); {name} placeholders are substituted by the
+# harness per run ({seed}, {model}, {output_dir}, ...).
+schema: roboguide-eval.local-config/v0.1
+environments:
+  emos:
+    # EMOS/Habitat-MAS checkout on this machine.
+    working_directory: /data/workspace/code/emos-baseline
+    # Dedicated EMOS Conda environment; never RoboGuide's uv environment.
+    conda_environment: habitat
+    conda_command: conda
+    executable: python
+    # Official EMOS entry point. Episode pinning (verified against this
+    # habitat-lab checkout): there is no episode_ids filter, so determinism
+    # comes from habitat.seed + iterator sampling. One evaluation process
+    # runs the whole filtered episode set; num_episode_sample=1 with a fixed
+    # seed deterministically selects exactly one episode per run. Seeds must
+    # be nonzero (habitat's iterator ignores seed 0). Scene-level
+    # alternative: habitat.dataset.content_scenes=["<scene_id>"] runs that
+    # scene's episodes as one batch instead.
+    arguments:
+      - "-u"
+      - "-m"
+      - "habitat_baselines.run"
+      - "--config-name=multi_rearrange/llm_spot_fetch_mobility.yaml"
+      - "habitat_baselines.evaluate=True"
+      - "habitat_baselines.num_environments=1"
+      - "habitat.seed={seed}"
+      - "habitat.environment.iterator_options.num_episode_sample=1"
+      - "habitat.environment.iterator_options.shuffle=False"
+      # Keep run outputs inside the harness run directory as raw evidence.
+      - "habitat_baselines.video_dir={output_dir}/video"
+    environment_variables:
+      # EMOS patch reads the model from this variable; follows the spec.
+      EMOS_LLM_MODEL: "{model}"
+      OPENAI_BASE_URL: http://101.43.45.215:8080/v1
+      # Never a literal key here: resolved from the harness shell only.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # GPU 0 is reserved for other work on this machine.
+      CUDA_VISIBLE_DEVICES: "1"
+    version_probe_command: ["git", "rev-parse", "HEAD"]
+  roboguide:
+    # Placeholder until the habitat bridge drives the real Controller path.
+    working_directory: /data/workspace/code/RoboGuide
+    executable: uv
+    arguments: ["run", "..."]
+    version_probe_command: ["git", "rev-parse", "HEAD"]

@@ -1,0 +1,66 @@
+# E1 Mobility Smoke — the first Eval Harness smoke experiment.
+#
+# This spec represents the phase-one smoke test, not the final paper
+# experiment. It describes the experiment itself; machine-specific launch
+# facts (EMOS working directory, Conda environment, credentials) are supplied
+# by evaluation/local.yaml or ROBOGUIDE_EVAL_* environment variables and are
+# deliberately absent here.
+schema: roboguide-eval.experiment-spec/v0.1
+experiment_id: e1-habitat-mas-mobility
+description: >-
+  E1 heterogeneous embodied collaboration smoke run on Habitat-MAS mobility
+  tasks, comparing EMOS with RoboGuide. It exercises the harness lifecycle,
+  process boundary, and result infrastructure; it is not the final paper
+  experiment.
+benchmark: habitat-mas
+task: mobility
+dataset:
+  # Episode set of the spot+fetch mobility task; the digest pins the exact
+  # episodes file. NOTE: these episodes span 18 MP3D scenes while only the
+  # free sample scene is currently downloaded — running this task waits on
+  # the Matterport ToU approval and full scene download.
+  name: habitat-mas-mp3d-mobility
+  revision: mobility_episodes_1
+  digest: 5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca
+# Robot context is metadata only; the harness implements no robot logic.
+context:
+  robots: spot+fetch
+# This habitat-lab version has no episode_ids filter; EMOS episodes are
+# pinned deterministically by seed (habitat.seed +
+# iterator_options.num_episode_sample=1 in the configured command). Episode
+# diversity therefore comes from the seed grid: each seed selects exactly
+# one episode, and seeds must be nonzero.
+episodes:
+  - seed-pinned-sample
+systems:
+  - emos
+  - roboguide
+llm:
+  provider: openai
+  model: gpt-5.6-luna
+  reasoning_effort: medium
+seeds:
+  - 7
+  - 11
+  - 13
+metrics:
+  - success
+  - subgoal_success
+  - simulation_steps
+  - token_usage
+  - wall_time
+  - coordination_latency
+  - invalid_assignment_count
+timeout_seconds: 900
+environments:
+  emos:
+    # Raw artifact the EMOS command is expected to write into its run
+    # directory; the runner converts it into canonical metrics and keeps the
+    # file untouched as raw evidence.
+    metrics_source_path: emos-metrics.json
+    expected_output_paths:
+      - emos-metrics.json
+  roboguide:
+    metrics_source_path: roboguide-metrics.json
+    expected_output_paths:
+      - roboguide-metrics.json
