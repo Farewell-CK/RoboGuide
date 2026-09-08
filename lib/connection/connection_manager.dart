@@ -52,7 +52,11 @@ class ConnectionManager {
 
   RobotTransport _buildTransport() {
     if (settings.mode == TransportMode.ws) {
-      return WsTransport(host: settings.wsHost, port: settings.wsPort);
+      return WsTransport(
+        host: settings.wsHost,
+        bridgePort: settings.wsPort,
+        liaisonPort: settings.liaisonPort,
+      );
     }
     final spp = SppTransport();
     spp.lastMac = settings.mac;

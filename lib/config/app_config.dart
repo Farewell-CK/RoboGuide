@@ -12,6 +12,7 @@ class AppSettings {
   String mac;
   String wsHost;
   int wsPort;
+  int liaisonPort;
   bool autoReconnect;
 
   AppSettings({
@@ -19,6 +20,7 @@ class AppSettings {
     this.mac = defaultThorMac,
     this.wsHost = defaultWsHost,
     this.wsPort = defaultWsPort,
+    this.liaisonPort = 50081,
     this.autoReconnect = true,
   });
 
@@ -38,6 +40,7 @@ class AppSettings {
       s.mac = prefs.getString('$_key.mac') ?? s.mac;
       s.wsHost = prefs.getString('$_key.wsHost') ?? s.wsHost;
       s.wsPort = prefs.getInt('$_key.wsPort') ?? s.wsPort;
+      s.liaisonPort = prefs.getInt('$_key.liaisonPort') ?? s.liaisonPort;
       s.autoReconnect = prefs.getBool('$_key.autoReconnect') ?? s.autoReconnect;
     } catch (_) {
       // plugin unavailable (e.g. widget tests) — keep defaults
@@ -52,6 +55,7 @@ class AppSettings {
       await prefs.setString('$_key.mac', mac);
       await prefs.setString('$_key.wsHost', wsHost);
       await prefs.setInt('$_key.wsPort', wsPort);
+      await prefs.setInt('$_key.liaisonPort', liaisonPort);
       await prefs.setBool('$_key.autoReconnect', autoReconnect);
     } catch (_) {}
   }

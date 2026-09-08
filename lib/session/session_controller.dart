@@ -22,6 +22,17 @@ class SessionController {
   final SpeakerController speaker;
   final HealthStats stats;
 
+  /// WS mode voice-session hooks (no-op on SPP, where the robot's SPP server
+  /// drives Liaison). Wired from HomePage when the active transport is WS.
+  final Future<void> Function(String sessionId, String historyJson)?
+      onBeginVoiceSession;
+  final Future<void> Function(String sessionId)? onEndVoiceCapture;
+  /// Null return means "not WS mode — no client-driven session".
+  final String? Function()? onNewSessionId;
+
+  /// History provider for cross-turn context (set by HomePage).
+  final String Function()? onHistoryJson;
+
   final _turnsCtrl = StreamController<ConversationTurn>.broadcast();
   final _stateCtrl = StreamController<String>.broadcast();
 
@@ -29,6 +40,7 @@ class SessionController {
   TurnFsm? _fsm;
   bool _pttBusy = false;
   bool _micActive = false;
+  String? _wsSessionId;
   StreamSubscription? _controlSub;
   StreamSubscription? _audioSub;
   StreamSubscription? _speakerErrSub;
@@ -42,6 +54,10 @@ class SessionController {
     required this.mic,
     required this.speaker,
     required this.stats,
+    this.onBeginVoiceSession,
+    this.onEndVoiceCapture,
+    this.onNewSessionId,
+    this.onHistoryJson,
   });
 
   void attach() {
@@ -85,6 +101,14 @@ class SessionController {
 
       await speaker.beginTurn();
 
+      // WS mode: start the Liaison voice session BEFORE audio flows (the
+      // bridge drops PCM until a mic stream exists). SPP mode: hooks are
+      // null; the robot's SPP server drives the session itself.
+      if (onNewSessionId != null) {
+        _wsSessionId = onNewSessionId!();
+        await onBeginVoiceSession?.call(_wsSessionId!, onHistoryJson?.call() ?? '');
+      }
+
       await mic.start((pcm) {
         final t = transport();
         stats.txAudioBytes += pcm.length;
@@ -125,6 +149,11 @@ class SessionController {
       if (t.connected) {
         stats.onTxControl();
         await t.sendControl({'type': 'mic_end'}).catchError((Object e) {});
+        // WS mode: finalize ASR early instead of waiting out record_seconds.
+        final sessionId = _wsSessionId;
+        if (sessionId != null) {
+          await onEndVoiceCapture?.call(sessionId);
+        }
       }
       _fsm?.armWatchdog();
     } finally {

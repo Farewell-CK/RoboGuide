@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,8 @@ import '../bluetooth/bluetooth_spp.dart';
 import '../session/session_controller.dart';
 import '../session/session_store.dart';
 import '../transport/robot_transport.dart';
+import '../transport/ws_transport.dart';
+import 'settings_page.dart';
 import 'session_list_page.dart';
 import 'widgets/ptt_button.dart';
 import 'widgets/status_card.dart';
@@ -65,6 +68,27 @@ class _HomePageState extends State<HomePage> {
       mic: _mic,
       speaker: _speaker,
       stats: _stats,
+      // WS-mode voice-session driving hooks. Resolved at call time (not
+      // fixed at initState) so switching backend in settings takes effect
+      // without recreating the controller.
+      onNewSessionId: () =>
+          _conn.transport is WsTransport ? _nextWsSessionId() : null,
+      onBeginVoiceSession: (sessionId, historyJson) async {
+        final t = _conn.transport;
+        if (t is WsTransport) {
+          await t.beginVoiceSession(sessionId, historyJson);
+        }
+      },
+      onEndVoiceCapture: (sessionId) async {
+        final t = _conn.transport;
+        if (t is WsTransport) {
+          await t.endVoiceCapture(sessionId);
+        }
+      },
+      onHistoryJson: () => jsonEncode({
+        'source': 'roboguide-ws',
+        'history': _recentHistory(),
+      }),
     );
 
     _conn.status.listen(_onConnStatus);
@@ -252,6 +276,32 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
+  // ── WS-mode voice-session helpers ────────────────────────────────────
+  int _wsSessionCounter = 0;
+
+  /// Stable per-app session id: server-side Pilot history survives across
+  /// PTT turns within the same conversation.
+  String _nextWsSessionId() {
+    final base = _currentSession?.id;
+    if (base != null && base.isNotEmpty) return 'ws-$base';
+    return 'ws-${DateTime.now().millisecondsSinceEpoch}-${_wsSessionCounter++}';
+  }
+
+  /// Recent turns as {role, text} pairs (time-ascending), mirroring the SPP
+  /// path's mic_end history payload.
+  List<Map<String, String>> _recentHistory() {
+    final s = _currentSession;
+    if (s == null) return const [];
+    final history = <Map<String, String>>[];
+    for (final t in s.turns.reversed.take(5)) {
+      if (t.userText.isNotEmpty) history.add({'role': 'user', 'text': t.userText});
+      if (t.assistantText.isNotEmpty) {
+        history.add({'role': 'assistant', 'text': t.assistantText});
+      }
+    }
+    return history;
+  }
+
   // ── connection ──────────────────────────────────────────────────────
   Future<void> _loadDevices() async {
     try {
@@ -278,11 +328,34 @@ class _HomePageState extends State<HomePage> {
     widget.settings.mac = _selectedMac ?? widget.settings.mac;
     unawaited(widget.settings.save());
     _stats.reset();
+    _conn.reconnectCount = 0;
     await _conn.start();
   }
 
   Future<void> _disconnect() async {
     await _conn.stop();
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SettingsPage(
+        settings: widget.settings,
+        onChanged: () {
+          if (!mounted) return;
+          setState(() {
+            _mode = widget.settings.mode.name;
+            _selectedMac = widget.settings.mac;
+          });
+          // changing backend while connected: restart the link
+          if (_connected) {
+            unawaited(() async {
+              await _conn.stop();
+              await _connect();
+            }());
+          }
+        },
+      ),
+    ));
   }
 
   // ── misc ────────────────────────────────────────────────────────────
@@ -327,6 +400,11 @@ class _HomePageState extends State<HomePage> {
             onPressed: _openSessionList,
             icon: const Icon(Icons.forum_outlined),
             tooltip: '会话列表',
+          ),
+          IconButton(
+            onPressed: _openSettings,
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: '设置',
           ),
         ],
       ),
@@ -381,43 +459,62 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 10),
             Row(
               children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedMac,
-                    isExpanded: true,
-                    items: _devices
-                        .map((d) => DropdownMenuItem(
-                              value: d['address'] as String,
-                              child: Text(
-                                '${d['name']} (${d['address']})',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ))
-                        .toList(),
-                    onChanged: _connected
-                        ? null
-                        : (mac) => setState(() => _selectedMac = mac),
-                    decoration: const InputDecoration(
-                      labelText: 'Robot (Bluetooth)',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                if (_mode == 'ws') ...[
+                  Expanded(
+                    child: InkWell(
+                      onTap: _connected ? null : _openSettings,
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Robot (WS)',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        child: Text(
+                          '${widget.settings.wsHost}:${widget.settings.wsPort}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  onPressed: _connected ? null : _loadDevices,
-                  icon: const Icon(Icons.refresh),
-                  tooltip: '刷新设备',
-                ),
+                ] else ...[
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _selectedMac,
+                      isExpanded: true,
+                      items: _devices
+                          .map((d) => DropdownMenuItem(
+                                value: d['address'] as String,
+                                child: Text(
+                                  '${d['name']} (${d['address']})',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ))
+                          .toList(),
+                      onChanged: _connected
+                          ? null
+                          : (mac) => setState(() => _selectedMac = mac),
+                      decoration: const InputDecoration(
+                        labelText: 'Robot (Bluetooth)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    onPressed: _connected ? null : _loadDevices,
+                    icon: const Icon(Icons.refresh),
+                    tooltip: '刷新设备',
+                  ),
+                ],
                 const SizedBox(width: 4),
                 FilledButton.icon(
-                  onPressed: (_connected || _connecting)
-                      ? _disconnect
-                      : _connect,
+                  onPressed: (_connected || _connecting) ? _disconnect : _connect,
                   icon: Icon(_connected
-                      ? Icons.bluetooth_disabled
-                      : Icons.bluetooth),
+                      ? Icons.link_off
+                      : _mode == 'ws'
+                          ? Icons.wifi
+                          : Icons.bluetooth),
                   label: Text(_connected
                       ? '断开'
                       : _connecting
