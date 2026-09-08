@@ -18,12 +18,14 @@ class MainActivity : FlutterActivity() {
         val binaryMessenger = flutterEngine.dartExecutor.binaryMessenger
         val methodChannel = MethodChannel(binaryMessenger, "roboguide/bluetooth_spp")
         val eventChannel = EventChannel(binaryMessenger, "roboguide/bluetooth_spp/events")
+        val statusChannel = EventChannel(binaryMessenger, "roboguide/bluetooth_spp/status")
 
-        // BluetoothSppPlugin registers the event stream handler in its init.
+        // BluetoothSppPlugin registers the stream handlers in its init.
         sppPlugin = BluetoothSppPlugin(
             context = applicationContext,
             methodChannel = methodChannel,
             eventChannel = eventChannel,
+            statusChannel = statusChannel,
         )
         sppPlugin.startListening()
 

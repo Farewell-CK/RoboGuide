@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
-import 'spp_protocol.dart';
+import '../transport/spp_framer.dart';
 
 /// A decoded control event received from Thor.
 class SppControlEvent {
@@ -41,10 +40,7 @@ class BluetoothSpp {
         _dataCtrl.add(frame.payload);
       } else {
         try {
-          final value = jsonDecodeUtf8(frame.payload);
-          if (value is Map<String, dynamic>) {
-            _controlCtrl.add(SppControlEvent(value));
-          }
+          _controlCtrl.add(SppControlEvent(jsonDecodeUtf8(frame.payload)));
         } catch (_) {
           // Ignore malformed control events; the audio stream remains alive.
         }
