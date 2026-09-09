@@ -187,3 +187,32 @@ dependencies {
     implementation project(':librealsense')
     testImplementation 'junit:junit:4.13.2'
 }
+
+def verifyVinsAndroidDependencies = tasks.register('verifyVinsAndroidDependencies') {
+    group = 'verification'
+    description = 'Fails before packaging when the generated VINS Android dependencies are absent.'
+    doLast {
+        def dependencyRoot = rootProject.file('third_party/vins_android_deps')
+        def requiredFiles = [
+                new File(dependencyRoot, 'opencv/sdk/native/jni/OpenCVConfig.cmake'),
+                new File(dependencyRoot, 'eigen3/Eigen/Core'),
+                new File(dependencyRoot, 'boost-header-stage/boost_1_69_0/boost/shared_ptr.hpp'),
+                new File(dependencyRoot, 'ceres/arm64-v8a/lib/cmake/Ceres/CeresConfig.cmake')
+        ]
+        def missingFiles = requiredFiles.findAll { !it.isFile() }
+        if (!missingFiles.isEmpty()) {
+            def relativePaths = missingFiles.collect {
+                rootProject.projectDir.toPath().relativize(it.toPath()).toString()
+            }.join('\n  - ')
+            throw new GradleException(
+                    "VINS Android dependencies are missing:\n  - ${relativePaths}\n" +
+                    "Run .\\tools\\prepare_vins_android_deps.ps1 before building the APK.")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.startsWith('configureCMake') || name.startsWith('buildCMake')) {
+        dependsOn verifyVinsAndroidDependencies
+    }
+}

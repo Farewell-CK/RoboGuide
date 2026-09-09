@@ -141,5 +141,7 @@ if(EXISTS ${OPENCV_ANDROID}/OpenCVConfig.cmake
     target_link_libraries(vins_estimator PRIVATE
         ${OpenCV_LIBS} ${CERES_LIBRARIES} vins_openmp log)
 else()
-    message(STATUS "VINS-Mono dependencies not staged; OctoMap-only native target remains buildable")
+    message(FATAL_ERROR
+        "VINS-Mono Android dependencies are missing. "
+        "Run tools/prepare_vins_android_deps.ps1 before configuring the APK.")
 endif()

@@ -38,6 +38,9 @@ Copy-Item local.properties.example local.properties
 生成的 APK 位于 `app/build/outputs/apk/npu/debug/app-npu-debug.apk`。依赖已缓存时可为
 Gradle 命令增加 `--offline`。
 
+不要跳过 VINS 依赖准备步骤。构建会检查 OpenCV、Eigen、Boost 和 Ceres；任一依赖缺失
+都会中止，防止生成不含 `libvins_feature_tracker.so` 或 `libvins_estimator.so` 的无效 APK。
+
 NPU 运行库仅在兼容的 MediaTek Neuron 设备上生效。桌面构建无法验证 D455F 真机、
 Neuron 可用性、GPS 或高德地图服务。
 
