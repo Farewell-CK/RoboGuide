@@ -4,6 +4,7 @@ project(elabrador_native LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ELABRADOR_OPTIMIZED_NATIVE "Optimize native mapping in the fast flavor" OFF)
+option(ELABRADOR_BUILD_VINS_FROM_SOURCE "Build VINS JNI libraries instead of packaging prebuilts" OFF)
 
 # The upstream OctoMap sources are vendored from the same dependency used by
 # edge. Only the two runtime libraries are built; command-line tools are not
@@ -65,7 +66,7 @@ set(EIGEN_ROOT ${VINS_DEPS}/eigen3)
 set(BOOST_ROOT ${VINS_DEPS}/boost-header-stage/boost_1_69_0)
 set(CERES_ANDROID ${VINS_DEPS}/ceres/${ANDROID_ABI})
 
-if(EXISTS ${OPENCV_ANDROID}/OpenCVConfig.cmake
+if(ELABRADOR_BUILD_VINS_FROM_SOURCE AND EXISTS ${OPENCV_ANDROID}/OpenCVConfig.cmake
         AND EXISTS ${EIGEN_ROOT}/Eigen/Core
         AND EXISTS ${BOOST_ROOT}/boost/shared_ptr.hpp
         AND EXISTS ${CERES_ANDROID}/lib/cmake/Ceres/CeresConfig.cmake)
@@ -140,7 +141,7 @@ if(EXISTS ${OPENCV_ANDROID}/OpenCVConfig.cmake
     target_include_directories(vins_estimator PRIVATE ${VINS_COMMON_INCLUDES})
     target_link_libraries(vins_estimator PRIVATE
         ${OpenCV_LIBS} ${CERES_LIBRARIES} vins_openmp log)
-else()
+elseif(ELABRADOR_BUILD_VINS_FROM_SOURCE)
     message(FATAL_ERROR
         "VINS-Mono Android dependencies are missing. "
         "Run tools/prepare_vins_android_deps.ps1 before configuring the APK.")
