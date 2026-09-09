@@ -18,7 +18,7 @@ class TurnFsm {
   final void Function(TurnFsm fsm) onChanged;
 
   TurnFsm({
-    this.softTimeout = const Duration(seconds: 20),
+    this.softTimeout = const Duration(seconds: 60),
     required this.onChanged,
   });
 
@@ -33,7 +33,9 @@ class TurnFsm {
       case VoiceEventKind.recordingDone:
         _set(TurnState.recognizing);
       case VoiceEventKind.asrPartial:
-        break;
+        // 即时回显：partial 一到就更新识别文本，但不改变回合状态
+        if (event.text.isNotEmpty) userText = event.text;
+        armWatchdog();
       case VoiceEventKind.asrFinal:
         if (event.text.isNotEmpty) userText = event.text;
         _set(TurnState.thinking);

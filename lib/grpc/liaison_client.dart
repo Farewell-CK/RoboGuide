@@ -26,6 +26,13 @@ class LiaisonClient {
     (bytes) => Uint8List.fromList(bytes),
   );
 
+  static final ClientMethod<Uint8List, Uint8List> _submitMethod =
+      ClientMethod<Uint8List, Uint8List>(
+    '/robonix.contracts.RobonixSystemLiaisonSubmit/SubmitTask',
+    (value) => value,
+    (bytes) => Uint8List.fromList(bytes),
+  );
+
   static final ClientMethod<Uint8List, Uint8List> _finishMethod =
       ClientMethod<Uint8List, Uint8List>(
     '/robonix.contracts.RobonixSystemLiaisonVoiceFinish/FinishVoiceCapture',
@@ -79,6 +86,31 @@ class LiaisonClient {
     );
     final bytes = await call.response.single;
     return decodeFinishVoiceCaptureResponse(bytes);
+  }
+
+  /// Text/task path: server-streaming PilotEvent for one task submission
+  /// (the same stream the official Android `submitTask` consumes).
+  Stream<Uint8List> submitTask({
+    required String sessionId,
+    required String text,
+    String contextJson = '',
+    int source = 0,
+  }) {
+    final channel = _channelFor();
+    final request = encodeTask(
+      taskId: 'replay-${DateTime.now().millisecondsSinceEpoch}',
+      sessionId: sessionId,
+      source: source,
+      text: text,
+      contextJson: contextJson,
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    final call = channel.createCall(
+      _submitMethod,
+      Stream.value(request),
+      CallOptions(),
+    );
+    return call.response;
   }
 
   Future<void> close() async {

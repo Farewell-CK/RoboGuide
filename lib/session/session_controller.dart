@@ -3,8 +3,10 @@ import 'dart:typed_data';
 
 import '../audio/mic_controller.dart';
 import '../audio/speaker_controller.dart';
+import '../capture/capture_controller.dart';
 import '../connection/health_stats.dart';
 import '../transport/robot_transport.dart';
+import 'pilot_text.dart';
 import 'session_store.dart';
 import 'turn_fsm.dart';
 import 'voice_event.dart';
@@ -33,6 +35,12 @@ class SessionController {
   /// History provider for cross-turn context (set by HomePage).
   final String Function()? onHistoryJson;
 
+  /// Offline capture (debug): writes the SPP-wire bytes that would be sent,
+  /// independent of the link. When enabled, PTT is allowed while disconnected.
+  final CaptureController? capture;
+  /// Called with the capture folder path after a PTT capture is finalized.
+  final void Function(String path)? onCaptureSaved;
+
   final _turnsCtrl = StreamController<ConversationTurn>.broadcast();
   final _stateCtrl = StreamController<String>.broadcast();
 
@@ -44,6 +52,7 @@ class SessionController {
   StreamSubscription? _controlSub;
   StreamSubscription? _audioSub;
   StreamSubscription? _speakerErrSub;
+  StreamSubscription? _micErrSub;
 
   Stream<ConversationTurn> get turnUpdates => _turnsCtrl.stream;
   Stream<String> get audioState => _stateCtrl.stream;
@@ -58,6 +67,8 @@ class SessionController {
     this.onEndVoiceCapture,
     this.onNewSessionId,
     this.onHistoryJson,
+    this.capture,
+    this.onCaptureSaved,
   });
 
   void attach() {
@@ -72,6 +83,15 @@ class SessionController {
         _turnsCtrl.add(turn);
       }
     });
+    _micErrSub = mic.errors.listen((e) {
+      _stateCtrl.add('error');
+      final turn = activeTurn;
+      if (turn != null) {
+        turn.state = 'error';
+        turn.error = e.message;
+        _turnsCtrl.add(turn);
+      }
+    });
   }
 
   void detach() {
@@ -81,12 +101,17 @@ class SessionController {
     _audioSub = null;
     _speakerErrSub?.cancel();
     _speakerErrSub = null;
+    _micErrSub?.cancel();
+    _micErrSub = null;
   }
 
   // ── PTT ──────────────────────────────────────────────────────────────
   Future<void> startTalking() async {
-    if (_pttBusy || _micActive || !transport().connected) return;
+    // 未连接时仅在离线捕获开启时放行，让"录音→发送前"整条链路可脱离 SPP 调试。
+    final captureEnabled = capture?.enabled ?? false;
+    if (_pttBusy || _micActive || (!transport().connected && !captureEnabled)) return;
     _pttBusy = true;
+    final offlineCapture = !transport().connected;
     try {
       // Force the previous turn terminal: the server keys a fresh voice
       // session off the first audio frame, and a turn still in flight would
@@ -101,22 +126,29 @@ class SessionController {
 
       await speaker.beginTurn();
 
+      // 捕获挂在 sendAudio 之前，记录"SPP 传输前"的同一份字节。
+      final cap = await capture?.begin(
+        sessionId: turn.id,
+        mode: transport().mode.name,
+      );
+
       // WS mode: start the Liaison voice session BEFORE audio flows (the
-      // bridge drops PCM until a mic stream exists). SPP mode: hooks are
-      // null; the robot's SPP server drives the session itself.
-      if (onNewSessionId != null) {
+      // bridge drops PCM until a mic stream exists). Only when the link is
+      // actually up — offline capture never reaches Liaison.
+      if (transport().connected && onNewSessionId != null) {
         _wsSessionId = onNewSessionId!();
         await onBeginVoiceSession?.call(_wsSessionId!, onHistoryJson?.call() ?? '');
       }
 
       await mic.start((pcm) {
+        cap?.onPcm(pcm);
         final t = transport();
         stats.txAudioBytes += pcm.length;
         t.sendAudio(pcm).catchError((Object e) {});
       });
       _micActive = true;
       _stateCtrl.add('recording');
-      _fsm?.armWatchdog();
+      if (!offlineCapture) _fsm?.armWatchdog();
     } on MicException catch (e) {
       final turn = activeTurn;
       if (turn != null) {
@@ -145,6 +177,11 @@ class SessionController {
         turn.state = 'recognizing';
         _turnsCtrl.add(turn);
       }
+
+      // 松开必写 mic_end 帧 + meta 落盘，与连接状态无关。
+      final capturedPath = await capture?.endActive();
+      if (capturedPath != null) onCaptureSaved?.call(capturedPath);
+
       final t = transport();
       if (t.connected) {
         stats.onTxControl();
@@ -154,8 +191,16 @@ class SessionController {
         if (sessionId != null) {
           await onEndVoiceCapture?.call(sessionId);
         }
+        _fsm?.armWatchdog();
+      } else {
+        // 离线捕获回合（或连接中途断开）：立即收尾，不挂 watchdog、不等回包。
+        final offlineCapture = capture?.enabled ?? false;
+        if (turn != null && offlineCapture && !_fsm!.isTerminal) {
+          turn.state = 'done';
+          _turnsCtrl.add(turn);
+        }
+        await _finishTurn();
       }
-      _fsm?.armWatchdog();
     } finally {
       _pttBusy = false;
     }
@@ -173,12 +218,20 @@ class SessionController {
     if (event == null) return;
     final turn = activeTurn;
     if (turn == null) return;
+    // 刷新 60s 软看门狗：分阶段回答（先述→调相机→再描述）间隔可能超过 60s，
+    // 但引擎在会话结束前会持续推送事件——不刷新就会把长回合误判成"无响应超时"。
+    _fsm?.armWatchdog();
 
     switch (event.kind) {
+      case VoiceEventKind.asrPartial:
+        // ASR 中间结果即时回显，不等 asrFinal
+        if (event.text.isNotEmpty) turn.userText = event.text;
       case VoiceEventKind.asrFinal:
         if (event.text.isNotEmpty) turn.userText = event.text;
       case VoiceEventKind.pilot:
-        if (event.text.isNotEmpty) turn.assistantText += event.text;
+        // Pilot 长回复会先流式发 text_chunk，收尾再发 final_text（全文）。
+        // 逐条累加会把全文重复一遍，需用官方客户端 mergeFinalText 语义去重。
+        turn.assistantText = mergePilotText(turn.assistantText, event.text);
       case VoiceEventKind.error:
         turn.error = event.error.isNotEmpty ? event.error : event.status;
       default:
@@ -235,6 +288,7 @@ class SessionController {
     _micActive = false;
     _interruptActive('连接已断开');
     await mic.stop();
+    await capture?.endActive();
     await speaker.abort();
     _stateCtrl.add('idle');
   }
@@ -244,6 +298,7 @@ class SessionController {
     _interruptActive('控制器销毁');
     await mic.dispose();
     await speaker.dispose();
+    await capture?.dispose();
     await _turnsCtrl.close();
     await _stateCtrl.close();
   }

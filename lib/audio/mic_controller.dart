@@ -20,9 +20,15 @@ class MicController {
   bool _opened = false;
   bool _recording = false;
   StreamController<Uint8List>? _sink;
+  StreamController<MicException>? _errCtrl;
   Timer? _byteWatchdog;
 
   bool get recording => _recording;
+
+  /// Failures that happen asynchronously after start (fake start, recorder
+  /// death). The turn layer listens and marks the turn errored.
+  Stream<MicException> get errors =>
+      (_errCtrl ??= StreamController<MicException>.broadcast()).stream;
 
   /// Start capture; PCM16 bytes flow to [onPcm]. Throws [MicException] on
   /// failure (caller should mark the turn errored).
@@ -46,13 +52,12 @@ class MicController {
     _recording = true;
 
     // Fake-start watchdog: no bytes within 300ms means the recorder is
-    // wedged; stop and surface so the turn can be retried.
+    // wedged; stop and surface via [errors] so the turn can be retried.
     _byteWatchdog = Timer(const Duration(milliseconds: 300), () {
-      if (_recording) {
-        _recording = false;
-        unawaited(stop());
-        throw MicException('recorder produced no data (fake start)');
-      }
+      if (!_recording) return;
+      _recording = false;
+      unawaited(stop());
+      _errCtrl?.add(MicException('recorder produced no data (fake start)'));
     });
   }
 
@@ -137,6 +142,8 @@ class MicController {
     } catch (_) {}
     _recorder = null;
     _opened = false;
+    await _errCtrl?.close();
+    _errCtrl = null;
   }
 }
 

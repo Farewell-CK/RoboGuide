@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../audio/mic_controller.dart';
 import '../audio/speaker_controller.dart';
+import '../capture/capture_controller.dart';
 import '../config/app_config.dart';
 import '../connection/connection_manager.dart';
 import '../connection/health_stats.dart';
@@ -23,7 +27,11 @@ import 'widgets/turn_bubble.dart';
 /// Home page: wires ConnectionManager + SessionController to the UI.
 class HomePage extends StatefulWidget {
   final AppSettings settings;
-  const HomePage({super.key, required this.settings});
+
+  /// Non-null when the mic runtime permission was denied at startup; shown
+  /// as a dismissible banner (PTT would otherwise fail silently).
+  final String? micBlockedNotice;
+  const HomePage({super.key, required this.settings, this.micBlockedNotice});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -37,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   late final SpeakerController _speaker;
   late final SessionController _session;
   final HealthStats _stats = HealthStats();
+  late final CaptureController _capture;
 
   List<Map<String, dynamic>> _devices = [];
   List<ConversationSession> _sessions = [];
@@ -63,11 +72,18 @@ class _HomePageState extends State<HomePage> {
     _conn = ConnectionManager(widget.settings);
     _mic = MicController();
     _speaker = SpeakerController();
+    _capture = CaptureController(
+      baseDir: Directory.systemTemp,
+      enabled: widget.settings.captureAudio,
+      onError: (m) => _appendLog('捕获: $m'),
+    );
     _session = SessionController(
       transport: () => _conn.transport ?? _DisconnectedTransport.instance,
       mic: _mic,
       speaker: _speaker,
       stats: _stats,
+      capture: _capture,
+      onCaptureSaved: (path) => _appendLog('捕获已保存: $path'),
       // WS-mode voice-session driving hooks. Resolved at call time (not
       // fixed at initState) so switching backend in settings takes effect
       // without recreating the controller.
@@ -100,8 +116,20 @@ class _HomePageState extends State<HomePage> {
 
     _loadSessions();
     _loadDevices();
-    // auto-connect on launch
-    unawaited(_connect());
+    _initCaptureDir();
+    // 启动只自动连蓝牙；WS 是调试通道，须手动点连接
+    if (_mode != 'ws') unawaited(_connect());
+  }
+
+  Future<void> _initCaptureDir() async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      _capture.baseDir = docs;
+      _appendLog('捕获目录: ${_capture.baseDir.path}/captures');
+    } catch (e) {
+      _capture.enabled = false;
+      _appendLog('获取捕获目录失败，离线捕获不可用: $e');
+    }
   }
 
   void _onConnStatus(TransportStatus s) {
@@ -337,17 +365,26 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openSettings() {
+    final prevMode = _mode;
+    final prevMac = _selectedMac;
+    final prevHost = widget.settings.wsHost;
+    final prevPort = widget.settings.wsPort;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => SettingsPage(
         settings: widget.settings,
         onChanged: () {
           if (!mounted) return;
+          final linkChanged = prevMode != widget.settings.mode.name ||
+              prevMac != widget.settings.mac ||
+              prevHost != widget.settings.wsHost ||
+              prevPort != widget.settings.wsPort;
           setState(() {
             _mode = widget.settings.mode.name;
             _selectedMac = widget.settings.mac;
+            _capture.enabled = widget.settings.captureAudio;
           });
-          // changing backend while connected: restart the link
-          if (_connected) {
+          // 仅传输后端/设备/端点变化才重启链路；捕获开关不打断当前连接
+          if (_connected && linkChanged) {
             unawaited(() async {
               await _conn.stop();
               await _connect();
@@ -413,6 +450,32 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.micBlockedNotice != null)
+              Material(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => openAppSettings(),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(widget.micBlockedNotice!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                              )),
+                        ),
+                        const Icon(Icons.settings, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             Row(
               children: [
                 Expanded(
@@ -537,11 +600,21 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 10),
             PttButton(
-              enabled: _connected,
+              enabled: _connected || _capture.enabled,
               talking: _micActive,
               onPressStart: () => unawaited(_session.startTalking()),
               onPressEnd: () => unawaited(_session.stopTalking()),
             ),
+            if (_capture.enabled && !_connected)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '离线捕获中：未连接也可录音，松开即保存 .sppwire 捕获包',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.outline),
+                ),
+              ),
             const SizedBox(height: 10),
             Row(
               children: [

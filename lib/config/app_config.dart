@@ -14,6 +14,7 @@ class AppSettings {
   int wsPort;
   int liaisonPort;
   bool autoReconnect;
+  bool captureAudio;
 
   AppSettings({
     this.mode = TransportMode.spp,
@@ -22,9 +23,11 @@ class AppSettings {
     this.wsPort = defaultWsPort,
     this.liaisonPort = 50081,
     this.autoReconnect = true,
+    this.captureAudio = false,
   });
 
-  static const _key = 'roboguide.settings_v3';
+  // v3→v4: 丢弃旧持久化的 ws 模式，让"默认蓝牙、WS 需手动切"的新默认生效
+  static const _key = 'roboguide.settings_v4';
 
   static Future<AppSettings> load() async {
     final s = AppSettings();
@@ -42,6 +45,7 @@ class AppSettings {
       s.wsPort = prefs.getInt('$_key.wsPort') ?? s.wsPort;
       s.liaisonPort = prefs.getInt('$_key.liaisonPort') ?? s.liaisonPort;
       s.autoReconnect = prefs.getBool('$_key.autoReconnect') ?? s.autoReconnect;
+      s.captureAudio = prefs.getBool('$_key.captureAudio') ?? s.captureAudio;
     } catch (_) {
       // plugin unavailable (e.g. widget tests) — keep defaults
     }
@@ -57,6 +61,7 @@ class AppSettings {
       await prefs.setInt('$_key.wsPort', wsPort);
       await prefs.setInt('$_key.liaisonPort', liaisonPort);
       await prefs.setBool('$_key.autoReconnect', autoReconnect);
+      await prefs.setBool('$_key.captureAudio', captureAudio);
     } catch (_) {}
   }
 }

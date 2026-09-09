@@ -156,6 +156,18 @@ class _SettingsPageState extends State<SettingsPage> {
               _save();
             },
           ),
+          const Divider(),
+          _SectionHeader('调试 (SPP 桥断开)'),
+          SwitchListTile(
+            title: const Text('离线捕获音频'),
+            subtitle: const Text(
+                '未连接也可按住录音；每次 PTT 把"发往 SPP 之前"的字节存为捕获包，供服务端 mock 回放'),
+            value: _s.captureAudio,
+            onChanged: (v) {
+              setState(() => _s.captureAudio = v);
+              _save();
+            },
+          ),
         ],
       ),
     );
