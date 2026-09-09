@@ -1,0 +1,11 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+**/build/
+**/.cxx/
+third_party/vins_android_deps/
+work/
+*.apk
+*.aab
+*.log

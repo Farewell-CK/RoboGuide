@@ -1,0 +1,19 @@
+plugins {
+    id 'com.android.application' version '8.9.1' apply false
+    id 'com.android.library' version '8.9.1' apply false
+}
+
+ext {
+    defaultCompileSdkVersion = 35
+    defaultTargetSdkVersion = 35
+    defaultMinSdkVersion = 24
+
+    appcompatVersion = '1.6.1'
+    junitVersion = '4.13.2'
+    androidextjunitVersion = '1.1.5'
+    espressoCoreVersion = '3.5.1'
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

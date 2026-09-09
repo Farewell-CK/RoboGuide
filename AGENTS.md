@@ -143,6 +143,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   `--simulate-execute` mode submits a synthetic Mission through the Controller HTTP API, emits only
   synthetic lifecycle facts after formal dispatch, uses a session-unique capability contract so it
   cannot select an existing Node, and never performs hardware I/O.
+- `apps/mobile-navigation/` contains the experimental Android NPU Local System. It owns local D455F
+  perception, semantic/depth cost-map generation, A* planning, navigation presentation, and
+  immediate safety. It does not own Control, Runtime, State, or Node Protocol authority. Runtime
+  models and RealSense native libraries use Git LFS; generated VINS dependencies, local Android
+  toolchains, build outputs, captures, and machine-local configuration stay outside Git.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
   not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references

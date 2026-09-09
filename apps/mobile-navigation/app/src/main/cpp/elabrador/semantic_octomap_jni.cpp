@@ -1,0 +1,317 @@
+#include <jni.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <vector>
+#include <thread>
+#include "pidnet_preprocess.h"
+
+#include <octomap/Pointcloud.h>
+#include <semantics_octree/semantics_max.h>
+#include <semantics_octree/semantics_octree.h>
+
+namespace {
+using Tree = octomap::SemanticsOcTree<octomap::SemanticsMax>;
+
+struct MobileOctomap {
+    Tree tree;
+    float maxRange = 10.0f;
+    float validMin = 0.2f;
+    float validMax = 66.0f;
+    float raycastRange = 10.0f;
+    bool globalCrop = true;
+    octomap::point3d lastOrigin;
+    bool hasOrigin = false;
+
+    explicit MobileOctomap(float resolution) : tree(resolution) {
+        // Mirrors OctomapGeneratorNode::reset() and octomap_generator.yaml.
+        tree.setResolution(resolution);
+        tree.setClampingThresMin(0.12);
+        tree.setClampingThresMax(0.97);
+        tree.setOccupancyThres(0.5);
+        tree.setProbHit(0.8);
+        tree.setProbMiss(0.2);
+    }
+};
+
+static void throwIllegalArgument(JNIEnv* env, const char* message) {
+    jclass cls = env->FindClass("java/lang/IllegalArgumentException");
+    if (cls) env->ThrowNew(cls, message);
+}
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeCreate(JNIEnv* env, jclass, jfloat resolution) {
+    if (!(resolution > 0.0f)) {
+        throwIllegalArgument(env, "OctoMap resolution must be positive");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(new MobileOctomap(resolution));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeDestroy(JNIEnv*, jclass, jlong handle) {
+    delete reinterpret_cast<MobileOctomap*>(handle);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeClear(JNIEnv*, jclass, jlong handle) {
+    auto* map = reinterpret_cast<MobileOctomap*>(handle);
+    if (map) {
+        map->tree.clear();
+        map->hasOrigin = false;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeDecodePidNetParallel(
+        JNIEnv* env, jclass, jobject logitsBuffer, jint classCount, jint plane,
+        jintArray classMap, jintArray mask, jfloatArray confidence, jboolean parallel) {
+    if (!logitsBuffer || !classMap || !mask || !confidence
+            || classCount <= 0 || plane <= 0) {
+        throwIllegalArgument(env, "PIDNet decode received invalid arguments");
+        return;
+    }
+    const auto capacity = env->GetDirectBufferCapacity(logitsBuffer);
+    const auto requiredBytes = static_cast<jlong>(classCount) * plane * sizeof(float);
+    const auto* logits = static_cast<const float*>(
+            env->GetDirectBufferAddress(logitsBuffer));
+    if (!logits || capacity < requiredBytes
+            || env->GetArrayLength(classMap) != classCount
+            || env->GetArrayLength(mask) < plane
+            || env->GetArrayLength(confidence) < plane) {
+        throwIllegalArgument(env, "PIDNet decode buffers have inconsistent lengths");
+        return;
+    }
+
+    jint* mapping = env->GetIntArrayElements(classMap, nullptr);
+    jint* decodedMask = env->GetIntArrayElements(mask, nullptr);
+    jfloat* decodedConfidence = env->GetFloatArrayElements(confidence, nullptr);
+    if (!mapping || !decodedMask || !decodedConfidence) {
+        if (mapping) env->ReleaseIntArrayElements(classMap, mapping, JNI_ABORT);
+        if (decodedMask) env->ReleaseIntArrayElements(mask, decodedMask, 0);
+        if (decodedConfidence) {
+            env->ReleaseFloatArrayElements(confidence, decodedConfidence, 0);
+        }
+        return;
+    }
+
+    auto decode = [&](jint first, jint last) {
+    for (jint pixel = first; pixel < last; ++pixel) {
+        jint bestClass = 0;
+        float best = logits[pixel];
+        for (jint classId = 1; classId < classCount; ++classId) {
+            const float value = logits[static_cast<std::size_t>(classId) * plane + pixel];
+            if (value > best) {
+                best = value;
+                bestClass = classId;
+            }
+        }
+        double sum = 0.0;
+        for (jint classId = 0; classId < classCount; ++classId) {
+            sum += std::exp(static_cast<double>(
+                    logits[static_cast<std::size_t>(classId) * plane + pixel] - best));
+        }
+        decodedMask[pixel] = mapping[bestClass];
+        decodedConfidence[pixel] = static_cast<float>(1.0 / sum);
+    }
+    };
+    if (parallel && plane >= 4096) {
+        std::thread worker(decode, 0, plane / 2);
+        decode(plane / 2, plane);
+        worker.join();
+    } else decode(0, plane);
+
+    env->ReleaseIntArrayElements(classMap, mapping, JNI_ABORT);
+    env->ReleaseIntArrayElements(mask, decodedMask, 0);
+    env->ReleaseFloatArrayElements(confidence, decodedConfidence, 0);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeDecodePidNet(
+        JNIEnv* env, jclass cls, jobject logitsBuffer, jint classCount, jint plane,
+        jintArray classMap, jintArray mask, jfloatArray confidence) {
+    Java_com_elabrador_mobilenavigation_NativeOctomap_nativeDecodePidNetParallel(
+            env, cls, logitsBuffer, classCount, plane, classMap, mask, confidence, false);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativePreparePidNet(
+        JNIEnv* env, jclass, jbyteArray rgb, jint stride, jint xOffset, jint yOffset,
+        jint cropWidth, jint cropHeight, jint modelWidth, jint modelHeight,
+        jobject inputBuffer) {
+    if (!rgb || !inputBuffer || stride <= 0 || xOffset < 0 || yOffset < 0
+            || cropWidth <= 0 || cropHeight <= 0 || modelWidth <= 0 || modelHeight <= 0) {
+        throwIllegalArgument(env, "PIDNet preprocessing received invalid arguments");
+        return;
+    }
+    const auto rgbSize = env->GetArrayLength(rgb);
+    const jlong lastSource = static_cast<jlong>(yOffset + cropHeight - 1) * stride
+            + static_cast<jlong>(xOffset + cropWidth - 1) * 3 + 2;
+    const jlong plane = static_cast<jlong>(modelWidth) * modelHeight;
+    const jlong requiredBytes = plane * 3 * sizeof(float);
+    auto* input = static_cast<float*>(env->GetDirectBufferAddress(inputBuffer));
+    if (lastSource < 0 || lastSource >= rgbSize || !input
+            || env->GetDirectBufferCapacity(inputBuffer) < requiredBytes) {
+        throwIllegalArgument(env, "PIDNet preprocessing buffers have inconsistent lengths");
+        return;
+    }
+
+    const auto* source = static_cast<const jbyte*>(
+            env->GetPrimitiveArrayCritical(rgb, nullptr));
+    if (!source) return;
+    elabrador::preparePidNet(reinterpret_cast<const unsigned char*>(source), stride,
+            xOffset, yOffset, cropWidth, cropHeight, modelWidth, modelHeight, input);
+    env->ReleasePrimitiveArrayCritical(rgb, const_cast<jbyte*>(source), JNI_ABORT);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeInsert(
+        JNIEnv* env, jclass, jlong handle, jfloatArray xyz, jintArray semanticRgb,
+        jfloatArray confidence, jfloatArray sensorToWorld) {
+    auto* map = reinterpret_cast<MobileOctomap*>(handle);
+    if (!map || !xyz || !semanticRgb || !confidence || !sensorToWorld) return 0;
+    const jsize xyzSize = env->GetArrayLength(xyz);
+    const jsize colorSize = env->GetArrayLength(semanticRgb);
+    const jsize confidenceSize = env->GetArrayLength(confidence);
+    const jsize transformSize = env->GetArrayLength(sensorToWorld);
+    if (xyzSize % 3 != 0 || colorSize * 3 != xyzSize
+            || confidenceSize != colorSize || transformSize != 16) {
+        throwIllegalArgument(env, "OctoMap point arrays have inconsistent lengths");
+        return 0;
+    }
+    jfloat* points = env->GetFloatArrayElements(xyz, nullptr);
+    jint* colors = env->GetIntArrayElements(semanticRgb, nullptr);
+    jfloat* confidences = env->GetFloatArrayElements(confidence, nullptr);
+    jfloat* transform = env->GetFloatArrayElements(sensorToWorld, nullptr);
+    const octomap::point3d origin(transform[3], transform[7], transform[11]);
+    map->lastOrigin = origin;
+    map->hasOrigin = true;
+    octomap::Pointcloud endpoints;
+    std::vector<std::size_t> valid;
+    std::vector<octomap::point3d> worldPoints;
+    std::vector<float> worldDistances;
+    valid.reserve(static_cast<std::size_t>(colorSize));
+    worldPoints.reserve(static_cast<std::size_t>(colorSize));
+    worldDistances.reserve(static_cast<std::size_t>(colorSize));
+    for (jsize i = 0; i < colorSize; ++i) {
+        const float sensorX = points[i * 3];
+        const float sensorY = points[i * 3 + 1];
+        const float sensorZ = points[i * 3 + 2];
+        const float x = transform[0] * sensorX + transform[1] * sensorY
+                + transform[2] * sensorZ + transform[3];
+        const float y = transform[4] * sensorX + transform[5] * sensorY
+                + transform[6] * sensorZ + transform[7];
+        const float z = transform[8] * sensorX + transform[9] * sensorY
+                + transform[10] * sensorZ + transform[11];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+        const float dx = x - origin.x(), dy = y - origin.y(), dz = z - origin.z();
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (distance < map->validMin || distance > map->validMax) continue;
+        if (distance <= map->maxRange) {
+            endpoints.push_back(x, y, z);
+        } else {
+            const float scale = (map->maxRange + 1.0f) / distance;
+            endpoints.push_back(origin.x() + dx * scale, origin.y() + dy * scale,
+                                origin.z() + dz * scale);
+        }
+        valid.push_back(static_cast<std::size_t>(i));
+        worldPoints.emplace_back(x, y, z);
+        worldDistances.push_back(distance);
+    }
+    if (endpoints.size() > 0) {
+        map->tree.insertPointCloud(endpoints, origin, map->raycastRange, true, true);
+    }
+    for (std::size_t pointIndex = 0; pointIndex < valid.size(); ++pointIndex) {
+        const std::size_t i = valid[pointIndex];
+        const float x = worldPoints[pointIndex].x();
+        const float y = worldPoints[pointIndex].y();
+        const float z = worldPoints[pointIndex].z();
+        const float distance = worldDistances[pointIndex];
+        if (distance < map->validMin || distance > map->maxRange) continue;
+        const jint packed = colors[i];
+        map->tree.averageNodeColor(x, y, z,
+                                   static_cast<uint8_t>((packed >> 16) & 0xff),
+                                   static_cast<uint8_t>((packed >> 8) & 0xff),
+                                   static_cast<uint8_t>(packed & 0xff));
+        octomap::SemanticsMax semantic;
+        semantic.semantic_color = octomap::ColorOcTreeNode::Color(
+                static_cast<uint8_t>((packed >> 16) & 0xff),
+                static_cast<uint8_t>((packed >> 8) & 0xff),
+                static_cast<uint8_t>(packed & 0xff));
+        semantic.confidence = confidences[i];
+        map->tree.updateNodeSemantics(x, y, z, semantic);
+    }
+    if (map->globalCrop) {
+        std::vector<octomap::OcTreeKey> toRemove;
+        for (Tree::leaf_iterator it = map->tree.begin_leafs(); it != map->tree.end_leafs(); ++it) {
+            if (origin.distance(it.getCoordinate()) > map->maxRange) {
+                toRemove.push_back(it.getKey());
+            }
+        }
+        for (const octomap::OcTreeKey& key : toRemove) map->tree.deleteNode(key);
+    }
+    map->tree.updateInnerOccupancy();
+    env->ReleaseFloatArrayElements(xyz, points, JNI_ABORT);
+    env->ReleaseIntArrayElements(semanticRgb, colors, JNI_ABORT);
+    env->ReleaseFloatArrayElements(confidence, confidences, JNI_ABORT);
+    env->ReleaseFloatArrayElements(sensorToWorld, transform, JNI_ABORT);
+    return static_cast<jint>(valid.size());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeLeafCount(JNIEnv*, jclass, jlong handle) {
+    auto* map = reinterpret_cast<MobileOctomap*>(handle);
+    if (!map) return 0;
+    return static_cast<jint>(map->tree.getNumLeafNodes());
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_elabrador_mobilenavigation_NativeOctomap_nativeExportLeafs(
+        JNIEnv* env, jclass, jlong handle) {
+    auto* map = reinterpret_cast<MobileOctomap*>(handle);
+    if (!map) return env->NewFloatArray(0);
+    // The source planner ignores free leaves (occupancy < 0.5). Exporting
+    // them is unnecessary for the local cost map and creates huge Java
+    // allocations on every semantic frame.
+    const octomap::point3d bbxMin = map->hasOrigin
+            ? octomap::point3d(map->lastOrigin.x() - 7.5f,
+                               map->lastOrigin.y() - 7.5f,
+                               map->lastOrigin.z() - 2.5f)
+            : octomap::point3d(-7.5f, -7.5f, -2.5f);
+    const octomap::point3d bbxMax = map->hasOrigin
+            ? octomap::point3d(map->lastOrigin.x() + 7.5f,
+                               map->lastOrigin.y() + 7.5f,
+                               map->lastOrigin.z())
+            : octomap::point3d(7.5f, 7.5f, 0.0f);
+    std::vector<float> data;
+    data.reserve(8192);
+    for (Tree::leaf_bbx_iterator it = map->tree.begin_leafs_bbx(bbxMin, bbxMax),
+                                 end = map->tree.end_leafs_bbx();
+         it != end; ++it) {
+        const octomap::point3d point = it.getCoordinate();
+        if (point.x() < bbxMin.x() || point.x() > bbxMax.x()
+                || point.y() < bbxMin.y() || point.y() > bbxMax.y()
+                || point.z() < bbxMin.z() || point.z() > bbxMax.z()) continue;
+        if (it->getOccupancy() < 0.5f) continue;
+        const octomap::SemanticsMax semantic = it->getSemantics();
+        data.push_back(point.x());
+        data.push_back(point.y());
+        data.push_back(point.z());
+        data.push_back(static_cast<float>(it->getOccupancy()));
+        data.push_back(semantic.semantic_color.r);
+        data.push_back(semantic.semantic_color.g);
+        data.push_back(semantic.semantic_color.b);
+        data.push_back(semantic.confidence);
+    }
+    const jsize count = static_cast<jsize>(std::min<std::size_t>(
+            data.size() / 8, static_cast<std::size_t>(std::numeric_limits<jsize>::max() / 8)));
+    if (data.size() > static_cast<std::size_t>(count) * 8) data.resize(static_cast<std::size_t>(count) * 8);
+    jfloatArray result = env->NewFloatArray(count * 8);
+    if (!result) return nullptr;
+    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(data.size()), data.data());
+    return result;
+}
