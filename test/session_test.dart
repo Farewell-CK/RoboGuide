@@ -151,6 +151,20 @@ void main() {
       expect(mergePilotText(accumulated, finalText), finalText);
     });
 
+    test('final_text repeating the last narration segment is deduped', () {
+      // 实测场景（长回放）：末段 final 恰好等于已累加的末段，不得重复
+      const accumulated = '我先拍一张当前画面。相机暂时还没有图像，我正在等待画面。';
+      const lastSegment = '相机暂时还没有图像，我正在等待画面。';
+      expect(mergePilotText(accumulated, lastSegment), accumulated);
+    });
+
+    test('incoming substring already shown is ignored', () {
+      expect(
+        mergePilotText('我先看看眼前的画面，请稍候', '我先看看眼前的画面'),
+        '我先看看眼前的画面，请稍候',
+      );
+    });
+
     test('final identical to current is idempotent', () {
       expect(mergePilotText('好的', '好的'), '好的');
     });

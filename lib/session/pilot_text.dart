@@ -3,16 +3,18 @@ library;
 
 /// Merge a new Pilot text event into the accumulated assistant text.
 ///
-/// Pilot streams a long answer as `text_chunk`s and ends with a `final_text`
-/// that usually contains the full accumulated text. Naive `+=` would repeat
-/// the whole answer when the final event arrives. Chunks are continuous
-/// narration (no separator), so the only replace-able case is the final text
-/// that already contains everything we accumulated — take it as-is:
+/// Pilot streams a narration as incremental chunks and closes the turn with a
+/// `final_text`. The final_text can be (a) the full accumulated text, or (b) a
+/// repeat of the last narration segment — both would duplicate a naive `+=`.
+/// Chunks are continuous narration (no separator), so we only special-case the
+/// overlap-heavy cases and otherwise append directly:
 ///  - incoming is the full final (contains current) → take incoming
-///  - otherwise it's the next chunk (or a disjoint addendum) → append directly.
+///  - current already contains the incoming segment (final repeats it) → keep
+///  - otherwise it's the next chunk → append directly (no separator).
 String mergePilotText(String current, String incoming) {
   if (incoming.isEmpty) return current;
   if (current.isEmpty) return incoming;
   if (incoming.contains(current)) return incoming;
+  if (current.contains(incoming)) return current;
   return current + incoming;
 }
