@@ -146,7 +146,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `apps/mobile-navigation/` contains the experimental Android NPU Local System. It owns local D455F
   perception, semantic/depth cost-map generation, A* planning, navigation presentation, and
   immediate safety. It does not own Control, Runtime, State, or Node Protocol authority. Runtime
-  models and RealSense native libraries use Git LFS; generated VINS dependencies, local Android
+  models and prebuilt native libraries use Git LFS; generated VINS dependencies, local Android
   toolchains, build outputs, captures, and machine-local configuration stay outside Git.
 - Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
   not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.

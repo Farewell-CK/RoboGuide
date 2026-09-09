@@ -417,7 +417,7 @@ Local System 保留 Navigation、Local Planning、Perception、Motion、Hardware
 实验性 Android NPU Local System 位于
 [`apps/mobile-navigation/`](apps/mobile-navigation/)。它在手机端使用 D455F 完成本地感知、
 语义/深度代价图、A* 规划、导航呈现和即时安全，不拥有 RoboGuide 的 Control、Runtime、
-State 或 Node Protocol 权威；模型与 RealSense 原生库由 Git LFS 管理。
+State 或 Node Protocol 权威；模型与预编译原生库由 Git LFS 管理。
 
 部署侧 Local EAIOS 适配器位于 [`integrations/`](integrations/)；例如
 [`integrations/robonix-map-service/`](integrations/robonix-map-service/) 只把 canonical

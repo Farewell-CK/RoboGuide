@@ -20,13 +20,14 @@ Node Protocol 权威。
 git lfs pull
 ```
 
-PIDNet NPU 模型、RealSense arm64 原生库和两个 VINS arm64 预编译库由 Git LFS 管理。
-OpenCV、Eigen、Boost 和 Ceres Android 依赖仅在重新编译 VINS 时由准备脚本在本地生成，
+PIDNet NPU 模型、RealSense arm64 原生库以及 `libelabrador_native.so`、
+`libvins_feature_tracker.so`、`libvins_estimator.so` 三个应用原生库由 Git LFS 管理。
+OpenCV、Eigen、Boost 和 Ceres Android 依赖仅在重新编译应用原生库时由准备脚本在本地生成，
 不进入 Git。
 
 ## 构建
 
-安装 Android SDK API 35、NDK、CMake 和 Java 17。将 `local.properties.example` 复制为
+默认构建需要 Android SDK API 35 和 Java 17。将 `local.properties.example` 复制为
 `local.properties`，填写 `sdk.dir`；需要语音功能时还需填写 `asr.token` 和
 `tts.apiKey`。该文件已被 Git 忽略，不要提交真实凭据。默认使用预编译 VINS 库，macOS、
 Linux 和 Windows 都可以直接构建：
@@ -46,12 +47,13 @@ cp local.properties.example local.properties
 生成的 APK 位于 `app/build/outputs/apk/npu/debug/app-npu-debug.apk`。依赖已缓存时可为
 Gradle 命令增加 `--offline`。
 
-构建会检查两个 VINS 预编译库；缺少时会提示执行 `git lfs pull` 并中止，防止生成无效
-APK。需要修改 VINS C++ 源码时，在 Windows 上执行准备脚本，再显式启用源码构建：
+构建会检查三个应用预编译库是否为有效 ELF；缺少文件或只有 Git LFS 指针时会提示执行
+`git lfs pull` 并中止，防止生成无效 APK。只有修改 C++ 源码并重新生成这些库时才需要
+Android NDK 和 CMake；在 Windows 上执行准备脚本，再显式启用源码构建：
 
 ```powershell
 .\tools\prepare_vins_android_deps.ps1
-.\gradlew.bat :app:assembleNpuDebug -PbuildVinsFromSource=true
+.\gradlew.bat :app:assembleNpuDebug -PbuildNativeFromSource=true
 ```
 
 NPU 运行库仅在兼容的 MediaTek Neuron 设备上生效。桌面构建无法验证 D455F 真机、

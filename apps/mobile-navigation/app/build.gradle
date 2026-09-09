@@ -13,7 +13,8 @@ def localString = { String key ->
             .replace('"', '\\"')
     return '"' + value + '"'
 }
-def buildVinsFromSource = providers.gradleProperty('buildVinsFromSource')
+def buildNativeFromSource = providers.gradleProperty('buildNativeFromSource')
+        .orElse(providers.gradleProperty('buildVinsFromSource'))
         .map { it.toBoolean() }
         .getOrElse(false)
 
@@ -33,7 +34,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments "-DELABRADOR_BUILD_VINS_FROM_SOURCE=${buildVinsFromSource ? 'ON' : 'OFF'}"
+                arguments "-DELABRADOR_BUILD_VINS_FROM_SOURCE=${buildNativeFromSource ? 'ON' : 'OFF'}"
             }
         }
 
@@ -150,7 +151,7 @@ android {
     }
 
     sourceSets {
-        main.jniLibs.srcDirs = buildVinsFromSource ? [] : ['src/main/jniLibs']
+        main.jniLibs.srcDirs = buildNativeFromSource ? [] : ['src/main/jniLibs']
         turbo.assets.srcDirs = ['src/fast/assets']
         npu.assets.srcDirs = ['src/npu/assets']
     }
@@ -175,9 +176,11 @@ android {
         noCompress 'onnx', 'tflite'
     }
 
-    externalNativeBuild {
-        cmake {
-            path file('src/main/cpp/CMakeLists.txt')
+    if (buildNativeFromSource) {
+        externalNativeBuild {
+            cmake {
+                path file('src/main/cpp/CMakeLists.txt')
+            }
         }
     }
 }
@@ -198,13 +201,13 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
 }
 
-def verifyVinsAndroidDependencies = tasks.register('verifyVinsAndroidDependencies') {
+def verifyNativeLibraries = tasks.register('verifyNativeLibraries') {
     group = 'verification'
-    description = 'Fails before packaging when the generated VINS Android dependencies are absent.'
+    description = 'Fails before packaging when required native libraries or source dependencies are absent.'
     doLast {
         def requiredFiles
         def preparationHint
-        if (buildVinsFromSource) {
+        if (buildNativeFromSource) {
             def dependencyRoot = rootProject.file('third_party/vins_android_deps')
             requiredFiles = [
                     new File(dependencyRoot, 'opencv/sdk/native/jni/OpenCVConfig.cmake'),
@@ -215,12 +218,23 @@ def verifyVinsAndroidDependencies = tasks.register('verifyVinsAndroidDependencie
             preparationHint = 'Run .\\tools\\prepare_vins_android_deps.ps1 before building from source.'
         } else {
             requiredFiles = [
+                    rootProject.file('app/src/main/jniLibs/arm64-v8a/libelabrador_native.so'),
                     rootProject.file('app/src/main/jniLibs/arm64-v8a/libvins_feature_tracker.so'),
                     rootProject.file('app/src/main/jniLibs/arm64-v8a/libvins_estimator.so')
             ]
             preparationHint = 'Run git lfs pull before building the APK.'
         }
-        def missingFiles = requiredFiles.findAll { !it.isFile() }
+        def missingFiles = requiredFiles.findAll { file ->
+            if (!file.isFile()) return true
+            if (buildNativeFromSource) return false
+            if (file.length() < 4) return true
+            return file.withInputStream { input ->
+                byte[] magic = new byte[4]
+                input.read(magic) != 4 ||
+                        magic[0] != 0x7f || magic[1] != 0x45 ||
+                        magic[2] != 0x4c || magic[3] != 0x46
+            }
+        }
         if (!missingFiles.isEmpty()) {
             def relativePaths = missingFiles.collect {
                 rootProject.projectDir.toPath().relativize(it.toPath()).toString()
@@ -233,6 +247,10 @@ def verifyVinsAndroidDependencies = tasks.register('verifyVinsAndroidDependencie
 
 tasks.configureEach {
     if (name.startsWith('configureCMake') || name.startsWith('buildCMake')) {
-        dependsOn verifyVinsAndroidDependencies
+        dependsOn verifyNativeLibraries
     }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn verifyNativeLibraries
 }
