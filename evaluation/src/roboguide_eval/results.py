@@ -133,6 +133,7 @@ class RunManifest:
     environment_overrides: Mapping[str, str] = field(default_factory=dict)
     context: Mapping[str, str] = field(default_factory=dict)
     environment_information: Mapping[str, str] = field(default_factory=dict)
+    episode_selection: Mapping[str, JSONValue] = field(default_factory=dict)
 
     def to_json(self) -> JSONObject:
         """Serialize the manifest into its versioned JSON form.
@@ -174,6 +175,7 @@ class RunManifest:
             "environment_overrides": dict(sorted(self.environment_overrides.items())),
             "context": dict(sorted(self.context.items())),
             "environment_information": dict(sorted(self.environment_information.items())),
+            "episode_selection": dict(self.episode_selection),
         }
 
 
@@ -360,6 +362,31 @@ def _number_field(document: JSONObject, key: str) -> float | int | None:
     return value
 
 
+def _resolved_episode_identity(document: JSONObject) -> JSONValue:
+    """Read the resolved benchmark episode identity from a run manifest.
+
+    Args:
+        document: Decoded manifest document.
+
+    Returns:
+        The single resolved episode id, the list of ids for a batch run, or
+        ``None`` when identity is unresolved.
+    """
+    selection = document.get("episode_selection")
+    if not isinstance(selection, dict):
+        return None
+    resolution = selection.get("resolution")
+    if not isinstance(resolution, dict):
+        return None
+    single = resolution.get("resolved_episode_id")
+    if isinstance(single, str | int):
+        return single
+    batch = resolution.get("resolved_episode_ids")
+    if isinstance(batch, list):
+        return batch
+    return None
+
+
 def summarize_results(results_root: Path) -> JSONObject:
     """Summarize every run directory below a results root.
 
@@ -413,6 +440,7 @@ def summarize_results(results_root: Path) -> JSONObject:
                 "system": _text_field(document, "system"),
                 "run_id": _text_field(document, "run_id"),
                 "episode_id": _text_field(document, "episode_id"),
+                "resolved_episode_id": _resolved_episode_identity(document),
                 "seed": _number_field(document, "seed"),
                 "process_status": process_status,
                 "exit_code": exit_code,

@@ -80,15 +80,15 @@ def test_committed_e1_smoke_spec_loads_with_expected_shape() -> None:
     assert spec.dataset.digest is not None and len(spec.dataset.digest) == 64
     assert spec.metrics == (
         "success",
-        "subgoal_success",
+        "subgoal_success_rate",
         "simulation_steps",
         "token_usage",
         "wall_time",
         "coordination_latency",
-        "invalid_assignment_count",
     )
-    assert spec.environments["emos"].metrics_source_path == "emos-metrics.json"
-    assert spec.environments["roboguide"].metrics_source_path == "roboguide-metrics.json"
+    # No per-system metrics file requirements: official EMOS outputs are the
+    # raw evidence and the runner canonicalizes them directly.
+    assert spec.environments == {}
     assert spec.timeout_seconds == 900
 
 

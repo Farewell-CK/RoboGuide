@@ -38,6 +38,7 @@ from roboguide_eval.config import (
 )
 from roboguide_eval.metrics import (
     METRICS_SCHEMA,
+    MetricsError,
     MetricsPayload,
     RawEvidenceRef,
 )
@@ -430,7 +431,9 @@ class ProcessSystemRunner:
                 "duration_seconds": outcome.duration_seconds,
             },
         )
-        metrics = backfill_wall_time(self.collect_result(prepared, run_directory, outcome), outcome)
+        metrics = self._collect_validated_metrics(prepared, run_directory, outcome, writer)
+        identity = self.resolve_episode_identity(prepared, run_directory, outcome)
+        writer.trace.append("episode_identity", {"resolution": identity.get("status")})
         ended_at = utc_now_iso()
         manifest = RunManifest(
             experiment_id=experiment.experiment_id,
@@ -464,6 +467,11 @@ class ProcessSystemRunner:
             environment_overrides=dict(environment_overrides),
             context=dict(experiment.context),
             environment_information=harness_environment_information(process_spec.conda_environment),
+            episode_selection={
+                "selector": episode_id,
+                "seed": seed,
+                "resolution": identity,
+            },
         )
         writer.trace.append(
             "run_completed" if outcome.succeeded else "run_failed",
@@ -472,6 +480,48 @@ class ProcessSystemRunner:
         writer.write_manifest(manifest)
         writer.write_metrics(metrics.to_json())
         return RunResult(manifest=manifest, metrics=metrics, outcome=outcome)
+
+    def _collect_validated_metrics(
+        self,
+        prepared: PreparedSystem,
+        run_directory: Path,
+        outcome: ProcessOutcome,
+        writer: RunArtifactWriter,
+    ) -> MetricsPayload:
+        """Collect metrics and enforce the canonical contract before writing.
+
+        The payload is validated (names, kinds, bounds) so no mis-mapped
+        value can reach ``metrics.json``; a payload that would fail
+        ``from_json`` on read is never written. A validation failure does not
+        destroy evidence: the run keeps its manifest, logs, and trace, the
+        offending values are dropped, the error is recorded in
+        ``details.metrics_validation_error`` and a ``metrics_invalid`` trace
+        event, and the raw evidence references survive.
+
+        Args:
+            prepared: The prepared-system handle.
+            run_directory: The finished run's directory.
+            outcome: The observed process outcome for this episode run.
+            writer: The run's artifact writer for the trace event.
+
+        Returns:
+            The validated metrics payload, or the degraded empty-values
+            payload with the validation error recorded.
+        """
+        collected: MetricsPayload | None = None
+        try:
+            collected = self.collect_result(prepared, run_directory, outcome)
+            validated = backfill_wall_time(collected, outcome)
+            validated.validate()
+            return validated
+        except MetricsError as error:
+            writer.trace.append("metrics_invalid", {"error": str(error)})
+            raw_evidence = collected.raw_evidence if collected is not None else ()
+            return MetricsPayload(
+                values={},
+                details={"metrics_validation_error": str(error)},
+                raw_evidence=raw_evidence,
+            )
 
     def collect_result(
         self,
@@ -540,6 +590,44 @@ class ProcessSystemRunner:
                 "raw_evidence": [evidence.to_json() for evidence in raw_evidence],
             }
         )
+
+    def resolve_episode_identity(
+        self,
+        prepared: PreparedSystem,
+        run_directory: Path,
+        outcome: ProcessOutcome,
+    ) -> JSONObject:
+        """Resolve which real benchmark episode this run executed.
+
+        The manifest must distinguish the episode *selector* (what the
+        experiment requested, e.g. a seed-pinned sample label) from the
+        *resolved* benchmark episode identity. The base implementation is
+        honestly unresolved: a generic process runner has no benchmark-side
+        source, and fabricating an id is forbidden. System runners with
+        official outputs override this.
+
+        Args:
+            prepared: The prepared-system handle carrying the resolved
+                process specification.
+            run_directory: The finished run's directory with persisted logs.
+            outcome: The observed process outcome for this episode run.
+
+        Returns:
+            A JSON object describing the resolution: ``status`` is one of
+            ``resolved``, ``multiple-episodes``, or ``unresolved``, plus
+            ``resolved_episode_id`` / ``resolved_scene_id`` /
+            ``dataset_index`` when known, ``evidence_source`` naming the
+            official output used, and ``reason`` when unresolved.
+        """
+        return {
+            "status": "unresolved",
+            "resolved_episode_id": None,
+            "resolved_scene_id": None,
+            "dataset_index": None,
+            "reason": (
+                f"system runner {self.system!r} provides no benchmark episode identity source"
+            ),
+        }
 
     def cleanup(self, prepared: PreparedSystem) -> None:
         """Release everything the runner still owns after an experiment.

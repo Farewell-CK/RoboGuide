@@ -14,12 +14,11 @@ from roboguide_eval.metrics import (
 
 E1_CORE_METRICS: tuple[str, ...] = (
     "success",
-    "subgoal_success",
+    "subgoal_success_rate",
     "simulation_steps",
     "token_usage",
     "wall_time",
     "coordination_latency",
-    "invalid_assignment_count",
 )
 
 
@@ -29,12 +28,26 @@ def test_registry_covers_e1_core_metrics() -> None:
     for name in E1_CORE_METRICS:
         assert name in registry
     assert registry["success"].value_kind == "boolean"
-    assert registry["subgoal_success"].value_kind == "boolean"
+    assert registry["subgoal_success_rate"].value_kind == "number"
+    assert registry["subgoal_success_rate"].bounds == (0.0, 1.0)
     assert registry["simulation_steps"].value_kind == "integer"
     assert registry["token_usage"].value_kind == "integer"
     assert registry["wall_time"].value_kind == "number"
     assert registry["coordination_latency"].unit == "s"
-    assert registry["invalid_assignment_count"].value_kind == "integer"
+
+
+def test_registry_splits_assignment_metrics_as_reserved() -> None:
+    """The vague invalid_assignment_count is replaced by reserved names."""
+    registry = metric_registry()
+    assert "invalid_assignment_count" not in registry
+    assert "subgoal_success" not in registry
+    for name in (
+        "initial_infeasible_assignment_count",
+        "final_infeasible_assignment_count",
+        "reassignment_count",
+    ):
+        assert registry[name].value_kind == "integer"
+        assert "reserved" in registry[name].description
 
 
 def test_registry_reserves_future_experiment_metrics() -> None:
@@ -64,7 +77,7 @@ def test_validate_metric_names_rejects_unknown_and_duplicates() -> None:
 def test_payload_serialization_round_trip_preserves_values_and_evidence() -> None:
     """Payloads survive a JSON round trip including raw evidence refs."""
     payload = MetricsPayload(
-        values={"success": True, "wall_time": 12.5, "token_usage": 42},
+        values={"success": True, "wall_time": 12.5, "token_usage": 42, "subgoal_success_rate": 0.5},
         details={"note": "fixture"},
         raw_evidence=(
             RawEvidenceRef(
@@ -79,7 +92,12 @@ def test_payload_serialization_round_trip_preserves_values_and_evidence() -> Non
     assert restored.raw_evidence == payload.raw_evidence
     document = payload.to_json()
     assert document["schema"] == METRICS_SCHEMA
-    assert document["values"] == {"success": True, "token_usage": 42, "wall_time": 12.5}
+    assert document["values"] == {
+        "success": True,
+        "wall_time": 12.5,
+        "token_usage": 42,
+        "subgoal_success_rate": 0.5,
+    }
 
 
 def test_payload_rejects_unknown_names_and_wrong_types() -> None:
@@ -92,6 +110,28 @@ def test_payload_rejects_unknown_names_and_wrong_types() -> None:
         MetricsPayload.from_json({"schema": METRICS_SCHEMA, "values": {"success": 1}})
     with pytest.raises(MetricsError, match="must be a boolean, integer, or number"):
         MetricsPayload.from_json({"schema": METRICS_SCHEMA, "values": {"wall_time": "fast"}})
+
+
+def test_payload_enforces_rate_bounds() -> None:
+    """Rate metrics reject values outside their declared [0, 1] bounds."""
+    with pytest.raises(MetricsError, match=r"must stay within \[0.0, 1.0\]"):
+        MetricsPayload.from_json(
+            {"schema": METRICS_SCHEMA, "values": {"subgoal_success_rate": 1.5}}
+        )
+    with pytest.raises(MetricsError, match=r"must stay within \[0.0, 1.0\]"):
+        MetricsPayload.from_json(
+            {"schema": METRICS_SCHEMA, "values": {"subgoal_success_rate": -0.1}}
+        )
+    bounded = MetricsPayload.from_json(
+        {"schema": METRICS_SCHEMA, "values": {"subgoal_success_rate": 1.0}}
+    )
+    assert bounded.values["subgoal_success_rate"] == 1.0
+
+
+def test_payload_rejects_superseded_schema_version() -> None:
+    """v0.1 payloads (boolean subgoal_success) are rejected under v0.2."""
+    with pytest.raises(MetricsError, match="unsupported metrics schema"):
+        MetricsPayload.from_json({"schema": "roboguide-eval.metrics/v0.1", "values": {}})
 
 
 def test_payload_accepts_integer_for_number_metrics() -> None:

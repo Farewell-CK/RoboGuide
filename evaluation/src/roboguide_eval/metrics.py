@@ -10,6 +10,19 @@ never decides what "success" means for Habitat-MAS or RoboGuide.
 Raw evidence always travels beside the summarized numbers: a
 :class:`MetricsPayload` references the untouched artifact files inside the run
 directory instead of replacing them.
+
+v0.2 migration (no formal paper data exists on v0.1):
+
+- ``subgoal_success`` (boolean) became ``subgoal_success_rate`` (number in
+  ``[0, 1]``): a boolean cannot represent partial subgoal completion;
+- ``invalid_assignment_count`` was replaced by the reserved names
+  ``initial_infeasible_assignment_count``, ``final_infeasible_assignment_count``,
+  and ``reassignment_count`` (see evaluation/README.md for measurement
+  requirements); the old single count had no defensible definition.
+
+Availability policy: a canonical metric with no reliable source for a run is
+simply absent from ``values`` and recorded with a reason under
+``details.unavailable_metrics`` — never zero-filled, never guessed.
 """
 
 from __future__ import annotations
@@ -20,7 +33,7 @@ from typing import Final, Literal
 
 from roboguide_eval.models import JSONObject, JSONValue
 
-METRICS_SCHEMA: Final = "roboguide-eval.metrics/v0.1"
+METRICS_SCHEMA: Final = "roboguide-eval.metrics/v0.2"
 METRICS_FILE_NAME: Final = "metrics.json"
 
 type MetricValueKind = Literal["boolean", "integer", "number"]
@@ -32,42 +45,76 @@ class MetricsError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class MetricDefinition:
-    """Describe one canonical metric: its value kind, unit, and meaning."""
+    """Describe one canonical metric: kind, unit, meaning, and value bounds.
+
+    ``bounds`` is an inclusive ``[lower, upper]`` range enforced for numeric
+    metrics whose semantics fix a domain, such as rates in ``[0, 1]``.
+    """
 
     name: str
     value_kind: MetricValueKind
     unit: str | None
     description: str
+    bounds: tuple[float, float] | None = None
 
 
 CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
     MetricDefinition(
-        "success", "boolean", None, "episode-level task success judged by the system under test"
-    ),
-    MetricDefinition(
-        "subgoal_success",
+        "success",
         "boolean",
         None,
-        "episode-level subgoal completion judged by the system under test",
+        "episode-level task success judged by the official benchmark evaluator",
     ),
     MetricDefinition(
-        "simulation_steps", "integer", "steps", "simulator steps consumed by the episode"
+        "subgoal_success_rate",
+        "number",
+        "ratio",
+        "fraction of benchmark subgoals completed in the episode, in [0, 1]; "
+        "raw completed/total subgoal counts stay in details",
+        bounds=(0.0, 1.0),
     ),
     MetricDefinition(
-        "token_usage", "integer", "tokens", "total LLM tokens consumed by the episode"
+        "simulation_steps",
+        "integer",
+        "steps",
+        "simulator steps consumed by the episode, counted by the official benchmark runtime",
+    ),
+    MetricDefinition(
+        "token_usage",
+        "integer",
+        "tokens",
+        "total LLM tokens consumed by the episode, from actual provider usage records",
     ),
     MetricDefinition("wall_time", "number", "s", "wall-clock duration of the episode run"),
     MetricDefinition(
         "coordination_latency",
         "number",
         "s",
-        "latency of coordination decisions during the episode",
+        "latency of the coordination phase only, within the measurement boundary frozen in "
+        "evaluation/README.md; unavailable until the comparison protocol is agreed",
     ),
     MetricDefinition(
-        "invalid_assignment_count",
+        "initial_infeasible_assignment_count",
         "integer",
         "count",
-        "assignments rejected or undone during the episode",
+        "reserved: assignments in the initial coordination proposal rejected as "
+        "capability-infeasible by the target robot/local agent; requires reliable benchmark "
+        "event extraction (see evaluation/README.md measurement requirements)",
+    ),
+    MetricDefinition(
+        "final_infeasible_assignment_count",
+        "integer",
+        "count",
+        "reserved: assignments that entered execution while capability-infeasible; requires "
+        "reliable benchmark event extraction (see evaluation/README.md measurement requirements)",
+    ),
+    MetricDefinition(
+        "reassignment_count",
+        "integer",
+        "count",
+        "reserved: reassignments caused by assignment rejection or feasibility conflicts; "
+        "requires reliable benchmark event extraction (see evaluation/README.md measurement "
+        "requirements)",
     ),
     MetricDefinition("scheduling_latency", "number", "s", "reserved: scheduler decision latency"),
     MetricDefinition("recovery_latency", "number", "s", "reserved: failure recovery latency"),
@@ -186,11 +233,12 @@ class MetricsPayload:
         return cls(values={}, details={}, raw_evidence=())
 
     def validate(self) -> None:
-        """Check value names and types against the canonical registry.
+        """Check value names, types, and bounds against the canonical registry.
 
         Raises:
-            MetricsError: If a value uses an unknown name or a value whose
-                JSON type does not match the declared metric kind.
+            MetricsError: If a value uses an unknown name, a value whose JSON
+                type does not match the declared metric kind, or a numeric
+                value outside the metric's declared inclusive bounds.
         """
         registry = metric_registry()
         for name, value in self.values.items():
@@ -204,15 +252,37 @@ class MetricsPayload:
                 and isinstance(value, int)
                 and not isinstance(value, bool)
             ):
+                self._check_bounds(definition, value)
                 continue
             if (
                 definition.value_kind == "number"
                 and isinstance(value, int | float)
                 and not isinstance(value, bool)
             ):
+                self._check_bounds(definition, value)
                 continue
             raise MetricsError(
                 f"metric {name!r} expects {definition.value_kind}, got {type(value).__name__}"
+            )
+
+    @staticmethod
+    def _check_bounds(definition: MetricDefinition, value: int | float) -> None:
+        """Reject numeric values outside a metric's declared inclusive bounds.
+
+        Args:
+            definition: The canonical definition carrying optional bounds.
+            value: The numeric payload value.
+
+        Raises:
+            MetricsError: If bounds are declared and the value lies outside
+                them.
+        """
+        if definition.bounds is None:
+            return
+        lower, upper = definition.bounds
+        if not lower <= value <= upper:
+            raise MetricsError(
+                f"metric {definition.name!r} must stay within [{lower}, {upper}], got {value}"
             )
 
     def to_json(self) -> JSONObject:

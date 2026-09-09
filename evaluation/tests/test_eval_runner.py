@@ -31,6 +31,38 @@ SpecFactory = Callable[..., Path]
 LocalConfigFactory = Callable[..., Path]
 
 
+def require_object(value: object) -> dict[str, object]:
+    """Narrow one JSON value to a plain object or fail the test.
+
+    Args:
+        value: The decoded JSON value to narrow.
+
+    Returns:
+        The value typed as a string-keyed mapping.
+
+    Raises:
+        AssertionError: If the value is not an object.
+    """
+    assert isinstance(value, dict)
+    return value
+
+
+def require_str(value: object) -> str:
+    """Narrow one JSON value to a string or fail the test.
+
+    Args:
+        value: The decoded JSON value to narrow.
+
+    Returns:
+        The value typed as a string.
+
+    Raises:
+        AssertionError: If the value is not a string.
+    """
+    assert isinstance(value, str)
+    return value
+
+
 @pytest.fixture
 def fixture_spec(tmp_path: Path, make_spec: SpecFactory) -> ExperimentSpec:
     """Load the standard fixture experiment spec.
@@ -162,7 +194,7 @@ def test_full_lifecycle_produces_complete_run_evidence(
         json.loads(line)["event"]
         for line in (run_directory / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert trace_events == ["run_started", "process_completed", "run_completed"]
+    assert trace_events == ["run_started", "process_completed", "episode_identity", "run_completed"]
 
 
 def test_failing_episode_still_leaves_manifest_and_logs(
@@ -192,7 +224,7 @@ def test_failing_episode_still_leaves_manifest_and_logs(
         json.loads(line)["event"]
         for line in (run_directory / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert trace_events == ["run_started", "process_completed", "run_failed"]
+    assert trace_events == ["run_started", "process_completed", "episode_identity", "run_failed"]
     # Raw metrics the child produced before failing are still converted and
     # stored beside the failure evidence.
     stored_metrics = json.loads((run_directory / "metrics.json").read_text(encoding="utf-8"))
@@ -479,7 +511,7 @@ def test_emos_runner_converts_evaluator_logs_to_canonical_metrics(
     make_local_config: LocalConfigFactory,
     fixed_environment: dict[str, str],
 ) -> None:
-    """EmosRunner maps pddl_success to success for single-episode runs."""
+    """EmosRunner maps official outputs to canonical metrics per-episode."""
     spec = load_experiment_spec(make_spec())
     config_path = make_local_config(
         helpers.local_config_yaml(
@@ -496,15 +528,90 @@ def test_emos_runner_converts_evaluator_logs_to_canonical_metrics(
     assert result.succeeded
     values = result.metrics.values
     assert values["success"] is True
+    assert values["simulation_steps"] == 120  # from the official Episode Step Info banner
     assert "wall_time" in values  # backfilled from the harness-measured duration
     details = result.metrics.details
     assert details["emos_pddl_success_average"] == 1.0
     assert details["emos_average_metrics"] == {"composite_success": 0.5, "reward": 12.25}
+    assert details["emos_episode_ids"] == ["5"]
     assert details["emos_episode_batch_size"] == 1
     assert details["wall_time_source"] == "harness_process_duration"
+    unavailable = require_object(details["unavailable_metrics"])
+    assert require_str(unavailable["subgoal_success_rate"]).startswith(
+        "EMOS evaluator reported no subgoal"
+    )
+    assert require_str(unavailable["token_usage"]).startswith("EMOS wrote no chat_history_output")
+    assert "coordination_latency" in unavailable
+    selection = require_object(result.manifest.episode_selection)
+    assert selection["selector"] == "ep-000"
+    assert selection["seed"] == 7
+    resolution = require_object(selection["resolution"])
+    assert resolution["status"] == "resolved"
+    assert resolution["resolved_episode_id"] == "5"
     run_directory = tmp_path / "results" / "fixture-experiment" / result.manifest.run_id
     stored = json.loads((run_directory / "metrics.json").read_text(encoding="utf-8"))
     assert stored["values"]["success"] is True
+
+
+def test_emos_runner_collects_official_token_usage(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """token_usage comes from EMOS's own per-agent totals, copied as evidence."""
+    spec = load_experiment_spec(make_spec())
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_EMOS_EPISODE_SCRIPT],
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    values = result.metrics.values
+    assert values["token_usage"] == 2000
+    assert values["simulation_steps"] == 512
+    details = result.metrics.details
+    assert details["emos_token_usage_by_agent"] == {"agent_0": 1200, "agent_1": 800}
+    selection = require_object(result.manifest.episode_selection)
+    resolution = require_object(selection["resolution"])
+    assert resolution["resolved_episode_id"] == "42"
+    run_directory = tmp_path / "results" / "fixture-experiment" / result.manifest.run_id
+    evidence = run_directory / "raw-evidence" / "token_usage-42.json"
+    assert evidence.is_file()
+    assert json.loads(evidence.read_text(encoding="utf-8")) == {"agent_0": 1200, "agent_1": 800}
+    evidence_paths = {ref.path for ref in result.metrics.raw_evidence}
+    assert "raw-evidence/token_usage-42.json" in evidence_paths
+
+
+def test_emos_runner_marks_identity_unresolved_without_official_output(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """No official banner and no new episode_log records: honest unresolved."""
+    spec = load_experiment_spec(make_spec())
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", "print('ran with no official outputs')"],
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    resolution = require_object(require_object(result.manifest.episode_selection)["resolution"])
+    assert resolution["status"] == "unresolved"
+    assert resolution["resolved_episode_id"] is None
+    assert "reason" in resolution
+    unavailable = require_object(result.metrics.details["unavailable_metrics"])
+    assert require_str(unavailable["success"]) == (
+        "evaluator reported no pddl_success average in stdout"
+    )
+    assert "simulation_steps" in unavailable
 
 
 def test_emos_runner_parses_metrics_after_large_log_prefix(
@@ -536,6 +643,7 @@ def test_emos_runner_parses_metrics_after_large_log_prefix(
     run_directory = tmp_path / "results" / "fixture-experiment" / result.manifest.run_id
     assert (run_directory / "stdout.log").stat().st_size > 4096
     assert result.metrics.values["success"] is True
+    assert result.metrics.values["simulation_steps"] == 480
     assert result.metrics.details["emos_pddl_success_average"] == 1.0
 
 
@@ -554,9 +662,7 @@ def test_emos_runner_batch_average_is_not_booleanized(
             arguments=[
                 "-u",
                 "-c",
-                helpers.FIXTURE_EMOS_LOG_SCRIPT.replace(
-                    "pddl_success: 1.0000", "pddl_success: 0.6000"
-                ),
+                helpers.FIXTURE_EMOS_BATCH_SCRIPT,
                 "habitat.environment.iterator_options.num_episode_sample=3",
             ],
         )
@@ -564,8 +670,115 @@ def test_emos_runner_batch_average_is_not_booleanized(
     result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
     assert result.succeeded
     assert "success" not in result.metrics.values
+    assert "simulation_steps" not in result.metrics.values
     assert result.metrics.details["emos_pddl_success_average"] == 0.6
-    assert result.metrics.details["emos_episode_batch_size"] == 3
+    assert result.metrics.details["emos_episode_ids"] == ["3", "4"]
+    resolution = require_object(require_object(result.manifest.episode_selection)["resolution"])
+    assert resolution["status"] == "multiple-episodes"
+    assert resolution["resolved_episode_ids"] == ["3", "4"]
+
+
+def test_emos_runner_episode_log_fallback_attributes_per_run(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """The fallback diff attributes each run only its own new episode.
+
+    Regression guard: with a single prepare-time baseline, the second run of
+    a seed grid would wrongly claim the first run's episode as its own.
+    """
+    spec = load_experiment_spec(make_spec())
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_EMOS_APPEND_LOG_SCRIPT],
+        )
+    )
+    runner = build_runner("emos", environment=fixed_environment, repository_root=tmp_path)
+    results = run_experiment_spec(
+        spec,
+        runner,
+        results_root=tmp_path / "results",
+        local_config_path=config_path,
+        episodes=("ep-000",),
+        seeds=(7, 11),
+        environment=fixed_environment,
+    )
+    assert len(results) == 2
+    for index, result in enumerate(results):
+        resolution = require_object(require_object(result.manifest.episode_selection)["resolution"])
+        assert resolution["status"] == "resolved"
+        assert resolution["resolved_episode_id"] == str(11 + index)
+        assert result.metrics.values["simulation_steps"] == 77
+
+
+def test_invalid_metrics_degrade_with_full_evidence(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """A contract-violating payload is dropped, never written unreadable.
+
+    The process outcome, manifest, logs, and trace all survive; the offense
+    is recorded in metrics details and a trace event.
+    """
+    spec = load_experiment_spec(make_spec())
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_INVALID_METRICS_SCRIPT, "{output_dir}"],
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    assert result.manifest.process_status == "completed"
+    assert result.manifest.failure_reason is None
+    assert result.metrics.values == {}
+    error_text = require_str(require_object(result.metrics.details)["metrics_validation_error"])
+    assert "must stay within" in error_text
+    run_directory = tmp_path / "results" / "fixture-experiment" / result.manifest.run_id
+    assert (run_directory / "manifest.json").is_file()
+    assert (run_directory / "metrics.json").is_file()
+    stored = json.loads((run_directory / "metrics.json").read_text(encoding="utf-8"))
+    assert stored["values"] == {}
+    trace_events = [
+        json.loads(line)["event"]
+        for line in (run_directory / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "metrics_invalid" in trace_events
+
+
+def test_subgoal_count_aggregate_not_mapped_as_rate(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """A bare subgoal_success aggregate keeps unverified semantics in details."""
+    spec = load_experiment_spec(make_spec())
+    script = helpers.FIXTURE_EMOS_LOG_SCRIPT.replace(
+        "Average episode composite_success: 0.5000",
+        "Average episode subgoal_success: 2.5000",
+    )
+    config_path = make_local_config(
+        helpers.local_config_yaml(fixture_workdir, arguments=["-u", "-c", script])
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    values = result.metrics.values
+    assert "subgoal_success_rate" not in values
+    averages = require_object(result.metrics.details["emos_average_metrics"])
+    assert averages["subgoal_success"] == 2.5
+    unavailable = require_object(result.metrics.details["unavailable_metrics"])
+    assert require_str(unavailable["subgoal_success_rate"]).startswith(
+        "EMOS evaluator reported no subgoal_success_rate"
+    )
 
 
 def test_wall_time_backfill_respects_system_reported_values() -> None:

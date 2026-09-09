@@ -65,6 +65,9 @@ print(os.environ["FIXTURE_TOKEN"])
 FIXTURE_EMOS_LOG_SCRIPT: str = """\
 import sys
 
+print("========================Episode Step Info==========================")
+print("Episode ID: 5, Num Steps: 120")
+print("===================================================================")
 print("INFO habitat_baselines.rl.multi_agent.habitat_mas_evaluator - "
       "Average episode pddl_success: 1.0000")
 print("Average episode composite_success: 0.5000")
@@ -79,9 +82,82 @@ import sys
 
 for turn in range(120):
     print(f"INFO habitat.mas discussion turn {turn:03d}: " + "token " * 15)
+print("Episode ID: 9, Num Steps: 480")
 print("INFO evaluator - Average episode pddl_success: 1.0000")
 print("Average episode composite_success: 0.5000")
 sys.exit(0)
+"""
+
+# Official banner plus EMOS's own token record: writes
+# chat_history_output/<episode_id>/token_usage.json next to the run cwd,
+# exactly where the real EMOS chat-history saving leaves it. String
+# concatenation (not f-strings) avoids colliding with harness {placeholders}
+# that would substitute declared names like episode_id inside argv.
+FIXTURE_EMOS_EPISODE_SCRIPT: str = """\
+import json
+import os
+import sys
+
+episode_id = "42"
+print("========================Episode Step Info==========================")
+print("Episode ID: " + episode_id + ", Num Steps: 512")
+print("===================================================================")
+token_dir = os.path.join("chat_history_output", episode_id)
+os.makedirs(token_dir, exist_ok=True)
+with open(os.path.join(token_dir, "token_usage.json"), "w", encoding="utf-8") as handle:
+    json.dump({"agent_0": 1200, "agent_1": 800}, handle)
+print("INFO evaluator - Average episode pddl_success: 1.0000")
+print("Average episode composite_success: 0.5000")
+sys.exit(0)
+"""
+
+# A multi-episode batch run: two official banners, averaged success.
+FIXTURE_EMOS_BATCH_SCRIPT: str = """\
+import sys
+
+print("Episode ID: 3, Num Steps: 300")
+print("Episode ID: 4, Num Steps: 400")
+print("Average episode pddl_success: 0.6000")
+sys.exit(0)
+"""
+
+# No stdout banner; instead appends one new record per invocation to the
+# EMOS-style persistent episode_log step file (unique id via a counter), so
+# the fallback identity path must attribute each run only its own record.
+# String concatenation avoids colliding with harness {placeholders}.
+FIXTURE_EMOS_APPEND_LOG_SCRIPT: str = """\
+import json
+import os
+
+counter_path = os.path.join(os.getcwd(), "append_counter.txt")
+episode_number = 11
+if os.path.exists(counter_path):
+    with open(counter_path, encoding="utf-8") as handle:
+        episode_number = int(handle.read().strip()) + 1
+with open(counter_path, "w", encoding="utf-8") as handle:
+    handle.write(str(episode_number))
+log_path = os.path.join("episode_log", "fixture", "FULL", "fixture_steps_log.json")
+os.makedirs(os.path.dirname(log_path), exist_ok=True)
+data = {}
+if os.path.exists(log_path):
+    with open(log_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+data["episode_id: " + str(episode_number)] = "num_steps: 77"
+with open(log_path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle)
+"""
+
+# Writes a canonical-contract-violating raw metrics file (rate out of [0,1])
+# to probe the degrade-with-evidence path.
+FIXTURE_INVALID_METRICS_SCRIPT: str = """\
+import json
+import os
+import sys
+
+output_dir = sys.argv[1]
+with open(os.path.join(output_dir, "raw-metrics.json"), "w", encoding="utf-8") as handle:
+    json.dump({"values": {"subgoal_success_rate": 3.0}}, handle)
+print("wrote invalid raw metrics")
 """
 
 

@@ -52,6 +52,17 @@ BASE_MANIFEST_FIELDS: dict[str, Any] = {
     "environment_overrides": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
     "context": {"robots": "spot+fetch"},
     "environment_information": harness_environment_information("emos-env"),
+    "episode_selection": {
+        "selector": "seed-pinned-sample",
+        "seed": 7,
+        "resolution": {
+            "status": "resolved",
+            "resolved_episode_id": "1173",
+            "resolved_scene_id": None,
+            "dataset_index": None,
+            "evidence_source": "stdout: Episode Step Info banner",
+        },
+    },
 }
 
 
@@ -99,8 +110,12 @@ def test_manifest_serialization_carries_all_reproducibility_fields(tmp_path: Pat
         "exit_code",
         "timed_out",
         "failure_reason",
+        "episode_selection",
     ):
         assert key in document
+    selection = require_object(document["episode_selection"])
+    resolution = require_object(selection["resolution"])
+    assert resolution["resolved_episode_id"] == "1173"
     assert document["llm"] == {
         "provider": "openai",
         "requested_model": "gpt-5.6-luna",
@@ -211,6 +226,10 @@ def test_summarize_aggregates_runs_and_success_rate(tmp_path: Path) -> None:
     assert aggregate["total_wall_time"] == pytest.approx(6.0)
     runs = require_object(report).get("runs")
     assert isinstance(runs, list) and len(runs) == 3
+    first_row = require_object(runs[0])
+    # Paired-comparison grouping needs the resolved benchmark episode id in
+    # the summary row, not just the selector label.
+    assert first_row["resolved_episode_id"] == "1173"
 
 
 def test_summarize_tolerates_empty_and_malformed_directories(tmp_path: Path) -> None:

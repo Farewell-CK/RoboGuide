@@ -45,22 +45,16 @@ seeds:
   - 13
 metrics:
   - success
-  - subgoal_success
+  - subgoal_success_rate
   - simulation_steps
   - token_usage
   - wall_time
   - coordination_latency
-  - invalid_assignment_count
 timeout_seconds: 900
-environments:
-  emos:
-    # Raw artifact the EMOS command is expected to write into its run
-    # directory; the runner converts it into canonical metrics and keeps the
-    # file untouched as raw evidence.
-    metrics_source_path: emos-metrics.json
-    expected_output_paths:
-      - emos-metrics.json
-  roboguide:
-    metrics_source_path: roboguide-metrics.json
-    expected_output_paths:
-      - roboguide-metrics.json
+# No per-system metrics_source_path/expected_output_paths are declared:
+# official EMOS stdout (evaluator averages + Episode Step Info banner) and
+# EMOS's own chat_history_output/token_usage.json are the raw evidence, and
+# the runner canonicalizes them directly. Metrics without a reliable
+# official source stay unavailable with a recorded reason (see
+# evaluation/README.md for the availability policy, the coordination-latency
+# measurement boundary, and the reserved assignment-metric requirements).
