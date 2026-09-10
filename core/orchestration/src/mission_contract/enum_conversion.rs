@@ -1,6 +1,6 @@
 //! Conversion of closed Mission wire enumerations into Domain values.
 
-use super::{CapabilityDocument, ResourceDocument, ScopeDocument};
+use super::wire::{CapabilityDocument, ResourceDocument, ScopeDocument};
 use domain::{CapabilityKind, ResourceBindingScope, ResourceKind};
 
 /// Maps the contract capability enumeration into Domain.

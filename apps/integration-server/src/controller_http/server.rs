@@ -1,5 +1,10 @@
 //! Mission and operator HTTP request routing.
 
+use super::protocol::{parse_query, read_control_http_request, write_http_response};
+use super::view::{
+    inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
+    state_records_json,
+};
 use crate::*;
 /// Serves the local Phase 1 Mission and operator diagnostics API.
 pub(crate) async fn serve_http(

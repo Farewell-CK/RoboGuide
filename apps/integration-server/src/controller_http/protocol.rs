@@ -101,7 +101,7 @@ pub(crate) async fn read_control_http_request(
 }
 
 /// Writes one bounded JSON response and closes the HTTP/1.1 connection.
-pub(crate) async fn write_http_response(
+pub(super) async fn write_http_response(
     stream: &mut tokio::net::TcpStream,
     status: &str,
     body: serde_json::Value,

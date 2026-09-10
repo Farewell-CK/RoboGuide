@@ -1,6 +1,19 @@
 //! Read-only Controller HTTP inventory and State view projections.
 
 use crate::*;
+
+/// Returns one stable Mission contract spelling for a Runtime relation family.
+pub(super) fn relation_kind_name(kind: domain::ExecutionRelationKind) -> &'static str {
+    match kind {
+        domain::ExecutionRelationKind::RequiresActive => "requires-active",
+        domain::ExecutionRelationKind::GroupMemberState => "group-member-state",
+        domain::ExecutionRelationKind::SharedSpatialReference => "shared-spatial-reference",
+        domain::ExecutionRelationKind::RelativePose => "relative-pose",
+        domain::ExecutionRelationKind::RelativeDistance => "relative-distance",
+        domain::ExecutionRelationKind::StateRequirement => "state-requirement",
+        domain::ExecutionRelationKind::FreshnessRequirement => "freshness-requirement",
+    }
+}
 /// Projects current Shared Node State for Mission Intelligence without adding decision authority.
 pub(crate) fn inventory_json(
     state: &state::InMemorySharedNodeState,
@@ -46,7 +59,7 @@ pub(crate) fn inventory_json(
 }
 
 /// Describes built-in read adapters and selectively registered node providers.
-pub(crate) fn state_providers_json(controller: &ControllerState) -> serde_json::Value {
+pub(super) fn state_providers_json(controller: &ControllerState) -> serde_json::Value {
     let built_in = [
         ("mission-orchestrator", "desired"),
         ("control-plane", "committed"),
@@ -85,7 +98,7 @@ pub(crate) fn state_providers_json(controller: &ControllerState) -> serde_json::
 }
 
 /// Describes the generic catalog and selectively registered node Memory providers.
-pub(crate) fn memory_providers_json(controller: &ControllerState) -> serde_json::Value {
+pub(super) fn memory_providers_json(controller: &ControllerState) -> serde_json::Value {
     let nodes = controller
         .bridge
         .state()
@@ -111,7 +124,7 @@ pub(crate) fn memory_providers_json(controller: &ControllerState) -> serde_json:
 }
 
 /// Builds a read-only federated State view over existing owners plus external records.
-pub(crate) fn state_records_json(
+pub(super) fn state_records_json(
     controller: &ControllerState,
     now: domain::TimestampMs,
     query: &std::collections::BTreeMap<&str, &str>,
