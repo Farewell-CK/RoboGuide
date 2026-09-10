@@ -48,6 +48,7 @@
 - [`decisions/0030-mission-semantic-admission-and-deployability.md`](decisions/0030-mission-semantic-admission-and-deployability.md)：Mission 语义接纳与当前部署可执行性的 authority 分离。
 - [`decisions/0031-canonical-capability-catalog.md`](decisions/0031-canonical-capability-catalog.md)：Planner/Reviewer 使用的稳定 canonical contract 与 scalar parameter 词汇表。
 - [`decisions/0032-mission-review-and-repair-loop.md`](decisions/0032-mission-review-and-repair-loop.md)：结构化 Review evidence、用户 clarification 分流与有界 MissionPlan Repair。
+- [`decisions/0033-task-satisfaction-boundary.md`](decisions/0033-task-satisfaction-boundary.md)：本地 execution completion、Task satisfaction 与 Mission completion 的显式边界。
 
 ## 历史架构
 

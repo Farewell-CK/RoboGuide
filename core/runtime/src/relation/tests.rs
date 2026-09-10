@@ -1,7 +1,7 @@
 //! Runtime Execution Relation tests.
 
 use super::*;
-use crate::{ExecutionRuntimeError, ObservedTaskResult};
+use crate::{ExecutionRuntimeError, ObservedTaskExecutionResult};
 use domain::{
     CapabilityContractRef, CorrelationId, ExecutionCommand, ExecutionIntent, ExecutionRelationSpec,
     ExecutionRelationType, MapId, MapRevisionId, NodeId, PlannedExecutionRef,
@@ -421,12 +421,12 @@ fn relation_tracks_rebind_without_node_identity() {
         )
         .expect("target completion records");
     assert_eq!(
-        runtime.task_result(
+        runtime.task_execution_result(
             &group_id,
             target.task_ref(),
             std::iter::once(target.role_id())
         ),
-        Some(ObservedTaskResult::Succeeded)
+        Some(ObservedTaskExecutionResult::ExecutionCompleted)
     );
 }
 
@@ -522,7 +522,7 @@ fn target_completion_requires_relation_satisfaction_proof() {
         }
     )));
     assert_eq!(
-        runtime.task_result(
+        runtime.task_execution_result(
             &group_id,
             target.task_ref(),
             std::iter::once(target.role_id())
@@ -575,11 +575,11 @@ fn target_failure_remains_a_task_failure_without_relation_unknown() {
         ExecutionRelationState::Dormant
     );
     assert_eq!(
-        runtime.task_result(
+        runtime.task_execution_result(
             &group_id,
             target.task_ref(),
             std::iter::once(target.role_id())
         ),
-        Some(ObservedTaskResult::Failed)
+        Some(ObservedTaskExecutionResult::Failed)
     );
 }

@@ -88,25 +88,38 @@ def _v0_5_fixture_json() -> JSONObject:
     return raw
 
 
+def _v0_6_fixture_json() -> JSONObject:
+    """Upgrade the scheduling fixture with explicit Task satisfaction policy."""
+    raw = _v0_5_fixture_json()
+    raw["schema_version"] = "roboguide.mission-plan/v0.6"
+    tasks = cast(list[JSONObject], raw["tasks"])
+    for task in tasks:
+        task["satisfaction"] = {"basis": "execution-report"}
+    return raw
+
+
 def test_valid_fixture_round_trips() -> None:
     """The approved fixture must parse and serialize without contract drift."""
     raw = _fixture_json()
     assert MissionPlan.from_json(raw).to_json() == raw
 
 
-def test_v0_5_schema_requires_typed_relation_fields() -> None:
+def test_v0_6_schema_requires_typed_relations_and_satisfaction() -> None:
     """The current provider schema retains relation kinds and their required typed fields."""
     schema = json.loads(
-        Path("contracts/mission/v0.5/mission-plan.schema.json").read_text(encoding="utf-8")
+        Path("contracts/mission/v0.6/mission-plan.schema.json").read_text(encoding="utf-8")
     )
     version = schema["properties"]["schema_version"]
-    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.5"}
+    assert version == {"type": "string", "const": "roboguide.mission-plan/v0.6"}
     relation_kind = schema["$defs"]["relation"]["properties"]["kind"]
     assert "state-requirement" in relation_kind["enum"]
     conditional_requirements = {
         tuple(branch["then"]["required"]) for branch in schema["$defs"]["relation"]["allOf"]
     }
     assert ("state_key", "requirement") in conditional_requirements
+    assert schema["$defs"]["task_satisfaction"]["properties"]["basis"] == {
+        "const": "execution-report"
+    }
 
 
 def test_execution_relation_round_trips_logical_endpoints() -> None:
@@ -156,6 +169,34 @@ def test_v0_5_quantitative_resources_and_timing_round_trip() -> None:
     assert plan.tasks[0].timing.estimated_duration_ms == 5_000
     assert plan.tasks[1].roles[0].resources[0].units == 2
     assert plan.to_json() == raw
+
+
+def test_v0_6_task_satisfaction_round_trip_and_v0_5_default() -> None:
+    """Current plans declare satisfaction while historical v0.5 normalizes compatibly."""
+    current = _v0_6_fixture_json()
+    plan = MissionPlan.from_json(current)
+    assert plan.tasks[0].satisfaction_basis == "execution-report"
+    assert plan.to_json() == current
+
+    historical = MissionPlan.from_json(_v0_5_fixture_json())
+    assert historical.tasks[0].satisfaction_basis == "execution-report"
+    assert historical.to_json() == _v0_5_fixture_json()
+
+
+def test_v0_6_requires_supported_task_satisfaction_basis() -> None:
+    """Missing or unknown satisfaction policy fails before a Task can reach execution."""
+    missing = _v0_6_fixture_json()
+    missing_tasks = cast(list[JSONObject], missing["tasks"])
+    del missing_tasks[0]["satisfaction"]
+    with pytest.raises(MissionPlanError, match=r"missing=\['satisfaction'\]"):
+        MissionPlan.from_json(missing)
+
+    unknown = _v0_6_fixture_json()
+    unknown_tasks = cast(list[JSONObject], unknown["tasks"])
+    satisfaction = cast(JSONObject, unknown_tasks[0]["satisfaction"])
+    satisfaction["basis"] = "world-state-evidence"
+    with pytest.raises(MissionPlanError, match="basis is unsupported"):
+        MissionPlan.from_json(unknown)
 
 
 def test_v0_5_rejects_duplicate_resource_kind_and_infeasible_timing() -> None:

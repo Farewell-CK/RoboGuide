@@ -173,6 +173,9 @@ impl ControlPlane {
             // Active/Blocked execution must account for every role, whether bound or awaiting
             // the externally decided recovery rebind.
             TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Blocked => exact,
+            // Successful local execution retains its exact bindings until Orchestration accepts
+            // Task satisfaction and performs Task-scoped release.
+            TaskExecutionLifecycle::AwaitingSatisfaction => !has_task_recovery && exact,
             // Terminal Task history may retain Context-scoped role assignments until Context or
             // Group release, so role coverage is intentionally not required here.
             TaskExecutionLifecycle::Completed => !has_task_recovery,

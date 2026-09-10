@@ -13,7 +13,7 @@ use integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProto
 use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
 use orchestration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
-    IntegrationRuntimeError, ObservedTaskResult,
+    IntegrationRuntimeError, ObservedTaskExecutionResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::{Clock, SharedNodeStateReader, StateRecordReader};
@@ -27,10 +27,10 @@ use std::time::Duration;
 ///
 /// The outer version advances with the inner Integration checkpoint so old
 /// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
 
 /// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";

@@ -196,6 +196,25 @@ pub(super) struct TaskDocument {
     /// Relative time constraints introduced by MissionPlan v0.5.
     #[serde(default)]
     pub(super) timing: Option<TimingDocument>,
+    /// Explicit semantic-satisfaction policy introduced by MissionPlan v0.6.
+    #[serde(default)]
+    pub(super) satisfaction: Option<TaskSatisfactionDocument>,
+}
+
+/// Wire Task satisfaction policy.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TaskSatisfactionDocument {
+    /// Evidence basis Orchestration may accept after local execution ends.
+    pub(super) basis: TaskSatisfactionBasisDocument,
+}
+
+/// Closed satisfaction bases implemented by the current Mission boundary.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum TaskSatisfactionBasisDocument {
+    /// Successful aggregate Role execution reports satisfy the Task.
+    ExecutionReport,
 }
 
 /// Wire relative scheduling constraints anchored to Mission acceptance.

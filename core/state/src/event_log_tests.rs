@@ -233,7 +233,7 @@ fn sqlite_event_log_survives_reopen() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "event-1");
     assert_eq!(events[0].correlation_id, "test-correlation");
-    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V10);
+    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V11);
     let payload: EventPayload =
         serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
     assert!(matches!(
@@ -241,6 +241,43 @@ fn sqlite_event_log_survives_reopen() {
         EventPayload::ExecutionGroupBlocked { .. }
     ));
     assert_eq!(reopened.decoded_events().expect("events decode").len(), 1);
+}
+
+/// A v10 row cannot claim Task satisfaction evidence introduced by codec v11.
+#[test]
+fn event_decoder_rejects_task_satisfaction_under_v10_marker() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let path = directory
+        .path()
+        .join("events-task-satisfaction-v11.sqlite3");
+    let correlation = CorrelationId::new("task-satisfaction-v11").expect("correlation valid");
+    let mut log = SqliteEventLog::open(&path).expect("event log opens");
+    log.append(
+        TimestampMs::new(50),
+        &correlation,
+        None,
+        EventPayload::TaskSatisfied {
+            group_id: ExecutionGroupId::new("group-a").expect("group id valid"),
+            task_ref: TaskRef::new(
+                MissionId::new("mission-a").expect("mission id valid"),
+                TaskId::new("task-a").expect("task id valid"),
+            ),
+            basis: domain::TaskSatisfactionBasis::ExecutionReport,
+        },
+    );
+    log.connection
+        .lock()
+        .expect("event connection lock is available")
+        .execute(
+            "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+            [EVENT_PAYLOAD_SCHEMA_V10],
+        )
+        .expect("fixture marker changes to v10");
+
+    assert!(matches!(
+        log.decoded_events(),
+        Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v11")
+    ));
 }
 
 /// The current decoder retains the previous v2 JSON path after v3 Spatial variants ship.

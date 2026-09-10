@@ -32,7 +32,8 @@ mod mission_contract;
 pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
     GroupSpatialVerification, GroupViewFreshness, IntegrationRuntimeBridge,
-    IntegrationRuntimeError, ObservedTaskOutcome, ObservedTaskResult, RemoteExecutionStatus,
+    IntegrationRuntimeError, ObservedTaskExecutionOutcome, ObservedTaskExecutionResult,
+    RemoteExecutionStatus,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission_contract::decode_mission_plan;
@@ -42,11 +43,11 @@ pub use mission_contract::decode_mission_plan;
 pub enum MissionExecutionLifecycle {
     /// The complete plan is accepted and its Group has been created.
     Accepted,
-    /// At least one Task is Ready, Active, Blocked, or completed while later Tasks remain.
+    /// At least one Task is Ready, Active, Blocked, awaiting satisfaction, or completed.
     Running,
     /// An explicit cancellation was durably requested; active attempts are draining.
     Cancelling,
-    /// Every Task in the accepted plan completed and the Group was released.
+    /// Every Task in the accepted plan was explicitly satisfied and the Group was released.
     Completed,
     /// Mission policy declared a final failure and released the Group.
     Failed,

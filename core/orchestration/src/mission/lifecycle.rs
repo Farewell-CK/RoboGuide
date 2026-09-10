@@ -4,8 +4,29 @@ use super::super::*;
 use super::timing::release_mission_scheduling;
 
 impl MissionOrchestrator {
-    /// Applies a successful Runtime Task outcome and explicitly evaluates the complete DAG.
-    pub fn task_succeeded<E: EventSink>(
+    /// Records successful aggregate local execution without declaring Task satisfaction.
+    pub fn record_task_execution_completed<E: EventSink>(
+        &self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        let group_id = self.group_for_task(mission_id, task_ref)?.clone();
+        control.record_task_execution_completed(
+            &group_id,
+            task_ref,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        Ok(())
+    }
+
+    /// Accepts execution-report evidence as Task satisfaction and advances the Mission DAG.
+    pub fn satisfy_task_from_execution_report<E: EventSink>(
         &mut self,
         mission_id: &MissionId,
         task_ref: &TaskRef,
@@ -15,6 +36,28 @@ impl MissionOrchestrator {
         events: &mut E,
     ) -> Result<(), OrchestrationError> {
         let group_id = self.group_for_task(mission_id, task_ref)?.clone();
+        let satisfaction_basis = self
+            .executions
+            .get(mission_id)
+            .and_then(|execution| {
+                execution
+                    .plan()
+                    .task_graph()
+                    .tasks()
+                    .iter()
+                    .find(|task| task.requirement().task_ref() == task_ref)
+            })
+            .map(domain::PlannedTask::satisfaction_basis)
+            .ok_or_else(|| {
+                OrchestrationError::Mission(
+                    "Task satisfaction policy is absent from the accepted MissionPlan".to_string(),
+                )
+            })?;
+        if satisfaction_basis != domain::TaskSatisfactionBasis::ExecutionReport {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction basis cannot accept execution-report evidence".to_string(),
+            ));
+        }
         let task_resources = control
             .group(&group_id)
             .and_then(|group| group.task_execution(task_ref))
@@ -32,7 +75,14 @@ impl MissionOrchestrator {
             })
             .cloned()
             .collect::<Vec<ResourceId>>();
-        control.complete_task_execution(&group_id, task_ref, timestamp, correlation_id, events)?;
+        control.satisfy_task_execution(
+            &group_id,
+            task_ref,
+            satisfaction_basis,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
         control.release_task_bindings(
             &group_id,
             task_ref,
@@ -50,7 +100,7 @@ impl MissionOrchestrator {
                 domain::EventPayload::SchedulingReservationReleased {
                     group_id: group_id.clone(),
                     task_ref: task_ref.clone(),
-                    reason: "Task completed".to_string(),
+                    reason: "Task satisfied".to_string(),
                 },
             );
         }

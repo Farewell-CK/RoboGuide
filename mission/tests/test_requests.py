@@ -35,7 +35,7 @@ CATALOG = Path("contracts/capability/v0.1/catalog.json")
 
 
 def test_request_v02_contract_accepts_current_and_compatible_plan_versions() -> None:
-    """Current request projections retain v0.3/v0.4 while admitting v0.5 plans."""
+    """Current request projections retain v0.3-v0.5 while admitting v0.6 plans."""
     schema = json.loads(
         Path("contracts/mission/request-v0.2/mission-request.schema.json").read_text(
             encoding="utf-8"
@@ -47,6 +47,7 @@ def test_request_v02_contract_accepts_current_and_compatible_plan_versions() -> 
         "../v0.3/mission-plan.schema.json",
         "../v0.4/mission-plan.schema.json",
         "../v0.5/mission-plan.schema.json",
+        "../v0.6/mission-plan.schema.json",
     }
 
 

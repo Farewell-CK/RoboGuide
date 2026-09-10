@@ -279,12 +279,12 @@ fn runtime_drives_activation_and_terminal_result() {
         )
         .expect("completion records");
     assert_eq!(
-        runtime.task_result(
+        runtime.task_execution_result(
             command.group_id(),
             command.task_ref(),
             std::iter::once(command.role_id())
         ),
-        Some(ObservedTaskResult::Succeeded)
+        Some(ObservedTaskExecutionResult::ExecutionCompleted)
     );
 }
 
@@ -317,7 +317,7 @@ fn restore_requires_reconciliation_before_replay() {
         Err(ExecutionRuntimeError::ReconciliationRequired(_))
     ));
     assert_eq!(
-        restored.task_result(
+        restored.task_execution_result(
             command.group_id(),
             command.task_ref(),
             std::iter::once(command.role_id())
@@ -414,7 +414,7 @@ fn unknown_execution_requires_reconciliation_without_task_failure() {
         }]
     ));
     assert_eq!(
-        runtime.task_result(
+        runtime.task_execution_result(
             command.group_id(),
             command.task_ref(),
             std::iter::once(command.role_id())

@@ -25,7 +25,7 @@ class CapabilityCatalogError(ValueError):
 
 
 class CapabilityParameterType(StrEnum):
-    """Describe scalar parameter types supported by MissionPlan v0.5."""
+    """Describe scalar parameter types supported by the current MissionPlan boundary."""
 
     BOOLEAN = "boolean"
     INTEGER = "integer"

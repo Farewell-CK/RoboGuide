@@ -31,6 +31,7 @@ mod spatial_replica;
 mod state_model;
 mod task_execution;
 mod task_requirement;
+mod task_satisfaction;
 mod time;
 
 pub use actor::{ActorBinding, MissionActor};
@@ -93,6 +94,7 @@ pub use state_model::{
 };
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 pub use task_requirement::{RoleRequirement, TaskRequirement};
+pub use task_satisfaction::TaskSatisfactionBasis;
 pub use time::{TaskTiming, TimestampMs};
 
 /// Version identifier for the first cross-language Mission Plan contract.
@@ -112,6 +114,9 @@ pub const MISSION_PLAN_SCHEMA_V0_4: &str = "roboguide.mission-plan/v0.4";
 
 /// Version identifier for Mission Plans carrying joint resource and temporal requirements.
 pub const MISSION_PLAN_SCHEMA_V0_5: &str = "roboguide.mission-plan/v0.5";
+
+/// Version identifier for Mission Plans declaring Task satisfaction evidence policy.
+pub const MISSION_PLAN_SCHEMA_V0_6: &str = "roboguide.mission-plan/v0.6";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";

@@ -413,7 +413,7 @@ fn mission_dispatch_and_outcomes_use_current_task_execution() {
         )
         .expect("current running fact records");
 
-    assert!(bridge.terminal_task_outcomes().is_empty());
+    assert!(bridge.terminal_task_execution_outcomes().is_empty());
     assert_eq!(
         bridge
             .control()
@@ -432,11 +432,14 @@ fn mission_dispatch_and_outcomes_use_current_task_execution() {
             "",
         )
         .expect("current completion records");
-    let outcomes = bridge.terminal_task_outcomes();
+    let outcomes = bridge.terminal_task_execution_outcomes();
     assert_eq!(outcomes.len(), 1);
     assert_eq!(outcomes[0].group_id(), &group_id);
     assert_eq!(outcomes[0].task_ref(), requirement.task_ref());
-    assert_eq!(outcomes[0].result(), ObservedTaskResult::Succeeded);
+    assert_eq!(
+        outcomes[0].result(),
+        ObservedTaskExecutionResult::ExecutionCompleted
+    );
     assert_eq!(
         bridge
             .control()
@@ -448,8 +451,24 @@ fn mission_dispatch_and_outcomes_use_current_task_execution() {
     {
         let (control, events) = (&mut bridge.control, &mut bridge.events);
         control
-            .complete_task_execution(&group_id, requirement.task_ref(), now, &correlation, events)
-            .expect("Task completion records");
+            .record_task_execution_completed(
+                &group_id,
+                requirement.task_ref(),
+                now,
+                &correlation,
+                events,
+            )
+            .expect("Task execution completion records");
+        control
+            .satisfy_task_execution(
+                &group_id,
+                requirement.task_ref(),
+                domain::TaskSatisfactionBasis::ExecutionReport,
+                now,
+                &correlation,
+                events,
+            )
+            .expect("Task satisfaction records");
     }
     assert!(matches!(
         bridge.execute_task_bound(
@@ -631,7 +650,7 @@ fn incomplete_multi_role_task_does_not_dispatch_or_report_terminal_outcome() {
         )
         .expect("retained role completion records");
 
-    assert!(bridge.terminal_task_outcomes().is_empty());
+    assert!(bridge.terminal_task_execution_outcomes().is_empty());
     assert!(matches!(
         bridge.execute_task_bound(
             "execution-during-recovery".to_string(),

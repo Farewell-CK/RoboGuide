@@ -51,6 +51,9 @@ pub struct PlannedTask {
     dependencies: Vec<TaskId>,
     /// Context and resource-lifetime declarations supplied by Mission Intelligence.
     continuity: TaskContinuity,
+    /// Mission-declared evidence basis for accepting the human-readable Task outcome.
+    #[serde(default)]
+    satisfaction_basis: TaskSatisfactionBasis,
 }
 
 impl PlannedTask {
@@ -61,6 +64,25 @@ impl PlannedTask {
         execution_intents: BTreeMap<RoleId, ExecutionIntent>,
         dependencies: Vec<TaskId>,
         continuity: TaskContinuity,
+    ) -> Result<Self, DomainError> {
+        Self::new_with_satisfaction(
+            description,
+            requirement,
+            execution_intents,
+            dependencies,
+            continuity,
+            TaskSatisfactionBasis::ExecutionReport,
+        )
+    }
+
+    /// Creates a Task with an explicit semantic-satisfaction evidence policy.
+    pub fn new_with_satisfaction(
+        description: impl Into<String>,
+        requirement: TaskRequirement,
+        execution_intents: BTreeMap<RoleId, ExecutionIntent>,
+        dependencies: Vec<TaskId>,
+        continuity: TaskContinuity,
+        satisfaction_basis: TaskSatisfactionBasis,
     ) -> Result<Self, DomainError> {
         let description = description.into();
         if description.trim().is_empty() {
@@ -131,6 +153,7 @@ impl PlannedTask {
             execution_intents,
             dependencies,
             continuity,
+            satisfaction_basis,
         })
     }
 
@@ -167,6 +190,11 @@ impl PlannedTask {
     /// Returns this Task's semantic continuity and resource-lifetime declaration.
     pub const fn continuity(&self) -> &TaskContinuity {
         &self.continuity
+    }
+
+    /// Returns the evidence policy Orchestration applies after local execution completes.
+    pub const fn satisfaction_basis(&self) -> TaskSatisfactionBasis {
+        self.satisfaction_basis
     }
 }
 
@@ -398,7 +426,7 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_5
+        MISSION_PLAN_SCHEMA_V0_6
     }
 
     /// Returns the original mission goal.

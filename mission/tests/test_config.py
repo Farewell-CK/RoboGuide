@@ -21,8 +21,8 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.prompts.reviewer_path.is_file()
     assert settings.prompts.repairer_path.is_file()
     assert settings.max_repair_attempts == 2
-    assert settings.contract_version == "roboguide.mission-plan/v0.5"
-    assert settings.schema_path == Path.cwd() / "contracts/mission/v0.5/mission-plan.schema.json"
+    assert settings.contract_version == "roboguide.mission-plan/v0.6"
+    assert settings.schema_path == Path.cwd() / "contracts/mission/v0.6/mission-plan.schema.json"
     assert settings.capability_catalog_path == (
         Path.cwd() / "contracts/capability/v0.1/catalog.json"
     )

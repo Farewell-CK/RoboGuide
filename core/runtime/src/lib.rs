@@ -15,7 +15,7 @@ pub use coordination::{
 };
 pub use execution::{
     DispatchDecision, DispatchIntent, ExecutionAttemptSnapshot, ExecutionContext, ExecutionEvent,
-    ExecutionRuntimeError, ExecutionSlot, ExecutionStatus, ObservedTaskResult,
+    ExecutionRuntimeError, ExecutionSlot, ExecutionStatus, ObservedTaskExecutionResult,
     RuntimeExecutionCheckpoint, RuntimeExecutionManager,
 };
 pub use relation::{RuntimeExecutionRelation, RuntimeRelationSnapshot, SharedSpatialEvidence};

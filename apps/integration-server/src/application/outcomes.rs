@@ -8,7 +8,7 @@ pub(crate) fn apply_runtime_outcomes(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let outcomes = controller.bridge.terminal_task_outcomes();
+    let outcomes = controller.bridge.terminal_task_execution_outcomes();
     for outcome in outcomes {
         let mission_id = outcome.task_ref().mission_id().clone();
         if controller
@@ -31,15 +31,25 @@ pub(crate) fn apply_runtime_outcomes(
             orchestrator,
         } = controller;
         match outcome.result() {
-            ObservedTaskResult::Succeeded => orchestrator.task_succeeded(
-                &mission_id,
-                outcome.task_ref(),
-                bridge.control_mut(),
-                timestamp,
-                correlation_id,
-                events,
-            )?,
-            ObservedTaskResult::Failed => orchestrator.task_failed(
+            ObservedTaskExecutionResult::ExecutionCompleted => {
+                orchestrator.record_task_execution_completed(
+                    &mission_id,
+                    outcome.task_ref(),
+                    bridge.control_mut(),
+                    timestamp,
+                    correlation_id,
+                    events,
+                )?;
+                orchestrator.satisfy_task_from_execution_report(
+                    &mission_id,
+                    outcome.task_ref(),
+                    bridge.control_mut(),
+                    timestamp,
+                    correlation_id,
+                    events,
+                )?;
+            }
+            ObservedTaskExecutionResult::Failed => orchestrator.task_failed(
                 &mission_id,
                 outcome.task_ref(),
                 "Runtime observed a terminal role failure",

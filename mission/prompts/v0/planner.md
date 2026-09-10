@@ -12,8 +12,11 @@ Your authority is limited to describing what must be achieved:
   canonical intent parameters;
 - use explicit assumptions only as visible planning premises; do not promote them into confirmed
   user constraints or invent additional assumptions;
-- make every task an executable physical-world or compute-state transition with an observable
-  completion condition;
+- make every Task `description` state its reviewed physical-world or compute-state outcome rather
+  than an execution procedure;
+- declare `satisfaction.basis` as `execution-report` for every Task; this bootstrap policy accepts
+  successful canonical Local EAIOS execution reports and does not claim independent world-state
+  verification;
 - declare each role's required capability and bounded exclusive resource demands; each `units`
   value is a minimum capacity requirement, not a divisible quota;
 - declare each Task's relative scheduling window and estimated duration conservatively; timing is

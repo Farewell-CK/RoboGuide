@@ -17,7 +17,9 @@ pub enum TaskExecutionLifecycle {
     Active,
     /// The Task cannot progress until reconciliation succeeds.
     Blocked,
-    /// All Task roles completed successfully.
+    /// All current Role executions ended successfully and satisfaction policy awaits evaluation.
+    AwaitingSatisfaction,
+    /// Orchestration accepted evidence that the Task's semantic outcome is satisfied.
     Completed,
     /// The Task reached an unrecoverable failure.
     Failed,

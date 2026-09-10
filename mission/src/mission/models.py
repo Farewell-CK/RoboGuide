@@ -5,15 +5,17 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final
 
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.5"
+MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.6"
 MISSION_PLAN_COMPAT_VERSION: Final = "roboguide.mission-plan/v0.3"
 MISSION_PLAN_COUPLING_VERSION: Final = "roboguide.mission-plan/v0.4"
+MISSION_PLAN_SCHEDULING_VERSION: Final = "roboguide.mission-plan/v0.5"
 CAPABILITIES: Final = frozenset({"mobility", "transport", "compute", "observation"})
 RESOURCE_KINDS: Final = frozenset({"space", "compute", "time"})
 U32_MAX: Final = (1 << 32) - 1
@@ -231,7 +233,12 @@ class RoleRequirement:
         }
         _exact_keys(
             item,
-            common | ({"resources"} if version == MISSION_PLAN_VERSION else {"resource_kind"}),
+            common
+            | (
+                {"resources"}
+                if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_VERSION}
+                else {"resource_kind"}
+            ),
             path,
         )
         role_id = _text(item["id"], f"{path}.id")
@@ -242,7 +249,7 @@ class RoleRequirement:
         execution = ExecutionIntent.from_json(item["execution"], f"{path}.execution")
         if execution.capability_contract != contract:
             raise MissionPlanError(f"{path}.contract differs from execution.capability_contract")
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_VERSION}:
             resources = tuple(
                 ResourceRequirement.from_json(resource, f"{path}.resources[{index}]")
                 for index, resource in enumerate(_array(item["resources"], f"{path}.resources"))
@@ -292,7 +299,7 @@ class RoleRequirement:
             "context_role": self.context_role,
             "resource_scope": self.resource_scope,
         }
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_VERSION}:
             result["resources"] = [resource.to_json() for resource in self.resources]
         else:
             result["resource_kind"] = self.resource_kind
@@ -646,7 +653,11 @@ class MissionContext:
             "roles": [role.to_json() for role in self.roles],
             "relations": [relation.to_json() for relation in self.relations],
         }
-        if version in {MISSION_PLAN_COUPLING_VERSION, MISSION_PLAN_VERSION}:
+        if version in {
+            MISSION_PLAN_COUPLING_VERSION,
+            MISSION_PLAN_SCHEDULING_VERSION,
+            MISSION_PLAN_VERSION,
+        }:
             result["coupling_mode"] = self.coupling_mode
             if self.shared_view is not None:
                 result["shared_view"] = self.shared_view.to_json()
@@ -728,6 +739,12 @@ class TaskTiming:
         }
 
 
+class TaskSatisfactionBasis(StrEnum):
+    """Name the evidence policy used to accept one Task's semantic outcome."""
+
+    EXECUTION_REPORT = "execution-report"
+
+
 @dataclass(frozen=True, slots=True)
 class MissionTask:
     """Describe one task node, its dependencies, and execution requirements."""
@@ -739,6 +756,7 @@ class MissionTask:
     context_id: str
     coupling_mode: str | None = None
     timing: TaskTiming | None = None
+    satisfaction_basis: TaskSatisfactionBasis = TaskSatisfactionBasis.EXECUTION_REPORT
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str, version: str) -> MissionTask:
@@ -747,8 +765,15 @@ class MissionTask:
         base_keys = {"id", "description", "depends_on", "roles", "context_id"}
         if version == MISSION_PLAN_COMPAT_VERSION:
             _exact_keys(item, base_keys, path)
-        elif version == MISSION_PLAN_VERSION:
+        elif version == MISSION_PLAN_SCHEDULING_VERSION:
             _bounded_keys(item, base_keys | {"timing"}, {"coupling_mode"}, path)
+        elif version == MISSION_PLAN_VERSION:
+            _bounded_keys(
+                item,
+                base_keys | {"timing", "satisfaction"},
+                {"coupling_mode"},
+                path,
+            )
         else:
             _bounded_keys(item, base_keys, {"coupling_mode"}, path)
         dependencies = tuple(
@@ -776,9 +801,21 @@ class MissionTask:
             raise MissionPlanError(f"{path}.coupling_mode is unsupported: {coupling_mode}")
         timing = (
             TaskTiming.from_json(item["timing"], f"{path}.timing")
-            if version == MISSION_PLAN_VERSION
+            if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_VERSION}
             else None
         )
+        if version == MISSION_PLAN_VERSION:
+            satisfaction = _object(item["satisfaction"], f"{path}.satisfaction")
+            _exact_keys(satisfaction, {"basis"}, f"{path}.satisfaction")
+            basis_value = _text(satisfaction["basis"], f"{path}.satisfaction.basis")
+            try:
+                satisfaction_basis = TaskSatisfactionBasis(basis_value)
+            except ValueError as error:
+                raise MissionPlanError(
+                    f"{path}.satisfaction.basis is unsupported: {basis_value}"
+                ) from error
+        else:
+            satisfaction_basis = TaskSatisfactionBasis.EXECUTION_REPORT
         return cls(
             task_id=_text(item["id"], f"{path}.id"),
             description=_text(item["description"], f"{path}.description"),
@@ -787,6 +824,7 @@ class MissionTask:
             context_id=_text(item["context_id"], f"{path}.context_id"),
             coupling_mode=coupling_mode,
             timing=timing,
+            satisfaction_basis=satisfaction_basis,
         )
 
     def to_json(self, version: str) -> JSONObject:
@@ -799,14 +837,21 @@ class MissionTask:
             "context_id": self.context_id,
         }
         if (
-            version in {MISSION_PLAN_COUPLING_VERSION, MISSION_PLAN_VERSION}
+            version
+            in {
+                MISSION_PLAN_COUPLING_VERSION,
+                MISSION_PLAN_SCHEDULING_VERSION,
+                MISSION_PLAN_VERSION,
+            }
             and self.coupling_mode is not None
         ):
             result["coupling_mode"] = self.coupling_mode
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_VERSION}:
             if self.timing is None:
-                raise MissionPlanError(f"task {self.task_id} lacks required v0.5 timing")
+                raise MissionPlanError(f"task {self.task_id} lacks required scheduling timing")
             result["timing"] = self.timing.to_json()
+        if version == MISSION_PLAN_VERSION:
+            result["satisfaction"] = {"basis": self.satisfaction_basis.value}
         return result
 
 
@@ -850,6 +895,7 @@ class MissionPlan:
         if version not in {
             MISSION_PLAN_COMPAT_VERSION,
             MISSION_PLAN_COUPLING_VERSION,
+            MISSION_PLAN_SCHEDULING_VERSION,
             MISSION_PLAN_VERSION,
         }:
             raise MissionPlanError(f"unsupported schema_version: {version}")

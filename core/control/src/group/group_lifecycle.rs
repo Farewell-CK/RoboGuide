@@ -173,7 +173,9 @@ impl ControlPlane {
             && !group.task_executions.values().any(|execution| {
                 matches!(
                     execution.lifecycle(),
-                    TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Completed
+                    TaskExecutionLifecycle::Active
+                        | TaskExecutionLifecycle::AwaitingSatisfaction
+                        | TaskExecutionLifecycle::Completed
                 )
             })
         {

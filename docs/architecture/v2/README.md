@@ -54,6 +54,15 @@ Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Plan
 `NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
 或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
 
+Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.6 为每个 Task 显式
+声明 `satisfaction.basis`；当前 bootstrap 只实现 `execution-report`，表示该 canonical Local
+EAIOS contract 的成功终态可被 Orchestration 接纳为 Task 满足证据。Runtime 只归约并报告
+execution completion，不拥有 Task 或 Mission completion authority。Control 先将 TaskExecution
+置为 `AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；Orchestration 应用 Mission 声明的
+policy 后才记录 `TaskSatisfied`、释放 Task-scoped binding、推进 DAG，并在所有 Task 满足后结束
+Mission。`execution-report` 不等于独立物理世界验证；State/Verifier evidence basis 仍需后续
+版本单独定义。详见 ADR-0033。
+
 ## 3. 核心抽象
 
 ### Embodied Node（具身节点）
@@ -90,7 +99,7 @@ TaskExecution、已提交的 Resource Bindings、Recovery Context 和 Lifecycle 
 
 Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 说明 Node 是否具备承担
 该 Role 的能力，Assignment 记录当前由哪个 Node 承担，Resource Binding 记录执行
-该职责已经提交的资源。Task 完成只释放属于该 Task 的临时 binding/reservation，不销毁
+该职责已经提交的资源。Task 被明确满足后只释放属于该 Task 的临时 binding/reservation，不销毁
 Group。节点故障时，Group 内可以 partial release、rebind，并经 `Adapted → Active`
 继续执行；只有 Mission 完成或最终失败后，Group 才进入 `Completed/Failed → Released`。
 

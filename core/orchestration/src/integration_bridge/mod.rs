@@ -35,11 +35,11 @@ use conversion::*;
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 13 adds durable Control scheduling reservations and their calendar generation.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
+/// Version 14 adds Task satisfaction policy and the AwaitingSatisfaction lifecycle boundary.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v12";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v13";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -58,24 +58,24 @@ pub enum RemoteExecutionStatus {
     Unknown,
 }
 
-/// Terminal Task result derived from role execution facts without mutating Control.
+/// Terminal local-execution result derived from Role facts without mutating Control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObservedTaskResult {
-    /// Every currently bound role completed successfully.
-    Succeeded,
+pub enum ObservedTaskExecutionResult {
+    /// Every currently bound Role reached a successful terminal execution state.
+    ExecutionCompleted,
     /// At least one currently bound role failed, cancelled, or became unknown.
     Failed,
 }
 
-/// One terminal Task result for Mission orchestration to consume explicitly.
+/// One terminal local-execution outcome for Mission orchestration to consume explicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObservedTaskOutcome {
+pub struct ObservedTaskExecutionOutcome {
     /// Mission-level Group containing the TaskExecution.
     group_id: domain::ExecutionGroupId,
-    /// Mission-scoped Task represented by the result.
+    /// Mission-scoped Task represented by the execution result.
     task_ref: domain::TaskRef,
-    /// Runtime-derived terminal role result.
-    result: ObservedTaskResult,
+    /// Runtime-derived terminal Role execution result.
+    result: ObservedTaskExecutionResult,
 }
 
 /// Read-only Group-scoped view assembled from existing State evidence.
@@ -219,19 +219,19 @@ impl GroupSharedViewSnapshot {
     }
 }
 
-impl ObservedTaskOutcome {
+impl ObservedTaskExecutionOutcome {
     /// Returns the Mission-level Group containing this Task.
     pub const fn group_id(&self) -> &domain::ExecutionGroupId {
         &self.group_id
     }
 
-    /// Returns the Mission-scoped Task represented by this result.
+    /// Returns the Mission-scoped Task represented by this execution result.
     pub const fn task_ref(&self) -> &domain::TaskRef {
         &self.task_ref
     }
 
-    /// Returns the terminal role result observed by Runtime.
-    pub const fn result(&self) -> ObservedTaskResult {
+    /// Returns the terminal Role execution result observed by Runtime.
+    pub const fn result(&self) -> ObservedTaskExecutionResult {
         self.result
     }
 }

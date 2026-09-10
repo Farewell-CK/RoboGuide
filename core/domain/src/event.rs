@@ -227,12 +227,21 @@ pub enum EventPayload {
         /// Task that became active.
         task_ref: TaskRef,
     },
-    /// A Task execution completed without closing its parent Group.
+    /// Every current Role execution reported success, pending Task satisfaction evaluation.
     TaskExecutionCompleted {
         /// Group retaining the Mission execution context.
         group_id: ExecutionGroupId,
-        /// Task that completed.
+        /// Task whose local execution aggregate completed.
         task_ref: TaskRef,
+    },
+    /// Orchestration accepted the declared evidence basis as Task semantic satisfaction.
+    TaskSatisfied {
+        /// Group retaining the Mission execution context.
+        group_id: ExecutionGroupId,
+        /// Task whose human-readable outcome became satisfied.
+        task_ref: TaskRef,
+        /// Mission-declared evidence basis accepted for this transition.
+        basis: TaskSatisfactionBasis,
     },
     /// A Task execution reached an unrecoverable failure state.
     TaskExecutionFailed {

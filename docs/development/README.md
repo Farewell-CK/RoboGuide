@@ -259,6 +259,20 @@ policy。Composition layer 仍分别调用 Proposal、Commit 和 Bind/Rebind，a
 Controller restore 会用 orchestration-owned acceptance time 与原始 Task timing 重算 calendar
 decision 的 earliest/end/latest activation，拒绝被扩宽的 checkpoint 证据。
 
+### Task Satisfaction Boundary v0.1
+
+MissionPlan v0.6 在保留 v0.5 scheduling contract 的基础上，为每个 Task 增加
+`satisfaction.basis`。当前唯一实现值 `execution-report` 表示：Runtime 归约出的所有当前 Role
+成功终态可以由 Orchestration 接纳为该 Task 的 satisfaction evidence。它是明确的 bootstrap
+policy，不代表独立传感器或 World State 已验证物理目标。
+
+Runtime 只报告 execution completion。Control 将 Task 从 `Active` 迁移到
+`AwaitingSatisfaction`，保留 Task binding、reservation 和后继 DAG fence，并记录
+`TaskExecutionCompleted`。Orchestration 随后应用 Mission policy，记录 `TaskSatisfied`，再释放
+Task-scoped ownership、推进 DAG，并仅在全部 Task 已满足后完成 Mission。历史 v0.2-v0.5
+MissionPlan 兼容输入归一化为 `execution-report`。State/Verifier-backed evidence、负向 verification
+与 disputed evidence 仍是后续独立合同。
+
 Mission Actor 的物理 placement 是独立的 Control deployment policy，不是 MissionPlan 字段。
 可选 `(MissionId, ActorId) -> NodeId` constraint 在首次 Matching 时生成 singleton candidate，
 但不会提前创建 ActorBinding 或 reservation；Group Bind 会再次校验 constraint，成功后才按

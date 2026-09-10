@@ -84,6 +84,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::TaskExecutionActivated { task_ref, .. }
         | EventPayload::TaskExecutionReady { task_ref, .. }
         | EventPayload::TaskExecutionCompleted { task_ref, .. }
+        | EventPayload::TaskSatisfied { task_ref, .. }
         | EventPayload::TaskExecutionFailed { task_ref, .. }
         | EventPayload::TaskExecutionBindingsReleased { task_ref, .. }
         | EventPayload::MissionActorBound { task_ref, .. }

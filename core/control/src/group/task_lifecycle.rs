@@ -194,8 +194,8 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Completes one Task and leaves its parent Group alive for later Tasks.
-    pub fn complete_task_execution<E: EventSink>(
+    /// Records successful local execution while retaining bindings for satisfaction evaluation.
+    pub fn record_task_execution_completed<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
         task_ref: &TaskRef,
@@ -218,7 +218,7 @@ impl ControlPlane {
         }
         group.task_executions.insert(
             task_ref.clone(),
-            execution.with_lifecycle(TaskExecutionLifecycle::Completed),
+            execution.with_lifecycle(TaskExecutionLifecycle::AwaitingSatisfaction),
         );
         events.append(
             timestamp,
@@ -227,6 +227,49 @@ impl ControlPlane {
             EventPayload::TaskExecutionCompleted {
                 group_id: group_id.clone(),
                 task_ref: task_ref.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Marks one execution-complete Task semantically satisfied under an explicit evidence basis.
+    pub fn satisfy_task_execution<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        basis: TaskSatisfactionBasis,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if !matches!(
+            execution.lifecycle(),
+            TaskExecutionLifecycle::AwaitingSatisfaction
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "Task execution is not awaiting satisfaction".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::Completed),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskSatisfied {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+                basis,
             },
         );
         Ok(())

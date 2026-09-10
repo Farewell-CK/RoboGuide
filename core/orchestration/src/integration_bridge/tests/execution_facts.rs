@@ -426,7 +426,7 @@ fn unknown_execution_emits_recovery_evidence() {
         )
         .expect("unknown fact is accepted");
 
-    assert!(bridge.terminal_task_outcomes().is_empty());
+    assert!(bridge.terminal_task_execution_outcomes().is_empty());
     assert!(matches!(
         bridge.take_runtime_events().as_slice(),
         [ExecutionEvent::RecoveryRequired { .. }]

@@ -6,10 +6,11 @@ use domain::{
     CoordinationContextId, ExecutionCouplingMode, ExecutionIntent, ExecutionRelationId,
     ExecutionRelationSpec, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
     GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
-    MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MapId, MapRevisionId, MapRevisionSelector,
-    MissionGoal, MissionId, MissionPlan, PeerChannelSpec, PlannedExecutionRef, PlannedTask,
-    RelationStateRequirement, ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference,
-    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskTiming,
+    MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6, MapId,
+    MapRevisionId, MapRevisionSelector, MissionGoal, MissionId, MissionPlan, PeerChannelSpec,
+    PlannedExecutionRef, PlannedTask, RelationStateRequirement, ResourceRequirement, RoleId,
+    RoleRequirement, SharedSpatialReference, TaskContinuity, TaskGraph, TaskId, TaskRequirement,
+    TaskSatisfactionBasis, TaskTiming,
 };
 use std::collections::BTreeMap;
 
@@ -19,7 +20,7 @@ use super::enum_conversion::{
 use super::execution_value::execution_value;
 use super::wire::*;
 
-/// Decodes historical input or one current MissionPlan v0.5 document.
+/// Decodes historical input or one current MissionPlan v0.6 document.
 pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError> {
     let document: PlanDocument = serde_json::from_str(json).map_err(|error| {
         OrchestrationError::Mission(format!("invalid MissionPlan JSON: {error}"))
@@ -30,6 +31,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
             | MISSION_PLAN_SCHEMA_V0_3
             | MISSION_PLAN_SCHEMA_V0_4
             | MISSION_PLAN_SCHEMA_V0_5
+            | MISSION_PLAN_SCHEMA_V0_6
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -38,13 +40,20 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     }
     let relation_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_3 | MISSION_PLAN_SCHEMA_V0_4 | MISSION_PLAN_SCHEMA_V0_5
+        MISSION_PLAN_SCHEMA_V0_3
+            | MISSION_PLAN_SCHEMA_V0_4
+            | MISSION_PLAN_SCHEMA_V0_5
+            | MISSION_PLAN_SCHEMA_V0_6
     );
     let mode_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_4 | MISSION_PLAN_SCHEMA_V0_5
+        MISSION_PLAN_SCHEMA_V0_4 | MISSION_PLAN_SCHEMA_V0_5 | MISSION_PLAN_SCHEMA_V0_6
     );
-    let scheduling_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_5;
+    let scheduling_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_5 | MISSION_PLAN_SCHEMA_V0_6
+    );
+    let satisfaction_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_6;
     let mission_id = MissionId::new(document.mission.id)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     let goal = MissionGoal::new(mission_id.clone(), document.mission.objective)
@@ -57,7 +66,15 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     let tasks = document
         .tasks
         .into_iter()
-        .map(|task| task_from_document(&mission_id, task, mode_contract, scheduling_contract))
+        .map(|task| {
+            task_from_document(
+                &mission_id,
+                task,
+                mode_contract,
+                scheduling_contract,
+                satisfaction_contract,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let graph = TaskGraph::new(mission_id, tasks)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -196,6 +213,7 @@ fn task_from_document(
     task: TaskDocument,
     mode_contract: bool,
     scheduling_contract: bool,
+    satisfaction_contract: bool,
 ) -> Result<PlannedTask, OrchestrationError> {
     let task_id =
         TaskId::new(task.id).map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -231,14 +249,15 @@ fn task_from_document(
         let requirement = if scheduling_contract {
             if !matches!(role.resource_kind, ResourceKindField::Missing) {
                 return Err(OrchestrationError::Mission(
-                    "MissionPlan v0.5 Role must use resources instead of resource_kind".to_string(),
+                    "MissionPlan v0.5+ Role must use resources instead of resource_kind"
+                        .to_string(),
                 ));
             }
             let resources = role
                 .resources
                 .ok_or_else(|| {
                     OrchestrationError::Mission(
-                        "MissionPlan v0.5 Role must declare resources".to_string(),
+                        "MissionPlan v0.5+ Role must declare resources".to_string(),
                     )
                 })?
                 .into_iter()
@@ -289,7 +308,7 @@ fn task_from_document(
     }
     let requirement = if scheduling_contract {
         let timing = task.timing.ok_or_else(|| {
-            OrchestrationError::Mission("MissionPlan v0.5 Task must declare timing".to_string())
+            OrchestrationError::Mission("MissionPlan v0.5+ Task must declare timing".to_string())
         })?;
         TaskRequirement::new_scheduled(
             mission_id.clone(),
@@ -328,7 +347,25 @@ fn task_from_document(
             "MissionPlan before v0.4 cannot declare Task coupling mode".to_string(),
         ));
     }
-    PlannedTask::new(
+    let satisfaction_basis = match (satisfaction_contract, task.satisfaction) {
+        (true, Some(satisfaction)) => match satisfaction.basis {
+            TaskSatisfactionBasisDocument::ExecutionReport => {
+                TaskSatisfactionBasis::ExecutionReport
+            }
+        },
+        (true, None) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan v0.6 Task must declare satisfaction".to_string(),
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan before v0.6 cannot declare Task satisfaction".to_string(),
+            ));
+        }
+        (false, None) => TaskSatisfactionBasis::ExecutionReport,
+    };
+    PlannedTask::new_with_satisfaction(
         task.description,
         requirement,
         intents,
@@ -339,6 +376,7 @@ fn task_from_document(
             scopes,
             coupling_mode_override,
         ),
+        satisfaction_basis,
     )
     .map_err(|error| OrchestrationError::Mission(error.to_string()))
 }

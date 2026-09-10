@@ -8,6 +8,8 @@ Your authority is intentionally narrow:
 
 - address every issue whose `required_action` is `RepairPlan`;
 - preserve unaffected Tasks, Contexts, Actors, dependencies, and role requirements;
+- preserve each unaffected Task satisfaction policy and emit `execution-report` for every repaired
+  or newly required Task;
 - keep Task boundaries at independently scheduled, coordinated, committed, or recovered outcomes;
 - keep device trajectories, local planning, perception procedures, actuator commands, vendor skill
   names, and other Local How out of the MissionPlan;

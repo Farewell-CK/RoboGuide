@@ -101,11 +101,11 @@ impl ExecutionStatus {
     }
 }
 
-/// Terminal Task result reduced from the current execution of every bound role.
+/// Terminal local-execution result reduced from every currently bound Role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObservedTaskResult {
-    /// Every supplied current role execution completed successfully.
-    Succeeded,
+pub enum ObservedTaskExecutionResult {
+    /// Every supplied current Role execution reached a successful terminal state.
+    ExecutionCompleted,
     /// At least one supplied current role execution failed, cancelled, or became unknown.
     Failed,
 }

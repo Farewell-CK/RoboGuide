@@ -206,13 +206,13 @@ impl RuntimeExecutionManager {
         Ok(events)
     }
 
-    /// Reduces current role execution facts into one Task terminal result when available.
-    pub fn task_result<'a>(
+    /// Reduces current Role facts into one aggregate terminal execution result when available.
+    pub fn task_execution_result<'a>(
         &self,
         group_id: &ExecutionGroupId,
         task_ref: &TaskRef,
         role_ids: impl IntoIterator<Item = &'a RoleId>,
-    ) -> Option<ObservedTaskResult> {
+    ) -> Option<ObservedTaskExecutionResult> {
         let mut saw_role = false;
         let mut all_completed = true;
         for role_id in role_ids {
@@ -225,14 +225,14 @@ impl RuntimeExecutionManager {
             match status {
                 Some(ExecutionStatus::Completed) => {}
                 Some(ExecutionStatus::Failed | ExecutionStatus::Cancelled) => {
-                    return Some(ObservedTaskResult::Failed);
+                    return Some(ObservedTaskExecutionResult::Failed);
                 }
                 Some(ExecutionStatus::Unknown) => return None,
                 _ => all_completed = false,
             }
         }
         (saw_role && all_completed && self.relations_allow_task_success(group_id, task_ref))
-            .then_some(ObservedTaskResult::Succeeded)
+            .then_some(ObservedTaskExecutionResult::ExecutionCompleted)
     }
 }
 

@@ -3,7 +3,7 @@
 use super::lifecycle::registration;
 use super::*;
 
-/// Legacy MissionPlan v0.3 decodes one Node-independent relation and normalizes to v0.5.
+/// Legacy MissionPlan v0.3 decodes one Node-independent relation and normalizes to v0.6.
 #[test]
 fn execution_relation_fixture_decodes_logical_endpoints() {
     let source =
@@ -155,7 +155,7 @@ fn v0_4_rejects_unbacked_task_coupling_mode() {
 fn phase1_fixture_contains_complete_dag_and_context() {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
-    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_5);
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
     assert_eq!(plan.contexts().len(), 1);
     assert_eq!(plan.task_graph().tasks().len(), 4);
     assert_eq!(
@@ -308,7 +308,7 @@ fn distributed_spatial_memory_fixtures_decode_in_both_directions() {
     ];
     for fixture in fixtures {
         let plan = decode_mission_plan(fixture).expect("Spatial Memory fixture should validate");
-        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_5);
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
         assert_eq!(plan.contexts().len(), 1);
         assert_eq!(plan.task_graph().tasks().len(), 2);
     }
@@ -447,12 +447,12 @@ fn legacy_plan_schema_is_rejected() {
     assert!(error.to_string().contains("unsupported MissionPlan schema"));
 }
 
-/// MissionPlan v0.2 remains a relation-free compatibility input during v0.5 migration.
+/// MissionPlan v0.2 remains a relation-free compatibility input during v0.6 migration.
 #[test]
 fn v0_2_plan_decodes_without_execution_relations() {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.2/mission-plan.json");
     let plan = decode_mission_plan(source).expect("v0.2 compatibility input should decode");
-    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_5);
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
     assert!(
         plan.contexts()
             .iter()

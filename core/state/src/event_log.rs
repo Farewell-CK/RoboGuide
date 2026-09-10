@@ -39,8 +39,11 @@ const EVENT_PAYLOAD_SCHEMA_V8: &str = "domain.EventPayload.json/v8";
 /// Previous JSON payload codec including identified peer-channel readiness evidence.
 const EVENT_PAYLOAD_SCHEMA_V9: &str = "domain.EventPayload.json/v9";
 
-/// Current JSON payload codec including Control scheduling reservation evidence.
+/// Previous JSON payload codec including Control scheduling reservation evidence.
 const EVENT_PAYLOAD_SCHEMA_V10: &str = "domain.EventPayload.json/v10";
+
+/// Current JSON payload codec distinguishing Task execution completion from satisfaction.
+const EVENT_PAYLOAD_SCHEMA_V11: &str = "domain.EventPayload.json/v11";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -470,6 +473,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V8 => Ok(8),
         EVENT_PAYLOAD_SCHEMA_V9 => Ok(9),
         EVENT_PAYLOAD_SCHEMA_V10 => Ok(10),
+        EVENT_PAYLOAD_SCHEMA_V11 => Ok(11),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -512,6 +516,7 @@ fn validate_payload_schema(
         | EventPayload::SchedulingReservationActivated { .. }
         | EventPayload::SchedulingReservationInvalidated { .. }
         | EventPayload::SchedulingReservationReleased { .. } => 10,
+        EventPayload::TaskSatisfied { .. } => 11,
         EventPayload::StateRecordObserved { .. } | EventPayload::MemoryManifestPublished { .. } => {
             6
         }
@@ -619,7 +624,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V10,
+                    EVENT_PAYLOAD_SCHEMA_V11,
                     payload_json,
                 ],
             )

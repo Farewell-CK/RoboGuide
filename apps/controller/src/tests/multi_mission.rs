@@ -433,8 +433,24 @@ fn concurrent_missions_rebind_and_release_independently() {
             .cloned()
             .collect::<Vec<_>>();
         control
-            .complete_task_execution(group_id, task_ref, TimestampMs::new(2), trace, &mut log)
-            .expect("Task should complete before its Mission Group");
+            .record_task_execution_completed(
+                group_id,
+                task_ref,
+                TimestampMs::new(2),
+                trace,
+                &mut log,
+            )
+            .expect("Task execution should complete before satisfaction");
+        control
+            .satisfy_task_execution(
+                group_id,
+                task_ref,
+                domain::TaskSatisfactionBasis::ExecutionReport,
+                TimestampMs::new(2),
+                trace,
+                &mut log,
+            )
+            .expect("Task should be satisfied before its Mission Group");
         control
             .release_task_bindings(
                 group_id,

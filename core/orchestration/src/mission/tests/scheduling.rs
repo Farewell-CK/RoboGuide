@@ -3,11 +3,11 @@
 use super::lifecycle::registration;
 use super::*;
 
-/// Current scheduling fixtures add bounded timing and replace legacy resource_kind fields.
+/// Current fixtures add bounded timing, quantitative resources, and satisfaction policy.
 fn scheduled_phase1_plan() -> MissionPlan {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     let mut document: serde_json::Value = serde_json::from_str(source).expect("fixture is JSON");
-    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_5);
+    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_6);
     for task in document["tasks"]
         .as_array_mut()
         .expect("fixture tasks are an array")
@@ -18,6 +18,7 @@ fn scheduled_phase1_plan() -> MissionPlan {
             "completion_deadline_offset_ms": 300,
             "estimated_duration_ms": 50,
         });
+        task["satisfaction"] = serde_json::json!({"basis": "execution-report"});
         for role in task["roles"]
             .as_array_mut()
             .expect("fixture roles are an array")
@@ -34,26 +35,65 @@ fn scheduled_phase1_plan() -> MissionPlan {
             };
         }
     }
-    decode_mission_plan(&document.to_string()).expect("v0.5 scheduling plan should decode")
+    decode_mission_plan(&document.to_string()).expect("v0.6 scheduling plan should decode")
 }
 
-/// MissionPlan v0.5 rejects the removed resource_kind field even when its value is null.
+/// Current MissionPlan input requires an explicit satisfaction policy for every Task.
 #[test]
-fn v0_5_rejects_explicit_legacy_resource_field() {
+fn v0_6_requires_task_satisfaction_policy() {
+    let plan = scheduled_phase1_plan();
+    let mut document = mission_plan_json(&plan);
+    document["tasks"][0]
+        .as_object_mut()
+        .expect("Task is an object")
+        .remove("satisfaction");
+
+    assert!(
+        decode_mission_plan(&document.to_string())
+            .expect_err("v0.6 Task without satisfaction must fail")
+            .to_string()
+            .contains("must declare satisfaction")
+    );
+}
+
+/// Historical v0.5 input normalizes to execution-report without changing scheduling fields.
+#[test]
+fn v0_5_defaults_task_satisfaction_to_execution_report() {
+    let plan = scheduled_phase1_plan();
+    let mut document = mission_plan_json(&plan);
+    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_5);
+    for task in document["tasks"]
+        .as_array_mut()
+        .expect("Tasks are an array")
+    {
+        task.as_object_mut()
+            .expect("Task is an object")
+            .remove("satisfaction");
+    }
+
+    let decoded = decode_mission_plan(&document.to_string()).expect("v0.5 remains compatible");
+    assert!(decoded.task_graph().tasks().iter().all(|task| {
+        task.satisfaction_basis() == domain::TaskSatisfactionBasis::ExecutionReport
+    }));
+}
+
+/// MissionPlan v0.6 rejects the removed resource_kind field even when its value is null.
+#[test]
+fn v0_6_rejects_explicit_legacy_resource_field() {
     let plan = scheduled_phase1_plan();
     let mut document = mission_plan_json(&plan);
     document["tasks"][0]["roles"][0]["resource_kind"] = serde_json::Value::Null;
     assert!(
         decode_mission_plan(&document.to_string())
-            .expect_err("v0.5 must not mix resource contracts")
+            .expect_err("v0.6 must not mix resource contracts")
             .to_string()
             .contains("must use resources instead of resource_kind")
     );
 }
 
-/// MissionPlan v0.5 requires every nullable timing key to be present explicitly.
+/// MissionPlan v0.6 requires every nullable timing key to be present explicitly.
 #[test]
-fn v0_5_rejects_missing_nullable_timing_key() {
+fn v0_6_rejects_missing_nullable_timing_key() {
     let plan = scheduled_phase1_plan();
     let mut document = mission_plan_json(&plan);
     document["tasks"][0]["timing"]
@@ -61,7 +101,7 @@ fn v0_5_rejects_missing_nullable_timing_key() {
         .expect("timing is an object")
         .remove("estimated_duration_ms");
     let error = decode_mission_plan(&document.to_string())
-        .expect_err("v0.5 nullable timing keys remain required");
+        .expect_err("v0.6 nullable timing keys remain required");
     assert!(
         error.to_string().contains("estimated_duration_ms"),
         "unexpected timing diagnostic: {error}"
@@ -482,7 +522,7 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
         None
     );
     orchestrator
-        .task_succeeded(
+        .record_task_execution_completed(
             &mission_id,
             &first,
             &mut control,
@@ -490,7 +530,17 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
             &correlation,
             &mut events,
         )
-        .expect("terminal Task releases its calendar interval");
+        .expect("terminal execution records before satisfaction");
+    orchestrator
+        .satisfy_task_from_execution_report(
+            &mission_id,
+            &first,
+            &mut control,
+            TimestampMs::new(150),
+            &correlation,
+            &mut events,
+        )
+        .expect("satisfied Task releases its calendar interval");
     assert!(control.scheduled_task(&first).is_none());
     assert!(events.contains_payload(|payload| matches!(
         payload,

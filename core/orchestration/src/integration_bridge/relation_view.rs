@@ -350,7 +350,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     }
 
     /// Reports terminal outcomes for active TaskExecutions without changing Mission or Group state.
-    pub fn terminal_task_outcomes(&self) -> Vec<ObservedTaskOutcome> {
+    pub fn terminal_task_execution_outcomes(&self) -> Vec<ObservedTaskExecutionOutcome> {
         let mut outcomes = Vec::new();
         for group_id in self.control.group_ids() {
             let Some(group) = self.control.group(&group_id) else {
@@ -364,16 +364,20 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     .assignments()
                     .iter()
                     .map(|assignment| assignment.role_id());
-                if let Some(result) = self
-                    .runtime
-                    .task_result(&group_id, task.task_ref(), role_ids)
+                if let Some(result) =
+                    self.runtime
+                        .task_execution_result(&group_id, task.task_ref(), role_ids)
                 {
-                    outcomes.push(ObservedTaskOutcome {
+                    outcomes.push(ObservedTaskExecutionOutcome {
                         group_id: group_id.clone(),
                         task_ref: task.task_ref().clone(),
                         result: match result {
-                            runtime::ObservedTaskResult::Succeeded => ObservedTaskResult::Succeeded,
-                            runtime::ObservedTaskResult::Failed => ObservedTaskResult::Failed,
+                            runtime::ObservedTaskExecutionResult::ExecutionCompleted => {
+                                ObservedTaskExecutionResult::ExecutionCompleted
+                            }
+                            runtime::ObservedTaskExecutionResult::Failed => {
+                                ObservedTaskExecutionResult::Failed
+                            }
                         },
                     });
                     continue;

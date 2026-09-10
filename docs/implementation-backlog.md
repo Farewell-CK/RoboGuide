@@ -81,8 +81,9 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
   分发/协商仍待后续版本；
 - 正规化 Role capability requirements 与 semantic ExecutionIntent，移除无必要的重复 contract
   字段，同时保持 Local EAIOS 的 Local How authority；
-- 建立 Task expected effect / satisfaction evidence，使 Runtime execution terminal fact 不自动等于
-  physical or semantic goal satisfied；
+- ADR-0033 / MissionPlan v0.6 已建立 execution completion 与 Task satisfaction 的显式边界，
+  当前 `execution-report` 只是一种 bootstrap evidence basis；独立 State/Verifier evidence、负向
+  satisfaction 与物理目标争议处理仍待后续版本；
 - ADR-0032 已将内部 revision-bound structured review history 与用户消息分开，并建立 bounded
   repair / clarification 分流；用户 dialogue 仍需从 `instruction + messages` 演化为版本化
   `DialogueTurn`；

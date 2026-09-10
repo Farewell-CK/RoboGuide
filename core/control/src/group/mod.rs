@@ -7,7 +7,8 @@ use crate::{
 use domain::{
     ActorId, CoordinationContextId, CorrelationId, EventPayload, ExecutionGroupId, MissionPlan,
     NodeId, ResourceBindingScope, ResourceId, RoleAssignment, RoleId, RoleRequirement,
-    TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    TaskExecution, TaskExecutionLifecycle, TaskId, TaskRef, TaskRequirement, TaskSatisfactionBasis,
+    TimestampMs,
 };
 use ports::EventSink;
 use std::collections::{BTreeMap, BTreeSet};

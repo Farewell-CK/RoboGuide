@@ -141,8 +141,13 @@ fn phase1_execution_reuses_context_binding_until_mission_completion() {
                 &mut events,
             )
             .expect("test Runtime transition should activate the bound Task");
+        let allocations_before_completion = control
+            .allocation_snapshot(TimestampMs::new(9 + index as u64))
+            .expect("active Task allocations are valid")
+            .allocations()
+            .to_vec();
         orchestrator
-            .task_succeeded(
+            .record_task_execution_completed(
                 &mission_id,
                 &task_ref,
                 &mut control,
@@ -150,7 +155,74 @@ fn phase1_execution_reuses_context_binding_until_mission_completion() {
                 &correlation,
                 &mut events,
             )
-            .expect("Task outcome should advance the DAG");
+            .expect("Task execution outcome should be recorded");
+        assert_eq!(
+            control
+                .group(&group_id)
+                .and_then(|group| group.task_execution(&task_ref))
+                .expect("Task remains in the Group")
+                .lifecycle(),
+            TaskExecutionLifecycle::AwaitingSatisfaction
+        );
+        assert_eq!(
+            control
+                .allocation_snapshot(TimestampMs::new(10 + index as u64))
+                .expect("execution-complete allocations remain valid")
+                .allocations(),
+            allocations_before_completion,
+            "execution completion must not change resource ownership"
+        );
+        assert!(events.contains_payload(|payload| matches!(
+            payload,
+            domain::EventPayload::TaskExecutionCompleted { task_ref: event_task, .. }
+                if event_task == &task_ref
+        )));
+        assert!(!events.contains_payload(|payload| matches!(
+            payload,
+            domain::EventPayload::TaskSatisfied { task_ref: event_task, .. }
+                if event_task == &task_ref
+        )));
+        let restored_control = ControlPlane::restore(control.checkpoint())
+            .expect("AwaitingSatisfaction Control authority should restore");
+        let restored_orchestrator = MissionOrchestrator::restore_json(
+            &orchestrator
+                .checkpoint_json()
+                .expect("AwaitingSatisfaction orchestration should serialize"),
+        )
+        .expect("AwaitingSatisfaction orchestration should restore");
+        restored_orchestrator
+            .validate_control_authority(&restored_control)
+            .expect("restored satisfaction boundary should retain aligned authority");
+        if index + 1 < plan.task_graph().tasks().len() {
+            let next_task_ref = task(index + 1);
+            assert_eq!(
+                control
+                    .group(&group_id)
+                    .and_then(|group| group.task_execution(&next_task_ref))
+                    .expect("dependent Task remains registered")
+                    .lifecycle(),
+                TaskExecutionLifecycle::Pending,
+                "execution completion must not unlock the next DAG Task"
+            );
+        }
+        orchestrator
+            .satisfy_task_from_execution_report(
+                &mission_id,
+                &task_ref,
+                &mut control,
+                TimestampMs::new(10 + index as u64),
+                &correlation,
+                &mut events,
+            )
+            .expect("Task satisfaction should advance the DAG");
+        assert!(events.contains_payload(|payload| matches!(
+            payload,
+            domain::EventPayload::TaskSatisfied {
+                task_ref: event_task,
+                basis: domain::TaskSatisfactionBasis::ExecutionReport,
+                ..
+            } if event_task == &task_ref
+        )));
         if index < 2 {
             assert_eq!(
                 orchestrator

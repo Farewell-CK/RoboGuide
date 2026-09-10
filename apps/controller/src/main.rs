@@ -747,9 +747,19 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         .cloned()
         .collect::<Vec<_>>();
     control
-        .complete_task_execution(
+        .record_task_execution_completed(
             &group_id,
             requirement.task_ref(),
+            TimestampMs::new(2),
+            &correlation_id,
+            &mut log,
+        )
+        .map_err(|error| error.to_string())?;
+    control
+        .satisfy_task_execution(
+            &group_id,
+            requirement.task_ref(),
+            domain::TaskSatisfactionBasis::ExecutionReport,
             TimestampMs::new(2),
             &correlation_id,
             &mut log,

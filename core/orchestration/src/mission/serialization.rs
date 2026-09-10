@@ -79,6 +79,11 @@ pub(crate) fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                     "completion_deadline_offset_ms": task.requirement().timing().completion_deadline_offset_ms(),
                     "estimated_duration_ms": task.requirement().timing().estimated_duration_ms(),
                 },
+                "satisfaction": {
+                    "basis": match task.satisfaction_basis() {
+                        domain::TaskSatisfactionBasis::ExecutionReport => "execution-report",
+                    },
+                },
             });
             if let Some(mode) = task.continuity().coupling_mode_override() {
                 value
@@ -93,7 +98,7 @@ pub(crate) fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_5,
+        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_6,
         "mission": {"id": plan.goal().mission_id().as_str(), "objective": plan.goal().objective()},
         "contexts": contexts,
         "tasks": tasks,

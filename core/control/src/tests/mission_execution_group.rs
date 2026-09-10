@@ -114,8 +114,24 @@ fn mission_group_hosts_complete_dag_without_task_completion_releasing_group() {
         .activate_task_execution(&group_id, &first, TimestampMs::new(4), &trace(), &mut events)
         .expect("first Task activates");
     control
-        .complete_task_execution(&group_id, &first, TimestampMs::new(5), &trace(), &mut events)
-        .expect("first Task completes");
+        .record_task_execution_completed(
+            &group_id,
+            &first,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("first Task execution completes");
+    control
+        .satisfy_task_execution(
+            &group_id,
+            &first,
+            domain::TaskSatisfactionBasis::ExecutionReport,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("first Task becomes satisfied");
 
     assert!(control
         .complete_group(&group_id, TimestampMs::new(6), &trace(), &mut events)
@@ -182,8 +198,24 @@ fn mission_task_bind_uses_commit_authority_and_releases_task_scope() {
         .activate_task_execution(&group, &task, TimestampMs::new(4), &trace(), &mut events)
         .expect("Task activates");
     control
-        .complete_task_execution(&group, &task, TimestampMs::new(5), &trace(), &mut events)
-        .expect("Task completes");
+        .record_task_execution_completed(
+            &group,
+            &task,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task execution completes");
+    control
+        .satisfy_task_execution(
+            &group,
+            &task,
+            domain::TaskSatisfactionBasis::ExecutionReport,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task becomes satisfied");
     control
         .release_task_bindings(
             &group,
@@ -250,8 +282,24 @@ fn task_release_preserves_context_assignment() {
         .activate_task_execution(&group, &task, TimestampMs::new(4), &trace(), &mut events)
         .expect("Task activates");
     control
-        .complete_task_execution(&group, &task, TimestampMs::new(5), &trace(), &mut events)
-        .expect("Task completes");
+        .record_task_execution_completed(
+            &group,
+            &task,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task execution completes");
+    control
+        .satisfy_task_execution(
+            &group,
+            &task,
+            domain::TaskSatisfactionBasis::ExecutionReport,
+            TimestampMs::new(5),
+            &trace(),
+            &mut events,
+        )
+        .expect("Task becomes satisfied");
     control
         .release_task_bindings(&group, &task, &[], TimestampMs::new(6), &trace(), &mut events)
         .expect("Task-scoped release accepts an empty set");

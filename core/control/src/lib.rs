@@ -414,6 +414,7 @@ impl ControlPlane {
                     task.lifecycle(),
                     domain::TaskExecutionLifecycle::Active
                         | domain::TaskExecutionLifecycle::Blocked
+                        | domain::TaskExecutionLifecycle::AwaitingSatisfaction
                 ),
             };
             if !valid_phase {
