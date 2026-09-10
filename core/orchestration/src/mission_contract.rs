@@ -2,19 +2,25 @@
 
 use crate::OrchestrationError;
 use domain::{
-    ActorId, CapabilityContractRef, CapabilityKind, ContextRole, ContextRoleId,
-    CoordinationContext, CoordinationContextId, ExecutionCouplingMode, ExecutionIntent,
-    ExecutionRelationId, ExecutionRelationSpec, ExecutionRelationType, ExecutionValue,
-    FreshnessPolicyRef, GroupSharedViewSpec, GroupViewBinding, GroupViewField,
-    MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3, MISSION_PLAN_SCHEMA_V0_4,
-    MISSION_PLAN_SCHEMA_V0_5, MapId, MapRevisionId, MapRevisionSelector, MissionGoal, MissionId,
-    MissionPlan, PeerChannelSpec, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
-    ResourceBindingScope, ResourceKind, ResourceRequirement, RoleId, RoleRequirement,
-    SharedSpatialReference, TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskTiming,
+    ActorId, CapabilityContractRef, ContextRole, ContextRoleId, CoordinationContext,
+    CoordinationContextId, ExecutionCouplingMode, ExecutionIntent, ExecutionRelationId,
+    ExecutionRelationSpec, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
+    GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
+    MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MapId, MapRevisionId, MapRevisionSelector,
+    MissionGoal, MissionId, MissionPlan, PeerChannelSpec, PlannedExecutionRef, PlannedTask,
+    RelationStateRequirement, ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference,
+    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskTiming,
 };
-use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
+
+mod enum_conversion;
+mod execution_value;
+mod nullable_millis;
+
+use enum_conversion::{capability_from_document, resource_from_document, scope_from_document};
+use execution_value::execution_value;
+use nullable_millis::NullableMillis;
 
 /// Wire MissionPlan accepted by the Phase 1 HTTP boundary.
 #[derive(Deserialize)]
@@ -222,46 +228,6 @@ struct TimingDocument {
     completion_deadline_offset_ms: NullableMillis,
     /// Optional planning duration.
     estimated_duration_ms: NullableMillis,
-}
-
-/// Required JSON field whose value may explicitly be a millisecond count or null.
-struct NullableMillis(Option<u64>);
-
-impl<'de> Deserialize<'de> for NullableMillis {
-    /// Preserves the distinction between an absent contract key and a present null value.
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(NullableMillisVisitor)
-    }
-}
-
-/// Decodes a present nullable millisecond value without accepting a missing field.
-struct NullableMillisVisitor;
-
-impl<'de> Visitor<'de> for NullableMillisVisitor {
-    type Value = NullableMillis;
-
-    /// Describes the exact nullable integer contract for Serde diagnostics.
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a non-negative millisecond integer or null")
-    }
-
-    /// Accepts one present non-negative millisecond count.
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-        Ok(NullableMillis(Some(value)))
-    }
-
-    /// Accepts an explicit JSON null value.
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(NullableMillis(None))
-    }
-
-    /// Accepts the unit representation used by JSON null.
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(NullableMillis(None))
-    }
 }
 
 /// Wire Task role requirement and continuity declaration.
@@ -830,52 +796,4 @@ fn contract_from_document(
 ) -> Result<CapabilityContractRef, OrchestrationError> {
     CapabilityContractRef::new(contract.namespace, contract.name, contract.version)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))
-}
-
-/// Converts one JSON scalar into a canonical ExecutionValue.
-fn execution_value(value: serde_json::Value) -> Result<ExecutionValue, OrchestrationError> {
-    match value {
-        serde_json::Value::Bool(value) => Ok(ExecutionValue::Bool(value)),
-        serde_json::Value::Number(value) if value.is_i64() => Ok(ExecutionValue::Integer(
-            value
-                .as_i64()
-                .expect("integer JSON number validated by is_i64"),
-        )),
-        serde_json::Value::Number(value) => value
-            .as_f64()
-            .filter(|value| value.is_finite())
-            .map(ExecutionValue::Float)
-            .ok_or_else(|| OrchestrationError::Mission("non-finite execution number".to_string())),
-        serde_json::Value::String(value) => Ok(ExecutionValue::String(value)),
-        _ => Err(OrchestrationError::Mission(
-            "execution parameters must be scalar".to_string(),
-        )),
-    }
-}
-
-/// Maps the contract capability enumeration into Domain.
-const fn capability_from_document(capability: CapabilityDocument) -> CapabilityKind {
-    match capability {
-        CapabilityDocument::Mobility => CapabilityKind::Mobility,
-        CapabilityDocument::Transport => CapabilityKind::Transport,
-        CapabilityDocument::Compute => CapabilityKind::Compute,
-        CapabilityDocument::Observation => CapabilityKind::Observation,
-    }
-}
-
-/// Maps the contract resource enumeration into Domain.
-const fn resource_from_document(resource: ResourceDocument) -> ResourceKind {
-    match resource {
-        ResourceDocument::Space => ResourceKind::Space,
-        ResourceDocument::Compute => ResourceKind::Compute,
-        ResourceDocument::Time => ResourceKind::Time,
-    }
-}
-
-/// Maps the contract lifetime enumeration into Domain.
-const fn scope_from_document(scope: ScopeDocument) -> ResourceBindingScope {
-    match scope {
-        ScopeDocument::Task => ResourceBindingScope::Task,
-        ScopeDocument::Context => ResourceBindingScope::Context,
-    }
 }
