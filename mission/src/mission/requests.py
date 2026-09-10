@@ -13,6 +13,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, cast
 
+from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionPlanSubmitter
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
@@ -333,6 +334,7 @@ class MissionRequestEngine:
         interpreter: MissionInterpreter,
         planner: MissionPlanner,
         controller: MissionPlanSubmitter,
+        capability_catalog: CanonicalCapabilityCatalog,
         approval_required_contracts: frozenset[str],
         id_generator: IdGenerator = uuid_token,
         clock: Clock = unix_time_ms,
@@ -342,6 +344,7 @@ class MissionRequestEngine:
         self._interpreter = interpreter
         self._planner = planner
         self._controller = controller
+        self._capability_catalog = capability_catalog
         self._approval_required_contracts = approval_required_contracts
         self._id_generator = id_generator
         self._clock = clock
@@ -475,7 +478,9 @@ class MissionRequestEngine:
             plan = self._planner.plan(
                 mission_id=record.mission_id,
                 grounded_intent=assessment.grounded_intent(),
+                capability_catalog=self._capability_catalog,
             )
+            self._capability_catalog.validate_plan(plan)
             revision = record.draft_revision + 1
             digest = _plan_digest(plan)
             record = self._update(

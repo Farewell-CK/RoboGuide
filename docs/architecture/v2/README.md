@@ -41,6 +41,13 @@ Ready Task 可以保留并等待后续部署事实变化。Request/dialogue 的�
 Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见 ADR-0018 与
 ADR-0030。
 
+Canonical Capability Catalog 是 Mission Intelligence 的稳定系统语言：Planner/Reviewer 只能
+引用 Catalog 中已知的 exact contract 与参数，未知 contract 使草案无效；Catalog 不包含实时
+Node、health、readiness 或 resource availability。已知 contract 即使当前 provider 为零，Mission
+仍可被接纳并在 Control Matching 后等待。v0.1 Catalog 只关闭 identity 与 scalar parameter
+schema，不冻结最终 Capability taxonomy、Operation/Requirement 分层或 feasibility envelope。
+详见 ADR-0031。
+
 ## 3. 核心抽象
 
 ### Embodied Node（具身节点）

@@ -3,6 +3,9 @@
 - Status: Accepted for Mission Semantic Admission v0.1
 - Date: 2026-09-10
 
+> Follow-up: ADR-0031 implements the first versioned Canonical Capability Catalog and closes the
+> unknown-contract versus known-with-zero-providers distinction for the Mission Request front-half.
+
 ## Context
 
 ADR-0018 introduced the Mission Request grounding loop and a read-only Controller inventory.
@@ -41,10 +44,11 @@ deployment facts change.
 explicit deployability preview. Such a preview is advisory and cannot accept or reject a Mission,
 select a Node, or commit a Resource.
 
-This slice does not introduce the Canonical Capability Catalog. Consequently, deterministic
+This slice did not introduce the Canonical Capability Catalog. Consequently, deterministic
 distinction between an unknown contract and a known contract with zero live providers remains an
-explicit follow-up. Live inventory must not be reused as that catalog: catalog membership is stable
-system-language evidence, while inventory is time-varying deployment evidence.
+explicit follow-up, implemented by ADR-0031. Live inventory must not be reused as that catalog:
+catalog membership is stable system-language evidence, while inventory is time-varying deployment
+evidence.
 
 The existing Mission Request `Blocked` lifecycle remains for Controller submission rejection and
 compatibility. Mission Intelligence no longer emits it merely because an advisory inventory lacks a

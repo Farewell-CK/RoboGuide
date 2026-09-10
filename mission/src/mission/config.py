@@ -78,6 +78,7 @@ class MissionSettings:
     planner: str
     contract_version: str
     schema_path: Path
+    capability_catalog_path: Path
     review_enabled: bool
     prompts: PromptSettings
     llm: LlmSettings
@@ -140,6 +141,7 @@ def load_settings(
         planner=_string(mission, "planner", "mission"),
         contract_version=_string(mission, "contract_version", "mission"),
         schema_path=root / _string(mission, "schema_path", "mission"),
+        capability_catalog_path=root / _string(mission, "capability_catalog_path", "mission"),
         review_enabled=_boolean(mission, "review_enabled", "mission"),
         prompts=PromptSettings(
             version=_string(prompts, "version", "mission.prompts"),

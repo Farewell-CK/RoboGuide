@@ -52,6 +52,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
   显式消费 objective、confirmed constraints 和 assumptions；Interpreter 不读取 live Node
   inventory，当前无 provider 不再使合法 Mission 被 Mission Intelligence 拒绝；
+- `contracts/capability/v0.1/` 提供 deployment-independent Canonical Capability Catalog；Planner
+  与 Reviewer 获得同一词汇表，确定性 admission 拒绝 unknown contract、未知/缺失参数和类型
+  不匹配，但 Catalog membership 不代表当前存在 provider；
 - Mission 输出使用 `contracts/mission/v0.4/` 中的版本化合同；v0.2/v0.3 作为兼容输入；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
   不绑定 NodeId 的 execution-time cross-role relation；
@@ -113,6 +116,13 @@ Control Matching/Scheduling/Commit 使用。实现可以使用 LLM、VLM、符�
 但不能直接进行跨节点资源绑定。该边界见
 [`ADR-0018`](docs/decisions/0018-mission-intent-loop.md) 与
 [`ADR-0030`](docs/decisions/0030-mission-semantic-admission-and-deployability.md)。
+
+Canonical Capability Catalog 回答“这个 contract 是否属于 RoboGuide 当前语义语言”；live
+Inventory 与 Capability Matching 回答“当前谁能执行”。Mission Intelligence 在 Reviewer 前
+确定性校验 Catalog identity 与 scalar parameters，但不读取当前 provider。当前 v0.1 Catalog
+不解决多 capability requirements、feasibility envelope、embodiment taxonomy 或
+Capability/Operation/ExecutionIntent 的最终分层，见
+[`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md)。
 
 ### Control Plane
 
@@ -539,6 +549,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
+│   ├── capability/v0.1/
 │   ├── mission/v0.2/ + v0.3/ + v0.4/
 │   ├── mission/request-v0.1/
 │   ├── mission/inventory-v0.1/

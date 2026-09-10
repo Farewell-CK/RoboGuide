@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
 
+from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
 from mission.models import JSONObject
@@ -25,6 +26,7 @@ def build_engine(
 ) -> tuple[MissionRequestEngine, MissionServiceSettings]:
     """Compose the Mission Request engine from validated non-secret configuration."""
     planner_settings = load_settings(mission_config, repository_root=repository_root)
+    capability_catalog = CanonicalCapabilityCatalog.load(planner_settings.capability_catalog_path)
     service_settings = load_service_settings(service_config, repository_root=repository_root)
     environment = current_environment()
     controller = HttpMissionController(
@@ -36,6 +38,7 @@ def build_engine(
         ResponsesMissionInterpreter(planner_settings, environment),
         ResponsesMissionPlanner(planner_settings, environment),
         controller,
+        capability_catalog,
         service_settings.approval_required_contracts,
     )
     return engine, service_settings

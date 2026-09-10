@@ -1,0 +1,101 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.1",
+  "contracts": [
+    {
+      "contract": {"namespace": "compute", "name": "infer", "version": "v1"},
+      "description": "Produce an inference result with a named semantic model profile.",
+      "parameters": [
+        {"name": "model", "type": "string", "required": true, "description": "Canonical model profile requested by the Mission."}
+      ]
+    },
+    {
+      "contract": {"namespace": "compute", "name": "noop", "version": "v1"},
+      "description": "Exercise a compute execution path without requesting a physical effect.",
+      "parameters": []
+    },
+    {
+      "contract": {"namespace": "compute", "name": "prepare", "version": "v1"},
+      "description": "Prepare a named compute-side plan artifact for subsequent execution.",
+      "parameters": [
+        {"name": "plan", "type": "string", "required": true, "description": "Stable semantic identifier of the plan to prepare."}
+      ]
+    },
+    {
+      "contract": {"namespace": "mobility", "name": "move", "version": "v1"},
+      "description": "Move an embodied system to a semantic destination while retaining Local How.",
+      "parameters": [
+        {"name": "destination", "type": "string", "required": true, "description": "Semantic destination reference resolved by the Local EAIOS context."}
+      ]
+    },
+    {
+      "contract": {"namespace": "mobility", "name": "navigate", "version": "v1"},
+      "description": "Navigate to a semantic destination while retaining local planning and safety.",
+      "parameters": [
+        {"name": "destination", "type": "string", "required": true, "description": "Semantic destination reference resolved by the Local EAIOS context."}
+      ]
+    },
+    {
+      "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+      "description": "Observe whether a named semantic condition holds.",
+      "parameters": [
+        {"name": "expected", "type": "string", "required": true, "description": "Semantic condition expected from the observation."}
+      ]
+    },
+    {
+      "contract": {"namespace": "safety", "name": "observe", "version": "v1"},
+      "description": "Observe safety-relevant conditions using a declared operating mode.",
+      "parameters": [
+        {"name": "mode", "type": "string", "required": true, "description": "Semantic observation mode such as continuous monitoring."}
+      ]
+    },
+    {
+      "contract": {"namespace": "spatial.localization", "name": "verify", "version": "v0"},
+      "description": "Verify localization against an immutable spatial map revision.",
+      "parameters": [
+        {"name": "artifact_operation", "type": "string", "required": true, "description": "Configured artifact workflow operation."},
+        {"name": "artifact_slot", "type": "string", "required": true, "description": "Logical artifact binding slot."},
+        {"name": "map_id", "type": "string", "required": true, "description": "Immutable map family identity."},
+        {"name": "revision_id", "type": "string", "required": true, "description": "Immutable map revision identity."},
+        {"name": "spatial_anchor_id", "type": "string", "required": true, "description": "Declared physical anchor identity."}
+      ]
+    },
+    {
+      "contract": {"namespace": "spatial.map", "name": "build", "version": "v0"},
+      "description": "Build one immutable spatial map revision through a Local EAIOS workflow.",
+      "parameters": [
+        {"name": "artifact_operation", "type": "string", "required": true, "description": "Configured artifact workflow operation."},
+        {"name": "artifact_slot", "type": "string", "required": true, "description": "Logical artifact binding slot."},
+        {"name": "map_id", "type": "string", "required": true, "description": "Immutable map family identity."},
+        {"name": "revision_id", "type": "string", "required": true, "description": "Immutable map revision identity."},
+        {"name": "spatial_anchor_id", "type": "string", "required": true, "description": "Declared physical anchor identity."}
+      ]
+    },
+    {
+      "contract": {"namespace": "spatial.map", "name": "import", "version": "v0"},
+      "description": "Import one immutable spatial map revision through the Artifact data plane.",
+      "parameters": [
+        {"name": "artifact_operation", "type": "string", "required": true, "description": "Configured artifact workflow operation."},
+        {"name": "artifact_slot", "type": "string", "required": true, "description": "Logical artifact binding slot."},
+        {"name": "map_id", "type": "string", "required": true, "description": "Immutable map family identity."},
+        {"name": "revision_id", "type": "string", "required": true, "description": "Immutable map revision identity."},
+        {"name": "spatial_anchor_id", "type": "string", "required": true, "description": "Declared physical anchor identity."}
+      ]
+    },
+    {
+      "contract": {"namespace": "spatial.map", "name": "publish", "version": "v0"},
+      "description": "Publish one immutable spatial map revision through the Artifact data plane.",
+      "parameters": [
+        {"name": "artifact_operation", "type": "string", "required": true, "description": "Configured artifact workflow operation."},
+        {"name": "artifact_slot", "type": "string", "required": true, "description": "Logical artifact binding slot."},
+        {"name": "map_id", "type": "string", "required": true, "description": "Immutable map family identity."},
+        {"name": "revision_id", "type": "string", "required": true, "description": "Immutable map revision identity."},
+        {"name": "spatial_anchor_id", "type": "string", "required": true, "description": "Declared physical anchor identity."}
+      ]
+    },
+    {
+      "contract": {"namespace": "system", "name": "ping", "version": "v1"},
+      "description": "Verify the generic execution path without requesting device-specific behavior.",
+      "parameters": []
+    }
+  ]
+}

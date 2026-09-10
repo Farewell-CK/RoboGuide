@@ -7,7 +7,8 @@ import json
 from pathlib import Path
 from typing import cast
 
-from mission.config import current_environment, load_settings
+from mission.capability_catalog import CanonicalCapabilityCatalog
+from mission.config import MissionSettings, current_environment, load_settings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner, MissionPlanner
@@ -21,6 +22,11 @@ def _parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="validate a MissionPlan v0 artifact")
     validate.add_argument("--input", type=Path, required=True)
+    validate.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("contracts/capability/v0.1/catalog.json"),
+    )
 
     plan = subparsers.add_parser("plan", help="produce a MissionPlan v0 artifact")
     plan.add_argument("--config", type=Path, default=Path("config/mission.toml"))
@@ -33,18 +39,18 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _read_plan(path: Path) -> MissionPlan:
-    """Read and validate one Mission Plan artifact from disk."""
+def _read_plan(path: Path, capability_catalog: CanonicalCapabilityCatalog) -> MissionPlan:
+    """Read and validate one Mission Plan against syntax and canonical vocabulary."""
     decoded = cast(JSONObject, json.loads(path.read_text(encoding="utf-8")))
-    return MissionPlan.from_json(decoded)
+    plan = MissionPlan.from_json(decoded)
+    capability_catalog.validate_plan(plan)
+    return plan
 
 
-def _planner(arguments: argparse.Namespace) -> MissionPlanner:
+def _planner(arguments: argparse.Namespace, settings: MissionSettings) -> MissionPlanner:
     """Create the requested planner while keeping network access behind explicit selection."""
     if arguments.fixture is not None:
         return FixturePlanner(cast(Path, arguments.fixture))
-    config_path = cast(Path, arguments.config)
-    settings = load_settings(config_path, repository_root=Path.cwd())
     if settings.planner != "llm":
         raise ValueError(f"unsupported configured planner: {settings.planner}")
     return ResponsesMissionPlanner(settings, current_environment())
@@ -54,9 +60,12 @@ def main() -> int:
     """Run validation or planning and return a process-compatible status code."""
     arguments = _parser().parse_args()
     if arguments.command == "validate":
-        _read_plan(cast(Path, arguments.input))
+        capability_catalog = CanonicalCapabilityCatalog.load(cast(Path, arguments.catalog))
+        _read_plan(cast(Path, arguments.input), capability_catalog)
         return 0
-    planner = _planner(arguments)
+    settings = load_settings(cast(Path, arguments.config), repository_root=Path.cwd())
+    capability_catalog = CanonicalCapabilityCatalog.load(settings.capability_catalog_path)
+    planner = _planner(arguments, settings)
     grounded_intent = GroundedIntent(
         cast(str, arguments.objective),
         tuple(cast(list[str], arguments.constraint)),
@@ -65,6 +74,7 @@ def main() -> int:
     plan = planner.plan(
         mission_id=cast(str, arguments.mission_id),
         grounded_intent=grounded_intent,
+        capability_catalog=capability_catalog,
     )
     output_path = cast(Path, arguments.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

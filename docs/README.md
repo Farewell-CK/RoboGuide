@@ -46,6 +46,7 @@
 - [`decisions/0028-durable-command-recovery-and-attempts.md`](decisions/0028-durable-command-recovery-and-attempts.md)：durable command outbox、physical attempt history、恢复组合与应用 timer。
 - [`decisions/0029-bounded-joint-scheduling-and-future-reservations.md`](decisions/0029-bounded-joint-scheduling-and-future-reservations.md)：有界联合调度、Control calendar 与 future reservation 语义。
 - [`decisions/0030-mission-semantic-admission-and-deployability.md`](decisions/0030-mission-semantic-admission-and-deployability.md)：Mission 语义接纳与当前部署可执行性的 authority 分离。
+- [`decisions/0031-canonical-capability-catalog.md`](decisions/0031-canonical-capability-catalog.md)：Planner/Reviewer 使用的稳定 canonical contract 与 scalar parameter 词汇表。
 
 ## 历史架构
 

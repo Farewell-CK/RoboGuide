@@ -98,6 +98,10 @@ apps -> orchestration -> integration/control/runtime/state -> ports -> domain
 apps -> artifact-store -> ports -> domain
 ```
 
+Mission Intelligence 从 `contracts/capability/v0.1/catalog.json` 读取稳定 canonical contract
+词汇表，并在 Reviewer 与提交前确定性校验 exact identity 和 scalar parameters。Catalog 不读取
+Shared Node State，也不回答当前是否可调度；Control Matching 仍是 live eligibility authority。
+
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。
 

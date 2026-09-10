@@ -2,6 +2,7 @@
 planner = "llm"
 contract_version = "roboguide.mission-plan/v0.5"
 schema_path = "contracts/mission/v0.5/mission-plan.schema.json"
+capability_catalog_path = "contracts/capability/v0.1/catalog.json"
 review_enabled = true
 
 [mission.prompts]

@@ -11,6 +11,7 @@ from typing import cast
 
 import pytest
 from mission.api import MissionRequestHttpServer
+from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import (
     InventoryCapability,
     InventoryNode,
@@ -30,6 +31,7 @@ from mission.requests import (
 )
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
+CATALOG = Path("contracts/capability/v0.1/catalog.json")
 
 
 def test_request_contract_accepts_current_and_compatible_plan_versions() -> None:
@@ -75,13 +77,49 @@ class FakePlanner:
         """Initialize an inspectable call list."""
         self.calls: list[tuple[str, GroundedIntent]] = []
 
-    def plan(self, mission_id: str, grounded_intent: GroundedIntent) -> MissionPlan:
+    def plan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+    ) -> MissionPlan:
         """Return a strict plan while retaining the complete grounded Planner input."""
         self.calls.append((mission_id, grounded_intent))
         raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
         mission = cast(JSONObject, raw["mission"])
         mission["id"] = mission_id
         mission["objective"] = grounded_intent.objective
+        plan = MissionPlan.from_json(raw)
+        capability_catalog.validate_plan(plan)
+        return plan
+
+
+class UnknownContractPlanner(FakePlanner):
+    """Return a structurally valid plan outside the Catalog to test admission defense."""
+
+    def plan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+    ) -> MissionPlan:
+        """Bypass the supplied Catalog as a deliberately faulty Planner implementation."""
+        del capability_catalog
+        self.calls.append((mission_id, grounded_intent))
+        raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
+        mission = cast(JSONObject, raw["mission"])
+        mission["id"] = mission_id
+        mission["objective"] = grounded_intent.objective
+        tasks = cast(list[JSONObject], raw["tasks"])
+        roles = cast(list[JSONObject], tasks[0]["roles"])
+        invented: JSONObject = {
+            "namespace": "delivery",
+            "name": "magic_move",
+            "version": "v1",
+        }
+        roles[0]["contract"] = invented
+        execution = cast(JSONObject, roles[0]["execution"])
+        execution["capability_contract"] = invented
         return MissionPlan.from_json(raw)
 
 
@@ -186,6 +224,11 @@ def _fixture_contracts() -> tuple[str, ...]:
     return tuple(sorted(contracts))
 
 
+def _catalog() -> CanonicalCapabilityCatalog:
+    """Load the versioned semantic vocabulary independently from fake inventory."""
+    return CanonicalCapabilityCatalog.load(CATALOG)
+
+
 def _engine(
     tmp_path: Path,
     interpreter: FakeInterpreter,
@@ -199,6 +242,7 @@ def _engine(
         interpreter,
         planner,
         controller,
+        _catalog(),
         risk_contracts,
         SequenceIds(),
         SequenceClock(),
@@ -308,6 +352,23 @@ def test_live_capability_readiness_does_not_change_mission_admission(
     assert controller.inventory_calls == 0
 
 
+def test_unknown_contract_fails_admission_without_controller_submission(tmp_path: Path) -> None:
+    """Engine-side Catalog validation fences a faulty Planner before submission."""
+    controller = FakeController(_inventory(*_fixture_contracts()))
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment()]),
+        UnknownContractPlanner(),
+        controller,
+    )
+
+    record = engine.create("执行一个未知语义合同")
+
+    assert record.lifecycle is MissionRequestLifecycle.FAILED
+    assert "delivery.magic_move@v1" in record.issues[0]
+    assert controller.submissions == []
+
+
 def test_controller_rejection_remains_blocked_instead_of_fabricating_acceptance(
     tmp_path: Path,
 ) -> None:
@@ -367,6 +428,7 @@ def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None
         FakeInterpreter([]),
         FakePlanner(),
         FakeController(_inventory()),
+        _catalog(),
         frozenset(),
         SequenceIds(),
         SequenceClock(),
@@ -402,6 +464,7 @@ def test_restart_fences_received_request_for_explicit_retry(tmp_path: Path) -> N
         FakeInterpreter([]),
         FakePlanner(),
         FakeController(_inventory()),
+        _catalog(),
         frozenset(),
         SequenceIds(),
         SequenceClock(),

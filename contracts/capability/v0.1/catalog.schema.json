@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/capability/v0.1/catalog.schema.json",
+  "title": "RoboGuide Canonical Capability Catalog v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contracts"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "roboguide.capability-catalog/v0.1"
+    },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/capability_contract"}
+    }
+  },
+  "$defs": {
+    "contract_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "name", "version"],
+      "properties": {
+        "namespace": {"type": "string", "pattern": "^[^\\s.@]+(?:\\.[^\\s.@]+)*$"},
+        "name": {"type": "string", "pattern": "^[^\\s.@]+$"},
+        "version": {"type": "string", "pattern": "^[^\\s@]+$"}
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "required", "description"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"enum": ["boolean", "integer", "number", "string"]},
+        "required": {"type": "boolean"},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "capability_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "description", "parameters"],
+      "properties": {
+        "contract": {"$ref": "#/$defs/contract_ref"},
+        "description": {"type": "string", "minLength": 1},
+        "parameters": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/parameter"}
+        }
+      }
+    }
+  }
+}

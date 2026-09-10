@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject
@@ -20,6 +21,7 @@ from mission.responses import (
 )
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
+CATALOG = Path("contracts/capability/v0.1/catalog.json")
 
 
 def _response(output: JSONObject) -> JSONObject:
@@ -73,11 +75,18 @@ def _local_settings() -> MissionSettings:
     )
 
 
+def _catalog() -> CanonicalCapabilityCatalog:
+    """Load the checked-in semantic vocabulary used by deterministic planner tests."""
+    return CanonicalCapabilityCatalog.load(CATALOG)
+
+
 def test_fixture_planner_loads_the_approved_plan() -> None:
     """The deterministic planner returns the approved artifact for the exact request."""
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     mission = raw["mission"]
-    plan = FixturePlanner(FIXTURE).plan(mission["id"], GroundedIntent(mission["objective"], (), ()))
+    plan = FixturePlanner(FIXTURE).plan(
+        mission["id"], GroundedIntent(mission["objective"], (), ()), _catalog()
+    )
     assert plan.mission.mission_id == "mission-phase1-001"
 
 
@@ -89,6 +98,7 @@ def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
         FixturePlanner(FIXTURE).plan(
             mission["id"],
             GroundedIntent(mission["objective"], ("keep the marked aisle clear",), ()),
+            _catalog(),
         )
 
 
@@ -109,7 +119,8 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
         ("the payload remains available at the pickup point",),
     )
 
-    plan = planner.plan(mission["id"], grounded_intent)
+    capability_catalog = _catalog()
+    plan = planner.plan(mission["id"], grounded_intent, capability_catalog)
 
     assert plan.to_json() == plan_json
     assert len(transport.requests) == 2
@@ -130,11 +141,13 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
     assert planning_input == {
         "mission_id": mission["id"],
         "grounded_intent": grounded_intent.to_json(),
+        "capability_catalog": capability_catalog.to_json(),
     }
     review_input = json.loads(cast(str, review_payload["input"]))
     assert review_input == {
         "grounded_intent": grounded_intent.to_json(),
         "mission_plan": plan_json,
+        "capability_catalog": capability_catalog.to_json(),
     }
     text_config = planning_payload["text"]
     assert isinstance(text_config, dict)
@@ -177,7 +190,35 @@ def test_responses_planner_rejects_failed_review() -> None:
     )
     mission = plan_json["mission"]
     with pytest.raises(MissionProviderError, match="review rejected"):
-        planner.plan(mission["id"], GroundedIntent(mission["objective"], ("avoid stairs",), ()))
+        planner.plan(
+            mission["id"],
+            GroundedIntent(mission["objective"], ("avoid stairs",), ()),
+            _catalog(),
+        )
+
+
+def test_responses_planner_rejects_unknown_contract_before_review() -> None:
+    """Deterministic Catalog admission prevents an invented contract reaching Reviewer."""
+    plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    role = plan_json["tasks"][0]["roles"][0]
+    invented = {"namespace": "delivery", "name": "magic_move", "version": "v1"}
+    role["contract"] = invented
+    role["execution"]["capability_contract"] = invented
+    transport = FakeTransport([_response(plan_json)])
+    planner = ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        transport,
+    )
+
+    with pytest.raises(CapabilityCatalogError, match="delivery.magic_move@v1"):
+        planner.plan(
+            plan_json["mission"]["id"],
+            GroundedIntent(plan_json["mission"]["objective"], (), ()),
+            _catalog(),
+        )
+
+    assert len(transport.requests) == 1
 
 
 def test_responses_interpreter_preserves_open_questions_before_planning() -> None:

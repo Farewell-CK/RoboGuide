@@ -181,6 +181,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   but are never real evidence.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
+- `contracts/capability/v0.1/` is the deployment-independent Canonical Capability Catalog consumed
+  by Mission Intelligence. It validates known exact contracts and scalar parameters, never current
+  providers; live Node inventory remains Control eligibility evidence. The current catalog does not
+  freeze the final Capability/Operation/Requirement model.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add
