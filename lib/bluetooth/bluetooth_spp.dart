@@ -16,7 +16,9 @@ class SppControlEvent {
 /// reassembles RGAD/RGCT frames before exposing audio and control streams.
 class BluetoothSpp {
   static const MethodChannel _method = MethodChannel('roboguide/bluetooth_spp');
-  static const EventChannel _events = EventChannel('roboguide/bluetooth_spp/events');
+  static const EventChannel _events = EventChannel(
+    'roboguide/bluetooth_spp/events',
+  );
 
   final _dataCtrl = StreamController<Uint8List>.broadcast();
   final _controlCtrl = StreamController<SppControlEvent>.broadcast();
@@ -29,6 +31,13 @@ class BluetoothSpp {
         _consume(event);
       } else if (event is List) {
         _consume(Uint8List.fromList(event.cast<int>()));
+      } else if (event == null) {
+        // Native plugin signals a dropped RFCOMM link with a null success
+        // event (emitData(null) from disconnectQuietly/read-loop EOF). The
+        // EventChannel fires onDone only on real stream teardown, not on
+        // `success(null)`, so treat the marker as EOF: surface an error on
+        // the audio stream; SppTransport maps it to a disconnected status.
+        _dataCtrl.addError('connection closed');
       }
     }, onDone: () => _dataCtrl.addError('connection closed'));
   }
@@ -86,7 +95,9 @@ class BluetoothSpp {
 
   /// Send a framed JSON control message to Thor.
   Future<void> writeControl(Map<String, dynamic> value) async {
-    await _method.invokeMethod('write', {'bytes': SppFramer.encodeControl(value)});
+    await _method.invokeMethod('write', {
+      'bytes': SppFramer.encodeControl(value),
+    });
   }
 
   void dispose() {
@@ -100,6 +111,7 @@ Map<String, dynamic> jsonDecodeUtf8(Uint8List bytes) {
   // UTF-8 decode, NOT String.fromCharCodes (which maps each byte to a code
   // unit and mangles multi-byte CJK into mojibake like '½½□').
   final value = jsonDecode(utf8.decode(bytes));
-  if (value is! Map) throw const FormatException('control payload is not an object');
+  if (value is! Map)
+    throw const FormatException('control payload is not an object');
   return value.cast<String, dynamic>();
 }

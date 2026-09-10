@@ -4,41 +4,37 @@ import 'dart:typed_data';
 
 import 'package:flutter_sound/flutter_sound.dart' as fs;
 
-/// Speaker playback with per-turn player lifecycle. Root cause of the
-/// "second PTT freezes" bug lived here: a single FlutterSoundPlayer was
-/// reused across turns; flutter_sound 9.x throws "already initialized" on a
-/// second openPlayer() and can hang startPlayerFromStream on a stale
-/// instance, and the old serial `.then` chain stopped forever once one job
-/// hung. Rules now:
-/// - one player per turn: open -> startPlayerFromStream -> feed* -> close;
-///   beginTurn() releases the previous player first.
-/// - finite queue + single-flight pump, never an unbounded .then chain.
-/// - every feed is time-boxed; on timeout the player is rebuilt.
+/// Speaker playback — live streaming, one frame at a time.
+///
+/// The server throttles SPP at ~32KB/s (0.26s per 8192B frame), which paces
+/// our feedUint8FromStream calls at roughly realtime. Earlier "only first
+/// chunk played" reports were caused by (a) the server bursting many frames
+/// back-to-back while the phone's BT stack dropped all but the first ~33KB,
+/// and (b) a flutter_sound streaming quirk under those bursts. With the
+/// server throttled and frames arriving steadily, live streaming plays the
+/// full utterance with minimal latency.
+///
+/// A one-shot WAV fallback (replace feed+_pump with accumulate+finishAndPlay)
+/// is intentionally NOT wired in: it adds a whole-turn latency the user
+/// rejected. Keep `finishAndPlay` below if streaming regresses.
 class SpeakerController {
   static const int sampleRate = 16000;
-  static const int channels = 1;
-  static const int frameBytes = 1600;
+  static const int bufferBytes = 8192; // match the throttled TTS frame size
 
+  final Queue<Uint8List> _queue = Queue<Uint8List>();
   fs.FlutterSoundPlayer? _player;
   bool _playerReady = false;
-  final Queue<Uint8List> _queue = Queue<Uint8List>();
   bool _pumping = false;
   bool _turnActive = false;
 
-  /// Playback errors surfaced to the session layer (turn should go error).
   final _errors = StreamController<String>.broadcast();
   Stream<String> get errors => _errors.stream;
 
-  /// Begin a turn: any previous player is torn down (it belonged to the
-  /// previous turn), state resets.
   Future<void> beginTurn() async {
     _turnActive = true;
-    await _teardownPlayer();
     _queue.clear();
   }
 
-  /// Enqueue PCM for playback. Returns immediately; a single-flight pump
-  /// drains the queue.
   void feed(Uint8List pcm) {
     if (!_turnActive) return;
     _queue.add(pcm);
@@ -51,17 +47,19 @@ class SpeakerController {
     try {
       while (_queue.isNotEmpty && _turnActive) {
         final frame = _queue.removeFirst();
+        print('SPK feed frame ${frame.length}B (q left ${_queue.length})');
         try {
           await _ensureReady();
-          await _player!.feedUint8FromStream(frame)
-              .timeout(const Duration(seconds: 1));
+          await _player!
+              .feedUint8FromStream(frame)
+              .timeout(const Duration(seconds: 2));
         } catch (e) {
-          // wedged player: rebuild and retry this frame once
           await _teardownPlayer();
           try {
             await _ensureReady();
-            await _player!.feedUint8FromStream(frame)
-                .timeout(const Duration(seconds: 1));
+            await _player!
+                .feedUint8FromStream(frame)
+                .timeout(const Duration(seconds: 2));
           } catch (e2) {
             _queue.clear();
             _errors.add('playback failed: $e2');
@@ -80,12 +78,13 @@ class SpeakerController {
     final player = fs.FlutterSoundPlayer();
     _player = player;
     await player.openPlayer();
+    await player.setSubscriptionDuration(const Duration(milliseconds: 50));
     await player.startPlayerFromStream(
       codec: fs.Codec.pcm16,
-      interleaved: true,
-      numChannels: channels,
+      numChannels: 1,
       sampleRate: sampleRate,
-      bufferSize: frameBytes,
+      bufferSize: bufferBytes,
+      interleaved: true,
     );
     _playerReady = true;
   }
@@ -103,19 +102,12 @@ class SpeakerController {
     } catch (_) {}
   }
 
-  /// End the turn: drain what's queued, then release the player.
   Future<void> endTurn() async {
-    // small grace so the tail of the audio can be pumped
-    final deadline = DateTime.now().add(const Duration(milliseconds: 300));
-    while (_queue.isNotEmpty && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
     _turnActive = false;
     _queue.clear();
     await _teardownPlayer();
   }
 
-  /// Immediate stop (disconnect/error paths).
   Future<void> abort() async {
     _turnActive = false;
     _queue.clear();

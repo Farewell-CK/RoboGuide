@@ -101,10 +101,8 @@ class _HomePageState extends State<HomePage> {
           await t.endVoiceCapture(sessionId);
         }
       },
-      onHistoryJson: () => jsonEncode({
-        'source': 'roboguide-ws',
-        'history': _recentHistory(),
-      }),
+      onHistoryJson: () =>
+          jsonEncode({'source': 'roboguide-ws', 'history': _recentHistory()}),
     );
 
     _conn.status.listen(_onConnStatus);
@@ -113,6 +111,11 @@ class _HomePageState extends State<HomePage> {
     _session.audioState.listen((s) {
       if (mounted) setState(() => _audioState = s);
     });
+    // CRITICAL: attach subscribes SessionController to the transport's
+    // control/audio streams (voice_event -> turn updates, PCM -> playback).
+    // Without it the app never reacts to robot responses (RX stays 0,
+    // turns hang in "recognizing"). detach happens inside _session.dispose().
+    _session.attach();
 
     _loadSessions();
     _loadDevices();
@@ -140,6 +143,10 @@ class _HomePageState extends State<HomePage> {
           _connected = true;
           _connecting = false;
           _reconnects = _conn.reconnectCount;
+          // Transport instance is now live; (re)bind SessionController to
+          // its control/audio streams (early attach in initState grabbed
+          // the disconnected stub's empty streams).
+          _session.attach();
         case TransportStatusKind.connecting:
           _connecting = true;
         case TransportStatusKind.disconnected:
@@ -161,8 +168,9 @@ class _HomePageState extends State<HomePage> {
     s.lastActiveAt = DateTime.now();
     // 首句 ASR 设会话标题(前 12 字),与旧行为一致
     if (turn.userText.isNotEmpty && (s.title == '新会话' || s.title.isEmpty)) {
-      s.title =
-          turn.userText.length > 12 ? turn.userText.substring(0, 12) : turn.userText;
+      s.title = turn.userText.length > 12
+          ? turn.userText.substring(0, 12)
+          : turn.userText;
     }
     setState(() {
       _micActive = _session.micActive;
@@ -196,7 +204,8 @@ class _HomePageState extends State<HomePage> {
     final cur = _currentSession;
     if (cur != null) return cur;
     final s = ConversationSession(
-        id: DateTime.now().microsecondsSinceEpoch.toString());
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+    );
     _sessions.insert(0, s);
     _currentSession = s;
     return s;
@@ -233,7 +242,9 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
             child: const Text('确定'),
@@ -265,8 +276,9 @@ class _HomePageState extends State<HomePage> {
         content: const Text('会话内的所有对话记录将被删除，不可恢复。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('删除'),
@@ -286,22 +298,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openSessionList() {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SessionListPage(
-        sessions: _sessions,
-        currentId: _currentSession?.id,
-        onSelect: (s) {
-          _selectSession(s.id);
-          Navigator.of(context).pop();
-        },
-        onNewSession: () {
-          _newSession();
-          Navigator.of(context).pop();
-        },
-        onRename: _renameSession,
-        onDelete: _deleteSession,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SessionListPage(
+          sessions: _sessions,
+          currentId: _currentSession?.id,
+          onSelect: (s) {
+            _selectSession(s.id);
+            Navigator.of(context).pop();
+          },
+          onNewSession: () {
+            _newSession();
+            Navigator.of(context).pop();
+          },
+          onRename: _renameSession,
+          onDelete: _deleteSession,
+        ),
       ),
-    ));
+    );
   }
 
   // ── WS-mode voice-session helpers ────────────────────────────────────
@@ -322,7 +336,8 @@ class _HomePageState extends State<HomePage> {
     if (s == null) return const [];
     final history = <Map<String, String>>[];
     for (final t in s.turns.reversed.take(5)) {
-      if (t.userText.isNotEmpty) history.add({'role': 'user', 'text': t.userText});
+      if (t.userText.isNotEmpty)
+        history.add({'role': 'user', 'text': t.userText});
       if (t.assistantText.isNotEmpty) {
         history.add({'role': 'assistant', 'text': t.assistantText});
       }
@@ -336,10 +351,12 @@ class _HomePageState extends State<HomePage> {
       final devices = await _deviceProbe.pairedDevices();
       if (!mounted) return;
       setState(() => _devices = devices);
-      final thor = devices.where((d) =>
-          (d['address'] as String) == 'F8:3D:C6:91:8D:69' ||
-          (d['name'] as String).toLowerCase().contains('roboguide') ||
-          (d['name'] as String).toLowerCase().contains('localhost'));
+      final thor = devices.where(
+        (d) =>
+            (d['address'] as String) == 'F8:3D:C6:91:8D:69' ||
+            (d['name'] as String).toLowerCase().contains('roboguide') ||
+            (d['name'] as String).toLowerCase().contains('localhost'),
+      );
       if (thor.isNotEmpty) {
         setState(() => _selectedMac = thor.first['address'] as String);
         widget.settings.mac = _selectedMac!;
@@ -369,30 +386,33 @@ class _HomePageState extends State<HomePage> {
     final prevMac = _selectedMac;
     final prevHost = widget.settings.wsHost;
     final prevPort = widget.settings.wsPort;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SettingsPage(
-        settings: widget.settings,
-        onChanged: () {
-          if (!mounted) return;
-          final linkChanged = prevMode != widget.settings.mode.name ||
-              prevMac != widget.settings.mac ||
-              prevHost != widget.settings.wsHost ||
-              prevPort != widget.settings.wsPort;
-          setState(() {
-            _mode = widget.settings.mode.name;
-            _selectedMac = widget.settings.mac;
-            _capture.enabled = widget.settings.captureAudio;
-          });
-          // 仅传输后端/设备/端点变化才重启链路；捕获开关不打断当前连接
-          if (_connected && linkChanged) {
-            unawaited(() async {
-              await _conn.stop();
-              await _connect();
-            }());
-          }
-        },
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          settings: widget.settings,
+          onChanged: () {
+            if (!mounted) return;
+            final linkChanged =
+                prevMode != widget.settings.mode.name ||
+                prevMac != widget.settings.mac ||
+                prevHost != widget.settings.wsHost ||
+                prevPort != widget.settings.wsPort;
+            setState(() {
+              _mode = widget.settings.mode.name;
+              _selectedMac = widget.settings.mac;
+              _capture.enabled = widget.settings.captureAudio;
+            });
+            // 仅传输后端/设备/端点变化才重启链路；捕获开关不打断当前连接
+            if (_connected && linkChanged) {
+              unawaited(() async {
+                await _conn.stop();
+                await _connect();
+              }());
+            }
+          },
+        ),
       ),
-    ));
+    );
   }
 
   // ── misc ────────────────────────────────────────────────────────────
@@ -462,13 +482,15 @@ class _HomePageState extends State<HomePage> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text(widget.micBlockedNotice!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onErrorContainer,
-                              )),
+                          child: Text(
+                            widget.micBlockedNotice!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
+                            ),
+                          ),
                         ),
                         const Icon(Icons.settings, size: 18),
                       ],
@@ -484,13 +506,15 @@ class _HomePageState extends State<HomePage> {
                     isExpanded: true,
                     hint: const Text('选择会话'),
                     items: _sessions
-                        .map((s) => DropdownMenuItem(
-                              value: s.id,
-                              child: Text(
-                                s.title,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ))
+                        .map(
+                          (s) => DropdownMenuItem(
+                            value: s.id,
+                            child: Text(
+                              s.title,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
                         .toList(),
                     onChanged: _selectSession,
                     decoration: const InputDecoration(
@@ -507,8 +531,9 @@ class _HomePageState extends State<HomePage> {
                   tooltip: '新建会话',
                 ),
                 IconButton(
-                  onPressed:
-                      _currentSession == null ? null : () => _renameSession(),
+                  onPressed: _currentSession == null
+                      ? null
+                      : () => _renameSession(),
                   icon: const Icon(Icons.edit_outlined),
                   tooltip: '重命名会话',
                 ),
@@ -545,13 +570,15 @@ class _HomePageState extends State<HomePage> {
                       initialValue: _selectedMac,
                       isExpanded: true,
                       items: _devices
-                          .map((d) => DropdownMenuItem(
-                                value: d['address'] as String,
-                                child: Text(
-                                  '${d['name']} (${d['address']})',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ))
+                          .map(
+                            (d) => DropdownMenuItem(
+                              value: d['address'] as String,
+                              child: Text(
+                                '${d['name']} (${d['address']})',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
                           .toList(),
                       onChanged: _connected
                           ? null
@@ -572,17 +599,23 @@ class _HomePageState extends State<HomePage> {
                 ],
                 const SizedBox(width: 4),
                 FilledButton.icon(
-                  onPressed: (_connected || _connecting) ? _disconnect : _connect,
-                  icon: Icon(_connected
-                      ? Icons.link_off
-                      : _mode == 'ws'
-                          ? Icons.wifi
-                          : Icons.bluetooth),
-                  label: Text(_connected
-                      ? '断开'
-                      : _connecting
-                          ? '连接中'
-                          : '连接'),
+                  onPressed: (_connected || _connecting)
+                      ? _disconnect
+                      : _connect,
+                  icon: Icon(
+                    _connected
+                        ? Icons.link_off
+                        : _mode == 'ws'
+                        ? Icons.wifi
+                        : Icons.bluetooth,
+                  ),
+                  label: Text(
+                    _connected
+                        ? '断开'
+                        : _connecting
+                        ? '连接中'
+                        : '连接',
+                  ),
                 ),
               ],
             ),
@@ -611,8 +644,9 @@ class _HomePageState extends State<HomePage> {
                 child: Text(
                   '离线捕获中：未连接也可录音，松开即保存 .sppwire 捕获包',
                   style: TextStyle(
-                      fontSize: 11,
-                      color: Theme.of(context).colorScheme.outline),
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
                 ),
               ),
             const SizedBox(height: 10),
@@ -652,9 +686,10 @@ class _HomePageState extends State<HomePage> {
             if (_log.isNotEmpty)
               SizedBox(
                 height: 58,
-                child: Text(_log,
-                    style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 10)),
+                child: Text(
+                  _log,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+                ),
               ),
           ],
         ),

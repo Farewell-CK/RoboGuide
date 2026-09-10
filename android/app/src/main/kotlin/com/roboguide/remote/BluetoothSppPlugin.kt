@@ -57,14 +57,16 @@ class BluetoothSppPlugin(
     private var connected = false
 
     init {
-        eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                eventSink = events
-            }
-            override fun onCancel(arguments: Any?) {
-                eventSink = null
-            }
-        })
+            eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    eventSink = events
+                    Log.d(TAG, "event channel onListen; sink=${events != null}")
+                }
+                override fun onCancel(arguments: Any?) {
+                    eventSink = null
+                    Log.d(TAG, "event channel onCancel; sink=null")
+                }
+            })
         statusChannel.setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 statusSink = events
@@ -76,11 +78,15 @@ class BluetoothSppPlugin(
     }
 
     private fun emitData(data: Any?) {
-        val sink = eventSink ?: return
-        mainHandler.post {
-            sink.success(data)
+            val sink = eventSink
+            if (sink == null) {
+                Log.d(TAG, "emitData dropped: no eventSink (len=${(data as? ByteArray)?.size ?: -1})")
+                return
+            }
+            mainHandler.post {
+                sink.success(data)
+            }
         }
-    }
 
     private fun emitStatus(state: String, reason: String = "") {
         val sink = statusSink ?: return
@@ -221,14 +227,15 @@ class BluetoothSppPlugin(
         readThread = Thread {
             try {
                 val input = sock.inputStream
-                val buffer = ByteArray(4096)
-                while (connected) {
-                    val n = input.read(buffer)
-                    if (n <= 0) break
-                    val chunk = ByteArray(n)
-                    System.arraycopy(buffer, 0, chunk, 0, n)
-                    emitData(chunk)
-                }
+                                val buffer = ByteArray(4096)
+                                while (connected) {
+                                    val n = input.read(buffer)
+                                    if (n <= 0) break
+                                    Log.d(TAG, "read loop RX $n bytes; sink=${eventSink != null}")
+                                    val chunk = ByteArray(n)
+                                    System.arraycopy(buffer, 0, chunk, 0, n)
+                                    emitData(chunk)
+                                }
             } catch (e: IOException) {
                 Log.d(TAG, "read loop ended", e)
             } finally {
