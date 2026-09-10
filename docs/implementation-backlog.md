@@ -71,6 +71,22 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 - 延迟、恢复时间、资源冲突和任务完成的最小指标；
 - 导盲等后续领域场景如何通过领域层接入通用核心。
 
+### Mission Front-half 后续切片
+
+[`ADR-0030`](decisions/0030-mission-semantic-admission-and-deployability.md) 已将 Mission 语义接纳
+与当前部署可执行性分开。后续按独立合同切片处理，不能重新使用 live inventory 代替稳定语义：
+
+- 建立版本化 Canonical Capability Catalog 及参数/约束校验，明确区分 unknown contract 与
+  known-but-currently-unprovided contract；
+- 正规化 Role capability requirements 与 semantic ExecutionIntent，移除无必要的重复 contract
+  字段，同时保持 Local EAIOS 的 Local How authority；
+- 建立 Task expected effect / satisfaction evidence，使 Runtime execution terminal fact 不自动等于
+  physical or semantic goal satisfied；
+- 将用户 DialogueTurn 与内部 planning/review trace 分离，并为结构化 review issue、bounded repair
+  和重新 clarification 建立闭环；
+- 将用户/策略给出的 timing constraints 与 Runtime/State/候选节点提供的 duration estimate 及其
+  provenance 分离。
+
 ## 真机 Runtime 稳定基线 Gate
 
 [`ADR-0028`](decisions/0028-durable-command-recovery-and-attempts.md) 已完成 Runtime reliability

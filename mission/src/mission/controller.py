@@ -159,7 +159,7 @@ class InventoryNode:
         )
 
     def to_json(self) -> JSONObject:
-        """Serialize only the facts consumed by Mission Intelligence planning preflight."""
+        """Serialize bounded deployment facts without granting Mission admission authority."""
         return {
             "node_id": self.node_id,
             "reported_health": self.reported_health,
@@ -255,15 +255,19 @@ class SubmissionReceipt:
     detail: str
 
 
-class MissionController(Protocol):
-    """Read advisory inventory and submit complete accepted plans to Orchestration."""
-
-    def inventory(self) -> InventorySnapshot:
-        """Return the latest bounded inventory snapshot or raise a transport error."""
-        ...
+class MissionPlanSubmitter(Protocol):
+    """Submit semantically admitted plans without exposing deployment eligibility evidence."""
 
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit one complete plan and preserve Controller rejection details."""
+        ...
+
+
+class MissionController(MissionPlanSubmitter, Protocol):
+    """Combine plan submission with a separate advisory deployment-view operation."""
+
+    def inventory(self) -> InventorySnapshot:
+        """Return the latest bounded inventory snapshot or raise a transport error."""
         ...
 
 

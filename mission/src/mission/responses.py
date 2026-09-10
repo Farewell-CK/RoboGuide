@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mission.config import MissionSettings
-from mission.controller import InventorySnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.requests import IntentAssessment
@@ -306,7 +305,6 @@ class ResponsesMissionInterpreter:
         self,
         instruction: str,
         messages: tuple[str, ...],
-        inventory: InventorySnapshot,
     ) -> IntentAssessment:
         """Return grounded intent or explicit questions without decomposing or executing Tasks."""
         schema: JSONObject = {
@@ -327,7 +325,6 @@ class ResponsesMissionInterpreter:
                 {
                     "instruction": instruction,
                     "messages": list(messages),
-                    "inventory": inventory.to_json(),
                 },
                 ensure_ascii=False,
                 sort_keys=True,

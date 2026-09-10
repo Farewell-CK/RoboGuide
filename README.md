@@ -50,7 +50,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
 - 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
-  显式消费 objective、confirmed constraints 和 assumptions；
+  显式消费 objective、confirmed constraints 和 assumptions；Interpreter 不读取 live Node
+  inventory，当前无 provider 不再使合法 Mission 被 Mission Intelligence 拒绝；
 - Mission 输出使用 `contracts/mission/v0.4/` 中的版本化合同；v0.2/v0.3 作为兼容输入；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
   不绑定 NodeId 的 execution-time cross-role relation；
@@ -105,9 +106,13 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；存在
 open questions 时停在 `NeedsClarification`，不会创建 Execution Group。无歧义并通过
-inventory preflight 与部署风险策略后，Mission Intelligence 才把完整 MissionPlan 交给
-Orchestration。实现可以使用 LLM、VLM、符号规划器或混合方法，但不能直接进行跨节点资源
-绑定。该边界见 [`ADR-0018`](docs/decisions/0018-mission-intent-loop.md)。
+计划审查与部署风险策略后，Mission Intelligence 把完整 MissionPlan 交给 Orchestration。
+Interpreter 不消费 live Node/Resource inventory；Plan Accepted 只表示语义和合同可进入系统
+生命周期，不表示当前部署一定可调度。当前 provider、health、readiness 与资源证据只由
+Control Matching/Scheduling/Commit 使用。实现可以使用 LLM、VLM、符号规划器或混合方法，
+但不能直接进行跨节点资源绑定。该边界见
+[`ADR-0018`](docs/decisions/0018-mission-intent-loop.md) 与
+[`ADR-0030`](docs/decisions/0030-mission-semantic-admission-and-deployability.md)。
 
 ### Control Plane
 

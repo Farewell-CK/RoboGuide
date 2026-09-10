@@ -86,7 +86,7 @@ reference transport 和 configured command bridge 已
 | Controller composition | `core/orchestration` 中把 Node Protocol facts 接到 Control/State/Runtime 的 bridge | transport framing、Local EAIOS endpoint 或 reservation policy |
 | Node Service | 单一节点服务、声明式 Local Integration Engine、durable journal 与 Memory manifest ledger/reference fallback | 每种 EAIOS 的代码插件、真实 EAIOS Memory semantic/storage authority 或独立 RoboGuide 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
-| Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | Node assignment、Commit、Group/Runtime execution lifecycle |
+| Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | live inventory eligibility、Node assignment、Commit、Group/Runtime execution lifecycle |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 

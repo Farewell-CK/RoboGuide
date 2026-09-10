@@ -3,6 +3,10 @@
 - 状态：Accepted for Mission Request v0.1
 - 日期：2026-08-28
 
+> Follow-up: ADR-0030 removes live deployment inventory from Interpreter input and makes current
+> provider availability a Control scheduling concern. The inventory preflight below records the
+> original v0.1 decision and is no longer the current admission behavior.
+
 ## Context
 
 现有 `POST /v1/missions` 接受完整 MissionPlan，适合作为 Mission Intelligence 到

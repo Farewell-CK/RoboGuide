@@ -49,21 +49,20 @@ def test_request_contract_accepts_current_and_compatible_plan_versions() -> None
 
 
 class FakeInterpreter:
-    """Return scripted assessments and retain dialogue/inventory calls."""
+    """Return scripted assessments and retain deployment-independent dialogue calls."""
 
     def __init__(self, assessments: list[IntentAssessment]) -> None:
         """Initialize a finite assessment queue."""
         self.assessments = assessments
-        self.calls: list[tuple[str, tuple[str, ...], InventorySnapshot]] = []
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
 
     def interpret(
         self,
         instruction: str,
         messages: tuple[str, ...],
-        inventory: InventorySnapshot,
     ) -> IntentAssessment:
         """Record one grounding call and return its scripted result."""
-        self.calls.append((instruction, messages, inventory))
+        self.calls.append((instruction, messages))
         if not self.assessments:
             raise AssertionError("fake interpreter assessment queue is empty")
         return self.assessments.pop(0)
@@ -98,9 +97,11 @@ class FakeController:
         self.snapshot = inventory
         self.receipts = receipts or [SubmissionReceipt(True, 202, "Running")]
         self.submissions: list[MissionPlan] = []
+        self.inventory_calls = 0
 
     def inventory(self) -> InventorySnapshot:
-        """Return the current fake snapshot exactly once per engine processing pass."""
+        """Return the snapshot while exposing accidental admission-time reads."""
+        self.inventory_calls += 1
         return self.snapshot
 
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
@@ -254,30 +255,27 @@ def test_risk_policy_requires_revision_bound_approval(tmp_path: Path) -> None:
     assert len(controller.submissions) == 1
 
 
-def test_missing_capability_blocks_without_submission_and_retry_rechecks_inventory(
-    tmp_path: Path,
-) -> None:
-    """Advisory preflight blocks missing contracts and a later retry reads fresh inventory."""
-    interpreter = FakeInterpreter([_assessment(), _assessment()])
+def test_zero_current_providers_do_not_block_semantically_valid_mission(tmp_path: Path) -> None:
+    """A reviewed plan reaches Control even when advisory inventory has no provider."""
+    interpreter = FakeInterpreter([_assessment()])
     planner = FakePlanner()
     controller = FakeController(_inventory())
     engine = _engine(tmp_path, interpreter, planner, controller)
 
-    blocked = engine.create("执行明确的运输任务")
-    assert blocked.lifecycle is MissionRequestLifecycle.BLOCKED
-    assert blocked.issues[0].startswith("role requirement unavailable")
-    assert controller.submissions == []
+    accepted = engine.create("执行明确的运输任务")
 
-    controller.snapshot = _inventory(*_fixture_contracts())
-    accepted = engine.retry(blocked.request_id)
     assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
-    assert accepted.draft_revision == 2
+    assert accepted.draft_revision == 1
+    assert accepted.issues == ()
+    assert len(controller.submissions) == 1
+    assert controller.inventory_calls == 0
+    assert interpreter.calls == [("执行明确的运输任务", ())]
 
 
-def test_unavailable_coarse_capability_blocks_even_when_contract_is_registered(
+def test_live_capability_readiness_does_not_change_mission_admission(
     tmp_path: Path,
 ) -> None:
-    """Advisory preflight checks availability instead of trusting registration alone."""
+    """Mission admission does not duplicate Control's current readiness policy."""
     inventory = _inventory(*_fixture_contracts())
     node = inventory.nodes[0]
     controller = FakeController(
@@ -305,9 +303,9 @@ def test_unavailable_coarse_capability_blocks_even_when_contract_is_registered(
 
     record = engine.create("执行明确的运输任务")
 
-    assert record.lifecycle is MissionRequestLifecycle.BLOCKED
-    assert any("capability=compute" in issue for issue in record.issues)
-    assert controller.submissions == []
+    assert record.lifecycle is MissionRequestLifecycle.ACCEPTED
+    assert len(controller.submissions) == 1
+    assert controller.inventory_calls == 0
 
 
 def test_controller_rejection_remains_blocked_instead_of_fabricating_acceptance(

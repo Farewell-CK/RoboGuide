@@ -13,9 +13,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, cast
 
-from mission.controller import InventorySnapshot, MissionController
+from mission.controller import MissionPlanSubmitter
 from mission.intent import GroundedIntent
-from mission.models import JSONObject, JSONValue, MissionPlan, RoleRequirement
+from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planners import MissionPlanner
 
 MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.1"
@@ -93,13 +93,12 @@ class IntentAssessment:
 
 
 class MissionInterpreter(Protocol):
-    """Ground an instruction using dialogue and advisory inventory without executing it."""
+    """Ground an instruction from user dialogue without consulting deployment placement facts."""
 
     def interpret(
         self,
         instruction: str,
         messages: tuple[str, ...],
-        inventory: InventorySnapshot,
     ) -> IntentAssessment:
         """Return a normalized objective or explicit open questions."""
         ...
@@ -333,7 +332,7 @@ class MissionRequestEngine:
         store: MissionRequestStore,
         interpreter: MissionInterpreter,
         planner: MissionPlanner,
-        controller: MissionController,
+        controller: MissionPlanSubmitter,
         approval_required_contracts: frozenset[str],
         id_generator: IdGenerator = uuid_token,
         clock: Clock = unix_time_ms,
@@ -425,7 +424,7 @@ class MissionRequestEngine:
             return self._submit(record)
 
     def retry(self, request_id: str) -> MissionRequestRecord:
-        """Retry a failed or blocked deliberation from current dialogue and inventory."""
+        """Retry deliberation from dialogue or resubmit an unchanged rejected draft."""
         with self._lock:
             record = self.get(request_id)
             if record.lifecycle not in {
@@ -459,11 +458,10 @@ class MissionRequestEngine:
             )
 
     def _process(self, record: MissionRequestRecord) -> MissionRequestRecord:
-        """Interpret and plan until clarification, blocking, approval, or submission is required."""
+        """Interpret and plan until clarification, approval, or submission is required."""
         try:
             record = self._update(record, lifecycle=MissionRequestLifecycle.INTERPRETING)
-            inventory = self._controller.inventory()
-            assessment = self._interpreter.interpret(record.instruction, record.messages, inventory)
+            assessment = self._interpreter.interpret(record.instruction, record.messages)
             if assessment.open_questions:
                 return self._update(
                     record,
@@ -492,31 +490,6 @@ class MissionRequestEngine:
             )
             record = self._update(record, lifecycle=MissionRequestLifecycle.REVIEWING)
             contracts = _plan_contracts(plan)
-            missing = sorted(
-                {
-                    _requirement_label(
-                        role.capability,
-                        _contract_text(role),
-                        tuple((resource.kind, resource.units) for resource in role.resources),
-                    )
-                    for task in plan.tasks
-                    for role in task.roles
-                    if not inventory.supports_requirement(
-                        role.capability,
-                        _contract_text(role),
-                        tuple((resource.kind, resource.units) for resource in role.resources),
-                    )
-                }
-            )
-            if missing:
-                return self._update(
-                    record,
-                    lifecycle=MissionRequestLifecycle.BLOCKED,
-                    issues=tuple(
-                        f"role requirement unavailable in current inventory: {requirement}"
-                        for requirement in missing
-                    ),
-                )
             if contracts & self._approval_required_contracts:
                 return self._update(
                     record,
@@ -635,19 +608,3 @@ def _plan_contracts(plan: MissionPlan) -> frozenset[str]:
         for role in task.roles
         for contract in (role.execution.capability_contract,)
     )
-
-
-def _contract_text(role: RoleRequirement) -> str:
-    """Return one role contract through the validated MissionPlan object shape."""
-    contract = role.execution.capability_contract
-    return f"{contract.namespace}.{contract.name}@{contract.version}"
-
-
-def _requirement_label(
-    capability: str,
-    contract: str,
-    resources: tuple[tuple[str, int], ...],
-) -> str:
-    """Format one stable advisory requirement for an inspectable Blocked reason."""
-    resource = ",".join(f"{kind}:{units}" for kind, units in resources) or "none"
-    return f"capability={capability}, contract={contract}, resource={resource}"

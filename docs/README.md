@@ -43,6 +43,9 @@
 - [`decisions/0025-memory-provider-backend-and-workflow.md`](decisions/0025-memory-provider-backend-and-workflow.md)：Local Memory Provider、Node ledger/reference backend 与 EAIOS authority。
 - [`decisions/0026-execution-coupling-and-group-views.md`](decisions/0026-execution-coupling-and-group-views.md)：Execution Coupling Mode、Group view 与 peer channel lifecycle。
 - [`decisions/0027-runtime-coordination-evidence-completion.md`](decisions/0027-runtime-coordination-evidence-completion.md)：State restore freshness、typed shared-spatial relation、双端 peer readiness 与 implementation support gate。
+- [`decisions/0028-durable-command-recovery-and-attempts.md`](decisions/0028-durable-command-recovery-and-attempts.md)：durable command outbox、physical attempt history、恢复组合与应用 timer。
+- [`decisions/0029-bounded-joint-scheduling-and-future-reservations.md`](decisions/0029-bounded-joint-scheduling-and-future-reservations.md)：有界联合调度、Control calendar 与 future reservation 语义。
+- [`decisions/0030-mission-semantic-admission-and-deployability.md`](decisions/0030-mission-semantic-admission-and-deployability.md)：Mission 语义接纳与当前部署可执行性的 authority 分离。
 
 ## 历史架构
 

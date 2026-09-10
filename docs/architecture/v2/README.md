@@ -34,9 +34,12 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 
 外部用户入口是 Mission Request，而不是完整 MissionPlan。Mission Intelligence 在 instruction
 仍有 open questions 时停留在 `NeedsClarification`，不得创建 Group；只有无歧义并通过计划
-审查与部署风险策略后，才把内部 MissionPlan 提交给 Orchestration。Request/dialogue 的持久化
-属于 Mission Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见
-ADR-0018。
+审查与部署风险策略后，才把内部 MissionPlan 提交给 Orchestration。Interpreter 不读取实时
+Node/Resource inventory；当前部署是否有 provider 由 Control Capability Matching 判断，不是
+Mission 语义有效性的组成部分。Plan Accepted 不等于 immediately schedulable，零 Candidate 的
+Ready Task 可以保留并等待后续部署事实变化。Request/dialogue 的持久化属于 Mission
+Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见 ADR-0018 与
+ADR-0030。
 
 ## 3. 核心抽象
 

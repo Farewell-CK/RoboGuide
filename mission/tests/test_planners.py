@@ -10,7 +10,6 @@ from typing import cast
 
 import pytest
 from mission.config import MissionSettings, load_settings
-from mission.controller import InventorySnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject
 from mission.planners import FixturePlanner
@@ -193,10 +192,9 @@ def test_responses_interpreter_preserves_open_questions_before_planning() -> Non
     interpreter = ResponsesMissionInterpreter(
         _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
     )
-    inventory = InventorySnapshot(observed_at_ms=1, nodes=())
-
-    assessment = interpreter.interpret("一只可建图的机器狗", (), inventory)
+    assessment = interpreter.interpret("一只可建图的机器狗", ())
 
     assert assessment.open_questions == ("需要建立哪个区域的地图？",)
     assert len(transport.requests) == 1
-    assert "inventory" in cast(str, transport.requests[0][2]["input"])
+    request_input = json.loads(cast(str, transport.requests[0][2]["input"]))
+    assert request_input == {"instruction": "一只可建图的机器狗", "messages": []}

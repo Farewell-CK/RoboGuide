@@ -156,7 +156,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing
-  Controller API; it must not mirror execution lifecycle or choose physical nodes.
+  Controller API; its Interpreter does not consume live Node/Resource inventory, and current
+  provider absence is a Control scheduling condition rather than a Mission semantic rejection. It
+  must not mirror execution lifecycle or choose physical nodes.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace
