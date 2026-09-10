@@ -28,8 +28,8 @@ OpenCV、Eigen、Boost 和 Ceres Android 依赖仅在重新编译应用原生库
 ## 构建
 
 默认构建需要 Android SDK API 35 和 Java 17。将 `local.properties.example` 复制为
-`local.properties`，填写 `sdk.dir`；需要语音功能时还需填写 `asr.token` 和
-`tts.apiKey`。该文件已被 Git 忽略，不要提交真实凭据。默认使用预编译 VINS 库，macOS、
+`local.properties`，填写 `sdk.dir`。该文件已被 Git 忽略，不要提交真实凭据。
+默认使用预编译应用原生库，macOS、
 Linux 和 Windows 都可以直接构建：
 
 ```powershell
@@ -47,6 +47,18 @@ cp local.properties.example local.properties
 生成的 APK 位于 `app/build/outputs/apk/npu/debug/app-npu-debug.apk`。依赖已缓存时可为
 Gradle 命令增加 `--offline`。
 
+提交或分发前可用 Python 3.11+ 检查预编译库及最终 APK，避免源码里有 `.so`、
+安装包却漏装的情况（该工具不依赖 Android NDK）：
+
+```bash
+python3 tools/verify_native_package.py app/build/outputs/apk/npu/debug/app-npu-debug.apk
+```
+
+三个应用原生库放在 `app/src/main/jniLibs/arm64-v8a/`，RealSense 库放在
+`librealsense/src/main/jniLibs/arm64-v8a/`。另外四个推理库由 Gradle 的 AAR 依赖提供，
+不要再复制一份到 `jniLibs`，以免重复打包。检查工具核对这四个预编译文件，以及 APK
+中的全部八个库，检查 ELF 格式和 AArch64 架构；缺文件或只有 LFS 指针即报错退出。
+
 构建会检查三个应用预编译库是否为有效 ELF；缺少文件或只有 Git LFS 指针时会提示执行
 `git lfs pull` 并中止，防止生成无效 APK。只有修改 C++ 源码并重新生成这些库时才需要
 Android NDK 和 CMake；在 Windows 上执行准备脚本，再显式启用源码构建：
@@ -59,10 +71,27 @@ Android NDK 和 CMake；在 Windows 上执行准备脚本，再显式启用源�
 NPU 运行库仅在兼容的 MediaTek Neuron 设备上生效。桌面构建无法验证 D455F 真机、
 Neuron 可用性、GPS 或高德地图服务。
 
+## 导航交互
+
+输入目的地并点击搜索结果后，自动规划步行路线并启动导航、A* 和局部地图刷新。
+也可输入完整地址后按键盘“完成”。定位、路线请求或 VINS 未就绪时明确显示等待或错误；
+新请求会使旧请求回调失效，避免快速切换目的地后导航到旧地点。保留“结束导航”。
+
+方向提示在稳定时正常切换，连续变化时最多每秒切换一次；相同内容不重复更新。
+“停止”立即显示，停止后短暂的方向波动不会立即解除停止提示。该节流仅作用于提示，
+不降低语义、地图或 A* 的刷新频率。内置录音、ASR、TTS、语音命令与凭据配置已移除，
+由集成方统一实现语音。
+
+未进行室内同向标定时，以镜头当前前方为局部避障目标，地图仍为镜头朝上的局部地图；
+这不是地理北向导航。室内同向标定时，将手机顶部与 D455F 镜头同向，再点击按钮，
+之后会将地理路线目标换算为相机方向。同一 VINS 坐标系内持续复用标定。
+标定数值仍保存，但进程重新启动或 VINS 重建坐标系后，不把旧北向偏角套到新坐标系；
+自动回到镜头前方模式。如需地理方向引导，可再次执行室内同向标定。
+
 ## 来源核验
 
-已通过包名、版本号、文件大小及 SHA-256 将本源码与 `black.apk.1` 对应。提交前仅将
-硬编码的 ASR/TTS 凭据改为由 Git 忽略的 `local.properties` 注入。原 APK 的
+最初导入版本通过包名、版本号、文件大小及 SHA-256 与 `black.apk.1` 对应；
+当前版本在该基础上修改了导航交互并移除内置语音。原 APK 的
 SHA-256 为 `BE76C6C4982AD4DCD8F8B19F3D9B32FF9FA2A1A62A63F415206DBB2DA2E7719C`。
 APK、构建产物和本地采集数据不提交；再分发前请阅读随附的 VINS-Mono、OctoMap 和
 RealSense 许可证。

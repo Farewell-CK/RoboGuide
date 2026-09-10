@@ -210,7 +210,7 @@
         android:layout_marginTop="6dp"
         android:background="@color/nav_surface"
         android:padding="10dp"
-        android:text="方向未标定：可室外动态标定，或室内将手机顶部与 D455 镜头同向后标定"
+        android:text="默认镜头前方局部避障；地理方向未对齐。室内同向标定时请将手机顶部与镜头同向"
         android:textColor="@color/nav_muted"
         android:textSize="14sp" />
 
@@ -275,7 +275,7 @@
         android:id="@+id/toggleNavigationButton"
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:text="开始导航"
+        android:text="结束导航"
         android:textAllCaps="false"
         android:visibility="gone" />
 

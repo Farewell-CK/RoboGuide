@@ -26,27 +26,12 @@ final class DynamicHeadingCalibrator {
     private boolean collecting;
     private boolean ready;
     private double northOffsetDegrees = Double.NaN;
-    private String status = "未标定";
-    private boolean retainOnVinsRestart;
-
-    synchronized void load(SharedPreferences prefs) {
-        if (!prefs.getBoolean("heading_calibration_ready", false)) return;
-        double saved = prefs.getFloat("heading_calibration_offset", Float.NaN);
-        if (Double.isFinite(saved)) {
-            northOffsetDegrees = saved;
-            ready = true;
-            collecting = false;
-            retainOnVinsRestart = true;
-            status = String.format(java.util.Locale.CHINA,
-                    "已恢复标定：北向偏角 %+.1f°", northOffsetDegrees);
-        }
-    }
+    private String status = "默认镜头前方局部避障；地理方向未对齐（可选室内同向标定）";
 
     synchronized void save(SharedPreferences prefs) {
         if (!ready || !Double.isFinite(northOffsetDegrees)) return;
         prefs.edit().putBoolean("heading_calibration_ready", true)
                 .putFloat("heading_calibration_offset", (float) northOffsetDegrees).apply();
-        retainOnVinsRestart = true;
     }
 
     synchronized void start() {
@@ -62,22 +47,16 @@ final class DynamicHeadingCalibrator {
         offsetsDegrees.clear();
         anchor = null;
         collecting = false;
-        if (retainOnVinsRestart && ready && Double.isFinite(northOffsetDegrees)) {
-            status = String.format(java.util.Locale.CHINA,
-                    "已保留标定：VINS 重启后继续使用北向偏角 %+.1f°", northOffsetDegrees);
-        } else {
-            ready = false;
-            northOffsetDegrees = Double.NaN;
-            status = "VINS 已重启，需要重新动态标定";
-        }
+        // A reset creates arbitrary new world axes; an old offset is not valid here.
+        ready = false;
+        northOffsetDegrees = Double.NaN;
+        status = "默认镜头前方局部避障；地理方向未对齐（可选室内同向标定）";
     }
 
     synchronized boolean calibrateAligned(float phoneTrueHeadingDegrees, VinsMono.Pose pose) {
         offsetsDegrees.clear();
         anchor = null;
         collecting = false;
-        ready = false;
-        northOffsetDegrees = Double.NaN;
         if (!Float.isFinite(phoneTrueHeadingDegrees)) {
             status = "室内同向标定失败：等待手机方向传感器";
             return false;
@@ -173,7 +152,10 @@ final class DynamicHeadingCalibrator {
     synchronized double northOffsetDegrees() { return northOffsetDegrees; }
 
     synchronized float relativeTargetDegrees(float geographicBearingDegrees, VinsMono.Pose pose) {
-        if (!ready || pose == null || !pose.initialized) return Float.NaN;
+        if (pose == null || !pose.initialized) return Float.NaN;
+        // No north reference exists yet: allow camera-forward local avoidance, without
+        // pretending that a geographic bearing can be transformed into this frame.
+        if (!ready) return 0f;
         // VINS bearing convention used above: +Y is 0 degrees and +X is +90 degrees.
         double targetVinsBearing = normalizeDegrees(geographicBearingDegrees - northOffsetDegrees);
         double cameraForwardVinsBearing = -Math.toDegrees(pose.egoRightAxisYawRadians());

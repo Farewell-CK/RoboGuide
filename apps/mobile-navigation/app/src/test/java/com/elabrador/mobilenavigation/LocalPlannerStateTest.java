@@ -703,7 +703,7 @@ public class LocalPlannerStateTest {
 
         calibrator.resetForVinsRestart();
         assertFalse(calibrator.isReady());
-        assertTrue(calibrator.status().contains("重新动态标定"));
+        assertTrue(calibrator.status().contains("地理方向未对齐"));
     }
 
     @Test
@@ -745,6 +745,30 @@ public class LocalPlannerStateTest {
 
         calibrator.resetForVinsRestart();
         assertFalse(calibrator.isReady());
+    }
+
+    @Test
+    public void uncalibratedNavigationUsesCameraForwardWithoutClaimingNorth() {
+        DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
+        assertFalse(calibrator.isReady());
+        assertEquals(0f, calibrator.relativeTargetDegrees(175f, poseAt(1, 0, 60)), 0f);
+        assertEquals(0f, calibrator.relativeTargetDegrees(-90f, poseAt(2, 0, 120)), 0f);
+        assertTrue(Float.isNaN(calibrator.relativeTargetDegrees(0f, null)));
+    }
+
+    @Test
+    public void failedManualAlignmentPreservesValidSessionCalibration() {
+        DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
+        VinsMono.Pose pose = poseAt(1, 0, 0);
+        assertTrue(calibrator.calibrateAligned(40f, pose));
+        assertFalse(calibrator.calibrateAligned(Float.NaN, pose));
+        assertTrue(calibrator.isReady());
+        assertEquals(0f, calibrator.relativeTargetDegrees(40f, pose), 0.01f);
+        assertFalse(calibrator.calibrateAligned(40f, null));
+        assertTrue(calibrator.isReady());
+        calibrator.resetForVinsRestart();
+        assertFalse(calibrator.isReady());
+        assertEquals(0f, calibrator.relativeTargetDegrees(150f, poseAt(2, 0, 90)), 0f);
     }
 
     private static void fillObstacle(int[][] map, int firstRow, int lastRow,

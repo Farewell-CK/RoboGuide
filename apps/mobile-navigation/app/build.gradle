@@ -2,17 +2,6 @@ plugins {
     id 'com.android.application'
 }
 
-def localProperties = new Properties()
-def localPropertiesFile = rootProject.file('local.properties')
-if (localPropertiesFile.exists()) {
-    localPropertiesFile.withInputStream { localProperties.load(it) }
-}
-def localString = { String key ->
-    def value = localProperties.getProperty(key, '')
-            .replace('\\', '\\\\')
-            .replace('"', '\\"')
-    return '"' + value + '"'
-}
 def buildNativeFromSource = providers.gradleProperty('buildNativeFromSource')
         .orElse(providers.gradleProperty('buildVinsFromSource'))
         .map { it.toBoolean() }
@@ -26,11 +15,9 @@ android {
         applicationId 'com.elabrador.mobilenavigation'
         minSdk 24
         targetSdk 35
-        versionCode 85
-        versionName '0.9.60'
+        versionCode 86
+        versionName '0.9.61'
         testInstrumentationRunner 'com.elabrador.mobilenavigation.SemanticBenchmarkInstrumentation'
-        buildConfigField 'String', 'ASR_TOKEN', localString('asr.token')
-        buildConfigField 'String', 'TTS_API_KEY', localString('tts.apiKey')
 
         externalNativeBuild {
             cmake {

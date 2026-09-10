@@ -72,7 +72,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MobileNavigation";
-    private static final String DEFAULT_ASR_TOKEN = BuildConfig.ASR_TOKEN;
     private static final int CAMERA_PERMISSION_REQUEST = 10;
     private static final int LOCATION_PERMISSION_REQUEST = 11;
     private static final float VALID_MIN_METERS = 0.25f;
@@ -156,18 +155,17 @@ public class MainActivity extends AppCompatActivity {
     private volatile long latestLocalPlanCompletedNanos;
     private volatile long latestLocalPlanInputAgeNanos = -1L;
     private volatile boolean hasValidLocalPlanDisplay;
-    private String displayedGuidance = "";
-    private long displayedGuidanceNanos;
     private volatile boolean vinsInitialized;
     private volatile int vinsResetCount;
     private int consecutiveUninitializedPoses;
     private volatile long latestVinsPoseNanos;
+    private final GuidanceStabilizer guidanceStabilizer = new GuidanceStabilizer();
+    private long destinationGeneration;
     private Runnable pendingDestinationSearch;
     private AmapRouteClient.PlaceSuggestion selectedDestination;
     private boolean applyingSuggestion;
     private volatile SemanticSegmenter.Result latestSemanticResult =
             SemanticSegmenter.Result.waiting();
-    private VoiceNavigationController voiceNavigation;
     private PowerManager.WakeLock navigationWakeLock;
 
     private TextView cameraStatusText;
@@ -260,7 +258,8 @@ public class MainActivity extends AppCompatActivity {
         amapKeyInput.setText(getPreferences(MODE_PRIVATE).getString("amap_web_key", ""));
         calibrateAlignedButton.setOnClickListener(this::calibrateAlignedHeading);
         toggleNavigationButton.setOnClickListener(this::toggleNavigation);
-        dynamicHeadingCalibrator.load(getPreferences(MODE_PRIVATE));
+        // A geographic offset belongs to one VINS world frame, not to every new session.
+        getPreferences(MODE_PRIVATE).edit().remove("asr_token").apply();
         renderDynamicHeadingCalibration();
         destinationInput.addTextChangedListener(new TextWatcher() {
             @Override
@@ -270,6 +269,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onTextChanged(CharSequence text, int start, int before, int count) {
                 if (!applyingSuggestion) {
+                    destinationGeneration++;
                     selectedDestination = null;
                     scheduleDestinationSearch(text.toString().trim());
                 }
@@ -278,6 +278,14 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void afterTextChanged(Editable text) {
             }
+        });
+
+        destinationInput.setOnEditorActionListener((view, action, event) -> {
+            if (action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                planWalkingRoute(null);
+                return true;
+            }
+            return false;
         });
 
         phonePoseTracker = new PhonePoseTracker(this, new PhonePoseTracker.Listener() {
@@ -395,10 +403,6 @@ public class MainActivity extends AppCompatActivity {
             semanticSegmenter.close();
             semanticSegmenter = null;
         }
-        if (voiceNavigation != null) {
-            voiceNavigation.close();
-            voiceNavigation = null;
-        }
         searchHandler.removeCallbacksAndMessages(null);
         localPlanHandler.removeCallbacksAndMessages(null);
         vinsExecutor.shutdownNow();
@@ -473,11 +477,13 @@ public class MainActivity extends AppCompatActivity {
 
         getPreferences(MODE_PRIVATE).edit().putString("amap_web_key", key).apply();
         stopNavigationAndClearRoute();
+        final long requestGeneration = destinationGeneration;
         routeStatusText.setText("正在查询目的地和步行路线…");
         AmapRouteClient.Callback callback = new AmapRouteClient.Callback() {
             @Override
             public void onSuccess(AmapRouteClient.RouteResult result) {
                 runOnUiThread(() -> {
+                    if (requestGeneration != destinationGeneration || isDestroyed()) return;
                     currentRoute = result;
                     routeFollower.setRoute(result);
                     resetLocalPlanning();
@@ -487,10 +493,8 @@ public class MainActivity extends AppCompatActivity {
                             result.destinationName,
                             result.distanceMeters / 1000f,
                             Math.max(1, Math.round(result.durationSeconds / 60f))));
-                    toggleNavigationButton.setText("开始导航");
                     toggleNavigationButton.setEnabled(true);
                     toggleNavigationButton.setVisibility(View.VISIBLE);
-                    navigationStatusText.setText("路线已就绪，点击“开始导航”后实时跟随位置");
                     navigationStatusText.setVisibility(View.VISIBLE);
                     // A place suggestion selection completes route planning and starts navigation.
                     toggleNavigation(null);
@@ -500,7 +504,8 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
-                    routeStatusText.setText(message);
+                    if (requestGeneration != destinationGeneration || isDestroyed()) return;
+                    routeStatusText.setText(message + "；可重新选择地点重试");
                 });
             }
         };
@@ -527,6 +532,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         navigationActive = true;
+        guidanceStabilizer.reset();
         if (navigationWakeLock != null && !navigationWakeLock.isHeld()) {
             navigationWakeLock.acquire();
         }
@@ -534,33 +540,19 @@ public class MainActivity extends AppCompatActivity {
         requestLocalPlanRefresh();
         toggleNavigationButton.setText("结束导航");
         updateNavigationGuidance();
-        if (voiceNavigation != null) voiceNavigation.speakCritical("开始导航");
-    }
-
-    private void pauseNavigation() {
-        navigationActive = false;
-        releaseNavigationWakeLock();
-        resetLocalPlanning();
-        guidanceText.setText("");
-        toggleNavigationButton.setText("继续导航");
-        navigationStatusText.setText("导航已暂停，路线仍然保留");
-        if (voiceNavigation != null) {
-            voiceNavigation.resetGuidance();
-            voiceNavigation.speak("导航已暂停");
-        }
     }
 
     private void endNavigation() {
         stopNavigationAndClearRoute();
         guidanceText.setText("");
-        if (voiceNavigation != null) voiceNavigation.speakCritical("导航结束");
     }
 
     private void stopNavigationAndClearRoute() {
+        destinationGeneration++;
+        guidanceStabilizer.reset();
         navigationActive = false;
         releaseNavigationWakeLock();
         guidanceText.setText("");
-        if (voiceNavigation != null) voiceNavigation.resetGuidance();
         resetLocalPlanning();
         currentRoute = null;
         routeFollower.clear();
@@ -590,7 +582,7 @@ public class MainActivity extends AppCompatActivity {
         VinsMono.Pose pose = latestVinsPose;
         float cameraRelativeTarget = dynamicHeadingCalibrator.relativeTargetDegrees(
                 guidance.targetBearingDegrees, pose);
-        String cameraTarget = Float.isFinite(cameraRelativeTarget)
+        String cameraTarget = dynamicHeadingCalibrator.isReady() && Float.isFinite(cameraRelativeTarget)
                 ? String.format(Locale.CHINA, "D455 局部目标 %+.0f°", cameraRelativeTarget)
                 : dynamicHeadingCalibrator.status();
         String deviation = guidance.offRoute
@@ -615,11 +607,12 @@ public class MainActivity extends AppCompatActivity {
 
         if (guidance.arrived) {
             navigationActive = false;
+            releaseNavigationWakeLock();
+            guidanceStabilizer.reset();
             resetLocalPlanning();
             toggleNavigationButton.setText("导航完成");
             toggleNavigationButton.setEnabled(false);
             guidanceText.setText("");
-            if (voiceNavigation != null) voiceNavigation.speakCritical("导航结束");
         }
     }
 
@@ -718,12 +711,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        final long searchGeneration = destinationGeneration;
         showSuggestionStatus("正在搜索附近地点…");
         amapRouteClient.searchNearby(key, lastLocation, keyword, new AmapRouteClient.SearchCallback() {
             @Override
             public void onSuccess(List<AmapRouteClient.PlaceSuggestion> suggestions) {
                 runOnUiThread(() -> {
-                    if (!destinationInput.getText().toString().trim().equals(keyword)) {
+                    if (searchGeneration != destinationGeneration || isDestroyed()
+                            || !destinationInput.getText().toString().trim().equals(keyword)) {
                         return;
                     }
                     showDestinationSuggestions(suggestions);
@@ -733,7 +728,8 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
-                    if (destinationInput.getText().toString().trim().equals(keyword)) {
+                    if (searchGeneration == destinationGeneration && !isDestroyed()
+                            && destinationInput.getText().toString().trim().equals(keyword)) {
                         showSuggestionStatus(message);
                     }
                 });
@@ -775,6 +771,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectDestinationSuggestion(AmapRouteClient.PlaceSuggestion suggestion) {
+        if (pendingDestinationSearch != null) searchHandler.removeCallbacks(pendingDestinationSearch);
         selectedDestination = suggestion;
         applyingSuggestion = true;
         destinationInput.setText(suggestion.name);
@@ -1526,19 +1523,14 @@ public class MainActivity extends AppCompatActivity {
             color = R.color.nav_warning;
         }
 
-        long nowNanos = SystemClock.elapsedRealtimeNanos();
-        if (!guidance.equals(displayedGuidance)
-                && displayedGuidanceNanos != 0L
-                && nowNanos - displayedGuidanceNanos < TimeUnit.SECONDS.toNanos(1)) {
-            guidance = displayedGuidance;
-        } else if (!guidance.equals(displayedGuidance)) {
-            displayedGuidance = guidance;
-            displayedGuidanceNanos = nowNanos;
-        }
-        guidanceText.setText(guidance);
-        guidanceText.setTextColor(ContextCompat.getColor(this, color));
-        if (navigationActive && voiceNavigation != null) {
-            voiceNavigation.announceGuidance(guidance);
+        guidance = guidanceStabilizer.update(guidance, navigationActive,
+                SystemClock.elapsedRealtime());
+        color = "停止".equals(guidance) ? R.color.nav_danger
+                : "直走".equals(guidance) ? R.color.nav_safe
+                : guidance.isEmpty() ? R.color.nav_muted : R.color.nav_warning;
+        if (!guidance.contentEquals(guidanceText.getText())) {
+            guidanceText.setText(guidance);
+            guidanceText.setTextColor(ContextCompat.getColor(this, color));
         }
     }
 
@@ -1568,7 +1560,7 @@ public class MainActivity extends AppCompatActivity {
         float relativeTarget = dynamicHeadingCalibrator.relativeTargetDegrees(
                 guidance.targetBearingDegrees, latestVinsPose);
         if (!Float.isFinite(relativeTarget)) {
-            return LocalPlanner.PathResult.waiting(dynamicHeadingCalibrator.status());
+            return LocalPlanner.PathResult.waiting("等待有效 VINS 位姿");
         }
         float radians = (float) Math.toRadians(relativeTarget);
         float targetRow = (float) Math.cos(radians);
