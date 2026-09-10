@@ -180,6 +180,8 @@ class PreparedSystem:
 
     ``system_version`` comes from the configured version probe command (for
     example ``git rev-parse HEAD`` inside the EMOS checkout) when available.
+    ``dataset_digest`` carries the ExperimentSpec's pinned dataset digest so
+    system runners can verify read-only dataset lookups against it.
     """
 
     system: str
@@ -187,6 +189,7 @@ class PreparedSystem:
     environment_spec: EnvironmentSpec
     system_version: str | None
     config_digest: str
+    dataset_digest: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +310,7 @@ class ProcessSystemRunner:
             environment_spec=environment_spec,
             system_version=system_version,
             config_digest=spec_digest(experiment),
+            dataset_digest=experiment.dataset.digest,
         )
 
     def _probe_version(self, process_spec: ProcessSpec) -> str | None:

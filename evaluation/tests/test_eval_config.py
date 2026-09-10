@@ -89,7 +89,7 @@ def test_committed_e1_smoke_spec_loads_with_expected_shape() -> None:
     # No per-system metrics file requirements: official EMOS outputs are the
     # raw evidence and the runner canonicalizes them directly.
     assert spec.environments == {}
-    assert spec.timeout_seconds == 900
+    assert spec.timeout_seconds == 1800
 
 
 def test_spec_rejects_wrong_schema_version(make_spec: SpecFactory) -> None:
@@ -133,7 +133,7 @@ def test_spec_rejects_invalid_enumerated_fields(make_spec: SpecFactory) -> None:
     with pytest.raises(ExperimentSpecError, match="duplicate"):
         load_experiment_spec(make_spec(base.replace("- emos\n  - roboguide", "- emos\n  - emos")))
     with pytest.raises(ExperimentSpecError, match="positive number"):
-        load_experiment_spec(make_spec(base.replace("timeout_seconds: 900", "timeout_seconds: 0")))
+        load_experiment_spec(make_spec(base.replace("timeout_seconds: 1800", "timeout_seconds: 0")))
     with pytest.raises(ExperimentSpecError, match="nonnegative"):
         load_experiment_spec(make_spec(base.replace("seeds:\n  - 7", "seeds:\n  - -1")))
 
@@ -300,3 +300,32 @@ def test_resolve_process_spec_rejects_missing_workdir(
     overrides = load_local_config(config_path)["emos"]
     with pytest.raises(EvaluationConfigError, match="does not exist"):
         resolve_process_spec(spec, "emos", overrides, environment={})
+
+
+def test_resolve_process_spec_carries_and_validates_dataset_path(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+) -> None:
+    """dataset_path lands on the ProcessSpec and fails closed when absent."""
+    spec = load_experiment_spec(make_spec())
+    dataset_file = tmp_path / "episodes.json.gz"
+    dataset_file.write_bytes(b"payload")
+    config_path = make_local_config(
+        local_config_yaml(
+            fixture_workdir, extra_lines=f"    dataset_path: {dataset_file.as_posix()}\n"
+        )
+    )
+    overrides = load_local_config(config_path)["emos"]
+    resolved = resolve_process_spec(spec, "emos", overrides, environment={})
+    assert resolved.dataset_path == dataset_file
+    missing_config = make_local_config(
+        local_config_yaml(
+            fixture_workdir,
+            extra_lines=f"    dataset_path: {tmp_path / 'missing.json.gz'}\n",
+        )
+    )
+    missing_overrides = load_local_config(missing_config)["emos"]
+    with pytest.raises(EvaluationConfigError, match="dataset_path does not exist"):
+        resolve_process_spec(spec, "emos", missing_overrides, environment={})

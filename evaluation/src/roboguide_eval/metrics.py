@@ -131,6 +131,34 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
     MetricDefinition(
         "control_plane_memory_bytes", "integer", "bytes", "reserved: control-plane memory overhead"
     ),
+    MetricDefinition(
+        "token_input_usage",
+        "integer",
+        "tokens",
+        "prompt/input tokens from per-call usage records; unavailable without the "
+        "benchmark accounting instrumentation (see evaluation/README.md)",
+    ),
+    MetricDefinition(
+        "token_output_usage",
+        "integer",
+        "tokens",
+        "completion/output tokens from per-call usage records; unavailable without the "
+        "benchmark accounting instrumentation",
+    ),
+    MetricDefinition(
+        "cached_prompt_tokens",
+        "integer",
+        "tokens",
+        "prompt tokens served from provider cache; unavailable unless the upstream "
+        "reports cached-token detail",
+    ),
+    MetricDefinition(
+        "reasoning_tokens",
+        "integer",
+        "tokens",
+        "reasoning tokens inside completions; unavailable unless the upstream reports "
+        "reasoning-token detail",
+    ),
 )
 
 _REGISTRY: Final[Mapping[str, MetricDefinition]] = {

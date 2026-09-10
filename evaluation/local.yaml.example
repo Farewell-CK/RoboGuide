@@ -33,6 +33,7 @@ environments:
       - "habitat_baselines.num_environments=1"
       - "habitat.seed={seed}"
       - "habitat.environment.iterator_options.num_episode_sample=1"
+      - "habitat_baselines.test_episode_count=1"
       - "habitat.environment.iterator_options.shuffle=False"
       # Keep run outputs inside the harness run directory as raw evidence.
       - "habitat_baselines.video_dir={output_dir}/video"
@@ -45,6 +46,17 @@ environments:
       # GPU 0 is reserved for other work on this machine.
       CUDA_VISIBLE_DEVICES: "1"
     version_probe_command: ["git", "rev-parse", "HEAD"]
+    # Pinned benchmark episodes file; the runner reads it read-only and
+    # verifies its SHA-256 against the spec's dataset digest before
+    # resolving scene ids / dataset indices.
+    dataset_path: /data/workspace/code/emos-baseline/data/datasets/mp3d/mobility_episodes_1.json.gz
+    # Note: token evidence needs no configuration — EMOS writes
+    # chat_history_output/<date>/<config>/<ablation>/<episode_id>/
+    # token_usage.json by default and the runner locates the fresh file via
+    # a prepare-time snapshot diff. Also note the mobility measurements list
+    # includes "composite_stage_goals", which IS the PddlStageGoals
+    # measurement (config-store name vs uuid differ) — no override needed
+    # and no KeyError occurs at episode reset.
   roboguide:
     # Placeholder until the habitat bridge drives the real Controller path.
     working_directory: /data/workspace/code/RoboGuide

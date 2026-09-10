@@ -101,6 +101,21 @@ def _parser() -> argparse.ArgumentParser:
         "--results", type=Path, required=True, help="run or results root directory"
     )
     summarize.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+
+    proxy = subparsers.add_parser(
+        "proxy",
+        help="run the local LLM accounting proxy (forwards to the real endpoint, records usage)",
+    )
+    proxy.add_argument("--upstream", required=True, help="real OpenAI-compatible endpoint base URL")
+    proxy.add_argument(
+        "--port", type=int, default=8901, help="local port to listen on (default 8901)"
+    )
+    proxy.add_argument(
+        "--log",
+        type=Path,
+        required=True,
+        help="NDJSON accounting log path (one record per LLM call)",
+    )
     return parser
 
 
@@ -427,6 +442,43 @@ def _summarize(arguments: argparse.Namespace) -> int:
     return 0 if run_entries else 1
 
 
+def _proxy(arguments: argparse.Namespace) -> int:
+    """Execute the proxy subcommand: serve until interrupted.
+
+    Args:
+        arguments: Parsed CLI arguments (upstream, port, log path).
+
+    Returns:
+        Process exit code: zero after a clean shutdown, one on startup
+        failure (unusable port or log path).
+    """
+    from roboguide_eval.accounting import AccountingProxyConfig, AccountingProxyServer
+
+    config = AccountingProxyConfig(
+        upstream_base_url=arguments.upstream,
+        log_path=arguments.log,
+    )
+    try:
+        server = AccountingProxyServer(("127.0.0.1", arguments.port), config)
+    except OSError as error:
+        print(f"error: cannot bind accounting proxy: {error}", file=sys.stderr)
+        return 1
+    bound_host, bound_port = server.server_address[:2]
+    print(
+        f"accounting proxy listening on http://{str(bound_host)}:{bound_port}"
+        f" -> {arguments.upstream}"
+    )
+    print(f"accounting log: {arguments.log}")
+    print("point the system's OPENAI_BASE_URL at this address; Ctrl+C to stop")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("accounting proxy stopped")
+    finally:
+        server.server_close()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the requested subcommand and return a process-compatible status.
 
@@ -441,4 +493,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _doctor(arguments)
     if arguments.command == "run":
         return _run(arguments)
+    if arguments.command == "proxy":
+        return _proxy(arguments)
     return _summarize(arguments)

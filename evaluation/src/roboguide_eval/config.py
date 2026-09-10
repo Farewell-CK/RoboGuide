@@ -73,6 +73,7 @@ class EnvironmentOverrides:
     environment_variables: Mapping[str, str] | None = None
     readiness_command: tuple[str, ...] | None = None
     version_probe_command: tuple[str, ...] | None = None
+    dataset_path: str | None = None
 
 
 def _table(value: object, path: str) -> SpecTable:
@@ -478,6 +479,7 @@ def _parse_overrides(table: SpecTable, path: str) -> EnvironmentOverrides:
         "environment_variables",
         "readiness_command",
         "version_probe_command",
+        "dataset_path",
     }
     unknown = sorted(set(table) - allowed)
     if unknown:
@@ -523,6 +525,7 @@ def _parse_overrides(table: SpecTable, path: str) -> EnvironmentOverrides:
         environment_variables=variables,
         readiness_command=argv_list("readiness_command"),
         version_probe_command=argv_list("version_probe_command"),
+        dataset_path=text("dataset_path"),
     )
 
 
@@ -606,6 +609,7 @@ def _apply_environment_overrides(
         environment_variables=overrides.environment_variables,
         readiness_command=overrides.readiness_command,
         version_probe_command=overrides.version_probe_command,
+        dataset_path=overrides.dataset_path,
     )
 
 
@@ -669,6 +673,13 @@ def resolve_process_spec(
     if merged.conda_environment:
         argv = list(conda_run_prefix(conda_command, merged.conda_environment)) + argv
     timeout = environment_spec.timeout_seconds or spec.timeout_seconds
+    dataset_path = None
+    if merged.dataset_path:
+        dataset_path = Path(merged.dataset_path)
+        if not dataset_path.is_file():
+            raise EvaluationConfigError(
+                f"system {system!r} dataset_path does not exist: {dataset_path}"
+            )
     return ProcessSpec(
         argv=tuple(argv),
         working_directory=working_directory,
@@ -677,4 +688,5 @@ def resolve_process_spec(
         conda_environment=merged.conda_environment,
         readiness_command=merged.readiness_command,
         version_probe_command=merged.version_probe_command,
+        dataset_path=dataset_path,
     )

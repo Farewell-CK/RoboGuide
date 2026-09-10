@@ -77,31 +77,71 @@ RoboGuide 执行。因此 manifest 的 `episode_selection` 区分两层：
 - **selector**：spec 的 episode 标签（如 `seed-pinned-sample`）+ seed ——
   描述"如何选取"，不是 episode id；
 - **resolution**：从官方输出解析出的真实身份——`resolved_episode_id`、
-  `resolved_scene_id`、`dataset_index`（可获得时）、`evidence_source` 与
-  `status`（`resolved` / `multiple-episodes` / `unresolved` + reason）。
+  `resolved_scene_id`、`dataset_index`、`dataset_record`、`evidence_source`
+  列表与 `status`（`resolved` / `multiple-episodes` / `unresolved` + reason）。
 
 回答"EMOS run X 和 RoboGuide run Y 是否同一 benchmark episode"看
-`resolved_episode_id`（必要时配合 dataset digest）。**不伪造**：解析不到就
-unresolved 并记录原因。当前 EMOS 的 resolved identity 来源见下节；
-`resolved_scene_id` 官方 stdout 不打印，标记为 null 并注明可由 pinned
-dataset 推导（后续切片）。
+`resolved_episode_id` + `dataset_record`（配合 spec 的 dataset digest）。
+**不伪造**：解析不到就 unresolved/partial 并记录原因。
+
+**scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
+`dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不
+import Habitat/EMOS），并先校验文件 SHA-256 与 spec 的 dataset digest 一致；
+episode id 在 dataset 内唯一时给出 `resolved_scene_id` / `dataset_index` /
+`dataset_record`，digest 不匹配、id 缺失或重复时给出显式 `dataset_status`
+（`digest-mismatch` / `not-found` / `ambiguous`），不猜。未配置 `dataset_path`
+时 `dataset_status: not-configured`，scene 保持 null。
 
 ## EMOS 官方输出与 metric 来源
 
 | canonical metric | 官方来源 | 说明 |
 | --- | --- | --- |
-| success | stdout `Average episode pddl_success:`（evaluator 聚合） | 仅单 episode run 映射为布尔（均值≥0.5）；批次保留均值在 details，不布尔化 |
-| subgoal_success_rate | evaluator 聚合中的 subgoal 指标 | mobility 任务无 stage-goal measurement → 当前 unavailable |
+| success | evaluator 摘要 `Average episode pddl_success:`（**stderr**，logger 格式） | stdout+stderr 双流合并解析；仅单 episode run 映射为布尔（均值≥0.5）；批次保留均值在 details，不布尔化 |
+| subgoal_success_rate | 官方 `pddl_stage_goals.<stage>_success` 聚合的均值 | mobility 的 stage-goal measurement（经 `composite_stage_goals` 配置节点注册）在 evaluator 摘要中输出 per-stage 成功率；其均值为 rate，原始 stage 值保留在 `details.emos_stage_goal_success` |
 | simulation_steps | stdout `Episode ID: <id>, Num Steps: <n>` 官方横幅 | habitat `Env.log_episode_steps` 在 env reset 时打印 |
-| token_usage | `chat_history_output/<episode_id>/token_usage.json` | EMOS 自带的 per-agent 实际 usage 总计（默认开启）；复制进 run 目录 `raw-evidence/` |
+| token_usage | `chat_history_output/<date>/<config>/<ablation>/<episode_id>/token_usage.json` | EMOS 自带 per-agent 实际 usage total（`MultiLLMPolicy.act` 构造的嵌套布局，默认开启）；按 prepare 快照差异定位本次新写的文件，复制进 run 目录 `raw-evidence/` 并记录 source path |
 | wall_time | Harness 实测进程时长 | `details.wall_time_source = harness_process_duration` 标注来源 |
+
+> **evaluator 摘要在 stderr**：habitat-baselines 的聚合摘要走 Python
+> `logging`（默认 stderr，带时间戳前缀），横幅走 `print`（stdout）——
+> 两者都已对真实 run 验证，解析器合并双流。
+
+> **token 成本细分是 harness 侧记账职责**：EMOS 只记录 per-agent
+> `total_tokens`；input/output/cached/reasoning 的细分由 **EMOS 侧最小记账
+> 插桩**提供——`habitat_mas/utils/models.py` 中每个 LLM 调用通过
+> `_record_usage` 把完整 `usage` 对象 + 时间戳 + 延迟追加写入 episode 目录
+> 的 `token_usage_details.jsonl`（instrumentation only：不触碰 task
+> assignment / reflection / execution 任何算法路径，且 RoboGuide 臂将来复用
+> 同一 CrabAgent 栈时测量自动对称）。EmosRunner 按快照差异定位本次新写的
+> 明细文件，复制进 run 目录 `raw-evidence/` 并记录 source path，聚合成
+> canonical 细分（`token_input_usage` / `token_output_usage` 直接可得；
+> `cached_prompt_tokens` / `reasoning_tokens` 在上游 usage 携带明细时可得，
+> 否则 unavailable 并说明原因）。
+>
+> 本地记账代理（`roboguide-eval proxy`）保留为**诊断工具**：不改 baseline
+> 的透明转发 + 落盘，用于排查中转问题或交叉核对——`--upstream` 必须是不带
+> `/v1` 的根地址，`OPENAI_BASE_URL` 指向 `http://127.0.0.1:<port>/v1`。
+> TTFT 在 baseline 非流式调用下不可观测，如实不记录（插桩记录的是每次调用
+> 的请求/响应时间戳与总延迟）。
+>
+> **成本分析语义**（`cached ⊆ input`）：上游语义中 `cached_tokens` 是
+> `prompt_tokens` 的**子集**（canonical `token_input_usage` 包含缓存命中
+> 部分）。有效输入成本 = `(input − cached) + cached × 缓存单价`；直接拿
+> `token_input_usage` 乘全价会重复计费缓存部分。实测参考：mobility smoke
+> 一次 run 的 input 41436 中 18432（44.5%）为缓存命中——两臂/多 run 对比
+> 时必须披露缓存命中差异或按有效成本归一。批次 run（一次进程跑多个
+> episode）的 per-episode token 归因暂缓，五个 token 字段显式 unavailable。
 
 episode identity 的解析顺序：stdout 官方横幅（首选）→ `episode_log/**/
 *_steps_log.json` 相对上一 run 后刷新的 baseline 的新增记录（回退，每个 run
-只归属自己新增的记录）。横幅时机已对源码验证：habitat `VectorEnv` 默认
-`auto_reset_done=True`，episode done 的那次 step 自动 reset 并打印刚结束
-episode 的横幅——**包括最后一个/唯一一个 episode**；回退路径保留作非标准
-执行栈的纵深防御。
+只归属自己新增的记录）→ scene/index 由 digest 校验后的 pinned dataset 补全。
+横幅时机已对源码验证：habitat `VectorEnv` 默认 `auto_reset_done=True`，
+episode done 的那次 step 自动 reset 并打印刚结束 episode 的横幅——**包括
+最后一个/唯一一个 episode**；回退路径保留作非标准执行栈的纵深防御。
+
+token 定位防串场：同一 episode id 的历史 token 记录（不同日期目录）永远
+不作为本次证据——只有相对 prepare 快照新建或变更的文件才算，多于一处变
+更时显式 ambiguous，找不到时 unavailable 并说明原因。
 
 **可用性策略**：没有可靠官方来源的 metric 一律缺失，不填 0、不猜测，原因
 记录在 `details.unavailable_metrics`。此外 runner 写入前强制执行 canonical
@@ -223,8 +263,12 @@ episode 身份由 `EmosRunner` 从官方输出解析后写入 manifest 的
   （现由 local.yaml 模板承载）、RoboGuide Controller 路径驱动（保持
   placeholder，等 Task/Role/ExecutionIntent 语义人工冻结后接 Habitat
   bridge）、Habitat bridge。
-- Benchmark 侧观察（只报告，不修改 EMOS）：habitat 的
-  `Env.log_episode_steps` 在写 subgoals 文件时直接访问
-  `measures['pddl_stage_goals']`；mobility 任务未注册该 measurement，首次
-  真实 mobility run 可能因此 KeyError——届时可通过命令行 override 注册该
-  measurement 解决（benchmark 配置层），无需改 EMOS 代码。
+- Benchmark 侧观察（已对源码证伪的旧担忧，记录结论防止复发）：此前怀疑
+  `Env.log_episode_steps` 访问 `measures['pddl_stage_goals']` 会在 mobility
+  上 KeyError。实际验证：mobility measurements 列表中的
+  `composite_stage_goals` **就是** `PddlStageGoals` measurement（config-store
+  名、package 键 `pddl_stage_goals` 与 measure uuid 三者不同名），已注册
+  且被 HANDOFF 验证过的 social_rearrange 使用同一列表并成功写出
+  subgoals 文件——**无 KeyError，无需任何 override**。mobility 的 pddl
+  spec 也定义了 `stage_goals`，per-episode stage 数据会正常落
+  `episode_log/**/*_subgoals.json`（subgoal metric 接入留待后续轮次）。

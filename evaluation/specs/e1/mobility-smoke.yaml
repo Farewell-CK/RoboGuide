@@ -50,7 +50,10 @@ metrics:
   - token_usage
   - wall_time
   - coordination_latency
-timeout_seconds: 900
+# Measured: one mobility episode runs ~800s wall (3000 sim steps + LLM
+# discussion); 1800s leaves headroom for slower discussion rounds so the
+# harness timeout never destroys a real run's evidence.
+timeout_seconds: 1800
 # No per-system metrics_source_path/expected_output_paths are declared:
 # official EMOS stdout (evaluator averages + Episode Step Info banner) and
 # EMOS's own chat_history_output/token_usage.json are the raw evidence, and

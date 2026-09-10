@@ -7,6 +7,8 @@ from tests; pytest puts the tests directory on ``sys.path``.
 
 from __future__ import annotations
 
+import gzip
+import json
 import sys
 from pathlib import Path
 
@@ -88,11 +90,13 @@ print("Average episode composite_success: 0.5000")
 sys.exit(0)
 """
 
-# Official banner plus EMOS's own token record: writes
-# chat_history_output/<episode_id>/token_usage.json next to the run cwd,
-# exactly where the real EMOS chat-history saving leaves it. String
-# concatenation (not f-strings) avoids colliding with harness {placeholders}
-# that would substitute declared names like episode_id inside argv.
+# Official banner plus EMOS's own token records at the REAL nested path
+# chat_history_output/<date>/<config>/<ablation>/<episode_id>/ (as
+# constructed by MultiLLMPolicy.act): token_usage.json (per-agent totals)
+# and token_usage_details.jsonl (per-call usage from the accounting
+# instrumentation). String concatenation (not f-strings) avoids colliding
+# with harness {placeholders} that would substitute declared names like
+# episode_id inside argv.
 FIXTURE_EMOS_EPISODE_SCRIPT: str = """\
 import json
 import os
@@ -102,10 +106,47 @@ episode_id = "42"
 print("========================Episode Step Info==========================")
 print("Episode ID: " + episode_id + ", Num Steps: 512")
 print("===================================================================")
-token_dir = os.path.join("chat_history_output", episode_id)
+token_dir = os.path.join(
+    "chat_history_output", "2026-09-09", "llm_fixture", "FULL", episode_id
+)
 os.makedirs(token_dir, exist_ok=True)
 with open(os.path.join(token_dir, "token_usage.json"), "w", encoding="utf-8") as handle:
-    json.dump({"agent_0": 1200, "agent_1": 800}, handle)
+    json.dump({"agent_0": 2200, "agent_1": 800}, handle)
+details = [
+    {
+        "agent_name": "agent_0",
+        "model": "gpt-5.6-luna",
+        "request_utc": "2026-09-09T10:30:00",
+        "response_utc": "2026-09-09T10:30:41",
+        "latency_ms": 41000.0,
+        "usage": {
+            "prompt_tokens": 900,
+            "completion_tokens": 300,
+            "total_tokens": 1200,
+            "prompt_tokens_details": {"cached_tokens": 400},
+            "completion_tokens_details": {"reasoning_tokens": 50},
+        },
+    },
+    {
+        "agent_name": "agent_0",
+        "model": "gpt-5.6-luna",
+        "request_utc": "2026-09-09T10:31:00",
+        "response_utc": "2026-09-09T10:31:12",
+        "latency_ms": 12000.0,
+        "usage": {"prompt_tokens": 800, "completion_tokens": 200, "total_tokens": 1000},
+    },
+    {
+        "agent_name": "agent_1",
+        "model": "gpt-5.6-luna",
+        "request_utc": "2026-09-09T10:32:00",
+        "response_utc": "2026-09-09T10:32:30",
+        "latency_ms": 30000.0,
+        "usage": {"prompt_tokens": 600, "completion_tokens": 200, "total_tokens": 800},
+    },
+]
+with open(os.path.join(token_dir, "token_usage_details.jsonl"), "w", encoding="utf-8") as handle:
+    for record in details:
+        handle.write(json.dumps(record) + "\\n")
 print("INFO evaluator - Average episode pddl_success: 1.0000")
 print("Average episode composite_success: 0.5000")
 sys.exit(0)
@@ -118,6 +159,27 @@ import sys
 print("Episode ID: 3, Num Steps: 300")
 print("Episode ID: 4, Num Steps: 400")
 print("Average episode pddl_success: 0.6000")
+sys.exit(0)
+"""
+
+# Mirrors the REAL successful smoke shape: evaluator summary lines arrive on
+# stderr through Python logging with timestamp prefixes, and the official
+# stage-goal aggregates (pddl_stage_goals.<stage>_success) are among them.
+FIXTURE_EMOS_STDERR_LOG_SCRIPT: str = """\
+import sys
+
+print("Episode ID: 6, Num Steps: 150")
+print("2026-09-09 10:25:35,220 Average episode rearrange_cooperate_reward: 0.0000",
+      file=sys.stderr)
+print("2026-09-09 10:25:35,221 Average episode pddl_stage_goals.robot_at_object_0_success: 1.0000",
+      file=sys.stderr)
+receptacle_line = (
+    "2026-09-09 10:25:35,221 Average episode "
+    "pddl_stage_goals.robot_at_receptacle_0_success: 0.0000"
+)
+print(receptacle_line, file=sys.stderr)
+print("2026-09-09 10:25:35,221 Average episode num_steps: 150.0000", file=sys.stderr)
+print("2026-09-09 10:25:35,221 Average episode pddl_success: 1.0000", file=sys.stderr)
 sys.exit(0)
 """
 
@@ -168,6 +230,28 @@ def interpreter() -> str:
         The absolute path of the running interpreter.
     """
     return sys.executable
+
+
+def write_fixture_dataset(
+    path: Path,
+    episodes: list[dict[str, object]],
+) -> str:
+    """Write a gzipped fixture dataset and return its SHA-256 digest.
+
+    Args:
+        path: Target dataset file path (``.json.gz``).
+        episodes: Episode records with ``episode_id`` and ``scene_id``.
+
+    Returns:
+        The lowercase hexadecimal digest of the written file bytes, matching
+        how the resolver digests pinned datasets.
+    """
+    import hashlib
+
+    payload = json.dumps({"episodes": episodes}).encode(encoding="utf-8")
+    with gzip.open(path, "wb") as handle:
+        handle.write(payload)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def local_config_yaml(

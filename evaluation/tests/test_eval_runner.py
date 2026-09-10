@@ -538,7 +538,7 @@ def test_emos_runner_converts_evaluator_logs_to_canonical_metrics(
     assert details["wall_time_source"] == "harness_process_duration"
     unavailable = require_object(details["unavailable_metrics"])
     assert require_str(unavailable["subgoal_success_rate"]).startswith(
-        "EMOS evaluator reported no subgoal"
+        "evaluator logs carry no subgoal_success_rate"
     )
     assert require_str(unavailable["token_usage"]).startswith("EMOS wrote no chat_history_output")
     assert "coordination_latency" in unavailable
@@ -562,6 +562,13 @@ def test_emos_runner_collects_official_token_usage(
 ) -> None:
     """token_usage comes from EMOS's own per-agent totals, copied as evidence."""
     spec = load_experiment_spec(make_spec())
+    # A stale token record for the SAME episode id from an earlier "run":
+    # it exists before prepare snapshots the tree and must never be used.
+    stale_dir = (
+        fixture_workdir / "chat_history_output" / "2025-01-01" / "llm_fixture" / "FULL" / "42"
+    )
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "token_usage.json").write_text(json.dumps({"agent_0": 999999}), encoding="utf-8")
     config_path = make_local_config(
         helpers.local_config_yaml(
             fixture_workdir,
@@ -571,19 +578,145 @@ def test_emos_runner_collects_official_token_usage(
     result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
     assert result.succeeded
     values = result.metrics.values
-    assert values["token_usage"] == 2000
+    assert values["token_usage"] == 3000  # fresh totals, not the 999999 stale one
+    assert values["token_input_usage"] == 2300  # from per-call usage records
+    assert values["token_output_usage"] == 700
+    assert values["cached_prompt_tokens"] == 400  # detail present on one call
+    assert values["reasoning_tokens"] == 50
     assert values["simulation_steps"] == 512
     details = result.metrics.details
-    assert details["emos_token_usage_by_agent"] == {"agent_0": 1200, "agent_1": 800}
+    assert details["emos_token_usage_by_agent"] == {"agent_0": 2200, "agent_1": 800}
+    assert details["emos_token_breakdown_by_agent"] == {
+        "agent_0": {"prompt_tokens": 1700, "completion_tokens": 500},
+        "agent_1": {"prompt_tokens": 600, "completion_tokens": 200},
+    }
+    assert details["emos_token_calls"] == 3
+    latency_summary = require_object(details["emos_token_call_latency_ms"])
+    assert latency_summary["max"] == 41000.0
+    assert details["emos_token_usage_source_path"] == (
+        "chat_history_output/2026-09-09/llm_fixture/FULL/42/token_usage.json"
+    )
+    assert details["emos_token_details_source_path"] == (
+        "chat_history_output/2026-09-09/llm_fixture/FULL/42/token_usage_details.jsonl"
+    )
     selection = require_object(result.manifest.episode_selection)
     resolution = require_object(selection["resolution"])
     assert resolution["resolved_episode_id"] == "42"
+    assert resolution["dataset_status"] == "not-configured"
     run_directory = tmp_path / "results" / "fixture-experiment" / result.manifest.run_id
     evidence = run_directory / "raw-evidence" / "token_usage-42.json"
     assert evidence.is_file()
-    assert json.loads(evidence.read_text(encoding="utf-8")) == {"agent_0": 1200, "agent_1": 800}
+    assert json.loads(evidence.read_text(encoding="utf-8")) == {"agent_0": 2200, "agent_1": 800}
+    evidence_details = run_directory / "raw-evidence" / "token_usage_details-42.jsonl"
+    assert evidence_details.is_file()
+    assert len(evidence_details.read_text(encoding="utf-8").splitlines()) == 3
     evidence_paths = {ref.path for ref in result.metrics.raw_evidence}
     assert "raw-evidence/token_usage-42.json" in evidence_paths
+    assert "raw-evidence/token_usage_details-42.jsonl" in evidence_paths
+
+
+def test_emos_runner_parses_stderr_evaluator_summary_and_stage_goals(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """Evaluator averages on stderr (logger format) parse; stage goals map.
+
+    Mirrors the verified real-smoke shape: the habitat-baselines evaluator
+    logs its summary through Python logging onto stderr with timestamp
+    prefixes, including the official pddl_stage_goals aggregates.
+    """
+    spec = load_experiment_spec(make_spec())
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_EMOS_STDERR_LOG_SCRIPT],
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    values = result.metrics.values
+    assert values["success"] is True  # stderr pddl_success average
+    assert values["simulation_steps"] == 150
+    assert values["subgoal_success_rate"] == 0.5  # mean of the two stage aggregates
+    details = result.metrics.details
+    assert details["emos_stage_goal_success"] == {
+        "pddl_stage_goals.robot_at_object_0_success": 1.0,
+        "pddl_stage_goals.robot_at_receptacle_0_success": 0.0,
+    }
+    # Stage keys are lifted out of the generic averages bucket.
+    averages = require_object(details["emos_average_metrics"])
+    assert "pddl_stage_goals.robot_at_object_0_success" not in averages
+    assert averages["rearrange_cooperate_reward"] == 0.0
+    unavailable = require_object(details["unavailable_metrics"])
+    assert "subgoal_success_rate" not in unavailable
+
+
+def test_emos_runner_refuses_stale_token_records_without_fresh_ones(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """A historical token file with no fresh write stays unavailable."""
+    spec = load_experiment_spec(make_spec())
+    stale_dir = (
+        fixture_workdir / "chat_history_output" / "2025-01-01" / "llm_fixture" / "FULL" / "5"
+    )
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "token_usage.json").write_text(json.dumps({"agent_0": 999999}), encoding="utf-8")
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_EMOS_LOG_SCRIPT],
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    assert "token_usage" not in result.metrics.values
+    unavailable = require_object(result.metrics.details["unavailable_metrics"])
+    assert require_str(unavailable["token_usage"]).startswith(
+        "only token_usage.json records from earlier runs"
+    )
+
+
+def test_emos_runner_resolves_scene_identity_from_pinned_dataset(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """dataset_path resolves scene id and index with digest verification."""
+    dataset_path = tmp_path / "fixture_episodes.json.gz"
+    digest = helpers.write_fixture_dataset(
+        dataset_path,
+        [{"episode_id": "42", "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb"}],
+    )
+    spec_text = helpers.BASE_SPEC_YAML.replace(
+        "  revision: r1", f"  revision: fixture-r1\n  digest: {digest}"
+    )
+    spec = load_experiment_spec(make_spec(spec_text))
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            arguments=["-u", "-c", helpers.FIXTURE_EMOS_EPISODE_SCRIPT],
+            extra_lines=f"    dataset_path: {dataset_path.as_posix()}\n",
+        )
+    )
+    result = run_emos_once(tmp_path, spec, config_path, fixed_environment, "ep-000", 7)
+    assert result.succeeded
+    resolution = require_object(require_object(result.manifest.episode_selection)["resolution"])
+    assert resolution["resolved_episode_id"] == "42"
+    assert resolution["resolved_scene_id"] == "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb"
+    assert resolution["dataset_index"] == 0
+    assert resolution["dataset_record"] == "fixture_episodes.json.gz#42@0"
+    assert resolution["dataset_status"] == "resolved"
+    sources = resolution["evidence_source"]
+    assert isinstance(sources, list) and len(sources) == 2
 
 
 def test_emos_runner_marks_identity_unresolved_without_official_output(
@@ -609,7 +742,7 @@ def test_emos_runner_marks_identity_unresolved_without_official_output(
     assert "reason" in resolution
     unavailable = require_object(result.metrics.details["unavailable_metrics"])
     assert require_str(unavailable["success"]) == (
-        "evaluator reported no pddl_success average in stdout"
+        "evaluator reported no pddl_success average in its logs"
     )
     assert "simulation_steps" in unavailable
 
@@ -777,7 +910,7 @@ def test_subgoal_count_aggregate_not_mapped_as_rate(
     assert averages["subgoal_success"] == 2.5
     unavailable = require_object(result.metrics.details["unavailable_metrics"])
     assert require_str(unavailable["subgoal_success_rate"]).startswith(
-        "EMOS evaluator reported no subgoal_success_rate"
+        "evaluator logs carry no subgoal_success_rate"
     )
 
 

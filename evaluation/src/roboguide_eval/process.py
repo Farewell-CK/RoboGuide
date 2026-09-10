@@ -60,6 +60,9 @@ class ProcessSpec:
     conda_environment: str | None = None
     readiness_command: tuple[str, ...] | None = None
     version_probe_command: tuple[str, ...] | None = None
+    # Pinned benchmark dataset file used for read-only episode identity
+    # resolution; machine-specific, so it arrives only via local config.
+    dataset_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
