@@ -75,7 +75,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_ASR_TOKEN = BuildConfig.ASR_TOKEN;
     private static final int CAMERA_PERMISSION_REQUEST = 10;
     private static final int LOCATION_PERMISSION_REQUEST = 11;
-    private static final int AUDIO_PERMISSION_REQUEST = 12;
     private static final float VALID_MIN_METERS = 0.25f;
     private static final float VALID_MAX_METERS = 6.0f;
     private static final float OBSTACLE_METERS = 1.2f;
@@ -157,6 +156,8 @@ public class MainActivity extends AppCompatActivity {
     private volatile long latestLocalPlanCompletedNanos;
     private volatile long latestLocalPlanInputAgeNanos = -1L;
     private volatile boolean hasValidLocalPlanDisplay;
+    private String displayedGuidance = "";
+    private long displayedGuidanceNanos;
     private volatile boolean vinsInitialized;
     private volatile int vinsResetCount;
     private int consecutiveUninitializedPoses;
@@ -184,11 +185,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView calibrationStatusText;
     private EditText amapKeyInput;
     private EditText destinationInput;
-    private EditText asrTokenInput;
-    private Button voiceControlButton;
-    private TextView voiceStatusText;
-    private Button planRouteButton;
-    private Button calibrateHeadingButton;
     private Button calibrateAlignedButton;
     private Button toggleNavigationButton;
     private TextView routeStatusText;
@@ -218,11 +214,6 @@ public class MainActivity extends AppCompatActivity {
         calibrationStatusText = findViewById(R.id.calibrationStatusText);
         amapKeyInput = findViewById(R.id.amapKeyInput);
         destinationInput = findViewById(R.id.destinationInput);
-        asrTokenInput = findViewById(R.id.asrTokenInput);
-        voiceControlButton = findViewById(R.id.voiceControlButton);
-        voiceStatusText = findViewById(R.id.voiceStatusText);
-        planRouteButton = findViewById(R.id.planRouteButton);
-        calibrateHeadingButton = findViewById(R.id.calibrateHeadingButton);
         calibrateAlignedButton = findViewById(R.id.calibrateAlignedButton);
         toggleNavigationButton = findViewById(R.id.toggleNavigationButton);
         routeStatusText = findViewById(R.id.routeStatusText);
@@ -267,35 +258,10 @@ public class MainActivity extends AppCompatActivity {
                 });
         semanticSegmenter.initialize();
         amapKeyInput.setText(getPreferences(MODE_PRIVATE).getString("amap_web_key", ""));
-        planRouteButton.setOnClickListener(this::planWalkingRoute);
-        calibrateHeadingButton.setOnClickListener(this::startDynamicHeadingCalibration);
         calibrateAlignedButton.setOnClickListener(this::calibrateAlignedHeading);
         toggleNavigationButton.setOnClickListener(this::toggleNavigation);
-        String savedAsrToken = getPreferences(MODE_PRIVATE).getString("asr_token", "");
-        if (savedAsrToken.isEmpty()) savedAsrToken = DEFAULT_ASR_TOKEN;
-        asrTokenInput.setText(savedAsrToken);
         dynamicHeadingCalibrator.load(getPreferences(MODE_PRIVATE));
         renderDynamicHeadingCalibration();
-        voiceNavigation = new VoiceNavigationController(new VoiceNavigationController.Listener() {
-            @Override public void onStatus(String status) {
-                runOnUiThread(() -> voiceStatusText.setText(status));
-            }
-
-            @Override public void onCommand(VoiceCommand command, String recognizedText) {
-                runOnUiThread(() -> handleVoiceCommand(command, recognizedText));
-            }
-        });
-        voiceNavigation.setAsrToken(asrTokenInput.getText().toString());
-        voiceControlButton.setOnClickListener(this::toggleVoiceControl);
-        asrTokenInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                String token = s.toString().trim();
-                getPreferences(MODE_PRIVATE).edit().putString("asr_token", token).apply();
-                if (voiceNavigation != null) voiceNavigation.setAsrToken(token);
-            }
-            @Override public void afterTextChanged(Editable s) {}
-        });
         destinationInput.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence text, int start, int count, int after) {
@@ -392,11 +358,6 @@ public class MainActivity extends AppCompatActivity {
         if (phonePoseTracker != null) {
             phonePoseTracker.start();
         }
-        if (voiceNavigation != null
-                && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                == PackageManager.PERMISSION_GRANTED) {
-            voiceNavigation.resume();
-        }
     }
 
     @Override
@@ -411,7 +372,6 @@ public class MainActivity extends AppCompatActivity {
             stopStreaming();
             if (phonePoseTracker != null) phonePoseTracker.stop();
         }
-        if (voiceNavigation != null) voiceNavigation.pause();
         if (depthPreview != null) {
             depthPreview.setImageBitmap(null);
         }
@@ -461,67 +421,6 @@ public class MainActivity extends AppCompatActivity {
                 && grantResults.length > 0
                 && phonePoseTracker != null) {
             phonePoseTracker.start();
-        } else if (requestCode == AUDIO_PERMISSION_REQUEST && grantResults.length > 0) {
-            if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                setVoiceControlEnabled(true);
-            } else {
-                voiceStatusText.setText("需要麦克风权限才能使用语音控制");
-            }
-        }
-    }
-
-    private void toggleVoiceControl(View ignored) {
-        if (voiceNavigation == null) return;
-        if (voiceNavigation.isEnabled()) {
-            setVoiceControlEnabled(false);
-            return;
-        }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.RECORD_AUDIO}, AUDIO_PERMISSION_REQUEST);
-            return;
-        }
-        setVoiceControlEnabled(true);
-    }
-
-    private void setVoiceControlEnabled(boolean enabled) {
-        if (voiceNavigation == null) return;
-        voiceNavigation.setAsrToken(asrTokenInput.getText().toString());
-        voiceNavigation.setEnabled(enabled);
-        voiceControlButton.setText(enabled ? "关闭语音控制" : "开启语音控制");
-    }
-
-    private void handleVoiceCommand(VoiceCommand command, String recognizedText) {
-        switch (command.type) {
-            case DESTINATION:
-                applyingSuggestion = true;
-                destinationInput.setText(command.value);
-                destinationInput.setSelection(destinationInput.length());
-                applyingSuggestion = false;
-                selectedDestination = null;
-                voiceStatusText.setText("语音目的地：" + command.value + "，正在规划路线");
-                voiceNavigation.speak("正在规划前往" + command.value);
-                planWalkingRoute(null);
-                break;
-            case START:
-                if (!navigationActive) toggleNavigation(null);
-                if (!navigationActive) voiceStatusText.setText("尚不能开始导航，请先完成路线规划和定位");
-                break;
-            case RESUME:
-                if (!navigationActive) toggleNavigation(null);
-                break;
-            case PAUSE:
-                if (navigationActive) pauseNavigation();
-                else voiceStatusText.setText("导航当前未运行");
-                break;
-            case END:
-                if (navigationActive || currentRoute != null) endNavigation();
-                else voiceStatusText.setText("导航当前未运行");
-                break;
-            default:
-                voiceStatusText.setText("无法识别命令：" + recognizedText);
-                voiceNavigation.speak("请重说目的地或导航命令");
         }
     }
 
@@ -574,13 +473,11 @@ public class MainActivity extends AppCompatActivity {
 
         getPreferences(MODE_PRIVATE).edit().putString("amap_web_key", key).apply();
         stopNavigationAndClearRoute();
-        planRouteButton.setEnabled(false);
         routeStatusText.setText("正在查询目的地和步行路线…");
         AmapRouteClient.Callback callback = new AmapRouteClient.Callback() {
             @Override
             public void onSuccess(AmapRouteClient.RouteResult result) {
                 runOnUiThread(() -> {
-                    planRouteButton.setEnabled(true);
                     currentRoute = result;
                     routeFollower.setRoute(result);
                     resetLocalPlanning();
@@ -595,18 +492,15 @@ public class MainActivity extends AppCompatActivity {
                     toggleNavigationButton.setVisibility(View.VISIBLE);
                     navigationStatusText.setText("路线已就绪，点击“开始导航”后实时跟随位置");
                     navigationStatusText.setVisibility(View.VISIBLE);
-                    if (voiceNavigation != null) {
-                        voiceNavigation.speak("路线规划完成，请说开始导航");
-                    }
+                    // A place suggestion selection completes route planning and starts navigation.
+                    toggleNavigation(null);
                 });
             }
 
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
-                    planRouteButton.setEnabled(true);
                     routeStatusText.setText(message);
-                    if (voiceNavigation != null) voiceNavigation.speak("路线规划失败");
                 });
             }
         };
@@ -736,14 +630,6 @@ public class MainActivity extends AppCompatActivity {
         return String.format(Locale.CHINA, "%.1f 公里", meters / 1000f);
     }
 
-    private void startDynamicHeadingCalibration(View ignored) {
-        dynamicHeadingCalibrator.start();
-        if (lastLocation != null) updateDynamicHeadingCalibration(lastLocation);
-        renderDynamicHeadingCalibration();
-        resetLocalPlanning();
-        requestLocalPlanRefresh();
-    }
-
     private void calibrateAlignedHeading(View ignored) {
         float trueHeading = currentHeading;
         long nowNanos = SystemClock.elapsedRealtimeNanos();
@@ -799,13 +685,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderDynamicHeadingCalibration() {
-        if (calibrationStatusText == null || calibrateHeadingButton == null
-                || calibrateAlignedButton == null) return;
+        if (calibrationStatusText == null || calibrateAlignedButton == null) return;
         boolean ready = dynamicHeadingCalibrator.isReady();
         calibrationStatusText.setText(dynamicHeadingCalibrator.status());
         calibrationStatusText.setTextColor(ContextCompat.getColor(this,
                 ready ? R.color.nav_safe : R.color.nav_muted));
-        calibrateHeadingButton.setText(ready ? "重新动态方向标定" : "开始动态方向标定");
     }
 
     private void scheduleDestinationSearch(String keyword) {
@@ -902,6 +786,8 @@ public class MainActivity extends AppCompatActivity {
                 "已选择：%s，%s",
                 suggestion.name,
                 formatSuggestionDistance(suggestion.distanceMeters)));
+        // Selecting a place is the explicit user action that starts the complete flow.
+        planWalkingRoute(null);
     }
 
     private void showSuggestionStatus(String message) {
@@ -1640,6 +1526,15 @@ public class MainActivity extends AppCompatActivity {
             color = R.color.nav_warning;
         }
 
+        long nowNanos = SystemClock.elapsedRealtimeNanos();
+        if (!guidance.equals(displayedGuidance)
+                && displayedGuidanceNanos != 0L
+                && nowNanos - displayedGuidanceNanos < TimeUnit.SECONDS.toNanos(1)) {
+            guidance = displayedGuidance;
+        } else if (!guidance.equals(displayedGuidance)) {
+            displayedGuidance = guidance;
+            displayedGuidanceNanos = nowNanos;
+        }
         guidanceText.setText(guidance);
         guidanceText.setTextColor(ContextCompat.getColor(this, color));
         if (navigationActive && voiceNavigation != null) {

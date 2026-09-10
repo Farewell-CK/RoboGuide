@@ -196,14 +196,6 @@
         android:textSize="14sp" />
 
     <Button
-        android:id="@+id/calibrateHeadingButton"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginTop="6dp"
-        android:text="开始动态方向标定"
-        android:textAllCaps="false" />
-
-    <Button
         android:id="@+id/calibrateAlignedButton"
         android:layout_width="match_parent"
         android:layout_height="48dp"
@@ -249,36 +241,6 @@
         android:textColor="@color/nav_text"
         android:textColorHint="@color/nav_muted" />
 
-    <EditText
-        android:id="@+id/asrTokenInput"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginTop="8dp"
-        android:background="@color/nav_surface"
-        android:hint="ASR Token（服务未鉴权可留空）"
-        android:inputType="textPassword"
-        android:paddingHorizontal="14dp"
-        android:singleLine="true"
-        android:textColor="@color/nav_text"
-        android:textColorHint="@color/nav_muted" />
-
-    <Button
-        android:id="@+id/voiceControlButton"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:layout_marginTop="8dp"
-        android:text="开启语音控制"
-        android:textAllCaps="false" />
-
-    <TextView
-        android:id="@+id/voiceStatusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="可说：导航到某地；开始导航；暂停导航；继续导航"
-        android:textColor="@color/nav_muted"
-        android:textSize="13sp" />
-
     <TextView
         android:id="@+id/suggestionStatusText"
         android:layout_width="match_parent"
@@ -295,14 +257,6 @@
         android:layout_marginTop="6dp"
         android:orientation="vertical"
         android:visibility="gone" />
-
-    <Button
-        android:id="@+id/planRouteButton"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:layout_marginTop="10dp"
-        android:text="规划步行路线"
-        android:textAllCaps="false" />
 
     <TextView
         android:id="@+id/routeStatusText"
