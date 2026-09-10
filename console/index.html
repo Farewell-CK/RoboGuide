@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboGuide Mission Console</title>
+<link rel="stylesheet" href="css/console.css">
+</head>
+<body>
+<div id="backdrop"></div>
+
+<header id="topbar">
+  <div class="brand">
+    <span class="brand-mark">◇</span>
+    <div>
+      <h1>ROBOGUIDE <em>MISSION CONSOLE</em></h1>
+      <p class="brand-sub">分布式具身智能操作系统 · 任务旅程可视化（只读观察者）</p>
+    </div>
+  </div>
+  <nav class="controls">
+    <div class="seg" id="mode-switch" role="tablist">
+      <button class="seg-btn active" data-mode="demo" id="mode-demo">演示回放</button>
+      <button class="seg-btn" data-mode="live" id="mode-live">实时系统</button>
+    </div>
+    <select id="scenario-select" title="选择任务剧本 / MissionPlan"></select>
+    <button id="run-btn" class="primary">▶ 运行任务</button>
+    <button id="cancel-btn" class="danger" disabled>■ 取消</button>
+    <button id="reset-btn" class="ghost">↺ 重置</button>
+  </nav>
+  <div id="connection" class="conn conn-demo"><span class="conn-dot"></span><span id="conn-text">DEMO</span></div>
+</header>
+
+<div id="chains-bar">
+  <div class="chain" id="chain-decision">
+    <span class="chain-name">决策链</span>
+    <span class="chain-steps"></span>
+  </div>
+  <div class="chain" id="chain-observe">
+    <span class="chain-name">观测链</span>
+    <span class="chain-steps"></span>
+  </div>
+  <div class="chain" id="chain-recover">
+    <span class="chain-name">恢复链</span>
+    <span class="chain-steps"></span>
+  </div>
+</div>
+
+<main id="layout">
+  <aside id="left-col">
+    <section class="panel" id="mission-panel">
+      <h2>Mission</h2>
+      <div id="mission-card" class="empty">等待任务提交</div>
+    </section>
+    <section class="panel" id="dag-panel">
+      <h2>Task DAG <span class="hint">就绪 / 执行 / 完成</span></h2>
+      <div id="dag-view" class="empty">无任务图</div>
+    </section>
+    <section class="panel" id="calendar-panel">
+      <h2>Scheduling Calendar <span class="hint">Control 未来区间</span></h2>
+      <div id="calendar-view" class="empty">无调度区间</div>
+    </section>
+  </aside>
+
+  <section id="stage-wrap">
+    <svg id="stage" viewBox="0 0 1560 1030" preserveAspectRatio="xMidYMid meet" aria-label="RoboGuide layered stage"></svg>
+  </section>
+
+  <aside id="right-col">
+    <section class="panel" id="state-panel">
+      <h2>State &amp; Memory Plane</h2>
+      <div id="state-view"></div>
+    </section>
+    <section class="panel" id="recovery-panel">
+      <h2>Recovery Ladder <span class="hint">只升必要层级</span></h2>
+      <div id="recovery-view"></div>
+    </section>
+    <section class="panel" id="stats-panel">
+      <h2>Runtime Stats</h2>
+      <div id="stats-view"></div>
+    </section>
+  </aside>
+</main>
+
+<footer id="ticker">
+  <div id="ticker-filters"></div>
+  <div id="ticker-list"></div>
+</footer>
+
+<div id="payload-modal" class="hidden">
+  <div class="modal-box">
+    <header><span id="modal-title">事件</span><button id="modal-close">✕</button></header>
+    <pre id="modal-json"></pre>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

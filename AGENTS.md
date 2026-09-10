@@ -167,6 +167,16 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
   RoboGuide system runner must later drive the real Controller/Node/Runtime path instead of
   bypassing RoboGuide.
+- `console/` contains the experimental read-only Mission Journey visualizer
+  (early development; layout and features are still evolving): a zero-dependency
+  static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static
+  server with same-origin `/proxy/controller|mission` reverse proxies. It only
+  consumes existing Controller/Mission Service HTTP APIs (event evidence log,
+  inventory, mission/calendar projections, and the existing Mission submit/cancel
+  endpoints); it never becomes a second Control, Runtime, State, Node Protocol, or
+  Memory authority and introduces no Node toolchain. Built-in demo replay events
+  mirror the exact `core/domain::EventPayload` serde shapes for offline display
+  but are never real evidence.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
 

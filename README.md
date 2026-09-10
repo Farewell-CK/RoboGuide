@@ -576,6 +576,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service/
 │   ├── roboguide-node/
 │   └── real-node-smoke/
+├── console/               # Mission Console：只读任务旅程可视化（零依赖静态）
 └── docs/
     ├── README.md
     ├── architecture/
@@ -675,3 +676,24 @@ EMOS/Habitat-MAS；外部系统只通过进程边界访问。第一版提供 Exp
 Conda 环境、工作目录与凭据只来自 Git 忽略的 `evaluation/local.yaml` 或
 `ROBOGUIDE_EVAL_*` 环境变量；真实 results 不提交 Git。详见
 [`evaluation/README.md`](evaluation/README.md)。
+
+## Mission Console（任务旅程可视化）
+
+> **状态：开发中（experimental）** —— 布局、功能与事件映射仍在快速演进，
+> 尚未冻结；欢迎试用并反馈，但不要将其语义当作稳定契约。
+
+[`console/`](console/) 提供只读的 Mission Journey 控制台：动态展示一个任务被
+接受后，事件证据流经 Mission Intelligence → Control Plane → Execution Group →
+Runtime → Nodes 各层的真实效果（Match → Schedule → Propose → Commit → Bind →
+Execute 决策链、Observe → Update 观测链、Detect → Reconcile → Adapt 恢复链）。
+支持多 Mission 并发与整机集群视图。它是零依赖静态前端，只消费既有 HTTP API，
+不是新的架构权威：
+
+```bash
+python3 console/serve.py   # http://127.0.0.1:8095（默认演示回放模式）
+```
+
+「实时系统」模式连接真实 Integration Server/Controller：按 `after` 游标增量
+轮询 `/v1/events`，刷新 `/v1/inventory` 节点卡，并可用 `console/scenarios/`
+中的版本化 MissionPlan 通过既有 `POST /v1/missions` 提交真实任务。细节见
+[`console/README.md`](console/README.md)。

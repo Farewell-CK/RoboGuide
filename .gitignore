@@ -25,3 +25,6 @@ logs/
 /config/artifact-cache/
 /roboguide-artifacts/
 /roboguide-controller.sqlite3.writer.lock
+
+# RoboGuide runtime state (Controller evidence DB, Artifact CAS root)
+/var/
