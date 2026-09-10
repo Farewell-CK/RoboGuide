@@ -41,7 +41,7 @@ apps/
   real-node-smoke/         formal Node Protocol v0.4 probe 与合成 Execute simulation
 mission/
   src/mission/             Mission Request 状态机、规划、合同校验和模型/Controller 适配器
-  prompts/v0/              可版本化、可评审的 Interpreter、Planner 与 Reviewer Prompt
+  prompts/v0/              可版本化、可评审的 Interpreter、Planner、Reviewer 与 Repairer Prompt
   tests/                   Mission 合同与 Adapter 的离线测试
 simulation/                未来的仿真器集成适配器，首次实现时再创建
 contracts/mission/         版本化的跨语言 Mission Plan 合同
@@ -101,6 +101,11 @@ apps -> artifact-store -> ports -> domain
 Mission Intelligence 从 `contracts/capability/v0.1/catalog.json` 读取稳定 canonical contract
 词汇表，并在 Reviewer 与提交前确定性校验 exact identity 和 scalar parameters。Catalog 不读取
 Shared Node State，也不回答当前是否可调度；Control Matching 仍是 live eligibility authority。
+
+Mission Request v0.2 由 Engine 显式编排 Draft -> Review -> bounded Repair；Reviewer 只产生
+结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回
+`NeedsClarification`。`request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py`
+分别承担 orchestration、versioned projection、SQLite persistence 与 review contracts。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。

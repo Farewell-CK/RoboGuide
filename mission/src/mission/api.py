@@ -15,7 +15,12 @@ from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
 from mission.models import JSONObject
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
-from mission.responses import ResponsesMissionInterpreter, ResponsesMissionPlanner
+from mission.responses import (
+    ResponsesMissionInterpreter,
+    ResponsesMissionPlanner,
+    ResponsesMissionRepairer,
+    ResponsesMissionReviewer,
+)
 from mission.service_config import MissionServiceSettings, load_service_settings
 
 LOG = logging.getLogger("roboguide.mission_service")
@@ -33,6 +38,16 @@ def build_engine(
         service_settings.controller_endpoint,
         service_settings.controller_timeout_seconds,
     )
+    reviewer = (
+        ResponsesMissionReviewer(planner_settings, environment)
+        if planner_settings.review_enabled
+        else None
+    )
+    repairer = (
+        ResponsesMissionRepairer(planner_settings, environment)
+        if reviewer is not None and planner_settings.max_repair_attempts > 0
+        else None
+    )
     engine = MissionRequestEngine(
         MissionRequestStore(service_settings.state_db),
         ResponsesMissionInterpreter(planner_settings, environment),
@@ -40,6 +55,9 @@ def build_engine(
         controller,
         capability_catalog,
         service_settings.approval_required_contracts,
+        reviewer=reviewer,
+        repairer=repairer,
+        max_repair_attempts=(planner_settings.max_repair_attempts if reviewer is not None else 0),
     )
     return engine, service_settings
 

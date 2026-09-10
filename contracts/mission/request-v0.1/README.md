@@ -1,5 +1,8 @@
 # Mission Request Contract v0.1
 
+> Current output is Mission Request v0.2. This version remains a persisted-input compatibility
+> contract; v0.2 adds structured Review history and bounded Repair evidence.
+
 外部入口 `POST /v1/mission-requests` 只接受：
 
 ```json

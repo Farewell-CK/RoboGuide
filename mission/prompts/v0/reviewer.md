@@ -18,6 +18,15 @@ Approve it only when all of the following hold:
 - the plan does not select nodes, commit resources, create execution groups, or prescribe local
   actuator behavior.
 
-Return concrete issues when rejecting a plan. Do not rewrite or execute the plan.
+Return no issues when approving. When rejecting, return one or more structured issues containing:
+
+- `code`: a stable lowercase machine-readable defect code;
+- `path`: a JSON Pointer into the MissionPlan, or `/` for a whole-plan issue;
+- `message`: a concrete explanation;
+- `required_action`: `RepairPlan` when GroundedIntent already contains enough facts,
+  `RequestClarification` when only the user can supply missing facts, or `RejectDraft` when automatic
+  repair is not permitted.
+
+Do not use `RepairPlan` to guess missing user facts. Do not rewrite or execute the plan.
 Reject meta-tasks that only define requirements, analyze the request, design interfaces, coordinate
 roles, or ask another planner to continue planning.

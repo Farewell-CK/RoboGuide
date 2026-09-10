@@ -158,7 +158,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current
   provider absence is a Control scheduling condition rather than a Mission semantic rejection. It
-  must not mirror execution lifecycle or choose physical nodes.
+  must not mirror execution lifecycle or choose physical nodes. Mission Request v0.2 separates
+  Planner, Reviewer, and Repairer ports, persists revision-bound structured review evidence, bounds
+  automatic repair, and routes missing user facts back to clarification instead of letting Repair
+  invent them. Dialogue remains separate from internal review history.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace

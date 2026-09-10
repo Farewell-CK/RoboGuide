@@ -12,13 +12,15 @@ import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
 from mission.intent import GroundedIntent
-from mission.models import JSONObject
+from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner
 from mission.responses import (
-    MissionProviderError,
     ResponsesMissionInterpreter,
     ResponsesMissionPlanner,
+    ResponsesMissionRepairer,
+    ResponsesMissionReviewer,
 )
+from mission.review import MissionPlanReview, ReviewIssueAction
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
@@ -80,6 +82,21 @@ def _catalog() -> CanonicalCapabilityCatalog:
     return CanonicalCapabilityCatalog.load(CATALOG)
 
 
+def _review_output(action: str = "RepairPlan") -> JSONObject:
+    """Build one strict rejected-review provider payload for adapter tests."""
+    return {
+        "approved": False,
+        "issues": [
+            {
+                "code": "task.over_decomposed",
+                "path": "/tasks/0",
+                "message": "The Task exposes Local How.",
+                "required_action": action,
+            }
+        ],
+    }
+
+
 def test_fixture_planner_loads_the_approved_plan() -> None:
     """The deterministic planner returns the approved artifact for the exact request."""
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -102,10 +119,10 @@ def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
         )
 
 
-def test_responses_planner_uses_strict_output_and_review() -> None:
-    """The LLM planner disables storage, uses Luna, validates output, and runs review."""
+def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
+    """The Planner returns one validated draft without invoking semantic Review internally."""
     plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    transport = FakeTransport([_response(plan_json), _response({"approved": True, "issues": []})])
+    transport = FakeTransport([_response(plan_json)])
     settings = _local_settings()
     planner = ResponsesMissionPlanner(
         settings,
@@ -123,30 +140,18 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
     plan = planner.plan(mission["id"], grounded_intent, capability_catalog)
 
     assert plan.to_json() == plan_json
-    assert len(transport.requests) == 2
+    assert len(transport.requests) == 1
     planning_payload = transport.requests[0][2]
-    review_payload = transport.requests[1][2]
     assert planning_payload["model"] == "gpt-5.6-luna"
-    assert review_payload["model"] == "gpt-5.6-luna"
     assert (
         planning_payload["instructions"]
         == Path("mission/prompts/v0/planner.md").read_text(encoding="utf-8").strip()
-    )
-    assert (
-        review_payload["instructions"]
-        == Path("mission/prompts/v0/reviewer.md").read_text(encoding="utf-8").strip()
     )
     assert planning_payload["store"] is False
     planning_input = json.loads(cast(str, planning_payload["input"]))
     assert planning_input == {
         "mission_id": mission["id"],
         "grounded_intent": grounded_intent.to_json(),
-        "capability_catalog": capability_catalog.to_json(),
-    }
-    review_input = json.loads(cast(str, review_payload["input"]))
-    assert review_input == {
-        "grounded_intent": grounded_intent.to_json(),
-        "mission_plan": plan_json,
         "capability_catalog": capability_catalog.to_json(),
     }
     text_config = planning_payload["text"]
@@ -176,25 +181,67 @@ def test_responses_planner_uses_strict_output_and_review() -> None:
     assert {"type": "null"} in cast(list[JSONObject], state_key_schema["anyOf"])
 
 
-def test_responses_planner_rejects_failed_review() -> None:
-    """A structurally valid plan cannot pass when the configured reviewer rejects it."""
+def test_responses_reviewer_returns_structured_findings_with_independent_model() -> None:
+    """The Reviewer uses its configured model and never mutates the examined MissionPlan."""
     plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    transport = FakeTransport(
-        [_response(plan_json), _response({"approved": False, "issues": ["selects a node"]})]
-    )
+    transport = FakeTransport([_response(_review_output())])
     settings = _local_settings()
-    planner = ResponsesMissionPlanner(
+    settings = replace(settings, llm=replace(settings.llm, review_model="reviewer-model"))
+    reviewer = ResponsesMissionReviewer(
         settings,
         {"OPENAI_API_KEY": "test-only-key"},
         transport,
     )
     mission = plan_json["mission"]
-    with pytest.raises(MissionProviderError, match="review rejected"):
-        planner.plan(
-            mission["id"],
-            GroundedIntent(mission["objective"], ("avoid stairs",), ()),
-            _catalog(),
-        )
+    plan = MissionPlan.from_json(plan_json)
+    grounded_intent = GroundedIntent(mission["objective"], ("avoid stairs",), ())
+
+    review = reviewer.review(grounded_intent, plan, _catalog())
+
+    assert review.approved is False
+    assert review.issues[0].required_action is ReviewIssueAction.REPAIR_PLAN
+    payload = transport.requests[0][2]
+    assert payload["model"] == "reviewer-model"
+    assert (
+        payload["instructions"]
+        == Path("mission/prompts/v0/reviewer.md").read_text(encoding="utf-8").strip()
+    )
+    assert json.loads(cast(str, payload["input"])) == {
+        "grounded_intent": grounded_intent.to_json(),
+        "mission_plan": plan_json,
+        "capability_catalog": _catalog().to_json(),
+    }
+
+
+def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan() -> None:
+    """Repair input preserves rejected evidence and output passes the normal draft gates."""
+    plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    transport = FakeTransport([_response(plan_json)])
+    repairer = ResponsesMissionRepairer(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        transport,
+    )
+    plan = MissionPlan.from_json(plan_json)
+    mission = plan_json["mission"]
+    grounded_intent = GroundedIntent(mission["objective"], (), ())
+    review = MissionPlanReview.from_json(_review_output())
+
+    repaired = repairer.repair(mission["id"], grounded_intent, plan, review, _catalog())
+
+    assert repaired == plan
+    payload = transport.requests[0][2]
+    assert (
+        payload["instructions"]
+        == Path("mission/prompts/v0/repairer.md").read_text(encoding="utf-8").strip()
+    )
+    assert json.loads(cast(str, payload["input"])) == {
+        "mission_id": mission["id"],
+        "grounded_intent": grounded_intent.to_json(),
+        "rejected_plan": plan_json,
+        "review": review.to_json(),
+        "capability_catalog": _catalog().to_json(),
+    }
 
 
 def test_responses_planner_rejects_unknown_contract_before_review() -> None:

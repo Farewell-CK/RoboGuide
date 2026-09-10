@@ -69,6 +69,7 @@ class PromptSettings:
     interpreter_path: Path
     planner_path: Path
     reviewer_path: Path
+    repairer_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,7 @@ class MissionSettings:
     schema_path: Path
     capability_catalog_path: Path
     review_enabled: bool
+    max_repair_attempts: int
     prompts: PromptSettings
     llm: LlmSettings
     provider: ProviderSettings
@@ -116,6 +118,16 @@ def _positive_number(table: Mapping[str, object], key: str, path: str) -> float:
     return float(value)
 
 
+def _bounded_nonnegative_integer(
+    table: Mapping[str, object], key: str, path: str, maximum: int
+) -> int:
+    """Read one bounded nonnegative policy count without Boolean coercion."""
+    value = table.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+        raise MissionConfigError(f"{path}.{key} must be an integer from 0 through {maximum}")
+    return value
+
+
 def load_settings(
     path: Path,
     *,
@@ -143,11 +155,15 @@ def load_settings(
         schema_path=root / _string(mission, "schema_path", "mission"),
         capability_catalog_path=root / _string(mission, "capability_catalog_path", "mission"),
         review_enabled=_boolean(mission, "review_enabled", "mission"),
+        max_repair_attempts=_bounded_nonnegative_integer(
+            mission, "max_repair_attempts", "mission", 10
+        ),
         prompts=PromptSettings(
             version=_string(prompts, "version", "mission.prompts"),
             interpreter_path=root / _string(prompts, "interpreter_path", "mission.prompts"),
             planner_path=root / _string(prompts, "planner_path", "mission.prompts"),
             reviewer_path=root / _string(prompts, "reviewer_path", "mission.prompts"),
+            repairer_path=root / _string(prompts, "repairer_path", "mission.prompts"),
         ),
         llm=LlmSettings(
             model_provider=provider_name,

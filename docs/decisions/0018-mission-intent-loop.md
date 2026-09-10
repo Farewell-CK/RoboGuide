@@ -6,6 +6,9 @@
 > Follow-up: ADR-0030 removes live deployment inventory from Interpreter input and makes current
 > provider availability a Control scheduling concern. The inventory preflight below records the
 > original v0.1 decision and is no longer the current admission behavior.
+>
+> ADR-0032 moves semantic Review out of the Planner's hidden call path and adds structured findings,
+> bounded Repair, and explicit clarification routing in Mission Request v0.2.
 
 ## Context
 

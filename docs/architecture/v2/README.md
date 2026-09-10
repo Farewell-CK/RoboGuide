@@ -48,6 +48,12 @@ Node、health、readiness 或 resource availability。已知 contract 即使当�
 schema，不冻结最终 Capability taxonomy、Operation/Requirement 分层或 feasibility envelope。
 详见 ADR-0031。
 
+Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Planner 内部不可观察的
+异常路径。Reviewer 只返回结构化问题及所需下一步，不直接修改草案；Mission Request Engine
+持久化每次 review evidence，并在确定性校验后执行有界 Repair。需要新用户事实的问题回到
+`NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
+或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
+
 ## 3. 核心抽象
 
 ### Embodied Node（具身节点）

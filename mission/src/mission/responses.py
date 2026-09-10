@@ -1,4 +1,4 @@
-"""Responses-compatible LLM adapter for structured Mission planning and review."""
+"""Responses-compatible LLM adapters for Mission planning, review, and repair."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -14,7 +13,8 @@ from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.requests import IntentAssessment
+from mission.request_record import IntentAssessment
+from mission.review import MissionPlanReview
 
 
 class MissionProviderError(RuntimeError):
@@ -66,14 +66,6 @@ class UrllibJsonTransport:
         return cast(JSONObject, decoded)
 
 
-@dataclass(frozen=True, slots=True)
-class ReviewResult:
-    """Capture a model review decision without adding it to the Mission Plan contract."""
-
-    approved: bool
-    issues: tuple[str, ...]
-
-
 def _nullable_schema(value: JSONValue) -> JSONValue:
     """Return a provider schema accepting null exactly for a contract-optional property."""
     if isinstance(value, dict):
@@ -88,8 +80,54 @@ def _nullable_schema(value: JSONValue) -> JSONValue:
     return {"anyOf": [value, {"type": "null"}]}
 
 
-class ResponsesMissionPlanner:
-    """Plan and optionally review a Mission through a Responses-compatible provider."""
+def _validate_plan_output(
+    value: JSONObject,
+    mission_id: str,
+    grounded_intent: GroundedIntent,
+    capability_catalog: CanonicalCapabilityCatalog,
+) -> MissionPlan:
+    """Validate one generated draft against identity, implementation, and Catalog boundaries."""
+    plan = MissionPlan.from_json(value)
+    plan.validate_implementation_support()
+    if plan.mission.mission_id != mission_id:
+        raise MissionProviderError("model changed the requested mission id")
+    if plan.mission.objective != grounded_intent.objective:
+        raise MissionProviderError("model changed the requested mission objective")
+    capability_catalog.validate_plan(plan)
+    return plan
+
+
+def _review_schema() -> JSONObject:
+    """Return the strict provider schema for structured Mission review evidence."""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["approved", "issues"],
+        "properties": {
+            "approved": {"type": "boolean"},
+            "issues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["code", "path", "message", "required_action"],
+                    "properties": {
+                        "code": {"type": "string"},
+                        "path": {"type": "string"},
+                        "message": {"type": "string"},
+                        "required_action": {
+                            "type": "string",
+                            "enum": ["RepairPlan", "RequestClarification", "RejectDraft"],
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+class _ResponsesClient:
+    """Own shared provider transport and strict structured-output mechanics only."""
 
     def __init__(
         self,
@@ -105,42 +143,6 @@ class ResponsesMissionPlanner:
         self._transport = transport if transport is not None else UrllibJsonTransport()
         self._endpoint = settings.provider.endpoint(environment)
         self._api_key = settings.provider.api_key(environment)
-
-    def plan(
-        self,
-        mission_id: str,
-        grounded_intent: GroundedIntent,
-        capability_catalog: CanonicalCapabilityCatalog,
-    ) -> MissionPlan:
-        """Generate a strict MissionPlan from the complete resolved Mission intent."""
-        schema = self._load_schema()
-        response = self._request(
-            model=self._settings.llm.model,
-            instructions=self._load_prompt(self._settings.prompts.planner_path),
-            input_text=json.dumps(
-                {
-                    "mission_id": mission_id,
-                    "grounded_intent": grounded_intent.to_json(),
-                    "capability_catalog": capability_catalog.to_json(),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            schema_name="mission_plan_v0",
-            schema=cast(JSONObject, self._provider_schema(schema)),
-        )
-        plan = MissionPlan.from_json(self._extract_output_json(response))
-        plan.validate_implementation_support()
-        if plan.mission.mission_id != mission_id:
-            raise MissionProviderError("model changed the requested mission id")
-        if plan.mission.objective != grounded_intent.objective:
-            raise MissionProviderError("model changed the requested mission objective")
-        capability_catalog.validate_plan(plan)
-        if self._settings.review_enabled:
-            review = self._review(grounded_intent, plan, capability_catalog)
-            if not review.approved:
-                raise MissionProviderError(f"mission plan review rejected: {list(review.issues)}")
-        return plan
 
     def _load_schema(self) -> JSONObject:
         """Load the configured JSON Schema used for strict provider output."""
@@ -262,25 +264,74 @@ class ResponsesMissionPlanner:
                 raise MissionProviderError("provider output_text must decode to a JSON object")
         raise MissionProviderError("provider response contains no output_text")
 
-    def _review(
+
+class ResponsesMissionPlanner:
+    """Create MissionPlan drafts through a Responses-compatible provider."""
+
+    def __init__(
+        self,
+        settings: MissionSettings,
+        environment: Mapping[str, str],
+        transport: JsonTransport | None = None,
+    ) -> None:
+        """Create a Planner over transport mechanics that carry no Mission authority."""
+        self._client = _ResponsesClient(settings, environment, transport)
+        self._settings = settings
+
+    def plan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+    ) -> MissionPlan:
+        """Generate a strict MissionPlan from the complete resolved Mission intent."""
+        schema = self._client._load_schema()
+        response = self._client._request(
+            model=self._settings.llm.model,
+            instructions=self._client._load_prompt(self._settings.prompts.planner_path),
+            input_text=json.dumps(
+                {
+                    "mission_id": mission_id,
+                    "grounded_intent": grounded_intent.to_json(),
+                    "capability_catalog": capability_catalog.to_json(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            schema_name="mission_plan_v0",
+            schema=cast(JSONObject, self._client._provider_schema(schema)),
+        )
+        return _validate_plan_output(
+            self._client._extract_output_json(response),
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+        )
+
+
+class ResponsesMissionReviewer:
+    """Review validated MissionPlan drafts without modifying them."""
+
+    def __init__(
+        self,
+        settings: MissionSettings,
+        environment: Mapping[str, str],
+        transport: JsonTransport | None = None,
+    ) -> None:
+        """Create a Reviewer adapter over the shared Responses request implementation."""
+        self._client = _ResponsesClient(settings, environment, transport)
+        self._settings = settings
+
+    def review(
         self,
         grounded_intent: GroundedIntent,
         plan: MissionPlan,
         capability_catalog: CanonicalCapabilityCatalog,
-    ) -> ReviewResult:
+    ) -> MissionPlanReview:
         """Review the plan against its exact grounded input and authority boundaries."""
-        review_schema: JSONObject = {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["approved", "issues"],
-            "properties": {
-                "approved": {"type": "boolean"},
-                "issues": {"type": "array", "items": {"type": "string"}},
-            },
-        }
-        response = self._request(
+        response = self._client._request(
             model=self._settings.llm.review_model,
-            instructions=self._load_prompt(self._settings.prompts.reviewer_path),
+            instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
             input_text=json.dumps(
                 {
                     "grounded_intent": grounded_intent.to_json(),
@@ -291,16 +342,57 @@ class ResponsesMissionPlanner:
                 sort_keys=True,
             ),
             schema_name="mission_review_v0",
-            schema=review_schema,
+            schema=_review_schema(),
         )
-        decoded = self._extract_output_json(response)
-        approved = decoded.get("approved")
-        issues_value = decoded.get("issues")
-        if not isinstance(approved, bool) or not isinstance(issues_value, list):
-            raise MissionProviderError("review response does not match the review contract")
-        if not all(isinstance(issue, str) for issue in issues_value):
-            raise MissionProviderError("review issues must contain only text")
-        return ReviewResult(approved=approved, issues=tuple(cast(list[str], issues_value)))
+        return MissionPlanReview.from_json(self._client._extract_output_json(response))
+
+
+class ResponsesMissionRepairer:
+    """Repair one rejected MissionPlan without expanding grounded Mission facts."""
+
+    def __init__(
+        self,
+        settings: MissionSettings,
+        environment: Mapping[str, str],
+        transport: JsonTransport | None = None,
+    ) -> None:
+        """Create a Repairer adapter over the shared Responses request implementation."""
+        self._client = _ResponsesClient(settings, environment, transport)
+        self._settings = settings
+
+    def repair(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+    ) -> MissionPlan:
+        """Generate and validate one complete replacement draft from structured findings."""
+        schema = self._client._load_schema()
+        response = self._client._request(
+            model=self._settings.llm.model,
+            instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
+            input_text=json.dumps(
+                {
+                    "mission_id": mission_id,
+                    "grounded_intent": grounded_intent.to_json(),
+                    "rejected_plan": rejected_plan.to_json(),
+                    "review": review.to_json(),
+                    "capability_catalog": capability_catalog.to_json(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            schema_name="mission_plan_repair_v0",
+            schema=cast(JSONObject, self._client._provider_schema(schema)),
+        )
+        return _validate_plan_output(
+            self._client._extract_output_json(response),
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+        )
 
 
 class ResponsesMissionInterpreter:
@@ -313,7 +405,7 @@ class ResponsesMissionInterpreter:
         transport: JsonTransport | None = None,
     ) -> None:
         """Create a provider adapter while reusing strict request and response handling."""
-        self._client = ResponsesMissionPlanner(settings, environment, transport)
+        self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
 
     def interpret(

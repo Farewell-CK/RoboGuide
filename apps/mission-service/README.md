@@ -1,8 +1,9 @@
 # Mission Service
 
-该 composition root 接收自然语言 Mission Request，持久化澄清/草案状态，并在无开放问题且
-满足风险策略后把完整 MissionPlan 提交给 Integration Server。它不选择 Node、不创建 Group，
-也不保存 Running/Completed execution state。
+该 composition root 接收自然语言 Mission Request，持久化澄清、草案与结构化 Review history，
+并在无开放问题、确定性校验及语义 Review 通过且满足风险策略后，把完整 MissionPlan 提交给
+Integration Server。可修复 Review issue 进入最多两次自动 Repair；需要新用户事实的问题返回
+`NeedsClarification`。它不选择 Node、不创建 Group，也不保存 Running/Completed execution state。
 
 ```bash
 uv run python apps/mission-service/main.py \

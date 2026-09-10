@@ -49,13 +49,14 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
 - 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
-  确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner；Planner 与 Reviewer
-  显式消费 objective、confirmed constraints 和 assumptions；Interpreter 不读取 live Node
-  inventory，当前无 provider 不再使合法 Mission 被 Mission Intelligence 拒绝；
+  确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner/Reviewer/Repairer；Mission
+  Request v0.2 持久化结构化 Review history，并将 repair、重新 clarification 与不可修复 reject
+  分流；Interpreter 不读取 live Node inventory，当前无 provider 不再使合法 Mission 被 Mission
+  Intelligence 拒绝；
 - `contracts/capability/v0.1/` 提供 deployment-independent Canonical Capability Catalog；Planner
   与 Reviewer 获得同一词汇表，确定性 admission 拒绝 unknown contract、未知/缺失参数和类型
   不匹配，但 Catalog membership 不代表当前存在 provider；
-- Mission 输出使用 `contracts/mission/v0.4/` 中的版本化合同；v0.2/v0.3 作为兼容输入；每个 Role 分别声明
+- Mission 输出使用 `contracts/mission/v0.5/` 中的版本化合同；v0.2-v0.4 作为兼容输入；每个 Role 分别声明
   Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
   不绑定 NodeId 的 execution-time cross-role relation；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
@@ -123,6 +124,13 @@ Inventory 与 Capability Matching 回答“当前谁能执行”。Mission Intel
 不解决多 capability requirements、feasibility envelope、embodiment taxonomy 或
 Capability/Operation/ExecutionIntent 的最终分层，见
 [`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md)。
+
+Mission Review 不再隐藏在 Planner 调用内部。Reviewer 对 exact draft 返回结构化 issue，Mission
+Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最多自动修复两次，
+`RequestClarification` 返回用户对话，`RejectDraft` 或 repair budget exhausted 才失败。Repairer
+不能补写 GroundedIntent 中不存在的用户事实，见
+[`ADR-0032`](docs/decisions/0032-mission-review-and-repair-loop.md)。当前 dialogue 仍是
+`instruction + messages`，完整 `DialogueTurn` 结构化留待后续。
 
 ### Control Plane
 
@@ -550,8 +558,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   └── node.toml
 ├── contracts/
 │   ├── capability/v0.1/
-│   ├── mission/v0.2/ + v0.3/ + v0.4/
-│   ├── mission/request-v0.1/
+│   ├── mission/v0.2/ + v0.3/ + v0.4/ + v0.5/
+│   ├── mission/request-v0.1/ + request-v0.2/
 │   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ ... v0.7/
 │   ├── state/v0.1/

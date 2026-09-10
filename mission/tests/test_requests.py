@@ -34,10 +34,10 @@ FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
 
 
-def test_request_contract_accepts_current_and_compatible_plan_versions() -> None:
-    """Durable request records retain v0.3/v0.4 while admitting current v0.5 plans."""
+def test_request_v02_contract_accepts_current_and_compatible_plan_versions() -> None:
+    """Current request projections retain v0.3/v0.4 while admitting v0.5 plans."""
     schema = json.loads(
-        Path("contracts/mission/request-v0.1/mission-request.schema.json").read_text(
+        Path("contracts/mission/request-v0.2/mission-request.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -402,6 +402,35 @@ def test_submission_retry_reuses_exact_draft_without_replanning(tmp_path: Path) 
     assert len(planner.calls) == 1
     assert len(interpreter.calls) == 1
     assert controller.submissions[0].to_json() == controller.submissions[1].to_json()
+
+
+def test_v01_request_projection_restores_with_empty_review_history() -> None:
+    """Existing durable v0.1 records normalize without fabricating past Reviews."""
+    record = MissionRequestRecord(
+        request_id="request-" + "1" * 32,
+        mission_id="mission-" + "2" * 32,
+        instruction="test",
+        messages=(),
+        lifecycle=MissionRequestLifecycle.FAILED,
+        assessment=None,
+        plan=None,
+        draft_revision=0,
+        draft_digest=None,
+        approval_required=False,
+        issues=("old failure",),
+        created_at_ms=1,
+        updated_at_ms=2,
+    )
+    value = record.to_json()
+    value["schema_version"] = "roboguide.mission-request/v0.1"
+    del value["repair_attempts"]
+    del value["review_history"]
+
+    restored = MissionRequestRecord.from_json(value)
+
+    assert restored.repair_attempts == 0
+    assert restored.review_history == ()
+    assert restored.to_json()["schema_version"] == "roboguide.mission-request/v0.2"
 
 
 def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None:

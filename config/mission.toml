@@ -4,12 +4,14 @@ contract_version = "roboguide.mission-plan/v0.5"
 schema_path = "contracts/mission/v0.5/mission-plan.schema.json"
 capability_catalog_path = "contracts/capability/v0.1/catalog.json"
 review_enabled = true
+max_repair_attempts = 2
 
 [mission.prompts]
 version = "v0"
 interpreter_path = "mission/prompts/v0/interpreter.md"
 planner_path = "mission/prompts/v0/planner.md"
 reviewer_path = "mission/prompts/v0/reviewer.md"
+repairer_path = "mission/prompts/v0/repairer.md"
 
 [mission.llm]
 model_provider = "OpenAI"

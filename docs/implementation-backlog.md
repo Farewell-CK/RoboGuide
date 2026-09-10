@@ -83,8 +83,9 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
   字段，同时保持 Local EAIOS 的 Local How authority；
 - 建立 Task expected effect / satisfaction evidence，使 Runtime execution terminal fact 不自动等于
   physical or semantic goal satisfied；
-- 将用户 DialogueTurn 与内部 planning/review trace 分离，并为结构化 review issue、bounded repair
-  和重新 clarification 建立闭环；
+- ADR-0032 已将内部 revision-bound structured review history 与用户消息分开，并建立 bounded
+  repair / clarification 分流；用户 dialogue 仍需从 `instruction + messages` 演化为版本化
+  `DialogueTurn`；
 - 将用户/策略给出的 timing constraints 与 Runtime/State/候选节点提供的 duration estimate 及其
   provenance 分离。
 

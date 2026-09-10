@@ -19,6 +19,8 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.prompts.interpreter_path.is_file()
     assert settings.prompts.planner_path.is_file()
     assert settings.prompts.reviewer_path.is_file()
+    assert settings.prompts.repairer_path.is_file()
+    assert settings.max_repair_attempts == 2
     assert settings.contract_version == "roboguide.mission-plan/v0.5"
     assert settings.schema_path == Path.cwd() / "contracts/mission/v0.5/mission-plan.schema.json"
     assert settings.capability_catalog_path == (
@@ -55,7 +57,9 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     planner_prompt = settings.prompts.planner_path.read_text(encoding="utf-8")
     interpreter_prompt = settings.prompts.interpreter_path.read_text(encoding="utf-8")
     reviewer_prompt = settings.prompts.reviewer_path.read_text(encoding="utf-8")
+    repairer_prompt = settings.prompts.repairer_path.read_text(encoding="utf-8")
     assert "Do not emit meta-tasks" in planner_prompt
     assert "Do not create Tasks" in interpreter_prompt
     assert "must not select concrete nodes" in planner_prompt
     assert "Reject meta-tasks" in reviewer_prompt
+    assert "do not invent user facts" in repairer_prompt

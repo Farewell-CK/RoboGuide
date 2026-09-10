@@ -12,7 +12,12 @@ from mission.config import MissionSettings, current_environment, load_settings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner, MissionPlanner
-from mission.responses import ResponsesMissionPlanner
+from mission.responses import (
+    ResponsesMissionPlanner,
+    ResponsesMissionRepairer,
+    ResponsesMissionReviewer,
+)
+from mission.review import MissionReviewError, MissionReviewRoute, route_mission_review
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -56,6 +61,42 @@ def _planner(arguments: argparse.Namespace, settings: MissionSettings) -> Missio
     return ResponsesMissionPlanner(settings, current_environment())
 
 
+def _review_and_repair_plan(
+    settings: MissionSettings,
+    mission_id: str,
+    grounded_intent: GroundedIntent,
+    capability_catalog: CanonicalCapabilityCatalog,
+    plan: MissionPlan,
+) -> MissionPlan:
+    """Apply the same bounded semantic review policy for direct LLM CLI planning."""
+    if not settings.review_enabled:
+        return plan
+    environment = current_environment()
+    reviewer = ResponsesMissionReviewer(settings, environment)
+    repairer = ResponsesMissionRepairer(settings, environment)
+    repairs = 0
+    while True:
+        review = reviewer.review(grounded_intent, plan, capability_catalog)
+        route = route_mission_review(review)
+        if route is MissionReviewRoute.APPROVED:
+            return plan
+        messages = [issue.message for issue in review.issues]
+        if route is MissionReviewRoute.CLARIFICATION:
+            raise MissionReviewError(f"mission review requires clarification: {messages}")
+        if route is MissionReviewRoute.REJECTED:
+            raise MissionReviewError(f"mission review rejected automatic repair: {messages}")
+        if repairs >= settings.max_repair_attempts:
+            raise MissionReviewError(f"mission review repair attempts exhausted: {messages}")
+        plan = repairer.repair(
+            mission_id,
+            grounded_intent,
+            plan,
+            review,
+            capability_catalog,
+        )
+        repairs += 1
+
+
 def main() -> int:
     """Run validation or planning and return a process-compatible status code."""
     arguments = _parser().parse_args()
@@ -71,11 +112,20 @@ def main() -> int:
         tuple(cast(list[str], arguments.constraint)),
         tuple(cast(list[str], arguments.assumption)),
     )
+    mission_id = cast(str, arguments.mission_id)
     plan = planner.plan(
-        mission_id=cast(str, arguments.mission_id),
+        mission_id=mission_id,
         grounded_intent=grounded_intent,
         capability_catalog=capability_catalog,
     )
+    if arguments.fixture is None:
+        plan = _review_and_repair_plan(
+            settings,
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+            plan,
+        )
     output_path = cast(Path, arguments.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
