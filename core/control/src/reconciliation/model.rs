@@ -7,8 +7,8 @@
 
 use crate::{ControlError, ExecutionGroup};
 use domain::{
-    ExecutionGroupId, NodeId, NodeStateSnapshot, ResourceId, RoleId, RoleRequirement, TaskRef,
-    TaskRequirement,
+    ExecutionGroupId, NodeId, NodeStateSnapshot, OperationRef, ResourceId, RoleId, RoleRequirement,
+    TaskRef, TaskRequirement,
 };
 use std::collections::BTreeSet;
 
@@ -84,6 +84,8 @@ pub struct RecoveryCandidateSet {
     previous_node_id: NodeId,
     /// Currently eligible nodes in deterministic identity order.
     candidate_node_ids: Vec<NodeId>,
+    /// Exact semantic operation constrained by normalized Mission recovery, when available.
+    operation: Option<OperationRef>,
 }
 
 impl RecoveryCandidateSet {
@@ -101,6 +103,26 @@ impl RecoveryCandidateSet {
             role_id,
             previous_node_id,
             candidate_node_ids,
+            operation: None,
+        }
+    }
+
+    /// Creates a role-scoped candidate set whose nodes support the exact semantic operation.
+    pub(super) fn new_with_operation(
+        group_id: ExecutionGroupId,
+        task_ref: TaskRef,
+        role_id: RoleId,
+        previous_node_id: NodeId,
+        candidate_node_ids: Vec<NodeId>,
+        operation: OperationRef,
+    ) -> Self {
+        Self {
+            group_id,
+            task_ref,
+            role_id,
+            previous_node_id,
+            candidate_node_ids,
+            operation: Some(operation),
         }
     }
 
@@ -133,6 +155,11 @@ impl RecoveryCandidateSet {
     pub fn is_empty(&self) -> bool {
         self.candidate_node_ids.is_empty()
     }
+
+    /// Returns the exact operation checked for normalized Mission recovery.
+    pub const fn operation(&self) -> Option<&OperationRef> {
+        self.operation.as_ref()
+    }
 }
 
 /// Replacement assignment supplied by an external scheduler/coordination boundary.
@@ -150,6 +177,8 @@ pub struct RecoveryAssignmentProposal {
     replacement_node_id: NodeId,
     /// Replacement resources proposed by the caller but not yet committed.
     replacement_resource_ids: Vec<ResourceId>,
+    /// Exact semantic operation checked during Match and Proposal, when available.
+    operation: Option<OperationRef>,
 }
 
 impl RecoveryAssignmentProposal {
@@ -161,6 +190,7 @@ impl RecoveryAssignmentProposal {
         previous_node_id: NodeId,
         replacement_node_id: NodeId,
         replacement_resource_ids: Vec<ResourceId>,
+        operation: Option<OperationRef>,
     ) -> Self {
         Self {
             group_id,
@@ -169,6 +199,7 @@ impl RecoveryAssignmentProposal {
             previous_node_id,
             replacement_node_id,
             replacement_resource_ids,
+            operation,
         }
     }
 
@@ -201,6 +232,11 @@ impl RecoveryAssignmentProposal {
     pub fn replacement_resource_ids(&self) -> &[ResourceId] {
         &self.replacement_resource_ids
     }
+
+    /// Returns the exact operation that Commit must revalidate, when available.
+    pub const fn operation(&self) -> Option<&OperationRef> {
+        self.operation.as_ref()
+    }
 }
 
 /// Replacement assignment whose resources are committed to the existing Group.
@@ -218,10 +254,14 @@ pub struct CommittedRecoveryAssignment {
     replacement_node_id: NodeId,
     /// Resources atomically reserved for the replacement role.
     committed_resource_ids: Vec<ResourceId>,
+    /// Exact semantic operation covered by this commitment, when available.
+    #[serde(default)]
+    operation: Option<OperationRef>,
 }
 
 impl CommittedRecoveryAssignment {
     /// Creates an internal commitment after all coordination checks succeed.
+    #[cfg(test)]
     pub(crate) const fn new(
         group_id: ExecutionGroupId,
         task_ref: TaskRef,
@@ -237,6 +277,29 @@ impl CommittedRecoveryAssignment {
             previous_node_id,
             replacement_node_id,
             committed_resource_ids,
+            operation: None,
+        }
+    }
+
+    /// Creates an operation-aware commitment after coordination validation succeeds.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) const fn new_with_operation(
+        group_id: ExecutionGroupId,
+        task_ref: TaskRef,
+        role_id: RoleId,
+        previous_node_id: NodeId,
+        replacement_node_id: NodeId,
+        committed_resource_ids: Vec<ResourceId>,
+        operation: Option<OperationRef>,
+    ) -> Self {
+        Self {
+            group_id,
+            task_ref,
+            role_id,
+            previous_node_id,
+            replacement_node_id,
+            committed_resource_ids,
+            operation,
         }
     }
 
@@ -268,6 +331,11 @@ impl CommittedRecoveryAssignment {
     /// Returns resources committed to the existing Group and role.
     pub fn committed_resource_ids(&self) -> &[ResourceId] {
         &self.committed_resource_ids
+    }
+
+    /// Returns the semantic operation covered by this commitment, when available.
+    pub const fn operation(&self) -> Option<&OperationRef> {
+        self.operation.as_ref()
     }
 }
 

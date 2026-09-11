@@ -71,6 +71,7 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
             state_exports: Vec::new(),
             memory_providers: Vec::new(),
             capability_profiles: Vec::new(),
+            operation_support: Vec::new(),
         };
     for (node, lease, local_system, contract, kind, resources) in [
         (
@@ -388,6 +389,7 @@ fn state_observation_reconnect_epoch_accepts_reset_sequence() {
                     }],
                     memory_providers: Vec::new(),
                     capability_profiles: Vec::new(),
+                    operation_support: Vec::new(),
                 },
             },
             TimestampMs::new(1),

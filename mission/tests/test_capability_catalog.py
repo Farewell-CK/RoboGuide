@@ -12,7 +12,7 @@ from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCat
 from mission.models import JSONObject, MissionPlan
 
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
-CURRENT_CATALOG = Path("contracts/capability/v0.2/catalog.json")
+CURRENT_CATALOG = Path("contracts/capability/v0.3/catalog.json")
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 NORMALIZED_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 
@@ -70,8 +70,8 @@ def test_catalog_covers_all_checked_in_mission_scenarios() -> None:
     assert validated
 
 
-def test_v02_catalog_separates_capabilities_from_operations() -> None:
-    """A semantic operation may require several independently matchable capabilities."""
+def test_v03_integrated_operation_requires_only_provider_level_capability() -> None:
+    """An integrated semantic operation does not expose its Local How as requirements."""
     catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
     plan = MissionPlan.from_json(
         cast(JSONObject, json.loads(NORMALIZED_FIXTURE.read_text(encoding="utf-8")))
@@ -79,7 +79,9 @@ def test_v02_catalog_separates_capabilities_from_operations() -> None:
 
     catalog.validate_plan(plan)
     role = plan.tasks[0].roles[0]
-    assert len(role.capabilities) == 3
+    assert len(role.capabilities) == 1
+    assert role.capabilities[0].contract.name == "relocate"
+    assert role.capabilities[0].constraints[0].attribute == "max-payload-grams"
     assert role.execution.operation.name == "relocate"
     assert role.execution.objective.startswith("将指定急救包")
 

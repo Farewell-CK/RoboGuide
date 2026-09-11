@@ -53,7 +53,7 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   Request v0.3 持久化结构化 Dialogue 和独立 Review history，并将 repair、重新 clarification 与
   不可修复 reject 分流；Interpreter 不读取 live Node inventory，当前无 provider 不再使合法
   Mission 被 Mission Intelligence 拒绝；
-- `contracts/capability/v0.2/` 提供 deployment-independent Canonical Capability Catalog；Planner
+- `contracts/capability/v0.3/` 提供 deployment-independent Canonical Capability Catalog；Planner
   与 Reviewer 获得同一 capability/operation 词汇表，确定性 admission 拒绝 unknown identity、
   未知/缺失参数、约束属性和类型不匹配，但 Catalog membership 不代表当前存在 provider；
 - Mission 输出使用 `contracts/mission/v0.7/` 中的版本化合同；v0.2-v0.6 作为兼容输入；Mission
@@ -90,6 +90,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   返回，见 [`ADR-0023`](docs/decisions/0023-application-accepted-node-protocol-facts.md)。
 - Capability profile、semantic ExecutionIntent 与显式版本兼容边界见
   [`ADR-0035`](docs/decisions/0035-node-semantic-profile-and-intent-boundary.md)。
+- Control-visible Operation Support 与 integrated operation provider baseline 见
+  [`ADR-0036`](docs/decisions/0036-operation-support-and-integrated-capability-baseline.md)。
 - source-aware State federation 与 selective Memory ownership/exchange 见
   [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)；node-config/v0.6
   provider backend、discover/export/import workflow 与 scope 边界见
@@ -124,7 +126,8 @@ Control Matching/Scheduling/Commit 使用。实现可以使用 LLM、VLM、符�
 Canonical Capability Catalog 回答“这个 contract 是否属于 RoboGuide 当前语义语言”；live
 Inventory 与 Capability Matching 回答“当前谁能执行”。Mission Intelligence 在 Reviewer 前
 确定性校验 Catalog identity、scalar parameters 和 typed capability constraints，但不读取当前
-provider。当前 v0.2 Catalog 已区分 Capability、Operation 及其 baseline requirements；它仍不
+provider。当前 v0.3 Catalog 已区分 Capability、Operation 及其 direct provider-level baseline
+requirements；integrated operation 不会把内部 Local How 展开为全局 requirements。它仍不
 定义 embodiment taxonomy、结构化 entity schema 或动态 Catalog negotiation，见
 [`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md) 与
 [`ADR-0034`](docs/decisions/0034-mission-semantic-contract-normalization.md)。
@@ -235,10 +238,11 @@ TaskRole 显式关联；Matching 与 Scheduler 不解析 intent，Runtime 只路
 Local Integration Engine 负责将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
 正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System。显式协商的 Node Contract
-v0.5 通过 exact capability profiles 上报 readiness 与 typed feasibility attributes，并通过
-canonical invocation 原样传递 Operation、objective 和 scalar parameters。Capability profile
-回答节点能够证明什么，operation mapping 决定哪个本地 workflow 接收 intent，二者在 Node
-config v0.7 中分开声明。所有 Capability、
+v0.6 通过 exact capability profiles 上报 readiness 与 typed feasibility attributes，通过独立
+`OperationSupport` 声明 Node 可接收的 canonical operation，并通过 canonical invocation 原样传递
+Operation、objective 和 scalar parameters。Capability profile 回答节点能够证明什么，operation
+support 回答是否能接收 semantic invocation，operation binding 决定哪个本地 workflow 接收
+intent；三者保持分层，后者只存在于 Node config v0.7。所有 Capability、
 Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
 已 Commit 的 resource IDs。它还承载带当前 session/management sequence 的 peer-channel
 readiness evidence；实际 peer transport 和高频控制仍完全属于 Local EAIOS。
@@ -254,7 +258,7 @@ physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是�
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-当前合同与版本关系见 [`contracts/node/v0.8/`](contracts/node/v0.8/README.md) 和
+当前合同与版本关系见 [`contracts/node/v0.9/`](contracts/node/v0.9/README.md) 和
 [`contracts/node/README.md`](contracts/node/README.md)。Node config v0.7 为每个 exact
 canonical capability profile 提供固定 readiness observation 与 attributes，将 operation/workflow
 mapping 独立声明，并保留选择性的 State export、Memory provider、固定 discover/export/import
@@ -573,11 +577,11 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
-│   ├── capability/v0.1/ + v0.2/
+│   ├── capability/v0.1/ ... v0.3/
 │   ├── mission/v0.2/ ... v0.7/
 │   ├── mission/request-v0.1/ ... request-v0.3/
 │   ├── mission/inventory-v0.1/
-│   ├── node/v0.2/ ... v0.7/
+│   ├── node/v0.2/ ... v0.9/
 │   ├── state/v0.1/
 │   ├── memory/v0.1/
 │   ├── spatial/v0.1/

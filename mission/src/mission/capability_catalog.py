@@ -19,7 +19,8 @@ from mission.models import (
     TaskSatisfactionBasis,
 )
 
-CAPABILITY_CATALOG_SCHEMA = "roboguide.capability-catalog/v0.2"
+CAPABILITY_CATALOG_SCHEMA = "roboguide.capability-catalog/v0.3"
+_PREVIOUS_CAPABILITY_CATALOG_SCHEMA = "roboguide.capability-catalog/v0.2"
 _LEGACY_CAPABILITY_CATALOG_SCHEMA = "roboguide.capability-catalog/v0.1"
 
 
@@ -353,7 +354,10 @@ class CanonicalCapabilityCatalog:
         """Parse a complete Catalog and establish deterministic contract ordering."""
         item = _object(value, "capability_catalog")
         schema_version = _text(item["schema_version"], "capability_catalog.schema_version")
-        if schema_version == CAPABILITY_CATALOG_SCHEMA:
+        if schema_version in {
+            CAPABILITY_CATALOG_SCHEMA,
+            _PREVIOUS_CAPABILITY_CATALOG_SCHEMA,
+        }:
             _exact_keys(
                 item,
                 {"schema_version", "capabilities", "operations"},
@@ -364,7 +368,9 @@ class CanonicalCapabilityCatalog:
         else:
             raise CapabilityCatalogError(f"unsupported Capability Catalog: {schema_version}")
         operation_field = (
-            "operations" if schema_version == CAPABILITY_CATALOG_SCHEMA else "contracts"
+            "operations"
+            if schema_version in {CAPABILITY_CATALOG_SCHEMA, _PREVIOUS_CAPABILITY_CATALOG_SCHEMA}
+            else "contracts"
         )
         contracts = tuple(
             sorted(
@@ -396,7 +402,7 @@ class CanonicalCapabilityCatalog:
                     key=lambda definition: _contract_id(definition.contract),
                 )
             )
-            if schema_version == CAPABILITY_CATALOG_SCHEMA
+            if schema_version in {CAPABILITY_CATALOG_SCHEMA, _PREVIOUS_CAPABILITY_CATALOG_SCHEMA}
             else tuple(
                 CanonicalCapabilityDefinition(contract.contract, contract.description, ())
                 for contract in contracts
@@ -511,7 +517,7 @@ class CanonicalCapabilityCatalog:
                 "contracts": [definition.to_legacy_json() for definition in self.contracts],
             }
         return {
-            "schema_version": CAPABILITY_CATALOG_SCHEMA,
+            "schema_version": self.schema_version,
             "capabilities": [definition.to_json() for definition in self.capabilities],
             "operations": [definition.to_json() for definition in self.contracts],
         }

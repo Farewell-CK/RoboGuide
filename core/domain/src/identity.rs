@@ -2,7 +2,8 @@
 
 use crate::{
     DomainError, NODE_CONTRACT_VERSION_V0_1, NODE_CONTRACT_VERSION_V0_2,
-    NODE_CONTRACT_VERSION_V0_3, NODE_CONTRACT_VERSION_V0_4,
+    NODE_CONTRACT_VERSION_V0_3, NODE_CONTRACT_VERSION_V0_4, NODE_CONTRACT_VERSION_V0_5,
+    NODE_CONTRACT_VERSION_V0_6,
 };
 use std::fmt::{Display, Formatter};
 
@@ -114,6 +115,16 @@ impl NodeContractVersion {
     /// Returns the contract version carrying durable command admission evidence.
     pub fn v0_4() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_4.to_string())
+    }
+
+    /// Returns the contract version carrying capability profiles and semantic intents.
+    pub fn v0_5() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_5.to_string())
+    }
+
+    /// Returns the contract version carrying explicit canonical operation support.
+    pub fn v0_6() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_6.to_string())
     }
 }
 

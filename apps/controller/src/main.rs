@@ -515,7 +515,7 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         )
         .map_err(|error| error.to_string())?;
     let plan = control
-        .commit(&proposal, timestamp, &correlation_id, &mut log)
+        .commit_with_state(&state, &proposal, timestamp, &correlation_id, &mut log)
         .map_err(|error| error.to_string())?;
     refresh_allocation_view(&control, &mut allocation_state, TimestampMs::new(0))?;
     require_allocation_phase(
@@ -615,8 +615,9 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         )
         .map_err(|error| error.to_string())?;
     let assessment = control
-        .assess_group(
+        .assess_group_for_mission(
             &state,
+            &mission_plan,
             &group_id,
             &requirement,
             TimestampMs::new(1),
@@ -641,10 +642,14 @@ fn run_mvp_slice() -> Result<Vec<EventRecord>, String> {
         Some(&group_id),
     )?;
     let recovery_candidates = control
-        .match_recovery_candidates(
+        .match_recovery_candidates_for_operation(
             &state,
             &need,
             &requirement,
+            planned_task
+                .execution_intent(&transport_role)
+                .ok_or_else(|| "transport role lacks execution intent".to_string())?
+                .operation(),
             TimestampMs::new(1),
             &correlation_id,
             &mut log,

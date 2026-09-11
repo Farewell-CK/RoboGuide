@@ -81,6 +81,7 @@ fn group_shared_view_uses_exact_export_schema_and_freshness() {
                         .collect(),
                     memory_providers: Vec::new(),
                     capability_profiles: Vec::new(),
+                    operation_support: Vec::new(),
                 },
             },
             TimestampMs::new(1),

@@ -117,15 +117,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   envelope but never makes the Control/State/Runtime decision itself.
 - Node config v0.7 separates exact capability profiles from canonical operation workflows. Every
   profile owns typed scalar attributes plus one fixed readiness observation; Node Service observes
-  before Register and emits complete RegistrationUpdate snapshots on change. Node Contract v0.5
-  preserves these profiles through State into Control Matching. Operations independently map
+  before Register and emits complete RegistrationUpdate snapshots on change. Node Contract v0.6
+  preserves these profiles plus exact canonical Operation Support through State into Control
+  Matching. Operations independently map
   semantic `ExecutionIntent` to Local How. Node config v0.2-v0.6 remains an explicit combined
   declaration compatibility input. The config also declares fixed State exports and Memory
   providers and optional provider-local discover/export/import workflows; v0.2-v0.4 normalize
   those declarations to empty and v0.5 providers remain metadata-only. Optional v0.6+
   peer-channel observers use fixed read-only routes and configuration-owned LocalSystem
   identity; their response observes established endpoints and never requests transport setup.
-- Node Protocol v0.4 with Node Contract v0.5 carries complete capability-profile and State/Memory
+- Node Protocol v0.4 with Node Contract v0.6 carries complete capability-profile,
+  operation-support, and State/Memory
   provider snapshots, semantic invocation objective/operation/parameters, bounded periodic State
   observation batches plus identified peer-channel readiness facts. Local EAIOS establishes the
   actual peer channel; Controller verifies Node/LocalSystem/committed ContextRole ownership, and all
@@ -195,11 +197,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   but are never real evidence.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
-- `contracts/capability/v0.2/` is the deployment-independent Canonical Capability Catalog consumed
+- `contracts/capability/v0.3/` is the deployment-independent Canonical Capability Catalog consumed
   by Mission Intelligence. It separates capabilities/attributes from operations/parameters and
   validates exact requirements without current providers; live Node inventory remains Control
   eligibility evidence. The current catalog does not freeze embodiment taxonomy, structured entity
-  schemas, or Catalog distribution/negotiation.
+  schemas, or Catalog distribution/negotiation. Operation `required_capabilities` are direct
+  provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

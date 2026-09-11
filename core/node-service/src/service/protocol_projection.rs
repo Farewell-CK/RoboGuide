@@ -203,6 +203,18 @@ pub(super) fn registration_from_readiness(
     } else {
         Vec::new()
     };
+    let operation_support = if current_contract {
+        catalog
+            .operations()
+            .values()
+            .map(|operation| OperationSupport {
+                operation: Some(operation_ref(operation.operation())),
+                local_system_id: operation.owner().to_string(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let resources = catalog
         .resources()
         .values()
@@ -286,6 +298,22 @@ pub(super) fn registration_from_readiness(
         state_exports,
         memory_providers,
         capability_profiles,
+        operation_support,
+    }
+}
+
+/// Converts one startup-validated canonical operation identity to its wire components.
+fn operation_ref(value: &str) -> OperationRef {
+    let (qualified_name, version) = value
+        .rsplit_once('@')
+        .expect("compiled operation has a canonical version");
+    let (namespace, name) = qualified_name
+        .rsplit_once('.')
+        .expect("compiled operation has a canonical namespace");
+    OperationRef {
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
     }
 }
 

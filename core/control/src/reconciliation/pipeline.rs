@@ -7,10 +7,11 @@ use super::model::{
 };
 use crate::{ControlError, ControlPlane, GroupLifecycle, coordination::Reservation};
 use domain::{
-    CorrelationId, EventPayload, ExecutionGroupId, NodeId, ResourceId, RoleId, TaskRequirement,
-    TimestampMs,
+    CorrelationId, EventPayload, ExecutionGroupId, MissionPlan, NodeId, OperationRef, ResourceId,
+    RoleId, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
+use std::collections::BTreeMap;
 
 impl ControlPlane {
     /// Returns every Control-owned unbound recovery need in deterministic Group/Task/Role order.
@@ -125,6 +126,62 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<ReconciliationAssessment, ControlError> {
+        self.assess_group_with_operations(
+            state,
+            group_id,
+            requirement,
+            &BTreeMap::new(),
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Compares a normalized Mission Group against both capability and operation support facts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn assess_group_for_mission<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        mission: &MissionPlan,
+        group_id: &ExecutionGroupId,
+        requirement: &TaskRequirement,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<ReconciliationAssessment, ControlError> {
+        let task = mission
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == requirement.task_ref())
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "reconciliation Task is absent from the accepted MissionPlan".to_string(),
+                )
+            })?;
+        self.assess_group_with_operations(
+            state,
+            group_id,
+            requirement,
+            task.execution_intents(),
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Applies one assessment implementation with optional normalized role-operation evidence.
+    #[allow(clippy::too_many_arguments)]
+    fn assess_group_with_operations<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        group_id: &ExecutionGroupId,
+        requirement: &TaskRequirement,
+        role_operations: &BTreeMap<RoleId, domain::ExecutionIntent>,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<ReconciliationAssessment, ControlError> {
         let group = self
             .groups
             .get(group_id)
@@ -155,7 +212,19 @@ impl ControlPlane {
                 requirement.task_ref(),
                 assignment.role_id(),
             )?;
-            if !self.node_is_eligible_for_role(state, assignment.node_id(), &role, timestamp) {
+            let eligible = role_operations.get(assignment.role_id()).map_or_else(
+                || self.node_is_eligible_for_role(state, assignment.node_id(), &role, timestamp),
+                |intent| {
+                    self.node_is_eligible_for_role_operation(
+                        state,
+                        assignment.node_id(),
+                        &role,
+                        intent.operation(),
+                        timestamp,
+                    )
+                },
+            );
+            if !eligible {
                 unavailable.push((assignment.role_id().clone(), assignment.node_id().clone()));
             }
         }
@@ -306,6 +375,52 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryCandidateSet, ControlError> {
+        self.match_recovery_candidates_with_operation(
+            state,
+            need,
+            requirement,
+            None,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Matches one recovery role against capability facts and its exact semantic operation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn match_recovery_candidates_for_operation<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        operation: &OperationRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryCandidateSet, ControlError> {
+        self.match_recovery_candidates_with_operation(
+            state,
+            need,
+            requirement,
+            Some(operation),
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Applies role-scoped matching with an optional compatibility operation constraint.
+    #[allow(clippy::too_many_arguments)]
+    fn match_recovery_candidates_with_operation<S: SharedNodeStateReader, E: EventSink>(
+        &self,
+        state: &S,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        operation: Option<&OperationRef>,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryCandidateSet, ControlError> {
         let group = self
             .groups
             .get(need.group_id())
@@ -348,16 +463,41 @@ impl ControlPlane {
                     .is_none_or(|node_id| snapshot.node_id() == node_id)
             })
             .filter(|snapshot| {
-                self.node_is_eligible_for_role(state, snapshot.node_id(), &role, timestamp)
+                operation.map_or_else(
+                    || self.node_is_eligible_for_role(state, snapshot.node_id(), &role, timestamp),
+                    |operation| {
+                        self.node_is_eligible_for_role_operation(
+                            state,
+                            snapshot.node_id(),
+                            &role,
+                            operation,
+                            timestamp,
+                        )
+                    },
+                )
             })
             .map(|snapshot| snapshot.node_id().clone())
             .collect::<Vec<_>>();
-        let candidates = RecoveryCandidateSet::new(
-            need.group_id().clone(),
-            need.task_ref().clone(),
-            need.role_id().clone(),
-            need.current_node_id().clone(),
-            candidate_node_ids.clone(),
+        let candidates = operation.map_or_else(
+            || {
+                RecoveryCandidateSet::new(
+                    need.group_id().clone(),
+                    need.task_ref().clone(),
+                    need.role_id().clone(),
+                    need.current_node_id().clone(),
+                    candidate_node_ids.clone(),
+                )
+            },
+            |operation| {
+                RecoveryCandidateSet::new_with_operation(
+                    need.group_id().clone(),
+                    need.task_ref().clone(),
+                    need.role_id().clone(),
+                    need.current_node_id().clone(),
+                    candidate_node_ids.clone(),
+                    operation.clone(),
+                )
+            },
         );
         events.append(
             timestamp,
@@ -418,6 +558,13 @@ impl ControlPlane {
         let node = state
             .node(&selected_node_id)
             .ok_or_else(|| ControlError::UnknownNode(selected_node_id.clone()))?;
+        if let Some(operation) = candidates.operation()
+            && !node.registration().supports_operation(operation)
+        {
+            return Err(ControlError::InvalidProposal(format!(
+                "replacement node {selected_node_id} no longer supports operation {operation}"
+            )));
+        }
         validate_recovery_resources(node, &role, &replacement_resource_ids)?;
 
         let proposal = RecoveryAssignmentProposal::new(
@@ -427,6 +574,7 @@ impl ControlPlane {
             candidates.previous_node_id().clone(),
             selected_node_id.clone(),
             replacement_resource_ids.clone(),
+            candidates.operation().cloned(),
         );
         events.append(
             timestamp,
@@ -516,6 +664,14 @@ impl ControlPlane {
                 proposal.role_id()
             )));
         }
+        if let Some(operation) = proposal.operation()
+            && !replacement.registration().supports_operation(operation)
+        {
+            return Err(ControlError::InvalidProposal(format!(
+                "replacement node {} no longer supports operation {operation}",
+                proposal.replacement_node_id()
+            )));
+        }
         validate_recovery_resources(replacement, &role, proposal.replacement_resource_ids())?;
         for resource_id in proposal.replacement_resource_ids() {
             if let Some(reservation) = self.reservations.get(resource_id) {
@@ -536,13 +692,14 @@ impl ControlPlane {
             }
         }
 
-        let committed = CommittedRecoveryAssignment::new(
+        let committed = CommittedRecoveryAssignment::new_with_operation(
             proposal.group_id().clone(),
             proposal.task_ref().clone(),
             proposal.role_id().clone(),
             previous_node,
             proposal.replacement_node_id().clone(),
             proposal.replacement_resource_ids().to_vec(),
+            proposal.operation().cloned(),
         );
         for resource_id in proposal.replacement_resource_ids() {
             self.reservations.insert(

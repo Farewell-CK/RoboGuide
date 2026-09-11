@@ -85,7 +85,7 @@ pub use node_health::{
     NodeHealth, NodeHealthObservation, NodeHeartbeat, NodeLiveness, NodeLivenessObservation,
     NodeStatus,
 };
-pub use node_registration::{LocalSystemDescriptor, SensorDescriptor};
+pub use node_registration::{LocalSystemDescriptor, OperationSupport, SensorDescriptor};
 pub use node_state::{NodeRegistration, NodeStateSnapshot};
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
 pub use role_assignment::RoleAssignment;
@@ -141,6 +141,12 @@ pub const NODE_CONTRACT_VERSION_V0_3: &str = "roboguide.node.v0.3";
 
 /// Version identifier carrying durable command identity and admission receipts.
 pub const NODE_CONTRACT_VERSION_V0_4: &str = "roboguide.node.v0.4";
+
+/// Version identifier carrying exact capability profiles and semantic execution intents.
+pub const NODE_CONTRACT_VERSION_V0_5: &str = "roboguide.node.v0.5";
+
+/// Version identifier carrying explicit canonical operation-support declarations.
+pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 
 #[cfg(test)]
 #[path = "domain_tests.rs"]

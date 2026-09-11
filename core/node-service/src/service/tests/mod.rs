@@ -65,6 +65,16 @@ fn registration_aggregates_configured_local_systems() {
             .iter()
             .all(|profile| !profile.local_system_id.is_empty())
     );
+    assert_eq!(
+        registration.operation_support.len(),
+        catalog.operations().len()
+    );
+    assert!(
+        registration
+            .operation_support
+            .iter()
+            .all(|support| { support.operation.is_some() && !support.local_system_id.is_empty() })
+    );
 }
 
 /// Resolves one checked-in Distributed Spatial Memory scenario file from the crate root.

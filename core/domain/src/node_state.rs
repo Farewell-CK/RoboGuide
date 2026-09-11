@@ -19,7 +19,7 @@ pub struct NodeRegistration {
     contract_version: NodeContractVersion,
     /// Capabilities currently advertised by the node.
     capabilities: Vec<Capability>,
-    /// Canonical capability contracts executable through this node's adapter boundary.
+    /// Canonical capability contracts advertised as provider feasibility evidence.
     supported_contracts: Vec<CapabilityContractRef>,
     /// Unique local-system owner of each canonical contract.
     #[serde(with = "capability_owner_map_serde")]
@@ -33,6 +33,9 @@ pub struct NodeRegistration {
     /// Provider-declared feasibility attributes for each exact capability.
     #[serde(default, with = "capability_attribute_map_serde")]
     capability_attributes: BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>>,
+    /// Canonical semantic operations accepted by configured Local EAIOS bindings.
+    #[serde(default)]
+    operation_support: Vec<OperationSupport>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
@@ -253,6 +256,7 @@ impl NodeRegistration {
                 .map(|contract| (contract, true))
                 .collect(),
             capability_attributes: BTreeMap::new(),
+            operation_support: Vec::new(),
             capability_kinds: exact_kind
                 .map(|kind| {
                     supported_contracts
@@ -394,6 +398,7 @@ impl NodeRegistration {
             capability_kinds,
             capability_readiness,
             capability_attributes: BTreeMap::new(),
+            operation_support: Vec::new(),
             sensors,
             resources,
             resource_owners,
@@ -474,6 +479,42 @@ impl NodeRegistration {
             });
         }
         self.capability_attributes = capability_attributes;
+        Ok(self)
+    }
+
+    /// Adds canonical operation support without exposing the private Local How binding.
+    pub fn with_operation_support(
+        mut self,
+        mut operation_support: Vec<OperationSupport>,
+    ) -> Result<Self, DomainError> {
+        if !operation_support.is_empty()
+            && self.contract_version.as_str() != NODE_CONTRACT_VERSION_V0_6
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "independent operation support requires Node Contract v0.6".to_string(),
+            });
+        }
+        let owners = self
+            .local_systems
+            .iter()
+            .map(LocalSystemDescriptor::id)
+            .collect::<BTreeSet<_>>();
+        operation_support.sort_by(|left, right| left.operation().cmp(right.operation()));
+        let operation_ids = operation_support
+            .iter()
+            .map(OperationSupport::operation)
+            .collect::<BTreeSet<_>>();
+        if operation_ids.len() != operation_support.len()
+            || operation_support
+                .iter()
+                .any(|support| !owners.contains(support.local_system_id()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "operation support must be unique and owned by a declared local system"
+                    .to_string(),
+            });
+        }
+        self.operation_support = operation_support;
         Ok(self)
     }
 
@@ -559,6 +600,44 @@ impl NodeRegistration {
         &self,
     ) -> &BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>> {
         &self.capability_attributes
+    }
+
+    /// Returns canonical operation-support declarations in deterministic identity order.
+    pub fn operation_support(&self) -> &[OperationSupport] {
+        &self.operation_support
+    }
+
+    /// Returns whether this registration proves that one semantic operation can be accepted.
+    ///
+    /// Node Contracts through v0.4 used one combined capability/workflow declaration, so their
+    /// exact contract remains an explicit compatibility proof. Node Contract v0.5 deliberately
+    /// separated capability profiles but could not transport operation support and therefore must
+    /// not infer it. Version v0.6 and later require the independent declaration.
+    pub fn supports_operation(&self, operation: &OperationRef) -> bool {
+        if self
+            .operation_support
+            .iter()
+            .any(|support| support.operation() == operation)
+        {
+            return true;
+        }
+        matches!(
+            self.contract_version.as_str(),
+            NODE_CONTRACT_VERSION_V0_1
+                | NODE_CONTRACT_VERSION_V0_2
+                | NODE_CONTRACT_VERSION_V0_3
+                | NODE_CONTRACT_VERSION_V0_4
+        ) && self
+            .capability_owners
+            .contains_key(operation.as_legacy_contract())
+    }
+
+    /// Returns the Local EAIOS owner of one independently declared operation.
+    pub fn operation_owner(&self, operation: &OperationRef) -> Option<&LocalSystemId> {
+        self.operation_support
+            .iter()
+            .find(|support| support.operation() == operation)
+            .map(OperationSupport::local_system_id)
     }
 
     /// Returns the selective State channels declared by this node.

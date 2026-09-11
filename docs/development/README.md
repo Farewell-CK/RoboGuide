@@ -98,10 +98,14 @@ apps -> orchestration -> integration/control/runtime/state -> ports -> domain
 apps -> artifact-store -> ports -> domain
 ```
 
-Mission Intelligence 从 `contracts/capability/v0.2/catalog.json` 读取稳定 Capability/Operation
+Mission Intelligence 从 `contracts/capability/v0.3/catalog.json` 读取稳定 Capability/Operation
 词汇表，并在 Reviewer 与提交前确定性校验 exact identity、scalar parameters 和 typed capability
 constraints。Catalog 不读取 Shared Node State，也不回答当前是否可调度；Control Matching 仍是
 live eligibility authority。
+
+Node Contract v0.6 将 canonical `OperationSupport` 与 Capability Profile、Node-private Operation
+Binding 分开。Normalized Mission 与 Recovery 在 Match、Proposal、Commit 边界验证 exact operation
+support；Scheduler 只消费已过滤 Candidate Set，不解析 Operation 或 Local How。
 
 Mission Request v0.3 由 Engine 显式编排 Dialogue -> Draft -> Review -> bounded Repair；Reviewer
 只产生结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回
@@ -121,8 +125,9 @@ Matching/Scheduler 不解析 intent，Runtime 不翻译 intent。单一 `robogui
 Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP workflow 完成本地映射。
 
 Node Protocol v0.4 的 session/sequence/receipt lifecycle 保持不变；显式协商的 Node Contract
-v0.5 传输完整 scalar-profile `ExecutionIntent`，包括 canonical operation、独立 objective 与
-typed parameters。Node Contract v0.4 的原 wire 保持兼容；只有 objective 等于 canonical
+v0.6 传输完整 scalar-profile `ExecutionIntent` 与独立 `OperationSupport`，包括 canonical
+operation、独立 objective 与 typed parameters。Node Contract v0.5/v0.4 保持显式兼容；只有
+objective 等于 canonical
 operation identity 的 legacy-equivalent intent 才能显式降级，其他 objective 必须失败，不能静默
 丢弃或由 RoleId 推导。更丰富 entity/constraint values 仍需要后续版本化合同。
 

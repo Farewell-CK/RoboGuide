@@ -2,10 +2,11 @@
 
 use crate::{ControlError, ControlPlane};
 use domain::{
-    CapabilityRequirement, CorrelationId, EventPayload, MissionPlan, NodeId, RoleId, TaskId,
-    TaskRef, TaskRequirement, TimestampMs,
+    CapabilityRequirement, CorrelationId, EventPayload, MissionPlan, NodeId, OperationRef, RoleId,
+    TaskId, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
+use std::collections::BTreeMap;
 
 /// Candidate node identifiers for one task role.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,12 +41,24 @@ pub struct CandidateSet {
     task_ref: TaskRef,
     /// Candidate nodes grouped by required role.
     roles: Vec<RoleCandidates>,
+    /// Exact semantic operation associated with each normalized Mission role.
+    role_operations: BTreeMap<RoleId, OperationRef>,
 }
 
 impl CandidateSet {
     /// Creates a candidate set for one task.
     pub fn new(task_ref: TaskRef, roles: Vec<RoleCandidates>) -> Self {
-        Self { task_ref, roles }
+        Self {
+            task_ref,
+            roles,
+            role_operations: BTreeMap::new(),
+        }
+    }
+
+    /// Attaches normalized role operations after operation-aware matching succeeds.
+    fn with_role_operations(mut self, role_operations: BTreeMap<RoleId, OperationRef>) -> Self {
+        self.role_operations = role_operations;
+        self
     }
 
     /// Returns the complete mission-scoped task identity.
@@ -66,6 +79,16 @@ impl CandidateSet {
     /// Returns candidates for one role, if that role was included.
     pub fn for_role(&self, role_id: &RoleId) -> Option<&RoleCandidates> {
         self.roles.iter().find(|role| role.role_id() == role_id)
+    }
+
+    /// Returns the exact operation whose support was checked for one normalized Mission role.
+    pub fn operation_for_role(&self, role_id: &RoleId) -> Option<&OperationRef> {
+        self.role_operations.get(role_id)
+    }
+
+    /// Returns all operation-support constraints carried into Proposal and Commit validation.
+    pub(crate) const fn role_operations(&self) -> &BTreeMap<RoleId, OperationRef> {
+        &self.role_operations
     }
 }
 
@@ -154,6 +177,30 @@ impl ControlPlane {
                 "mission plan and task requirement belong to different missions".to_string(),
             ));
         }
+        let task = mission
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == requirement.task_ref())
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "task requirement is absent from the accepted MissionPlan".to_string(),
+                )
+            })?;
+        let role_operations = requirement
+            .roles()
+            .iter()
+            .map(|role| {
+                task.execution_intent(role.role_id())
+                    .map(|intent| (role.role_id().clone(), intent.operation().clone()))
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(format!(
+                            "MissionPlan lacks ExecutionIntent for role {}",
+                            role.role_id()
+                        ))
+                    })
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         let actor_requirements = mission.actor_requirements();
         let mut candidates = self.match_capabilities_with_actor_bindings(
             state,
@@ -163,6 +210,20 @@ impl ControlPlane {
             events,
         )?;
         for role in requirement.roles() {
+            let operation = role_operations
+                .get(role.role_id())
+                .expect("every normalized role operation was collected above");
+            let role_candidates = candidates
+                .roles
+                .iter_mut()
+                .find(|candidate| candidate.role_id() == role.role_id())
+                .expect("candidate exists");
+            role_candidates.node_ids.retain(|node_id| {
+                self.node_is_eligible_for_role_operation(state, node_id, role, operation, timestamp)
+            });
+            if role_candidates.node_ids.is_empty() {
+                return Err(ControlError::NoCandidate(role.role_id().clone()));
+            }
             if role.actor_id().is_none()
                 || self
                     .actor_binding(requirement.mission_id(), role.actor_id().expect("checked"))
@@ -190,7 +251,7 @@ impl ControlPlane {
                 return Err(ControlError::NoCandidate(role.role_id().clone()));
             }
         }
-        Ok(candidates)
+        Ok(candidates.with_role_operations(role_operations))
     }
 
     /// Matches every task role against currently eligible node facts.

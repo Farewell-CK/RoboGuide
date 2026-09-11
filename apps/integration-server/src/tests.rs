@@ -113,7 +113,7 @@ fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistr
             domain::CapabilityKind::Compute,
             true,
         )],
-        Vec::new(),
+        vec![domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid")],
         vec![
             domain::Resource::new(
                 domain::ResourceId::new(resource_id).expect("resource valid"),

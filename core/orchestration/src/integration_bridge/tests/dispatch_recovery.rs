@@ -35,6 +35,7 @@ fn checkpoint_restore_is_conservative_across_process_boundary() {
                     state_exports: Vec::new(),
                     memory_providers: Vec::new(),
                     capability_profiles: Vec::new(),
+                    operation_support: Vec::new(),
                 },
             },
             TimestampMs::new(100),

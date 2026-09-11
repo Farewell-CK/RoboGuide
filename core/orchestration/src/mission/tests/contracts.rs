@@ -179,8 +179,9 @@ fn v0_7_normalized_mission_round_trips_without_semantic_loss() {
 
     assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
     assert_eq!(plan.actors().len(), 1);
-    assert_eq!(role.capability_requirements().len(), 3);
-    assert_ne!(
+    assert_eq!(role.capability_requirements().len(), 1);
+    assert_eq!(role.capability_requirements()[0].constraints().len(), 1);
+    assert_eq!(
         intent.operation().as_legacy_contract(),
         role.capability_requirements()[0].contract()
     );

@@ -2,26 +2,38 @@
 
 use crate::{CandidateSet, ControlError, ControlPlane};
 use domain::{
-    CorrelationId, EventPayload, RoleAssignment, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    CorrelationId, EventPayload, OperationRef, RoleAssignment, RoleId, RoleRequirement, TaskId,
+    TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A Scheduler selection accepted for validation but not yet committed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentProposal {
     /// Mission-scoped task represented by this proposal.
     task_ref: TaskRef,
     /// Proposed node and resource assignments by role.
     assignments: Vec<RoleAssignment>,
+    /// Exact operations revalidated for normalized Mission roles.
+    role_operations: BTreeMap<RoleId, OperationRef>,
+    /// Exact Role requirements revalidated before operation-aware Commit.
+    role_requirements: BTreeMap<RoleId, RoleRequirement>,
 }
 
 impl AssignmentProposal {
     /// Creates a proposal after Control validates its role assignments.
-    fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
+    fn new(
+        task_ref: TaskRef,
+        assignments: Vec<RoleAssignment>,
+        role_operations: BTreeMap<RoleId, OperationRef>,
+        role_requirements: BTreeMap<RoleId, RoleRequirement>,
+    ) -> Self {
         Self {
             task_ref,
             assignments,
+            role_operations,
+            role_requirements,
         }
     }
 
@@ -38,6 +50,21 @@ impl AssignmentProposal {
     /// Returns all proposed role assignments.
     pub fn assignments(&self) -> &[RoleAssignment] {
         &self.assignments
+    }
+
+    /// Returns the exact normalized operation associated with one proposed role.
+    pub fn operation_for_role(&self, role_id: &RoleId) -> Option<&OperationRef> {
+        self.role_operations.get(role_id)
+    }
+
+    /// Returns the exact Role requirement retained for operation-aware Commit validation.
+    pub(crate) fn requirement_for_role(&self, role_id: &RoleId) -> Option<&RoleRequirement> {
+        self.role_requirements.get(role_id)
+    }
+
+    /// Returns whether this normalized proposal requires operation-aware Commit validation.
+    pub(crate) fn requires_operation_validation(&self) -> bool {
+        !self.role_operations.is_empty()
     }
 }
 
@@ -96,6 +123,16 @@ impl ControlPlane {
                     role.role_id()
                 )));
             }
+            if let Some(operation) = candidates.operation_for_role(role.role_id())
+                && !node.registration().supports_operation(operation)
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "node {} no longer supports operation {} for role {}",
+                    assignment.node_id(),
+                    operation,
+                    role.role_id()
+                )));
+            }
             let requirements = role.resource_requirements();
             if assignment.resource_ids().len() != requirements.len()
                 || assignment
@@ -124,7 +161,17 @@ impl ControlPlane {
             }
         }
 
-        let proposal = AssignmentProposal::new(requirement.task_ref().clone(), assignments);
+        let proposal = AssignmentProposal::new(
+            requirement.task_ref().clone(),
+            assignments,
+            candidates.role_operations().clone(),
+            requirement
+                .roles()
+                .iter()
+                .cloned()
+                .map(|role| (role.role_id().clone(), role))
+                .collect(),
+        );
         events.append(
             timestamp,
             correlation_id,

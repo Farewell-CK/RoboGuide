@@ -249,6 +249,21 @@ impl ControlPlane {
         })
     }
 
+    /// Applies the shared role policy plus exact canonical operation support.
+    pub(crate) fn node_is_eligible_for_role_operation<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        node_id: &NodeId,
+        role: &RoleRequirement,
+        operation: &domain::OperationRef,
+        timestamp: TimestampMs,
+    ) -> bool {
+        self.node_is_eligible_for_role(state, node_id, role, timestamp)
+            && state
+                .node(node_id)
+                .is_some_and(|snapshot| snapshot.registration().supports_operation(operation))
+    }
+
     /// Rejects resource identities already advertised by a different node.
     fn ensure_resource_identities_available<S: SharedNodeStateReader>(
         &self,

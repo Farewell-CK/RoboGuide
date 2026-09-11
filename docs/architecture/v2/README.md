@@ -44,8 +44,10 @@ ADR-0030。
 Canonical Capability Catalog 是 Mission Intelligence 的稳定系统语言：Planner/Reviewer 只能
 引用 Catalog 中已知的 exact contract 与参数，未知 contract 使草案无效；Catalog 不包含实时
 Node、health、readiness 或 resource availability。已知 contract 即使当前 provider 为零，Mission
-仍可被接纳并在 Control Matching 后等待。v0.2 Catalog 分别定义 Capability attributes、
-Operation parameters 和 Operation 的 baseline capability requirements，但不冻结 embodiment
+仍可被接纳并在 Control Matching 后等待。v0.3 Catalog 分别定义 Capability attributes、
+Operation parameters 和 Operation 的 direct provider-level baseline capability requirements；
+integrated Local EAIOS operation 不把内部 grasp/navigation/perception 等 Local How 展开成全局
+requirements。Catalog 仍不冻结 embodiment
 taxonomy、结构化 entity schema 或动态 Catalog negotiation。详见 ADR-0031 与 ADR-0034。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
@@ -53,7 +55,8 @@ Capability Contract 是可匹配的 provider-independent 能力语言，Role 可
 并附带可由 Node profile 证明的 typed constraints；Operation 是下发给 Local EAIOS 的 canonical
 语义动作身份；ExecutionIntent 同时保留 Task-level objective、Operation 和结构化参数，不把
 RoleId、厂商 Skill 或执行步骤当作 operation。Canonical Capability Catalog 分别定义合法
-Capability/attribute 与 Operation/parameter，并声明 Operation 的基础 capability requirements。
+Capability/attribute 与 Operation/parameter，并声明 Operation 的 provider-level capability
+baseline，而非内部 workflow step。
 Live Node evidence 只由 Control 用于 Matching/Scheduling，Catalog membership 不表示当前可用。
 详见 ADR-0034。
 
@@ -100,9 +103,10 @@ Local System、Capability profile、canonical Operation workflow、Sensor、Reso
 语义。新增 Local EAIOS 不修改或重新编译 RoboGuide Server 与 `roboguide-node`。
 
 Node Protocol v0.4 保持既有 session、sequence、command receipt 与 execution lifecycle；在该
-transport 上显式协商的 Node Contract v0.5 承载 exact capability profile 的 readiness/typed
-attributes，以及包含 canonical Operation、semantic objective 和 typed scalar parameters 的完整
-`ExecutionIntent`。Node config v0.7 分离 profile evidence 与 operation/workflow mapping。旧 Node
+transport 上显式协商的 Node Contract v0.6 承载 exact capability profile 的 readiness/typed
+attributes、独立 canonical Operation Support，以及包含 canonical Operation、semantic objective
+和 typed scalar parameters 的完整 `ExecutionIntent`。Node config v0.7 分离 profile evidence 与
+operation/workflow mapping。旧 Node
 Contract v0.4 和 node-config/v0.2-v0.6 是显式兼容输入，不能混用表示或静默丢弃 objective。
 
 ### Capability 与 Resource
@@ -110,7 +114,9 @@ Contract v0.4 和 node-config/v0.2-v0.6 是显式兼容输入，不能混用表�
 Capability 描述 Node 可证明的执行能力与 feasibility envelope；Operation 描述对 Local EAIOS 的
 canonical semantic invocation。Embodiment 是 Node profile 的独立描述维度，不是互斥 Capability
 分类。Role Requirement 回答“承担这个槽位必须证明什么”，ExecutionIntent 回答“被选中后要完成
-什么语义目标”，二者不互相复制。静态能力支持不代表运行时一定可用。
+什么语义目标”，二者不互相复制。Control Matching 同时要求 capability feasibility 与 exact
+Operation Support；Operation Binding 仍只存在于 Node 私有配置。静态能力支持不代表运行时一定
+可用。
 RoboGuide 联合调度四类资源：
 
 - Capability：可执行的具身或计算能力；

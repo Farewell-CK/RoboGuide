@@ -30,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--catalog",
         type=Path,
-        default=Path("contracts/capability/v0.2/catalog.json"),
+        default=Path("contracts/capability/v0.3/catalog.json"),
     )
 
     plan = subparsers.add_parser("plan", help="produce a MissionPlan v0 artifact")

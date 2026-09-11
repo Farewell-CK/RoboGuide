@@ -28,8 +28,10 @@ pub mod v0_4 {
     /// Exact stream protocol version advertised during Hello negotiation.
     pub const PROTOCOL_VERSION: &str = "roboguide.node-protocol/v0.4";
     /// Current semantic Node Contract version advertised during Hello negotiation.
-    pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
-    /// Previous semantic Node Contract retained for explicit session compatibility.
+    pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.6";
+    /// Prior profile-and-intent contract retained for explicit session compatibility.
+    pub const PREVIOUS_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
+    /// Legacy combined-declaration contract retained for explicit session compatibility.
     pub const LEGACY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.4";
 
     tonic::include_proto!("roboguide.node.v0_4");
@@ -43,7 +45,7 @@ mod tests {
     };
     use prost::Message;
 
-    /// Current additive wire fields preserve capability attributes and semantic objectives.
+    /// Current additive wire fields preserve profiles, operation support, and semantic objectives.
     #[test]
     fn v0_5_semantics_round_trip_without_legacy_fields() {
         use super::v0_4::scalar_value::Value;
@@ -63,6 +65,14 @@ mod tests {
                     },
                 )]),
             }],
+            operation_support: vec![super::v0_4::OperationSupport {
+                operation: Some(super::v0_4::OperationRef {
+                    namespace: "object".to_string(),
+                    name: "relocate".to_string(),
+                    version: "v1".to_string(),
+                }),
+                local_system_id: "manipulator".to_string(),
+            }],
             ..Default::default()
         };
         let decoded =
@@ -70,6 +80,7 @@ mod tests {
                 .expect("current registration decodes");
         assert_eq!(decoded, registration);
         assert!(decoded.capabilities.is_empty());
+        assert_eq!(decoded.operation_support.len(), 1);
 
         let invocation = super::v0_4::CanonicalInvocation {
             mission_id: "mission-a".to_string(),

@@ -1,6 +1,6 @@
 //! Local-system and sensor facts aggregated by one RoboGuide node registration.
 
-use crate::{LocalRuntime, LocalSystemId, SensorId};
+use crate::{LocalRuntime, LocalSystemId, OperationRef, SensorId};
 use std::collections::BTreeMap;
 
 /// One Local EAIOS/runtime aggregated behind a node identity.
@@ -12,6 +12,38 @@ pub struct LocalSystemDescriptor {
     runtime: LocalRuntime,
     /// Transport-neutral descriptive metadata.
     metadata: BTreeMap<String, String>,
+}
+
+/// One canonical operation accepted by a configured Local EAIOS boundary.
+///
+/// This declaration exposes only semantic invocation support. It deliberately carries no local
+/// workflow, command, service, route, or other implementation detail.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OperationSupport {
+    /// Canonical semantic operation accepted by the node.
+    operation: OperationRef,
+    /// Local system that owns the private operation binding.
+    local_system_id: LocalSystemId,
+}
+
+impl OperationSupport {
+    /// Creates one semantic operation-support declaration with an explicit local owner.
+    pub const fn new(operation: OperationRef, local_system_id: LocalSystemId) -> Self {
+        Self {
+            operation,
+            local_system_id,
+        }
+    }
+
+    /// Returns the supported canonical operation identity.
+    pub const fn operation(&self) -> &OperationRef {
+        &self.operation
+    }
+
+    /// Returns the Local EAIOS that owns the private operation binding.
+    pub const fn local_system_id(&self) -> &LocalSystemId {
+        &self.local_system_id
+    }
 }
 
 impl LocalSystemDescriptor {
@@ -171,6 +203,75 @@ mod tests {
                 unavailable,
                 None,
             ))
+        );
+    }
+
+    /// Independent operation support never leaks a private workflow into shared registration.
+    #[test]
+    fn semantic_registration_distinguishes_capability_from_operation_support() {
+        let system_id = LocalSystemId::new("motion").expect("local system id is valid");
+        let capability =
+            CapabilityContractRef::new("object", "relocate", "v1").expect("capability is valid");
+        let operation =
+            crate::OperationRef::new("object", "relocate", "v1").expect("operation is valid");
+        let registration = NodeRegistration::new_with_local_systems_and_readiness(
+            NodeId::new("dog-a").expect("node id is valid"),
+            vec![LocalSystemDescriptor::new(
+                system_id.clone(),
+                LocalRuntime::new("local-motion", "1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_6(),
+            vec![Capability::new(CapabilityKind::Transport, true)],
+            BTreeMap::from([(capability.clone(), system_id.clone())]),
+            BTreeMap::from([(capability.clone(), CapabilityKind::Transport)]),
+            BTreeMap::from([(capability, true)]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("registration is valid")
+        .with_operation_support(vec![OperationSupport::new(
+            operation.clone(),
+            system_id.clone(),
+        )])
+        .expect("operation support is valid");
+
+        assert!(registration.supports_operation(&operation));
+        assert_eq!(registration.operation_owner(&operation), Some(&system_id));
+        assert_eq!(registration.operation_support().len(), 1);
+    }
+
+    /// Profile-only v0.5 evidence cannot be reinterpreted as operation support.
+    #[test]
+    fn v05_capability_profile_does_not_imply_operation_support() {
+        let system_id = LocalSystemId::new("motion").expect("local system id is valid");
+        let capability =
+            CapabilityContractRef::new("object", "relocate", "v1").expect("capability is valid");
+        let operation = crate::OperationRef::from(capability.clone());
+        let registration = NodeRegistration::new_with_local_systems_and_readiness(
+            NodeId::new("dog-a").expect("node id is valid"),
+            vec![LocalSystemDescriptor::new(
+                system_id.clone(),
+                LocalRuntime::new("local-motion", "1").expect("runtime is valid"),
+                BTreeMap::new(),
+            )],
+            NodeContractVersion::v0_5(),
+            vec![Capability::new(CapabilityKind::Transport, true)],
+            BTreeMap::from([(capability.clone(), system_id.clone())]),
+            BTreeMap::from([(capability.clone(), CapabilityKind::Transport)]),
+            BTreeMap::from([(capability, true)]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("registration is valid");
+
+        assert!(!registration.supports_operation(&operation));
+        assert!(
+            registration
+                .with_operation_support(vec![OperationSupport::new(operation, system_id)])
+                .is_err()
         );
     }
 }

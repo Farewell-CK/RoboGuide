@@ -302,7 +302,7 @@ fn actor_binding_survives_t1_to_t3_and_is_audited() {
     let scheduler = BoundedJointScheduler::new();
     let decision = scheduler.schedule_task(&state, &t1, &candidates, now, &correlation_id, &mut events).expect("schedule succeeds");
     let proposal = control.propose(&state, &t1, &candidates, decision.proposed_assignments(), now, &correlation_id, &mut events).expect("proposal succeeds");
-    let committed = control.commit(&proposal, now, &correlation_id, &mut events).expect("commit succeeds");
+    let committed = control.commit_with_state(&state, &proposal, now, &correlation_id, &mut events).expect("commit succeeds");
     let group_id = ExecutionGroupId::new("group-t1").expect("group id valid");
     control.create_group_with_actor_bindings(group_id.clone(), &committed, &t1, now, &correlation_id, &mut events).expect("group bind succeeds");
     let actor_id = domain::ActorId::new("carrier").expect("actor id valid");
@@ -343,7 +343,7 @@ fn unavailable_bound_actor_requires_reconciliation() {
     let candidates = control.match_capabilities_for_mission(&state, &mission, &t1, now, &correlation_id, &mut events).expect("matching succeeds");
     let decision = BoundedJointScheduler::new().schedule_task(&state, &t1, &candidates, now, &correlation_id, &mut events).expect("schedule succeeds");
     let proposal = control.propose(&state, &t1, &candidates, decision.proposed_assignments(), now, &correlation_id, &mut events).expect("proposal succeeds");
-    let committed = control.commit(&proposal, now, &correlation_id, &mut events).expect("commit succeeds");
+    let committed = control.commit_with_state(&state, &proposal, now, &correlation_id, &mut events).expect("commit succeeds");
     control.create_group_with_actor_bindings(ExecutionGroupId::new("group-t1").expect("group id valid"), &committed, &t1, now, &correlation_id, &mut events).expect("group bind succeeds");
     state.record_node_health(NodeHealthObservation::new(NodeId::new("dog-b").expect("node id valid"), NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1)), TimestampMs::new(1))).expect("health update succeeds");
     assert!(matches!(control.match_capabilities_for_mission(&state, &mission, &t3, TimestampMs::new(1), &correlation_id, &mut events), Err(ControlError::ActorBindingRequiresReconciliation { .. })));
@@ -445,7 +445,8 @@ fn actor_recovery_cannot_bypass_binding_or_placement_authority() {
         )
         .expect("assignment proposal succeeds");
     let committed = control
-        .commit(
+        .commit_with_state(
+            &state,
             &proposal,
             TimestampMs::new(0),
             &correlation_id,

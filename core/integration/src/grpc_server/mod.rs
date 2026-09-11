@@ -5,7 +5,7 @@ use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
     Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, NODE_CONTRACT_VERSION, NodeMessage,
-    PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
+    PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
@@ -413,16 +413,20 @@ async fn run_grpc_session(
             "no compatible protocol version",
         ));
     }
-    let node_contract = [NODE_CONTRACT_VERSION, LEGACY_NODE_CONTRACT_VERSION]
-        .into_iter()
-        .find(|supported| {
-            hello
-                .node_contract_versions
-                .iter()
-                .any(|offered| offered == supported)
-        })
-        .map(str::to_string)
-        .ok_or_else(|| Status::failed_precondition("no compatible Node Contract version"))?;
+    let node_contract = [
+        NODE_CONTRACT_VERSION,
+        PREVIOUS_NODE_CONTRACT_VERSION,
+        LEGACY_NODE_CONTRACT_VERSION,
+    ]
+    .into_iter()
+    .find(|supported| {
+        hello
+            .node_contract_versions
+            .iter()
+            .any(|offered| offered == supported)
+    })
+    .map(str::to_string)
+    .ok_or_else(|| Status::failed_precondition("no compatible Node Contract version"))?;
     outbound
         .send(Ok(ServerMessage {
             message: Some(ServerPayload::Welcome(Welcome {
@@ -615,14 +619,14 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        NODE_CONTRACT_VERSION => {
+        NODE_CONTRACT_VERSION | PREVIOUS_NODE_CONTRACT_VERSION => {
             if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {
                 return Err(Status::invalid_argument(
-                    "Node Contract v0.5 invocation cannot mix legacy fields with ExecutionIntent",
+                    "semantic Node Contract invocation cannot mix legacy fields with ExecutionIntent",
                 ));
             }
             let intent = invocation.intent.as_ref().ok_or_else(|| {
-                Status::failed_precondition("Node Contract v0.5 requires semantic ExecutionIntent")
+                Status::failed_precondition("semantic Node Contract requires ExecutionIntent")
             })?;
             let operation = intent
                 .operation

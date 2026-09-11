@@ -64,6 +64,7 @@ fn registration_conversion_preserves_per_contract_readiness() {
         state_exports: Vec::new(),
         memory_providers: Vec::new(),
         capability_profiles: Vec::new(),
+        operation_support: Vec::new(),
     })
     .expect("registration converts");
     let build = parse_contract("spatial.map.build@v0").expect("build contract parses");
@@ -110,6 +111,7 @@ fn readiness_update_changes_later_control_matching() {
         state_exports: Vec::new(),
         memory_providers: Vec::new(),
         capability_profiles: Vec::new(),
+        operation_support: Vec::new(),
     };
     let mut bridge = IntegrationRuntimeBridge::new(
         ControlPlane::new(),
@@ -206,7 +208,7 @@ fn readiness_update_changes_later_control_matching() {
     assert_eq!(candidates.roles()[0].node_ids().len(), 1);
 }
 
-/// Node Contract v0.5 profile attributes survive State ingestion and constrain Control Matching.
+/// Node Contract v0.6 profiles and operation support jointly constrain normalized Matching.
 #[test]
 fn capability_profile_attributes_reach_control_matching() {
     use integration::grpc::v0_4::scalar_value::Value as Scalar;
@@ -239,6 +241,14 @@ fn capability_profile_attributes_reach_control_matching() {
                     value: Some(Scalar::IntegerValue(5_000)),
                 },
             )]),
+        }],
+        operation_support: vec![integration::grpc::v0_4::OperationSupport {
+            operation: Some(integration::grpc::v0_4::OperationRef {
+                namespace: "object".to_string(),
+                name: "relocate".to_string(),
+                version: "v1".to_string(),
+            }),
+            local_system_id: "manipulator".to_string(),
         }],
     };
     let mut bridge = IntegrationRuntimeBridge::new(
@@ -281,6 +291,21 @@ fn capability_profile_attributes_reach_control_matching() {
             &correlation,
         )
         .expect("profile owner heartbeat is consumed");
+    let operation =
+        domain::OperationRef::new("object", "relocate", "v1").expect("operation identity is valid");
+    let registration = bridge
+        .state()
+        .node(&NodeId::new("arm-a").expect("Node identity is valid"))
+        .expect("Node snapshot exists")
+        .registration();
+    assert!(registration.supports_operation(&operation));
+    assert_eq!(
+        registration
+            .operation_owner(&operation)
+            .expect("operation owner exists")
+            .as_str(),
+        "manipulator"
+    );
     let role_id = domain::RoleId::new("grasper").expect("Role identity is valid");
     let requirement = domain::TaskRequirement::new(
         domain::MissionId::new("mission-profile").expect("Mission identity is valid"),
@@ -310,11 +335,38 @@ fn capability_profile_attributes_reach_control_matching() {
         ],
     )
     .expect("Task requirement is valid");
+    let context_id =
+        domain::CoordinationContextId::new("profile-context").expect("Context identity is valid");
+    let task = domain::PlannedTask::new(
+        "relocate one object",
+        requirement.clone(),
+        BTreeMap::from([(
+            role_id.clone(),
+            domain::ExecutionIntent::new_semantic(
+                operation.clone(),
+                "relocate the selected object",
+                BTreeMap::new(),
+            )
+            .expect("ExecutionIntent is valid"),
+        )]),
+        Vec::new(),
+        domain::TaskContinuity::new(context_id.clone(), BTreeMap::new(), BTreeMap::new()),
+    )
+    .expect("Planned Task is valid");
+    let mission = domain::MissionPlan::new(
+        domain::MissionGoal::new(requirement.mission_id().clone(), "relocate one object")
+            .expect("Mission goal is valid"),
+        domain::TaskGraph::new(requirement.mission_id().clone(), vec![task])
+            .expect("Task graph is valid"),
+        vec![domain::CoordinationContext::new(context_id, Vec::new()).expect("Context is valid")],
+    )
+    .expect("MissionPlan is valid");
     let mut events = InMemoryEventLog::new();
     let candidates = bridge
         .control()
-        .match_capabilities(
+        .match_capabilities_for_mission(
             bridge.state(),
+            &mission,
             &requirement,
             TimestampMs::new(11),
             &correlation,
@@ -328,6 +380,7 @@ fn capability_profile_attributes_reach_control_matching() {
             .node_ids(),
         &[domain::NodeId::new("arm-a").expect("Node identity is valid")]
     );
+    assert_eq!(candidates.operation_for_role(&role_id), Some(&operation));
 }
 
 /// Bound Group assignments are the only source of NodeId for Runtime routing.

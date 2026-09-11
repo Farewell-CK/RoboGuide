@@ -230,7 +230,7 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            NODE_CONTRACT_VERSION | LEGACY_NODE_CONTRACT_VERSION
+            NODE_CONTRACT_VERSION | PREVIOUS_NODE_CONTRACT_VERSION | LEGACY_NODE_CONTRACT_VERSION
         )
     {
         return Err(Status::invalid_argument(
@@ -260,6 +260,7 @@ pub(super) fn validate_registration(
         ));
     }
     validate_capabilities(registration, &local_system_ids)?;
+    validate_operation_support(registration, &local_system_ids)?;
     let mut sensor_ids = BTreeSet::new();
     for sensor in &registration.sensors {
         require_known_owner(&sensor.local_system_id, &local_system_ids)?;
@@ -367,6 +368,43 @@ fn validate_capabilities(
             ));
         }
         super::validate_scalar_map(&profile.attributes, "capability profile attributes")?;
+    }
+    Ok(())
+}
+
+/// Validates exact canonical operation support without exposing or inferring Local How.
+fn validate_operation_support(
+    registration: &crate::grpc::v0_4::NodeRegistration,
+    local_system_ids: &BTreeSet<&str>,
+) -> Result<(), Status> {
+    if registration.node_contract_version != NODE_CONTRACT_VERSION {
+        if !registration.operation_support.is_empty() {
+            return Err(Status::invalid_argument(
+                "Node Contracts before v0.6 cannot declare operation support",
+            ));
+        }
+        return Ok(());
+    }
+    if registration.operation_support.is_empty() {
+        return Err(Status::invalid_argument(
+            "Node Contract v0.6 requires at least one supported operation",
+        ));
+    }
+    let mut operations = BTreeSet::new();
+    for support in &registration.operation_support {
+        require_known_owner(&support.local_system_id, local_system_ids)?;
+        let operation = support.operation.as_ref().ok_or_else(|| {
+            Status::invalid_argument("operation support requires an OperationRef")
+        })?;
+        let identity = format!(
+            "{}.{}@{}",
+            operation.namespace, operation.name, operation.version
+        );
+        if !valid_contract_identity(&identity) || !operations.insert(identity) {
+            return Err(Status::invalid_argument(
+                "operation support requires unique canonical operation identities",
+            ));
+        }
     }
     Ok(())
 }

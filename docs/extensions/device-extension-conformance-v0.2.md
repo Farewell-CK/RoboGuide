@@ -14,13 +14,14 @@ Extension Conformance v0.2 requires `roboguide.node-config/v0.7`. The configurat
   plus a fixed execute/status/cancel workflow.
 
 An operation mapping does not create capability evidence. A capability profile does not prove that
-the Local Integration Engine has an executable workflow. Node Contract v0.5 preserves that split in
-Registration and carries the complete scalar-profile `ExecutionIntent`, including objective, into
-the configured workflow context.
+the Local Integration Engine has an executable workflow. Node Contract v0.6 preserves independent
+Capability Profile and canonical Operation Support declarations in Registration and carries the
+complete scalar-profile `ExecutionIntent`, including objective, into the configured workflow
+context. Operation Support exposes no workflow details or other Local How.
 
 Node configs v0.2-v0.6 remain compatibility inputs with their original combined `capabilities`
 shape. They are not silently normalized into v0.7 authored semantics. The current contract and
-version matrix are documented in [`contracts/node/v0.8`](../../contracts/node/v0.8/README.md) and
+version matrix are documented in [`contracts/node/v0.9`](../../contracts/node/v0.9/README.md) and
 [`contracts/node/README.md`](../../contracts/node/README.md).
 
 ## Offline evidence
@@ -56,7 +57,7 @@ workflow-step paths. The report retains legacy `capabilities` only when compilin
 
 ## Deferred evidence ingress
 
-Verifier evidence does not enter Node Contract v0.5. A future generic evidence-ingress slice may
+Verifier evidence does not enter Node Contract v0.6. A future generic evidence-ingress slice may
 allow Node Protocol to transport one evidence source, but transport acceptance or Node-local
 execution completion must not declare Task satisfaction. Orchestration remains responsible for
 applying the Mission-declared satisfaction basis.

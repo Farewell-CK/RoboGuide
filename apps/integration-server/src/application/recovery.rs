@@ -164,7 +164,7 @@ pub(crate) fn resume_role_recovery(
         )?;
         return Ok(());
     }
-    let requirement = controller
+    let (requirement, operation) = controller
         .orchestrator
         .execution(need.task_ref().mission_id())
         .and_then(|execution| {
@@ -175,17 +175,24 @@ pub(crate) fn resume_role_recovery(
                 .iter()
                 .find(|task| task.requirement().task_ref() == need.task_ref())
         })
-        .map(|task| task.requirement().clone())
+        .and_then(|task| {
+            task.execution_intent(need.role_id())
+                .map(|intent| (task.requirement().clone(), intent.operation().clone()))
+        })
         .ok_or_else(|| "pending recovery has no accepted Task requirement".to_string())?;
     let state = controller.bridge.state().clone();
-    let candidates = controller.bridge.control().match_recovery_candidates(
-        &state,
-        need,
-        &requirement,
-        timestamp,
-        correlation_id,
-        events,
-    )?;
+    let candidates = controller
+        .bridge
+        .control()
+        .match_recovery_candidates_for_operation(
+            &state,
+            need,
+            &requirement,
+            &operation,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
     let scheduler = control::BoundedJointScheduler::new();
     let scheduling_snapshot = controller.bridge.control().scheduling_snapshot(timestamp);
     let selection = scheduler.schedule_recovery(

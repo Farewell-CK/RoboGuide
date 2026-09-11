@@ -24,7 +24,7 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.contract_version == "roboguide.mission-plan/v0.7"
     assert settings.schema_path == Path.cwd() / "contracts/mission/v0.7/mission-plan.schema.json"
     assert settings.capability_catalog_path == (
-        Path.cwd() / "contracts/capability/v0.2/catalog.json"
+        Path.cwd() / "contracts/capability/v0.3/catalog.json"
     )
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
     assert "sk-" not in path.read_text(encoding="utf-8")

@@ -76,14 +76,15 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 [`ADR-0030`](decisions/0030-mission-semantic-admission-and-deployability.md) 已将 Mission 语义接纳
 与当前部署可执行性分开。后续按独立合同切片处理，不能重新使用 live inventory 代替稳定语义：
 
-- Canonical Capability Catalog v0.2 已按 ADR-0034 区分 Capability/attribute 与
-  Operation/parameter，并支持多 capability requirements 与 typed feasibility predicates；结构化
-  entity values、embodiment taxonomy 及 Catalog 分发/协商仍待后续版本；
+- Canonical Capability Catalog v0.3 已按 ADR-0034/ADR-0036 区分 Capability/attribute 与
+  Operation/parameter，并支持多 capability requirements、typed feasibility predicates 及
+  integrated operation 的 provider-level baseline；结构化 entity values、embodiment taxonomy
+  及 Catalog 分发/协商仍待后续版本；
 - MissionPlan v0.7 已正规化 Actor -> ContextRole -> TaskRole、semantic ExecutionIntent 及 Role
   requirements，并保持 Local EAIOS 的 Local How authority；
-- 当前 Node Protocol invocation 只传输 canonical operation 与 scalar parameters；将 v0.7
-  objective 或未来 entity/constraint values 交给 Local EAIOS 需要新的版本化协议合同，不能由
-  RoleId 推导或在现有版本下静默扩展；
+- Node Contract v0.6 独立传输 Capability Profile、Operation Support，并把 v0.7 objective、
+  canonical operation 与 scalar parameters 完整交给 Local EAIOS；未来 structured
+  entity/constraint values 仍需新的版本化协议合同，不能由 RoleId 推导或静默扩展；
 - Task Satisfaction v0.2 已实现 source-aware State/Verifier evidence 与 receive-time freshness；
   多源融合、负向 verdict recovery、物理目标争议和持续 verification 仍待后续版本；
 - Mission Request v0.3 已将结构化 DialogueTurn、revision-bound Review/Repair history 和 approval

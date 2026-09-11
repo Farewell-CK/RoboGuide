@@ -455,29 +455,34 @@ impl MissionOrchestrator {
             }
             Err(error) => return Err(error.into()),
         };
-        let committed =
-            match control.commit_for_group(&group_id, &proposal, timestamp, correlation_id, events)
-            {
-                Ok(committed) => committed,
-                Err(error) if was_scheduled => {
-                    let reason = error.to_string();
-                    control.invalidate_scheduled_task(task_ref, reason.clone());
-                    events.append(
-                        timestamp,
-                        correlation_id,
-                        None,
-                        domain::EventPayload::SchedulingReservationInvalidated {
-                            group_id: group_id.clone(),
-                            task_ref: task_ref.clone(),
-                            reason,
-                        },
-                    );
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling deferred after activation conflict".to_string(),
-                    ));
-                }
-                Err(error) => return Err(error.into()),
-            };
+        let committed = match control.commit_for_group_with_state(
+            state,
+            &group_id,
+            &proposal,
+            timestamp,
+            correlation_id,
+            events,
+        ) {
+            Ok(committed) => committed,
+            Err(error) if was_scheduled => {
+                let reason = error.to_string();
+                control.invalidate_scheduled_task(task_ref, reason.clone());
+                events.append(
+                    timestamp,
+                    correlation_id,
+                    None,
+                    domain::EventPayload::SchedulingReservationInvalidated {
+                        group_id: group_id.clone(),
+                        task_ref: task_ref.clone(),
+                        reason,
+                    },
+                );
+                return Err(OrchestrationError::Mission(
+                    "joint scheduling deferred after activation conflict".to_string(),
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        };
         control.bind_task_execution_with_requirement(
             &group_id,
             &committed,

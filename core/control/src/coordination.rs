@@ -5,7 +5,7 @@ use domain::{
     AllocationOwner, CorrelationId, EventPayload, ExecutionGroupId, ResourceBindingScope,
     RoleAssignment, RoleId, TaskId, TaskRef, TimestampMs,
 };
-use ports::EventSink;
+use ports::{EventSink, SharedNodeStateReader};
 
 /// A proposal whose resources are now system-recognized commitments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,8 +58,37 @@ pub(crate) struct Reservation {
 }
 
 impl ControlPlane {
-    /// Commits all proposal resources atomically from the Control view.
+    /// Commits a compatibility proposal that carries no independent operation constraint.
     pub fn commit<E: EventSink>(
+        &mut self,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CommittedPlan, ControlError> {
+        if proposal.requires_operation_validation() {
+            return Err(ControlError::InvalidProposal(
+                "normalized Mission proposal requires operation-aware Commit".to_string(),
+            ));
+        }
+        self.commit_validated(proposal, timestamp, correlation_id, events)
+    }
+
+    /// Revalidates current operation support before atomically committing normal resources.
+    pub fn commit_with_state<S: SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        state: &S,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CommittedPlan, ControlError> {
+        self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.commit_validated(proposal, timestamp, correlation_id, events)
+    }
+
+    /// Applies normal reservation authority after all operation constraints are validated.
+    fn commit_validated<E: EventSink>(
         &mut self,
         proposal: &AssignmentProposal,
         timestamp: TimestampMs,
@@ -119,8 +148,40 @@ impl ControlPlane {
         Ok(plan)
     }
 
-    /// Commits a ready Task proposal using its declared Task or Context resource ownership.
+    /// Commits a compatibility ready-Task proposal without an independent operation constraint.
     pub fn commit_for_group<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CommittedPlan, ControlError> {
+        if proposal.requires_operation_validation() {
+            return Err(ControlError::InvalidProposal(
+                "normalized Mission proposal requires operation-aware Group Commit".to_string(),
+            ));
+        }
+        self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
+    }
+
+    /// Revalidates operation support before committing a normalized ready Task to its Group.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_for_group_with_state<S: SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        state: &S,
+        group_id: &ExecutionGroupId,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<CommittedPlan, ControlError> {
+        self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
+    }
+
+    /// Applies Group-scoped reservation authority after operation validation succeeds.
+    fn commit_for_group_validated<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
         proposal: &AssignmentProposal,
@@ -229,6 +290,45 @@ impl ControlPlane {
             },
         );
         Ok(plan)
+    }
+}
+
+impl ControlPlane {
+    /// Revalidates capability, health, lease, and operation support before Commit mutation.
+    fn validate_current_assignment_support<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        proposal: &AssignmentProposal,
+        timestamp: TimestampMs,
+    ) -> Result<(), ControlError> {
+        for assignment in proposal.assignments() {
+            let Some(operation) = proposal.operation_for_role(assignment.role_id()) else {
+                continue;
+            };
+            let requirement = proposal
+                .requirement_for_role(assignment.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "proposal lacks requirement for role {}",
+                        assignment.role_id()
+                    ))
+                })?;
+            if !self.node_is_eligible_for_role_operation(
+                state,
+                assignment.node_id(),
+                requirement,
+                operation,
+                timestamp,
+            ) {
+                return Err(ControlError::InvalidProposal(format!(
+                    "node {} no longer satisfies capability and operation {} for role {}",
+                    assignment.node_id(),
+                    operation,
+                    assignment.role_id()
+                )));
+            }
+        }
+        Ok(())
     }
 }
 

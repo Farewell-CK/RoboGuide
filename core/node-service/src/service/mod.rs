@@ -7,9 +7,10 @@ use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
     Cancel, Capability, CapabilityProfile, ExecutionEvent, Heartbeat, Hello, LocalRuntime,
     LocalSystemDescriptor, MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility,
-    NodeMessage, NodeRegistration, PROTOCOL_VERSION, PeerChannelReadiness, ProtocolError, Register,
-    RegistrationUpdate, Resource, ScalarValue, Sensor, ServerMessage, StateExportDescriptor,
-    StateObjectClass, StateObservation, StateObservationBatch, StateSemantic,
+    NodeMessage, NodeRegistration, OperationRef, OperationSupport, PROTOCOL_VERSION,
+    PeerChannelReadiness, ProtocolError, Register, RegistrationUpdate, Resource, ScalarValue,
+    Sensor, ServerMessage, StateExportDescriptor, StateObjectClass, StateObservation,
+    StateObservationBatch, StateSemantic,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};

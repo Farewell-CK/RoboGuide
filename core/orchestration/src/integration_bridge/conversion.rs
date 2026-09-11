@@ -163,7 +163,12 @@ pub(super) fn remote_status(status: ExecutionStatus) -> RemoteExecutionStatus {
 pub(super) fn registration_from_wire(
     wire: NodeRegistration,
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
-    let semantic_profiles =
+    let semantic_profiles = matches!(
+        wire.node_contract_version.as_str(),
+        integration::grpc::v0_4::NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PREVIOUS_NODE_CONTRACT_VERSION
+    );
+    let independent_operation_support =
         wire.node_contract_version == integration::grpc::v0_4::NODE_CONTRACT_VERSION;
     let state_exports = wire
         .state_exports
@@ -197,7 +202,7 @@ pub(super) fn registration_from_wire(
     if semantic_profiles {
         if !wire.capabilities.is_empty() {
             return Err(IntegrationRuntimeError::Protocol(
-                "Node Contract v0.5 mixes legacy capabilities with profiles".to_string(),
+                "semantic Node Contract mixes legacy capabilities with profiles".to_string(),
             ));
         }
         for profile in wire.capability_profiles {
@@ -250,6 +255,33 @@ pub(super) fn registration_from_wire(
             }
         }
     }
+    let operation_support = if independent_operation_support {
+        wire.operation_support
+            .iter()
+            .map(|support| {
+                let operation = support.operation.as_ref().ok_or_else(|| {
+                    IntegrationRuntimeError::Protocol(
+                        "operation support lacks OperationRef".to_string(),
+                    )
+                })?;
+                Ok(domain::OperationSupport::new(
+                    domain::OperationRef::new(
+                        operation.namespace.clone(),
+                        operation.name.clone(),
+                        operation.version.clone(),
+                    )?,
+                    LocalSystemId::new(support.local_system_id.clone())?,
+                ))
+            })
+            .collect::<Result<Vec<_>, IntegrationRuntimeError>>()?
+    } else {
+        if !wire.operation_support.is_empty() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "Node Contracts before v0.6 cannot declare operation support".to_string(),
+            ));
+        }
+        Vec::new()
+    };
     let capabilities = capability_kinds
         .into_iter()
         .map(|(kind, available)| Capability::new(kind, available))
@@ -292,6 +324,7 @@ pub(super) fn registration_from_wire(
             resource_owners,
         )?
         .with_capability_attributes(capability_attributes)?
+        .with_operation_support(operation_support)?
         .with_state_memory_exports(state_exports, memory_providers)?,
     )
 }

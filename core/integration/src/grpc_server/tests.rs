@@ -31,6 +31,7 @@ fn registration_rejects_execution_group_memory_provider_scope() {
             media_type: "application/json".to_string(),
         }],
         capability_profiles: Vec::new(),
+        operation_support: Vec::new(),
     };
     validate_registration(&registration).expect("global provider maximum should be valid");
 
@@ -42,9 +43,9 @@ fn registration_rejects_execution_group_memory_provider_scope() {
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
 }
 
-/// Node Contract v0.5 accepts typed profiles and rejects legacy/profile representation mixing.
+/// Node Contract v0.6 requires independent typed profiles and canonical operation support.
 #[test]
-fn current_registration_requires_capability_profiles() {
+fn current_registration_requires_profiles_and_operation_support() {
     let mut registration = crate::grpc::v0_4::NodeRegistration {
         node_id: "arm-a".to_string(),
         local_systems: vec![crate::grpc::v0_4::LocalSystemDescriptor {
@@ -68,9 +69,26 @@ fn current_registration_requires_capability_profiles() {
                 },
             )]),
         }],
+        operation_support: vec![crate::grpc::v0_4::OperationSupport {
+            operation: Some(crate::grpc::v0_4::OperationRef {
+                namespace: "object".to_string(),
+                name: "relocate".to_string(),
+                version: "v1".to_string(),
+            }),
+            local_system_id: "manipulator".to_string(),
+        }],
         ..Default::default()
     };
     validate_registration(&registration).expect("current profile should be accepted");
+
+    let operation_support = std::mem::take(&mut registration.operation_support);
+    assert_eq!(
+        validate_registration(&registration)
+            .expect_err("current contract requires explicit operation support")
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+    registration.operation_support = operation_support;
 
     registration
         .capabilities
@@ -95,6 +113,48 @@ fn current_registration_requires_capability_profiles() {
             .code(),
         tonic::Code::InvalidArgument
     );
+}
+
+/// v0.5 compatibility cannot infer operation support from a capability profile.
+#[test]
+fn previous_profile_contract_rejects_new_operation_support_field() {
+    let mut registration = crate::grpc::v0_4::NodeRegistration {
+        node_id: "arm-a".to_string(),
+        local_systems: vec![crate::grpc::v0_4::LocalSystemDescriptor {
+            id: "manipulator".to_string(),
+            runtime: Some(crate::grpc::v0_4::LocalRuntime {
+                name: "local-eaios".to_string(),
+                version: "1".to_string(),
+            }),
+            metadata: Default::default(),
+        }],
+        node_contract_version: PREVIOUS_NODE_CONTRACT_VERSION.to_string(),
+        capability_profiles: vec![crate::grpc::v0_4::CapabilityProfile {
+            contract: "object.relocate@v1".to_string(),
+            kind: "transport".to_string(),
+            local_system_id: "manipulator".to_string(),
+            ready: true,
+            attributes: Default::default(),
+        }],
+        operation_support: vec![crate::grpc::v0_4::OperationSupport {
+            operation: Some(crate::grpc::v0_4::OperationRef {
+                namespace: "object".to_string(),
+                name: "relocate".to_string(),
+                version: "v1".to_string(),
+            }),
+            local_system_id: "manipulator".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        validate_registration(&registration)
+            .expect_err("v0.5 cannot silently gain v0.6 semantics")
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+    registration.operation_support.clear();
+    validate_registration(&registration).expect("original v0.5 profile remains compatible");
 }
 
 /// Each negotiated Node Contract accepts exactly one capability and invocation representation.

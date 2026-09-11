@@ -10,7 +10,7 @@ from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.models import JSONObject, MissionPlan, TaskSatisfactionBasis
 
 PLAN_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
-CATALOG_FIXTURE = Path("contracts/capability/v0.2/catalog.json")
+CATALOG_FIXTURE = Path("contracts/capability/v0.3/catalog.json")
 
 
 def _raw_plan() -> JSONObject:
@@ -40,11 +40,7 @@ def test_front_half_fixture_keeps_one_semantic_task_above_local_how() -> None:
     assert {
         _contract_id(item.contract.namespace, item.contract.name, item.contract.version)
         for item in role.capabilities
-    } == {
-        "manipulation.grasp@v1",
-        "mobility.navigate@v1",
-        "object.relocate@v1",
-    }
+    } == {"object.relocate@v1"}
     assert (
         _contract_id(
             role.execution.operation.namespace,

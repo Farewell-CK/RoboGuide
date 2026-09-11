@@ -282,13 +282,10 @@ fn verifier_evidence_is_distinct_from_local_execution_completion() {
         .clone();
     let group_id = ExecutionGroupId::new("group-verifier-test").expect("group id valid");
     let correlation = CorrelationId::new("verifier-satisfaction-test").expect("trace valid");
-    let grasp = CapabilityContractRef::new("manipulation", "grasp", "v1").expect("contract valid");
-    let navigate =
-        CapabilityContractRef::new("mobility", "navigate", "v1").expect("contract valid");
     let relocate = CapabilityContractRef::new("object", "relocate", "v1").expect("contract valid");
     let mut attributes = BTreeMap::new();
     attributes.insert(
-        grasp.clone(),
+        relocate.clone(),
         BTreeMap::from([(
             "max-payload-grams".to_string(),
             domain::ExecutionValue::Integer(5_000),
@@ -297,11 +294,7 @@ fn verifier_evidence_is_distinct_from_local_execution_completion() {
     let node = registration(
         "carrier",
         vec![Capability::new(CapabilityKind::Transport, true)],
-        vec![
-            (grasp, CapabilityKind::Transport),
-            (navigate, CapabilityKind::Transport),
-            (relocate, CapabilityKind::Transport),
-        ],
+        vec![(relocate, CapabilityKind::Transport)],
         vec![(
             ResourceId::new("carrier-space").expect("resource id valid"),
             ResourceKind::Space,

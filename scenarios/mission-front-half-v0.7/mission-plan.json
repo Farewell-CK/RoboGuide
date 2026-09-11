@@ -30,18 +30,10 @@
           "requirements": {
             "capabilities": [
               {
-                "contract": {"namespace": "manipulation", "name": "grasp", "version": "v1"},
+                "contract": {"namespace": "object", "name": "relocate", "version": "v1"},
                 "constraints": [
                   {"attribute": "max-payload-grams", "operator": "at-least", "value": 3000}
                 ]
-              },
-              {
-                "contract": {"namespace": "mobility", "name": "navigate", "version": "v1"},
-                "constraints": []
-              },
-              {
-                "contract": {"namespace": "object", "name": "relocate", "version": "v1"},
-                "constraints": []
               }
             ],
             "resources": [

@@ -14,7 +14,8 @@ use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
     CapabilityProfile, CommandKind, CommandReceipt, CommandReceiptStatus, ExecutionEvent,
     ExecutionPhase, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor, NODE_CONTRACT_VERSION,
-    NodeMessage, NodeRegistration, NodeStatus, PROTOCOL_VERSION, Register, Resource, ServerMessage,
+    NodeMessage, NodeRegistration, NodeStatus, OperationRef, OperationSupport, PROTOCOL_VERSION,
+    Register, Resource, ServerMessage,
 };
 use std::env;
 use std::time::Duration;
@@ -184,6 +185,12 @@ async fn run(options: SmokeOptions) -> Result<(), String> {
 
 /// Builds a valid synthetic registration accepted by the v0.4 server validator.
 fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistration {
+    let (qualified_name, version) = capability_contract
+        .rsplit_once('@')
+        .expect("smoke contract has a version");
+    let (namespace, name) = qualified_name
+        .rsplit_once('.')
+        .expect("smoke contract has a namespace");
     NodeRegistration {
         node_id: node_id.to_string(),
         local_systems: vec![LocalSystemDescriptor {
@@ -201,6 +208,14 @@ fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistrat
             local_system_id: "smoke-system".to_string(),
             ready: true,
             attributes: Default::default(),
+        }],
+        operation_support: vec![OperationSupport {
+            operation: Some(OperationRef {
+                namespace: namespace.to_string(),
+                name: name.to_string(),
+                version: version.to_string(),
+            }),
+            local_system_id: "smoke-system".to_string(),
         }],
         sensors: vec![],
         resources: vec![Resource {

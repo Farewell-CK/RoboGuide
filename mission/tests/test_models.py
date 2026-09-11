@@ -200,9 +200,10 @@ def test_v0_7_normalizes_actor_role_operation_timing_and_satisfaction() -> None:
     assert plan.mission.actors[0].actor_id == "courier"
     assert role.actor_id is None
     assert role.context_role == "carrier"
-    assert len(role.capabilities) == 3
+    assert len(role.capabilities) == 1
+    assert role.capabilities[0].constraints[0].attribute == "max-payload-grams"
     assert role.execution.operation.name == "relocate"
-    assert role.execution.operation.to_json() != role.capabilities[0].contract.to_json()
+    assert role.execution.operation.to_json() == role.capabilities[0].contract.to_json()
     assert plan.tasks[0].timing is not None
     assert plan.tasks[0].timing.estimated_duration_ms is None
     assert plan.tasks[0].satisfaction.expected_effect.startswith("急救包")
