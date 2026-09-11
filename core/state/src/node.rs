@@ -30,10 +30,10 @@ impl InMemorySharedNodeState {
         }
     }
 
-    /// Restores reported node facts while rebasing process-local ordering and liveness evidence.
+    /// Restores reported node facts while preserving health freshness and rebasing liveness.
     ///
     /// Every restored node starts unreachable at `restored_at`; later registration or heartbeat
-    /// reception establishes current-process freshness. Duplicate node identities are rejected.
+    /// reception establishes current-process liveness. Duplicate node identities are rejected.
     pub fn restore(
         snapshots: Vec<NodeStateSnapshot>,
         restored_at: TimestampMs,
@@ -44,7 +44,7 @@ impl InMemorySharedNodeState {
             let rebased = NodeStateSnapshot::new(
                 snapshot.registration().clone(),
                 snapshot.reported_status(),
-                restored_at,
+                snapshot.reported_status_received_at(),
                 NodeLivenessObservation::new(NodeLiveness::Unreachable, restored_at),
             );
             if nodes.insert(node_id.clone(), rebased).is_some() {
@@ -299,5 +299,24 @@ mod tests {
         assert_eq!(stored.reported_status_received_at(), TimestampMs::new(10));
         assert_eq!(stored.liveness().liveness(), NodeLiveness::Unreachable);
         assert_eq!(stored.liveness().observed_at(), TimestampMs::new(20));
+    }
+
+    /// Restoring a Node keeps health freshness evidence from being rewritten as newly received.
+    #[test]
+    fn restore_preserves_reported_health_receive_time() {
+        let restored =
+            InMemorySharedNodeState::restore(vec![snapshot(8_000, 10)], TimestampMs::new(500))
+                .expect("snapshot restores");
+        let node_id = NodeId::new("node-a").expect("test node id should be valid");
+        let stored = restored.node(&node_id).expect("restored node should exist");
+
+        assert_eq!(stored.reported_status().health(), NodeHealth::Online);
+        assert_eq!(
+            stored.reported_status().observed_at(),
+            TimestampMs::new(8_000)
+        );
+        assert_eq!(stored.reported_status_received_at(), TimestampMs::new(10));
+        assert_eq!(stored.liveness().liveness(), NodeLiveness::Unreachable);
+        assert_eq!(stored.liveness().observed_at(), TimestampMs::new(500));
     }
 }

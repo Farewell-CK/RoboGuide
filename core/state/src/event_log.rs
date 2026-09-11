@@ -273,6 +273,21 @@ impl SqliteEventLog {
             .map_err(Into::into)
     }
 
+    /// Returns the latest durable event timestamp, or zero for an empty log.
+    pub fn latest_timestamp(&self) -> Result<TimestampMs, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let timestamp = connection.query_row(
+            "SELECT COALESCE(MAX(timestamp_ms), 0) FROM events",
+            [],
+            |row| row.get::<_, u64>(0),
+        )?;
+        Ok(TimestampMs::new(timestamp))
+    }
+
     /// Loads the last committed controller projection checkpoint, if present.
     pub fn load_checkpoint(&self) -> Result<Option<PersistedCheckpoint>, SqliteEventLogError> {
         self.ensure_no_open_batch()?;

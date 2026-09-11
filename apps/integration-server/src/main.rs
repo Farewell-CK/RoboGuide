@@ -328,7 +328,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
-    let process_clock = Arc::new(runtime::SystemMonotonicClock::new());
+    let process_clock = Arc::new(runtime::SystemMonotonicClock::from_floor(
+        event_log.latest_timestamp()?,
+    ));
     let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())

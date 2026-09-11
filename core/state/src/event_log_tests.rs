@@ -241,6 +241,10 @@ fn sqlite_event_log_survives_reopen() {
         EventPayload::ExecutionGroupBlocked { .. }
     ));
     assert_eq!(reopened.decoded_events().expect("events decode").len(), 1);
+    assert_eq!(
+        reopened.latest_timestamp().expect("latest timestamp reads"),
+        TimestampMs::new(10)
+    );
 }
 
 /// A v10 row cannot claim Task satisfaction evidence introduced by codec v11.

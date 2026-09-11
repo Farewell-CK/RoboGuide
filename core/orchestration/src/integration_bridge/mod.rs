@@ -264,7 +264,7 @@ struct ControllerCheckpoint {
     schema: String,
     /// Control-owned commitments, bindings, and Group lifecycle.
     control: control::ControlCheckpoint,
-    /// Shared reported node facts; local receive/liveness times are rebased on restore.
+    /// Shared reported node facts; health receive times persist while liveness is rebased on restore.
     nodes: Vec<domain::NodeStateSnapshot>,
     /// Independently attributed State channels, preserving their original receive times.
     #[serde(default)]

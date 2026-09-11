@@ -288,6 +288,67 @@ fn runtime_drives_activation_and_terminal_result() {
     );
 }
 
+/// Keeps a failed Task pending until every current physical Role attempt is terminal.
+#[test]
+fn failed_role_does_not_end_task_while_another_role_is_running() {
+    let mut runtime = RuntimeExecutionManager::new();
+    let failed = command_for("task-multi", "failed-role", "node-a");
+    let running = command_for("task-multi", "running-role", "node-b");
+    runtime
+        .record_dispatched("execution-failed".to_string(), failed.clone(), Vec::new())
+        .expect("failed role dispatch records");
+    runtime
+        .record_dispatched("execution-running".to_string(), running.clone(), Vec::new())
+        .expect("running role dispatch records");
+    runtime
+        .observe_execution(
+            "execution-failed",
+            failed.node_id().clone(),
+            1,
+            ExecutionStatus::Failed,
+            "local role failure",
+        )
+        .expect("failed role fact records");
+    runtime
+        .observe_execution(
+            "execution-running",
+            running.node_id().clone(),
+            1,
+            ExecutionStatus::Running,
+            "",
+        )
+        .expect("running role fact records");
+
+    assert_eq!(
+        runtime.task_execution_result(
+            failed.group_id(),
+            failed.task_ref(),
+            [failed.role_id(), running.role_id()].into_iter(),
+        ),
+        None,
+        "one failed role must not release a still-running sibling"
+    );
+
+    runtime
+        .observe_execution(
+            "execution-running",
+            running.node_id().clone(),
+            2,
+            ExecutionStatus::Completed,
+            "",
+        )
+        .expect("running role terminal fact records");
+    assert_eq!(
+        runtime.task_execution_result(
+            failed.group_id(),
+            failed.task_ref(),
+            [failed.role_id(), running.role_id()].into_iter(),
+        ),
+        Some(ObservedTaskExecutionResult::Failed),
+        "Task failure becomes actionable after all physical attempts terminate"
+    );
+}
+
 /// Restore fences command replay and converts nonterminal state to Unknown.
 #[test]
 fn restore_requires_reconciliation_before_replay() {

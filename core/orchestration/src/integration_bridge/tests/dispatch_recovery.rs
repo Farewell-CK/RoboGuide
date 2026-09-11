@@ -80,7 +80,11 @@ fn checkpoint_restore_is_conservative_across_process_boundary() {
 
     assert!(restored.control().node_lease(&node_id).is_none());
     let snapshot = restored.state().node(&node_id).expect("node fact restored");
-    assert_eq!(snapshot.reported_status_received_at(), TimestampMs::new(7));
+    assert_eq!(
+        snapshot.reported_status_received_at(),
+        TimestampMs::new(100),
+        "restart must not make old reported health appear newly received"
+    );
     assert_eq!(
         snapshot.liveness().liveness(),
         domain::NodeLiveness::Unreachable

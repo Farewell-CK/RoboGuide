@@ -214,7 +214,8 @@ impl RuntimeExecutionManager {
         role_ids: impl IntoIterator<Item = &'a RoleId>,
     ) -> Option<ObservedTaskExecutionResult> {
         let mut saw_role = false;
-        let mut all_completed = true;
+        let mut saw_failed = false;
+        let mut all_terminal = true;
         for role_id in role_ids {
             saw_role = true;
             let status = self
@@ -225,13 +226,23 @@ impl RuntimeExecutionManager {
             match status {
                 Some(ExecutionStatus::Completed) => {}
                 Some(ExecutionStatus::Failed | ExecutionStatus::Cancelled) => {
-                    return Some(ObservedTaskExecutionResult::Failed);
+                    saw_failed = true;
                 }
-                Some(ExecutionStatus::Unknown) => return None,
-                _ => all_completed = false,
+                Some(ExecutionStatus::Unknown) | None => all_terminal = false,
+                Some(
+                    ExecutionStatus::Dispatched
+                    | ExecutionStatus::Accepted
+                    | ExecutionStatus::Running,
+                ) => all_terminal = false,
             }
         }
-        (saw_role && all_completed && self.relations_allow_task_success(group_id, task_ref))
+        if !saw_role || !all_terminal {
+            return None;
+        }
+        if saw_failed {
+            return Some(ObservedTaskExecutionResult::Failed);
+        }
+        self.relations_allow_task_success(group_id, task_ref)
             .then_some(ObservedTaskExecutionResult::ExecutionCompleted)
     }
 }

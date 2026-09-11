@@ -196,6 +196,22 @@ impl MissionOrchestrator {
         self.executions.keys().cloned().collect()
     }
 
+    /// Returns the accepted satisfaction basis for one Mission Task.
+    pub fn task_satisfaction_basis(
+        &self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+    ) -> Option<&domain::TaskSatisfactionBasis> {
+        self.executions
+            .get(mission_id)?
+            .plan()
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == task_ref)
+            .map(domain::PlannedTask::satisfaction_basis)
+    }
+
     /// Validates restored Mission authority against Control before execution traffic is accepted.
     pub fn validate_control_authority(
         &self,

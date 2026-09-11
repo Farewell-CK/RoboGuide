@@ -38,12 +38,18 @@ pub struct SystemMonotonicClock {
 }
 
 impl SystemMonotonicClock {
-    /// Starts a process-local monotonic time domain at zero.
+    /// Starts a process-local monotonic time domain anchored to the current wall-clock epoch.
     pub fn new() -> Self {
+        Self::from_floor(TimestampMs::new(0))
+    }
+
+    /// Starts a process-local monotonic time domain no earlier than a persisted timestamp.
+    pub fn from_floor(floor: TimestampMs) -> Self {
         let wall_origin_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(floor.as_millis());
         Self {
             origin: Instant::now(),
             wall_origin_ms,
@@ -72,5 +78,19 @@ impl Clock for SystemMonotonicClock {
             .expect("SystemMonotonicClock high-water mutex is not poisoned");
         *high_water = (*high_water).max(monotonic);
         TimestampMs::new(*high_water)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A restored event timestamp remains a lower bound for the next process clock.
+    #[test]
+    fn persisted_floor_prevents_clock_regression() {
+        let floor = TimestampMs::new(u64::MAX - 1);
+        let clock = SystemMonotonicClock::from_floor(floor);
+
+        assert!(clock.now() >= floor);
     }
 }

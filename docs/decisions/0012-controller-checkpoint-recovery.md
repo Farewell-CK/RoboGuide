@@ -36,8 +36,8 @@ checkpoint to v9 so the Runtime relation registry, state and fences cannot disap
 Recovery is conservative across the process-local monotonic clock boundary:
 
 - Control leases are cleared and must be re-established by node registration;
-- restored Shared Node State keeps registration and reported health but rebases receive/liveness
-  times and marks liveness `Unreachable`;
+- restored Shared Node State keeps registration and reported health, preserves the reported health
+  receive time for freshness, and rebases only liveness to `Unreachable`;
 - nonterminal Runtime executions become `Unknown` and remain recovery-pending rather than terminally failed;
 - restored execution IDs are fenced from ordinary routing, and no command is automatically replayed;
 - fresh gRPC routes wait for nodes to reconnect and report current facts.
