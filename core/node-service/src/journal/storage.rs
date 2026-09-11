@@ -161,28 +161,31 @@ pub(super) fn validate_localization_evidence_binding(
             .pointer(pointer)
             .and_then(serde_json::Value::as_str)
     };
-    let matches_invocation = [
-        ("/mission_id", evidence.mission_id().as_str()),
-        ("/task_id", evidence.task_ref().task_id().as_str()),
-        ("/group_id", evidence.group_id().as_str()),
-        ("/role_id", evidence.role_id().as_str()),
-        ("/capability_contract", LOCALIZATION_VERIFY_CONTRACT),
-        (
-            "/parameters/map_id",
-            evidence.artifact().selector().map_id().as_str(),
-        ),
-        (
-            "/parameters/revision_id",
-            evidence.artifact().selector().revision_id().as_str(),
-        ),
-        (
-            "/parameters/spatial_anchor_id",
-            evidence.anchor_id().as_str(),
-        ),
-        ("/parameters/artifact_operation", "verify"),
-    ]
-    .into_iter()
-    .all(|(pointer, expected)| invocation_text(pointer) == Some(expected));
+    let operation_matches = invocation_text("/operation")
+        .or_else(|| invocation_text("/capability_contract"))
+        == Some(LOCALIZATION_VERIFY_CONTRACT);
+    let matches_invocation = operation_matches
+        && [
+            ("/mission_id", evidence.mission_id().as_str()),
+            ("/task_id", evidence.task_ref().task_id().as_str()),
+            ("/group_id", evidence.group_id().as_str()),
+            ("/role_id", evidence.role_id().as_str()),
+            (
+                "/parameters/map_id",
+                evidence.artifact().selector().map_id().as_str(),
+            ),
+            (
+                "/parameters/revision_id",
+                evidence.artifact().selector().revision_id().as_str(),
+            ),
+            (
+                "/parameters/spatial_anchor_id",
+                evidence.anchor_id().as_str(),
+            ),
+            ("/parameters/artifact_operation", "verify"),
+        ]
+        .into_iter()
+        .all(|(pointer, expected)| invocation_text(pointer) == Some(expected));
     if evidence.execution_id() != execution.execution_id()
         || execution.local_handle() != Some(evidence.local_attempt_id())
         || evidence.node_id() != local_node_id

@@ -10,8 +10,8 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         ActorId, Capability, CapabilityContractRef, CapabilityKind, CorrelationId,
         ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MissionId,
         NodeContractVersion, NodeHealth, NodeId, NodeRegistration as DomainRegistration,
-        NodeStatus as DomainStatus, Resource as DomainResource, ResourceId, ResourceKind, RoleId,
-        RoleRequirement, TaskId, TaskRequirement, TimestampMs,
+        NodeStatus as DomainStatus, OperationRef, Resource as DomainResource, ResourceId,
+        ResourceKind, RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
     };
     use integration::GrpcIntegrationService;
     use integration::grpc::v0_4::CanonicalInvocation;
@@ -34,12 +34,14 @@ async fn control_bound_command_round_trips_through_generic_engine() {
             .await
     });
     let terminal = Arc::new(AtomicBool::new(false));
+    let dispatch_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let state_dir = tempfile::tempdir().expect("state directory exists");
     let engine = crate::LocalIntegrationEngine::new(
-        gated_catalog(format!("http://{address}"), state_dir.path().to_path_buf()),
-        vec![Arc::new(GatedDriver {
-            completed: Arc::clone(&terminal),
-        }) as Arc<dyn LocalDriver>],
+        semantic_gated_catalog(format!("http://{address}"), state_dir.path().to_path_buf()),
+        vec![Arc::new(GatedDriver::recording(
+            Arc::clone(&terminal),
+            Arc::clone(&dispatch_requests),
+        )) as Arc<dyn LocalDriver>],
     )
     .expect("engine initializes");
     let node = NodeService::new(engine.clone());
@@ -91,8 +93,9 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         )],
     )
     .expect("requirement valid");
-    let intent = ExecutionIntent::new(
-        contract,
+    let intent = ExecutionIntent::new_semantic(
+        OperationRef::from(contract),
+        "Reach the library region while preserving local navigation and safety authority",
         BTreeMap::from([(
             "region_id".to_string(),
             ExecutionValue::String("library".to_string()),
@@ -205,6 +208,23 @@ async fn control_bound_command_round_trips_through_generic_engine() {
             .expect("running event consumed");
         completion.accept();
     }
+    {
+        let requests = dispatch_requests
+            .lock()
+            .expect("request sink remains available");
+        assert_eq!(
+            requests[0]
+                .pointer("/invocation/operation")
+                .and_then(serde_json::Value::as_str),
+            Some("mobility.reach_region@v1")
+        );
+        assert_eq!(
+            requests[0]
+                .pointer("/invocation/objective")
+                .and_then(serde_json::Value::as_str),
+            Some("Reach the library region while preserving local navigation and safety authority")
+        );
+    }
     assert_ne!(
         bridge.execution_status("execution-e2e"),
         Some(RemoteExecutionStatus::Completed)
@@ -216,6 +236,7 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         role_id: "carrier".to_string(),
         capability_contract: "mobility.reach_region@v1".to_string(),
         parameters: Default::default(),
+        intent: None,
     };
     assert!(matches!(
         engine.execute(
@@ -295,9 +316,7 @@ async fn reconciliation_required_execution_fences_local_resources_after_restart(
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine reopens journal");
     engine.recover().expect("ambiguous execution is fenced");
@@ -366,9 +385,7 @@ async fn handle_bearing_dispatch_resumes_status_only_recovery_after_restart() {
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine reopens journal");
     let mut events = engine.subscribe();

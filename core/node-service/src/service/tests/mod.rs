@@ -7,10 +7,10 @@ use crate::local_engine::driver::{
 };
 use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactServiceConfig,
-    CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
+    CapabilityBindingConfig, CapabilityProfileConfig, CapabilityReadinessConfig, ConnectionConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    NodeServiceConfig, RequestMappingConfig, ResourceConfig, ValueExpressionConfig, WorkflowConfig,
-    WorkflowStepConfig,
+    NodeServiceConfig, OperationBindingConfig, RequestMappingConfig, ResourceConfig,
+    ValueExpressionConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -54,13 +54,16 @@ fn registration_aggregates_configured_local_systems() {
     let catalog =
         crate::CompiledLocalCatalog::compile(config, directory).expect("example catalog compiles");
     let registration = registration_from_catalog(&catalog);
-    assert_eq!(registration.node_contract_version, NODE_CONTRACT_VERSION);
+    assert_eq!(
+        registration.node_contract_version,
+        integration::grpc::v0_4::NODE_CONTRACT_VERSION
+    );
     assert!(!registration.local_systems.is_empty());
     assert!(
         registration
-            .capabilities
+            .capability_profiles
             .iter()
-            .all(|capability| !capability.local_system_id.is_empty())
+            .all(|profile| !profile.local_system_id.is_empty())
     );
 }
 
@@ -119,9 +122,7 @@ fn spatial_scenario_engine(
     .expect("scenario Node catalog compiles with isolated test paths");
     crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("scenario Local Integration Engine compiles offline")
 }
@@ -325,6 +326,29 @@ impl LocalDriver for OfflineHealthDriver {
 struct GatedDriver {
     /// Local physical completion gate.
     completed: Arc<AtomicBool>,
+    /// Optional sink proving the exact request delivered to the Local EAIOS boundary.
+    dispatch_requests: Option<Arc<std::sync::Mutex<Vec<serde_json::Value>>>>,
+}
+
+impl GatedDriver {
+    /// Creates a deterministic lifecycle driver without retaining request bodies.
+    fn new(completed: Arc<AtomicBool>) -> Self {
+        Self {
+            completed,
+            dispatch_requests: None,
+        }
+    }
+
+    /// Creates a driver that records physical dispatch request bodies for boundary assertions.
+    fn recording(
+        completed: Arc<AtomicBool>,
+        dispatch_requests: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) -> Self {
+        Self {
+            completed,
+            dispatch_requests: Some(dispatch_requests),
+        }
+    }
 }
 
 impl LocalDriver for GatedDriver {
@@ -336,9 +360,17 @@ impl LocalDriver for GatedDriver {
     /// Produces one structured response without embedding any Local EAIOS semantics.
     fn invoke<'a>(&'a self, request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
         Box::pin(async move {
-            let CompiledDriverRequest::Http { path, .. } = request else {
+            let CompiledDriverRequest::Http { path, body, .. } = request else {
                 return Err(DriverError::KindMismatch);
             };
+            if path == "/dispatch"
+                && let Some(requests) = &self.dispatch_requests
+            {
+                requests
+                    .lock()
+                    .map_err(|_| DriverError::InvalidResponse("request sink poisoned".into()))?
+                    .push(body.clone());
+            }
             let payload = match path.as_str() {
                 "/health" => serde_json::json!({ "state": "ONLINE", "detail": "ready" }),
                 "/dispatch" => serde_json::json!({ "execution_id": "local-1" }),
@@ -403,12 +435,37 @@ fn gated_catalog(
     gated_catalog_with_artifacts(endpoint, state_directory, None, false)
 }
 
+/// Builds a current semantic-contract catalog for end-to-end intent transport tests.
+fn semantic_gated_catalog(
+    endpoint: String,
+    state_directory: std::path::PathBuf,
+) -> crate::CompiledLocalCatalog {
+    gated_catalog_for_contract(endpoint, state_directory, None, false, true)
+}
+
 /// Builds the generic test catalog with one optional immutable map-input binding.
 fn gated_catalog_with_artifacts(
     endpoint: String,
     state_directory: std::path::PathBuf,
     artifact_endpoint: Option<String>,
     readiness: bool,
+) -> crate::CompiledLocalCatalog {
+    gated_catalog_for_contract(
+        endpoint,
+        state_directory,
+        artifact_endpoint,
+        readiness,
+        false,
+    )
+}
+
+/// Builds either a legacy combined or current split Node catalog from one workflow fixture.
+fn gated_catalog_for_contract(
+    endpoint: String,
+    state_directory: std::path::PathBuf,
+    artifact_endpoint: Option<String>,
+    readiness: bool,
+    semantic_contract: bool,
 ) -> crate::CompiledLocalCatalog {
     let step = |id: &str, path: &str, request: RequestMappingConfig| WorkflowStepConfig {
         id: id.to_string(),
@@ -445,15 +502,102 @@ fn gated_catalog_with_artifacts(
         output_bindings: Vec::new(),
     });
     let artifact_operation = artifacts.as_ref().map(|_| ArtifactOperationConfig::Import);
-    crate::CompiledLocalCatalog::compile(
-        NodeServiceConfig {
-            schema: if readiness {
+    let capability_readiness = readiness.then(|| CapabilityReadinessConfig {
+        step: step("readiness", "/readiness", RequestMappingConfig::default()),
+        state_pointer: "/state".to_string(),
+        detail_pointer: Some("/detail".to_string()),
+        ready: vec!["READY".to_string()],
+        unavailable: vec!["UNAVAILABLE".to_string()],
+        case_sensitive: false,
+    });
+    let mut workflow = WorkflowConfig {
+        execute: vec![step(
+            "dispatch",
+            "/dispatch",
+            RequestMappingConfig::default(),
+        )],
+        status: vec![step("status", "/status", handle_request.clone())],
+        cancel: vec![step("cancel", "/cancel", handle_request)],
+        local_handle: ValueExpressionConfig::Pointer {
+            pointer: "/steps/dispatch/execution_id".to_string(),
+        },
+        poll_interval_ms: 10,
+        execution_state: ExecutionStateMappingConfig {
+            state_pointer: "/steps/status/state".to_string(),
+            reason_pointer: Some("/steps/status/detail".to_string()),
+            accepted: Vec::new(),
+            running: vec!["RUNNING".to_string()],
+            completed: vec!["COMPLETED".to_string()],
+            failed: vec!["FAILED".to_string()],
+            cancelled: vec!["CANCELLED".to_string()],
+            case_sensitive: false,
+        },
+    };
+    if semantic_contract {
+        workflow.execute[0].request = RequestMappingConfig {
+            base: serde_json::json!({}),
+            bindings: vec![crate::RequestBindingConfig {
+                target: "/invocation".to_string(),
+                value: ValueExpressionConfig::Pointer {
+                    pointer: "/invocation".to_string(),
+                },
+            }],
+        };
+    }
+    let (schema, capabilities, capability_profiles, operations) = if semantic_contract {
+        let readiness = capability_readiness.unwrap_or_else(|| CapabilityReadinessConfig {
+            step: step("readiness", "/readiness", RequestMappingConfig::default()),
+            state_pointer: "/state".to_string(),
+            detail_pointer: Some("/detail".to_string()),
+            ready: vec!["READY".to_string()],
+            unavailable: vec!["UNAVAILABLE".to_string()],
+            case_sensitive: false,
+        });
+        (
+            crate::CONFIG_SCHEMA_V0_7.to_string(),
+            Vec::new(),
+            vec![CapabilityProfileConfig {
+                contract: "mobility.reach_region@v1".to_string(),
+                kind: "mobility".to_string(),
+                owner: "motion".to_string(),
+                attributes: BTreeMap::new(),
+                readiness,
+            }],
+            vec![OperationBindingConfig {
+                operation: "mobility.reach_region@v1".to_string(),
+                owner: "motion".to_string(),
+                required_resources: vec!["base".to_string()],
+                local_locks: vec!["locomotion".to_string()],
+                artifact_operation,
+                workflow,
+            }],
+        )
+    } else {
+        (
+            if readiness {
                 crate::CONFIG_SCHEMA_V0_4.to_string()
             } else if artifacts.is_some() {
                 crate::CONFIG_SCHEMA_V0_3.to_string()
             } else {
                 crate::CONFIG_SCHEMA_V0_2.to_string()
             },
+            vec![CapabilityBindingConfig {
+                contract: "mobility.reach_region@v1".to_string(),
+                kind: "mobility".to_string(),
+                owner: "motion".to_string(),
+                required_resources: vec!["base".to_string()],
+                local_locks: vec!["locomotion".to_string()],
+                artifact_operation,
+                readiness: capability_readiness,
+                workflow,
+            }],
+            Vec::new(),
+            Vec::new(),
+        )
+    };
+    crate::CompiledLocalCatalog::compile(
+        NodeServiceConfig {
+            schema,
             node_id: "dog-a".to_string(),
             server_endpoint: endpoint,
             state_directory,
@@ -480,45 +624,9 @@ fn gated_catalog_with_artifacts(
                 timeout_ms: 1_000,
                 headers: BTreeMap::new(),
             }],
-            capabilities: vec![CapabilityBindingConfig {
-                contract: "mobility.reach_region@v1".to_string(),
-                kind: "mobility".to_string(),
-                owner: "motion".to_string(),
-                required_resources: vec!["base".to_string()],
-                local_locks: vec!["locomotion".to_string()],
-                artifact_operation,
-                readiness: readiness.then(|| CapabilityReadinessConfig {
-                    step: step("readiness", "/readiness", RequestMappingConfig::default()),
-                    state_pointer: "/state".to_string(),
-                    detail_pointer: Some("/detail".to_string()),
-                    ready: vec!["READY".to_string()],
-                    unavailable: vec!["UNAVAILABLE".to_string()],
-                    case_sensitive: false,
-                }),
-                workflow: WorkflowConfig {
-                    execute: vec![step(
-                        "dispatch",
-                        "/dispatch",
-                        RequestMappingConfig::default(),
-                    )],
-                    status: vec![step("status", "/status", handle_request.clone())],
-                    cancel: vec![step("cancel", "/cancel", handle_request)],
-                    local_handle: ValueExpressionConfig::Pointer {
-                        pointer: "/steps/dispatch/execution_id".to_string(),
-                    },
-                    poll_interval_ms: 10,
-                    execution_state: ExecutionStateMappingConfig {
-                        state_pointer: "/steps/status/state".to_string(),
-                        reason_pointer: Some("/steps/status/detail".to_string()),
-                        accepted: Vec::new(),
-                        running: vec!["RUNNING".to_string()],
-                        completed: vec!["COMPLETED".to_string()],
-                        failed: vec!["FAILED".to_string()],
-                        cancelled: vec!["CANCELLED".to_string()],
-                        case_sensitive: false,
-                    },
-                },
-            }],
+            capabilities,
+            capability_profiles,
+            operations,
             resources: vec![
                 ResourceConfig {
                     id: "base".to_string(),

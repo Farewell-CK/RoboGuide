@@ -70,6 +70,7 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
             node_contract_version: "roboguide.node.v0.3".to_string(),
             state_exports: Vec::new(),
             memory_providers: Vec::new(),
+            capability_profiles: Vec::new(),
         };
     for (node, lease, local_system, contract, kind, resources) in [
         (
@@ -386,6 +387,7 @@ fn state_observation_reconnect_epoch_accepts_reset_sequence() {
                         valid_for_ms: 1_000,
                     }],
                     memory_providers: Vec::new(),
+                    capability_profiles: Vec::new(),
                 },
             },
             TimestampMs::new(1),

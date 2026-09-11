@@ -94,7 +94,7 @@ impl LocalIntegrationEngine {
     pub async fn observe(&self) -> NodeObservation {
         let mut status = self.status().await;
         let mut tasks = tokio::task::JoinSet::new();
-        for (contract, capability) in self.inner.catalog.capabilities() {
+        for (contract, capability) in self.inner.catalog.capability_profiles() {
             let contract = contract.clone();
             let readiness = capability.readiness().cloned();
             let engine = self.clone();
@@ -265,11 +265,8 @@ impl LocalIntegrationEngine {
                 continue;
             }
             let invocation = decode_invocation_json(record.spec().invocation_content())?;
-            let contract = invocation
-                .get("capability_contract")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| EngineError::Protocol("journal invocation lacks contract".into()))?;
-            let capability = self.capability(contract)?.clone();
+            let operation = journal_operation(&invocation)?;
+            let capability = self.operation(operation)?.clone();
             let current_workflow_digest =
                 workflow_digest(&self.inner.catalog, &capability, &invocation)?;
             if current_workflow_digest != record.spec().workflow_digest() {

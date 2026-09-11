@@ -8,7 +8,7 @@ impl LocalIntegrationEngine {
         &self,
         execution_id: String,
         invocation: serde_json::Value,
-        capability: CompiledCapability,
+        capability: CompiledOperation,
     ) {
         let engine = self.clone();
         tokio::spawn(async move {
@@ -68,7 +68,7 @@ impl LocalIntegrationEngine {
         execution_id: String,
         invocation: serde_json::Value,
         handle: String,
-        capability: CompiledCapability,
+        capability: CompiledOperation,
         prepared_input: Option<MapArtifactManifest>,
     ) {
         let engine = self.clone();
@@ -179,7 +179,7 @@ impl LocalIntegrationEngine {
     pub(super) async fn prepare_artifacts(
         &self,
         invocation: &serde_json::Value,
-        capability: &CompiledCapability,
+        capability: &CompiledOperation,
         context: &mut WorkflowContext,
     ) -> Result<Option<MapArtifactManifest>, EngineError> {
         let Some(directive) = artifact_directive(invocation, capability.artifact_operation())?
@@ -270,7 +270,7 @@ impl LocalIntegrationEngine {
     pub(super) async fn complete_artifacts(
         &self,
         invocation: &serde_json::Value,
-        capability: &CompiledCapability,
+        capability: &CompiledOperation,
         execution_id: &str,
         prepared_input: Option<&MapArtifactManifest>,
     ) -> Result<(), EngineError> {
@@ -295,7 +295,7 @@ impl LocalIntegrationEngine {
     pub(super) fn prepare_artifact_finalization(
         &self,
         invocation: &serde_json::Value,
-        capability: &CompiledCapability,
+        capability: &CompiledOperation,
         execution_id: &str,
     ) -> Result<(), EngineError> {
         let Some(directive) = artifact_directive(invocation, capability.artifact_operation())?
@@ -322,7 +322,7 @@ impl LocalIntegrationEngine {
         &self,
         execution_id: String,
         invocation: serde_json::Value,
-        capability: CompiledCapability,
+        capability: CompiledOperation,
     ) -> Result<(), EngineError> {
         let pending = self
             .inner
@@ -397,7 +397,7 @@ impl LocalIntegrationEngine {
     pub(super) async fn freeze_artifact_output(
         &self,
         invocation: &serde_json::Value,
-        capability: &CompiledCapability,
+        capability: &CompiledOperation,
         execution_id: &str,
         directive: ArtifactDirective<'_>,
     ) -> Result<(), EngineError> {
@@ -703,7 +703,7 @@ impl LocalIntegrationEngine {
     pub(super) fn acquire_locks(
         &self,
         execution_id: &str,
-        capability: &CompiledCapability,
+        capability: &CompiledOperation,
         resource_ids: &[String],
         invocation: &serde_json::Value,
     ) -> Result<(), EngineError> {

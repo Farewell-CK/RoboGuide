@@ -18,7 +18,7 @@ fn registration_rejects_execution_group_memory_provider_scope() {
         sensors: Vec::new(),
         resources: Vec::new(),
         metadata: Default::default(),
-        node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
         state_exports: Vec::new(),
         memory_providers: vec![crate::grpc::v0_4::MemoryProviderDescriptor {
             provider_id: "experience".to_string(),
@@ -30,6 +30,7 @@ fn registration_rejects_execution_group_memory_provider_scope() {
             payload_schema: "example.experience/v1".to_string(),
             media_type: "application/json".to_string(),
         }],
+        capability_profiles: Vec::new(),
     };
     validate_registration(&registration).expect("global provider maximum should be valid");
 
@@ -39,6 +40,128 @@ fn registration_rejects_execution_group_memory_provider_scope() {
     let error = validate_registration(&registration)
         .expect_err("static execution Group provider scope should be rejected");
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
+}
+
+/// Node Contract v0.5 accepts typed profiles and rejects legacy/profile representation mixing.
+#[test]
+fn current_registration_requires_capability_profiles() {
+    let mut registration = crate::grpc::v0_4::NodeRegistration {
+        node_id: "arm-a".to_string(),
+        local_systems: vec![crate::grpc::v0_4::LocalSystemDescriptor {
+            id: "manipulator".to_string(),
+            runtime: Some(crate::grpc::v0_4::LocalRuntime {
+                name: "local-eaios".to_string(),
+                version: "1".to_string(),
+            }),
+            metadata: Default::default(),
+        }],
+        node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        capability_profiles: vec![crate::grpc::v0_4::CapabilityProfile {
+            contract: "manipulation.grasp@v1".to_string(),
+            kind: "mobility".to_string(),
+            local_system_id: "manipulator".to_string(),
+            ready: true,
+            attributes: std::collections::HashMap::from([(
+                "max-payload-g".to_string(),
+                crate::grpc::v0_4::ScalarValue {
+                    value: Some(crate::grpc::v0_4::scalar_value::Value::IntegerValue(5_000)),
+                },
+            )]),
+        }],
+        ..Default::default()
+    };
+    validate_registration(&registration).expect("current profile should be accepted");
+
+    registration
+        .capabilities
+        .push(crate::grpc::v0_4::Capability {
+            kind: "mobility".to_string(),
+            available: true,
+            contracts: vec!["manipulation.grasp@v1".to_string()],
+            local_system_id: "manipulator".to_string(),
+        });
+    assert_eq!(
+        validate_registration(&registration)
+            .expect_err("current contract cannot mix legacy capabilities")
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+
+    registration.node_contract_version = LEGACY_NODE_CONTRACT_VERSION.to_string();
+    registration.capabilities.clear();
+    assert_eq!(
+        validate_registration(&registration)
+            .expect_err("legacy contract cannot acquire current profile fields")
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+}
+
+/// Each negotiated Node Contract accepts exactly one capability and invocation representation.
+#[test]
+fn node_contract_versions_reject_mixed_or_downgraded_semantics() {
+    let current = crate::grpc::v0_4::CanonicalInvocation {
+        mission_id: "m".to_string(),
+        task_id: "t".to_string(),
+        group_id: "g".to_string(),
+        role_id: "r".to_string(),
+        intent: Some(crate::grpc::v0_4::ExecutionIntent {
+            operation: Some(crate::grpc::v0_4::OperationRef {
+                namespace: "compute".to_string(),
+                name: "noop".to_string(),
+                version: "v1".to_string(),
+            }),
+            objective: "Exercise the selected compute node".to_string(),
+            parameters: Default::default(),
+        }),
+        ..Default::default()
+    };
+    invocation_for_contract(current.clone(), NODE_CONTRACT_VERSION)
+        .expect("current contract accepts semantic intent");
+    assert_eq!(
+        invocation_for_contract(current, LEGACY_NODE_CONTRACT_VERSION)
+            .expect_err("legacy route cannot silently discard the objective")
+            .code(),
+        tonic::Code::FailedPrecondition
+    );
+
+    let legacy = crate::grpc::v0_4::CanonicalInvocation {
+        mission_id: "m".to_string(),
+        task_id: "t".to_string(),
+        group_id: "g".to_string(),
+        role_id: "r".to_string(),
+        capability_contract: "compute.noop@v1".to_string(),
+        ..Default::default()
+    };
+    invocation_for_contract(legacy.clone(), LEGACY_NODE_CONTRACT_VERSION)
+        .expect("legacy contract retains its original invocation form");
+    assert_eq!(
+        invocation_for_contract(legacy, NODE_CONTRACT_VERSION)
+            .expect_err("current contract cannot mix in legacy invocation fields")
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+
+    let compatible = crate::grpc::v0_4::CanonicalInvocation {
+        mission_id: "m".to_string(),
+        task_id: "t".to_string(),
+        group_id: "g".to_string(),
+        role_id: "r".to_string(),
+        intent: Some(crate::grpc::v0_4::ExecutionIntent {
+            operation: Some(crate::grpc::v0_4::OperationRef {
+                namespace: "compute".to_string(),
+                name: "noop".to_string(),
+                version: "v1".to_string(),
+            }),
+            objective: "compute.noop@v1".to_string(),
+            parameters: Default::default(),
+        }),
+        ..Default::default()
+    };
+    let compatible = invocation_for_contract(compatible, LEGACY_NODE_CONTRACT_VERSION)
+        .expect("legacy-equivalent semantic intent downgrades explicitly");
+    assert_eq!(compatible.capability_contract, "compute.noop@v1");
+    assert!(compatible.intent.is_none());
 }
 
 /// Builds one registered-export set for State batch validation tests.
@@ -162,6 +285,7 @@ fn peer_readiness_requires_current_session_identity_and_bounds() {
             lease_id: "lease-current".to_string(),
             last_heartbeat: std::time::Instant::now(),
             lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
             management_sequence: 1,
             state_export_ids: BTreeSet::new(),
             active: true,
@@ -312,6 +436,7 @@ fn pending_registration_cannot_route_commands() {
             lease_id: "lease-pending".to_string(),
             last_heartbeat: std::time::Instant::now(),
             lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: false,
@@ -329,6 +454,7 @@ fn pending_registration_cannot_route_commands() {
                 role_id: "r".to_string(),
                 capability_contract: "compute.noop@v1".to_string(),
                 parameters: Default::default(),
+                intent: None,
             },
             Vec::new(),
         )
@@ -350,6 +476,7 @@ fn expired_lease_rejects_new_commands() {
             lease_id: "lease-old".to_string(),
             last_heartbeat: std::time::Instant::now() - std::time::Duration::from_secs(2),
             lease_duration: std::time::Duration::from_secs(1),
+            node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: true,
@@ -368,6 +495,7 @@ fn expired_lease_rejects_new_commands() {
                     role_id: "r".to_string(),
                     capability_contract: "compute.noop@v1".to_string(),
                     parameters: Default::default(),
+                    intent: None,
                 },
                 Vec::new(),
             )
@@ -390,6 +518,7 @@ fn current_session_check_rejects_pending_wrong_and_expired_routes() {
             lease_id: "lease-current".to_string(),
             last_heartbeat: std::time::Instant::now(),
             lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: false,
@@ -446,6 +575,7 @@ fn newer_session_fences_late_old_heartbeat() {
             lease_id: "lease-new".to_string(),
             last_heartbeat: std::time::Instant::now(),
             lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: true,

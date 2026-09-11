@@ -63,6 +63,7 @@ fn registration_conversion_preserves_per_contract_readiness() {
         node_contract_version: "roboguide.node.v0.3".to_string(),
         state_exports: Vec::new(),
         memory_providers: Vec::new(),
+        capability_profiles: Vec::new(),
     })
     .expect("registration converts");
     let build = parse_contract("spatial.map.build@v0").expect("build contract parses");
@@ -108,6 +109,7 @@ fn readiness_update_changes_later_control_matching() {
         node_contract_version: "roboguide.node.v0.3".to_string(),
         state_exports: Vec::new(),
         memory_providers: Vec::new(),
+        capability_profiles: Vec::new(),
     };
     let mut bridge = IntegrationRuntimeBridge::new(
         ControlPlane::new(),
@@ -202,6 +204,130 @@ fn readiness_update_changes_later_control_matching() {
         )
         .expect("ready contract matches");
     assert_eq!(candidates.roles()[0].node_ids().len(), 1);
+}
+
+/// Node Contract v0.5 profile attributes survive State ingestion and constrain Control Matching.
+#[test]
+fn capability_profile_attributes_reach_control_matching() {
+    use integration::grpc::v0_4::scalar_value::Value as Scalar;
+
+    let registration = NodeRegistration {
+        node_id: "arm-a".to_string(),
+        local_systems: vec![LocalSystemDescriptor {
+            id: "manipulator".to_string(),
+            runtime: Some(WireRuntime {
+                name: "local-manipulation".to_string(),
+                version: "1".to_string(),
+            }),
+            metadata: Default::default(),
+        }],
+        capabilities: Vec::new(),
+        sensors: Vec::new(),
+        resources: Vec::new(),
+        metadata: Default::default(),
+        node_contract_version: integration::grpc::v0_4::NODE_CONTRACT_VERSION.to_string(),
+        state_exports: Vec::new(),
+        memory_providers: Vec::new(),
+        capability_profiles: vec![integration::grpc::v0_4::CapabilityProfile {
+            contract: "manipulation.grasp@v1".to_string(),
+            kind: "transport".to_string(),
+            local_system_id: "manipulator".to_string(),
+            ready: true,
+            attributes: std::collections::HashMap::from([(
+                "max-payload-grams".to_string(),
+                integration::grpc::v0_4::ScalarValue {
+                    value: Some(Scalar::IntegerValue(5_000)),
+                },
+            )]),
+        }],
+    };
+    let mut bridge = IntegrationRuntimeBridge::new(
+        ControlPlane::new(),
+        InMemorySharedNodeState::new(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+    );
+    let correlation =
+        CorrelationId::new("profile-attribute-matching").expect("correlation identity is valid");
+    bridge
+        .consume(
+            GrpcNodeEvent::Registered {
+                session_id: "session-arm".to_string(),
+                lease_id: "lease-arm".to_string(),
+                registration,
+            },
+            TimestampMs::new(10),
+            &correlation,
+        )
+        .expect("profile registration is consumed");
+    bridge
+        .consume(
+            GrpcNodeEvent::NodeMessage {
+                node_id: "arm-a".to_string(),
+                session_id: "session-arm".to_string(),
+                message: integration::grpc::v0_4::NodeMessage {
+                    message: Some(NodePayload::Heartbeat(integration::grpc::v0_4::Heartbeat {
+                        session_id: "session-arm".to_string(),
+                        lease_id: "lease-arm".to_string(),
+                        sequence: 1,
+                        status: Some(integration::grpc::v0_4::NodeStatus {
+                            health: "online".to_string(),
+                            detail: String::new(),
+                        }),
+                    })),
+                },
+            },
+            TimestampMs::new(11),
+            &correlation,
+        )
+        .expect("profile owner heartbeat is consumed");
+    let role_id = domain::RoleId::new("grasper").expect("Role identity is valid");
+    let requirement = domain::TaskRequirement::new(
+        domain::MissionId::new("mission-profile").expect("Mission identity is valid"),
+        domain::TaskId::new("grasp").expect("Task identity is valid"),
+        vec![
+            domain::RoleRequirement::new_normalized(
+                role_id.clone(),
+                None,
+                vec![
+                    domain::CapabilityRequirement::new(
+                        parse_contract("manipulation.grasp@v1")
+                            .expect("capability contract is valid"),
+                        vec![
+                            domain::CapabilityConstraint::new(
+                                "max-payload-grams",
+                                domain::CapabilityConstraintOperator::AtLeast,
+                                domain::ExecutionValue::Integer(3_000),
+                            )
+                            .expect("capability constraint is valid"),
+                        ],
+                    )
+                    .expect("capability requirement is valid"),
+                ],
+                Vec::new(),
+            )
+            .expect("Role requirement is valid"),
+        ],
+    )
+    .expect("Task requirement is valid");
+    let mut events = InMemoryEventLog::new();
+    let candidates = bridge
+        .control()
+        .match_capabilities(
+            bridge.state(),
+            &requirement,
+            TimestampMs::new(11),
+            &correlation,
+            &mut events,
+        )
+        .expect("wire profile satisfies the capability constraint");
+    assert_eq!(
+        candidates
+            .for_role(&role_id)
+            .expect("Role candidates exist")
+            .node_ids(),
+        &[domain::NodeId::new("arm-a").expect("Node identity is valid")]
+    );
 }
 
 /// Bound Group assignments are the only source of NodeId for Runtime routing.

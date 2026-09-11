@@ -179,14 +179,56 @@ pub(super) fn validate_invocation_identity(
         || invocation.task_id.trim().is_empty()
         || invocation.group_id.trim().is_empty()
         || invocation.role_id.trim().is_empty()
-        || invocation.capability_contract.trim().is_empty()
     {
-        Err(EngineError::Protocol(
+        return Err(EngineError::Protocol(
             "execution and canonical invocation identities must be nonblank".to_string(),
-        ))
-    } else {
-        Ok(())
+        ));
     }
+    invocation_operation(invocation).map(|_| ())
+}
+
+/// Returns the canonical operation selected by exactly one versioned invocation representation.
+pub(super) fn invocation_operation(
+    invocation: &CanonicalInvocation,
+) -> Result<String, EngineError> {
+    if let Some(intent) = invocation.intent.as_ref() {
+        if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {
+            return Err(EngineError::Protocol(
+                "semantic invocation cannot mix legacy capability fields".to_string(),
+            ));
+        }
+        let operation = intent.operation.as_ref().ok_or_else(|| {
+            EngineError::Protocol("semantic invocation lacks operation".to_string())
+        })?;
+        if intent.objective.trim().is_empty() {
+            return Err(EngineError::Protocol(
+                "semantic invocation objective must not be blank".to_string(),
+            ));
+        }
+        return domain::OperationRef::new(
+            operation.namespace.clone(),
+            operation.name.clone(),
+            operation.version.clone(),
+        )
+        .map(|operation| operation.to_string())
+        .map_err(|error| EngineError::Protocol(error.to_string()));
+    }
+    if invocation.capability_contract.trim().is_empty() {
+        return Err(EngineError::Protocol(
+            "legacy invocation capability contract must not be blank".to_string(),
+        ));
+    }
+    Ok(invocation.capability_contract.clone())
+}
+
+/// Reads a canonical operation from current or legacy durable invocation JSON.
+pub(super) fn journal_operation(invocation: &serde_json::Value) -> Result<&str, EngineError> {
+    invocation
+        .get("operation")
+        .or_else(|| invocation.get("capability_contract"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|operation| !operation.trim().is_empty())
+        .ok_or_else(|| EngineError::Protocol("journal invocation lacks operation".into()))
 }
 
 /// Parses and validates the complete artifact intent fixed by capability configuration.
@@ -364,7 +406,7 @@ pub(super) fn current_timestamp_ms() -> u64 {
 /// Validates Control commitments against the compiled node resource catalog.
 pub(super) fn validate_resources(
     catalog: &CompiledLocalCatalog,
-    capability: &CompiledCapability,
+    capability: &CompiledOperation,
     resource_ids: &[String],
 ) -> Result<(), EngineError> {
     let supplied = resource_ids.iter().collect::<BTreeSet<_>>();
@@ -393,7 +435,7 @@ pub(super) fn validate_resources(
 
 /// Builds deterministic local lock keys for one execution, including its artifact binding.
 pub(super) fn lock_keys(
-    capability: &CompiledCapability,
+    capability: &CompiledOperation,
     resource_ids: &[String],
     invocation: &serde_json::Value,
 ) -> Result<BTreeSet<String>, EngineError> {
@@ -418,8 +460,13 @@ pub(super) fn canonical_invocation_json(
     invocation: &CanonicalInvocation,
     resource_ids: &[String],
 ) -> Result<serde_json::Value, EngineError> {
-    let parameters = invocation
-        .parameters
+    let operation = invocation_operation(invocation)?;
+    let (objective, wire_parameters, legacy) = if let Some(intent) = invocation.intent.as_ref() {
+        (Some(intent.objective.as_str()), &intent.parameters, false)
+    } else {
+        (None, &invocation.parameters, true)
+    };
+    let parameters = wire_parameters
         .iter()
         .map(|(name, value)| {
             let value = value
@@ -440,15 +487,33 @@ pub(super) fn canonical_invocation_json(
             Ok((name.clone(), value))
         })
         .collect::<Result<BTreeMap<_, _>, EngineError>>()?;
-    Ok(serde_json::json!({
+    let mut normalized = serde_json::json!({
         "mission_id": invocation.mission_id,
         "task_id": invocation.task_id,
         "group_id": invocation.group_id,
         "role_id": invocation.role_id,
-        "capability_contract": invocation.capability_contract,
         "parameters": parameters,
         "resource_ids": resource_ids,
-    }))
+    });
+    let object = normalized
+        .as_object_mut()
+        .expect("canonical invocation object is constructed locally");
+    if legacy {
+        object.insert(
+            "capability_contract".to_string(),
+            serde_json::Value::String(operation),
+        );
+    } else {
+        object.insert(
+            "operation".to_string(),
+            serde_json::Value::String(operation),
+        );
+        object.insert(
+            "objective".to_string(),
+            serde_json::Value::String(objective.expect("semantic objective was validated").into()),
+        );
+    }
+    Ok(normalized)
 }
 
 /// Decodes canonical JSON retained in the durable journal.
@@ -487,7 +552,7 @@ pub(super) fn digest_text(value: &str) -> String {
 /// Hashes capability behavior, referenced connections, and selected artifact metadata.
 pub(crate) fn workflow_digest(
     catalog: &CompiledLocalCatalog,
-    capability: &CompiledCapability,
+    capability: &CompiledOperation,
     invocation: &serde_json::Value,
 ) -> Result<String, EngineError> {
     let mut identity = format!("{capability:?}");

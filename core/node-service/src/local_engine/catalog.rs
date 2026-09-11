@@ -10,17 +10,25 @@ impl CompiledLocalCatalog {
     ) -> Result<Self, CatalogError> {
         let supports_artifacts = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_3 | CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+            CONFIG_SCHEMA_V0_3
+                | CONFIG_SCHEMA_V0_4
+                | CONFIG_SCHEMA_V0_5
+                | CONFIG_SCHEMA_V0_6
+                | CONFIG_SCHEMA_V0_7
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
         );
         let supports_state_memory = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6
+            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
         );
-        let supports_peer_observers = config.schema == CONFIG_SCHEMA_V0_6;
+        let supports_peer_observers = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+        );
+        let separates_capabilities_and_operations = config.schema == CONFIG_SCHEMA_V0_7;
         require(
             matches!(
                 config.schema.as_str(),
@@ -29,10 +37,11 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_4
                     | CONFIG_SCHEMA_V0_5
                     | CONFIG_SCHEMA_V0_6
+                    | CONFIG_SCHEMA_V0_7
             ),
             "schema",
             format!(
-                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, or `{CONFIG_SCHEMA_V0_6}`"
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, `{CONFIG_SCHEMA_V0_6}`, or `{CONFIG_SCHEMA_V0_7}`"
             ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
@@ -86,22 +95,56 @@ impl CompiledLocalCatalog {
             &local_systems,
             &connections,
             &state_directory,
-            config.schema == CONFIG_SCHEMA_V0_6,
+            matches!(
+                config.schema.as_str(),
+                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+            ),
         )?;
         let resources = compile_resources(config.resources, &local_systems)?;
         let sensors = compile_sensors(config.sensors, &local_systems)?;
-        let capabilities = compile_capabilities(
-            config.capabilities,
-            &local_systems,
-            &connections,
-            &resources,
-            supports_artifacts,
-            requires_readiness,
+        let (capability_profiles, operations) = if separates_capabilities_and_operations {
+            require(
+                config.capabilities.is_empty(),
+                "capabilities",
+                "legacy combined declarations are not allowed by node-config/v0.7",
+            )?;
+            let profiles = compile_capability_profiles(
+                config.capability_profiles,
+                &local_systems,
+                &connections,
+            )?;
+            let operations = compile_operations(
+                config.operations,
+                &local_systems,
+                &connections,
+                &resources,
+                supports_artifacts,
+            )?;
+            (profiles, operations)
+        } else {
+            require(
+                config.capability_profiles.is_empty() && config.operations.is_empty(),
+                "capability_profiles",
+                format!("separate profiles and operations require schema `{CONFIG_SCHEMA_V0_7}`"),
+            )?;
+            compile_legacy_capabilities(
+                config.capabilities,
+                &local_systems,
+                &connections,
+                &resources,
+                supports_artifacts,
+                requires_readiness,
+            )?
+        };
+        require(
+            !capability_profiles.is_empty(),
+            "capability_profiles",
+            "must contain at least one canonical capability profile",
         )?;
         require(
-            !capabilities.is_empty(),
-            "capabilities",
-            "must contain at least one canonical capability",
+            !operations.is_empty(),
+            "operations",
+            "must contain at least one executable canonical operation",
         )?;
         require(
             supports_artifacts || config.artifacts.is_none(),
@@ -119,7 +162,8 @@ impl CompiledLocalCatalog {
             local_systems,
             connections,
             health_checks,
-            capabilities,
+            operations,
+            capability_profiles,
             resources,
             sensors,
             state_exports,
@@ -169,9 +213,31 @@ impl CompiledLocalCatalog {
         &self.health_checks
     }
 
-    /// Returns canonical capabilities in stable lexical contract order.
+    /// Returns legacy-named canonical operation workflows in stable lexical order.
+    ///
+    /// New code should use [`Self::operations`]. This accessor remains for source
+    /// compatibility with node-config/v0.2-v0.6 consumers.
     pub const fn capabilities(&self) -> &BTreeMap<String, CompiledCapability> {
-        &self.capabilities
+        &self.operations
+    }
+
+    /// Returns canonical operation workflows in stable lexical identity order.
+    pub const fn operations(&self) -> &BTreeMap<String, CompiledOperation> {
+        &self.operations
+    }
+
+    /// Returns exact capability evidence in stable canonical-contract order.
+    pub const fn capability_profiles(&self) -> &BTreeMap<String, CompiledCapabilityProfile> {
+        &self.capability_profiles
+    }
+
+    /// Returns the semantic Node Contract selected by this configuration generation.
+    pub fn node_contract_version(&self) -> &'static str {
+        if self.schema == CONFIG_SCHEMA_V0_7 {
+            integration::grpc::v0_4::NODE_CONTRACT_VERSION
+        } else {
+            integration::grpc::v0_4::LEGACY_NODE_CONTRACT_VERSION
+        }
     }
 
     /// Returns Control-visible resources in stable lexical identity order.

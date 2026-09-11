@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.6 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.7 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -30,8 +30,15 @@ pub struct NodeServiceConfig {
     pub local_systems: Vec<LocalSystemConfig>,
     /// Fixed local connections available to declared workflows.
     pub connections: Vec<ConnectionConfig>,
-    /// Canonical capability ownership and local workflows.
+    /// Legacy combined capability/workflow declarations accepted through schema v0.6.
+    #[serde(default)]
     pub capabilities: Vec<CapabilityBindingConfig>,
+    /// Exact capability evidence declarations introduced by node-config/v0.7.
+    #[serde(default)]
+    pub capability_profiles: Vec<CapabilityProfileConfig>,
+    /// Canonical operation to Local EAIOS workflow mappings introduced by node-config/v0.7.
+    #[serde(default)]
+    pub operations: Vec<OperationBindingConfig>,
     /// Locally observable resources registered with RoboGuide.
     #[serde(default)]
     pub resources: Vec<ResourceConfig>,
@@ -402,6 +409,44 @@ pub struct CapabilityBindingConfig {
     /// Fixed observation proving whether this exact contract can execute now.
     #[serde(default)]
     pub readiness: Option<CapabilityReadinessConfig>,
+    /// Declarative execute/status/cancel workflow.
+    pub workflow: WorkflowConfig,
+}
+
+/// One exact capability profile advertised independently of executable operations.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityProfileConfig {
+    /// Canonical capability contract such as `manipulation.grasp@v1`.
+    pub contract: String,
+    /// Transitional coarse category consumed by the current Control compatibility model.
+    pub kind: String,
+    /// Unique local system that owns this capability evidence.
+    pub owner: String,
+    /// Fixed typed feasibility attributes defined by the Canonical Capability Catalog.
+    #[serde(default)]
+    pub attributes: BTreeMap<String, serde_json::Value>,
+    /// Fixed observation proving whether this exact capability is ready now.
+    pub readiness: CapabilityReadinessConfig,
+}
+
+/// One canonical operation mapped to a deployment-owned Local EAIOS workflow.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperationBindingConfig {
+    /// Canonical operation identity selected by `ExecutionIntent`.
+    pub operation: String,
+    /// Unique local system responsible for executing this operation.
+    pub owner: String,
+    /// Control-committed resource identities required before local dispatch.
+    #[serde(default)]
+    pub required_resources: Vec<String>,
+    /// Node-local concurrency locks, which never grant Control authority.
+    #[serde(default)]
+    pub local_locks: Vec<String>,
+    /// Optional node-owned artifact action fixed for every execution of this operation.
+    #[serde(default)]
+    pub artifact_operation: Option<ArtifactOperationConfig>,
     /// Declarative execute/status/cancel workflow.
     pub workflow: WorkflowConfig,
 }

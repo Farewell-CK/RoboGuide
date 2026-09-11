@@ -31,9 +31,7 @@ async fn capability_readiness_is_observed_independently_from_health() {
             None,
             true,
         ),
-        vec![Arc::new(GatedDriver {
-            completed: ready.clone(),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(ready.clone())) as Arc<dyn LocalDriver>],
     )
     .expect("engine initializes");
 
@@ -171,9 +169,7 @@ async fn execution_identity_canonicalizes_resource_order() {
             "http://127.0.0.1:50051".to_string(),
             state_dir.path().to_path_buf(),
         ),
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine initializes");
     let invocation = integration::grpc::v0_4::CanonicalInvocation {
@@ -299,9 +295,7 @@ async fn controller_registration_rejection_is_visible_to_node() {
     let terminal = Arc::new(AtomicBool::new(false));
     let engine = crate::LocalIntegrationEngine::new(
         gated_catalog(format!("http://{address}"), state_dir.path().to_path_buf()),
-        vec![Arc::new(GatedDriver {
-            completed: terminal,
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(terminal)) as Arc<dyn LocalDriver>],
     )
     .expect("engine initializes");
     let node_task = tokio::spawn(async move { NodeService::new(engine).run_session().await });

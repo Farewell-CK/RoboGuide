@@ -23,20 +23,21 @@ pub use artifact::{
 };
 pub use config::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
-    CredentialSourceConfig, ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig,
-    LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
+    CapabilityReadinessConfig, ConnectionConfig, CredentialSourceConfig,
+    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
+    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig,
     PeerChannelObserverConfig, RequestBindingConfig, RequestMappingConfig, ResourceConfig,
     SensorConfig, StateExportConfig, ValueExpressionConfig, ValueFunction, WorkflowConfig,
     WorkflowStepConfig,
 };
 pub use conformance::{
-    CapabilityConformance, ConformanceChecks, ConformanceDiagnostic, ConformanceError,
-    ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1, ExtensionConformanceReport,
-    LifecycleConformanceInvariant, MemoryProviderConformance,
-    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, PeerChannelObserverConformance,
-    SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance, StepConformance, WorkflowConformance,
-    compile_extension_config, compile_extension_config_json,
+    CapabilityConformance, CapabilityProfileConformance, ConformanceChecks, ConformanceDiagnostic,
+    ConformanceError, ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1,
+    EXTENSION_CONFORMANCE_SCHEMA_V0_2, ExtensionConformanceReport, LifecycleConformanceInvariant,
+    MemoryProviderConformance, NODE_SERVICE_IMPLEMENTATION_GUARANTEES, OperationConformance,
+    PeerChannelObserverConformance, SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance,
+    StepConformance, WorkflowConformance, compile_extension_config, compile_extension_config_json,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine,
@@ -56,9 +57,10 @@ pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowCo
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
-    CONFIG_SCHEMA_V0_6, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
-    CompiledCapability, CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck,
-    CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryProvider, CompiledMemoryWorkflow,
+    CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CapabilityReadinessFact, CatalogError,
+    CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
+    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
+    CompiledLocalSystem, CompiledMemoryProvider, CompiledMemoryWorkflow, CompiledOperation,
     CompiledPeerChannelObserver, CompiledResource, CompiledSensor, CompiledStateExport,
     CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
     MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,

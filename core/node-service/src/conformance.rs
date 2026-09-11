@@ -5,14 +5,17 @@
 //! shared by HTTP, dynamic gRPC, and MCP workflows without opening a local or remote connection.
 
 use crate::{
-    CatalogError, CompiledCapability, CompiledConnection, CompiledLocalCatalog,
-    CompiledWorkflowStep, LocalOperationConfig, NodeServiceConfig,
+    CatalogError, CompiledCapability, CompiledCapabilityProfile, CompiledConnection,
+    CompiledLocalCatalog, CompiledOperation, CompiledWorkflowStep, LocalOperationConfig,
+    NodeServiceConfig,
 };
 use serde::Serialize;
 use std::path::Path;
 
 /// Version marker for the offline device-extension conformance report.
 pub const EXTENSION_CONFORMANCE_SCHEMA_V0_1: &str = "roboguide.extension-conformance/v0.1";
+/// Current report schema separating capability evidence from operation workflow mappings.
+pub const EXTENSION_CONFORMANCE_SCHEMA_V0_2: &str = "roboguide.extension-conformance/v0.2";
 
 /// One diagnostic emitted when a configuration cannot be compiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -113,6 +116,34 @@ pub struct CapabilityConformance {
     pub local_locks: Vec<String>,
     /// Whether schema v0.5 supplied an exact readiness observation.
     pub exact_readiness: bool,
+    /// Compiled lifecycle and mapping summary.
+    pub workflow: WorkflowConformance,
+}
+
+/// One exact capability evidence profile independently of executable workflow mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CapabilityProfileConformance {
+    /// Exact canonical capability contract.
+    pub contract: String,
+    /// Sole Local EAIOS owner of the evidence.
+    pub owner: String,
+    /// Typed feasibility attributes retained without interpreting provider availability.
+    pub attributes: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Fixed readiness observation route.
+    pub readiness: Option<StepConformance>,
+}
+
+/// One canonical operation mapped to a fixed Local EAIOS workflow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OperationConformance {
+    /// Canonical operation identity accepted from `ExecutionIntent`.
+    pub operation: String,
+    /// Sole Local EAIOS owner of the workflow.
+    pub owner: String,
+    /// Control-committed resource identities required before dispatch.
+    pub required_resources: Vec<String>,
+    /// Node-local concurrency locks, which never grant Control authority.
+    pub local_locks: Vec<String>,
     /// Compiled lifecycle and mapping summary.
     pub workflow: WorkflowConformance,
 }
@@ -238,8 +269,14 @@ pub struct ExtensionConformanceReport {
     pub local_systems: Vec<String>,
     /// Fixed connections included in the compiled catalog.
     pub connections: Vec<ConnectionConformance>,
-    /// Canonical capabilities and their workflow proofs.
+    /// Legacy combined declarations retained only for v0.6 report consumers.
     pub capabilities: Vec<CapabilityConformance>,
+    /// Exact capability/readiness/attribute evidence declarations.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub capability_profiles: Vec<CapabilityProfileConformance>,
+    /// Canonical operation to fixed Local EAIOS workflow mappings.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<OperationConformance>,
     /// Selective fixed-route State exports.
     pub state_exports: Vec<StateExportConformance>,
     /// Fixed Local EAIOS peer-channel readiness observation sources.
@@ -264,7 +301,7 @@ pub struct ExtensionConformanceReport {
 pub struct ConformanceChecks {
     /// Every canonical contract has one owner.
     pub unique_capability_owner: bool,
-    /// v0.6 configurations have one exact readiness workflow per contract.
+    /// Current configurations have one exact readiness workflow per capability profile.
     pub exact_readiness: bool,
     /// All endpoint, method, service, and tool selections are fixed.
     pub fixed_routes: bool,
@@ -274,7 +311,7 @@ pub struct ConformanceChecks {
     pub execution_state_mapping: bool,
     /// Every required resource exists and belongs to the capability owner.
     pub required_resources: bool,
-    /// State and Memory exposure is explicit, owner-scoped, and schema v0.6 validated.
+    /// State and Memory exposure is explicit, owner-scoped, and schema v0.6+ validated.
     pub selective_state_memory: bool,
 }
 
@@ -283,36 +320,38 @@ pub fn compile_extension_config(
     path: &Path,
 ) -> Result<ExtensionConformanceReport, ConformanceError> {
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
-    if config.schema() != crate::CONFIG_SCHEMA_V0_6 {
+    if !matches!(
+        config.schema(),
+        crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7
+    ) {
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: "schema".to_string(),
             code: "state-memory-contract-required".to_string(),
-            message:
-                "Extension Conformance v0.1 requires node-config/v0.6 Memory workflow semantics"
-                    .to_string(),
-        }));
-    }
-    if let Some(capability) = config
-        .capabilities()
-        .values()
-        .find(|capability| capability.readiness().is_none())
-    {
-        return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
-            location: format!("capabilities.{}.readiness", capability.contract()),
-            code: "readiness-required".to_string(),
-            message: "Extension Conformance v0.1 requires node-config/v0.6 exact readiness"
+            message: "Extension Conformance requires node-config/v0.6 or v0.7 semantics"
                 .to_string(),
         }));
     }
     if let Some(capability) = config
-        .capabilities()
+        .capability_profiles()
+        .values()
+        .find(|capability| capability.readiness().is_none())
+    {
+        return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
+            location: format!("capability_profiles.{}.readiness", capability.contract()),
+            code: "readiness-required".to_string(),
+            message: "Extension Conformance requires exact capability-profile readiness"
+                .to_string(),
+        }));
+    }
+    if let Some(capability) = config
+        .operations()
         .values()
         .find(|capability| !capability.workflow().execution_state_mapped())
     {
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: format!(
-                "capabilities.{}.workflow.execution_state",
-                capability.contract()
+                "operations.{}.workflow.execution_state",
+                capability.operation()
             ),
             code: "execution-state-incomplete".to_string(),
             message:
@@ -368,19 +407,48 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
         .values()
         .map(connection_report)
         .collect::<Vec<_>>();
-    let capabilities = catalog
-        .capabilities()
+    let legacy = catalog.schema() == crate::CONFIG_SCHEMA_V0_6;
+    let capabilities = if legacy {
+        catalog
+            .operations()
+            .values()
+            .map(capability_report)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let capability_profiles = if legacy {
+        Vec::new()
+    } else {
+        catalog
+            .capability_profiles()
+            .values()
+            .map(capability_profile_report)
+            .collect::<Vec<_>>()
+    };
+    let operations = if legacy {
+        Vec::new()
+    } else {
+        catalog
+            .operations()
+            .values()
+            .map(operation_report)
+            .collect::<Vec<_>>()
+    };
+    let exact_readiness = catalog
+        .capability_profiles()
         .values()
-        .map(capability_report)
-        .collect::<Vec<_>>();
-    let exact_readiness = capabilities
-        .iter()
-        .all(|capability| capability.exact_readiness);
-    let execution_state_mapping = capabilities
-        .iter()
-        .all(|capability| capability.workflow.execution_state_mapped);
+        .all(|profile| profile.readiness().is_some());
+    let execution_state_mapping = catalog
+        .operations()
+        .values()
+        .all(|operation| operation.workflow().execution_state_mapped());
     ExtensionConformanceReport {
-        schema: EXTENSION_CONFORMANCE_SCHEMA_V0_1,
+        schema: if legacy {
+            EXTENSION_CONFORMANCE_SCHEMA_V0_1
+        } else {
+            EXTENSION_CONFORMANCE_SCHEMA_V0_2
+        },
         config_path: path.display().to_string(),
         node_id: catalog.node_id().to_string(),
         offline_compile: true,
@@ -390,6 +458,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
         local_systems: catalog.local_systems().keys().cloned().collect(),
         connections,
         capabilities,
+        capability_profiles,
+        operations,
         state_exports: catalog
             .state_exports()
             .values()
@@ -484,6 +554,71 @@ fn capability_report(capability: &CompiledCapability) -> CapabilityConformance {
     }
 }
 
+/// Converts one compiled profile into report-safe capability evidence.
+fn capability_profile_report(profile: &CompiledCapabilityProfile) -> CapabilityProfileConformance {
+    CapabilityProfileConformance {
+        contract: profile.contract().to_string(),
+        owner: profile.owner().to_string(),
+        attributes: profile
+            .attributes()
+            .iter()
+            .map(|(name, value)| (name.clone(), execution_value_json(value)))
+            .collect(),
+        readiness: profile
+            .readiness()
+            .map(|readiness| step_report(readiness.step())),
+    }
+}
+
+/// Converts one compiled operation into a report-safe workflow mapping.
+fn operation_report(operation: &CompiledOperation) -> OperationConformance {
+    OperationConformance {
+        operation: operation.operation().to_string(),
+        owner: operation.owner().to_string(),
+        required_resources: operation.required_resources().iter().cloned().collect(),
+        local_locks: operation.local_locks().iter().cloned().collect(),
+        workflow: workflow_report(operation),
+    }
+}
+
+/// Converts one transport-neutral scalar to JSON without changing its type.
+fn execution_value_json(value: &domain::ExecutionValue) -> serde_json::Value {
+    match value {
+        domain::ExecutionValue::Bool(value) => serde_json::Value::Bool(*value),
+        domain::ExecutionValue::Integer(value) => serde_json::Value::Number((*value).into()),
+        domain::ExecutionValue::Float(value) => serde_json::Number::from_f64(*value)
+            .map(serde_json::Value::Number)
+            .expect("compiled capability attributes contain only finite floats"),
+        domain::ExecutionValue::String(value) => serde_json::Value::String(value.clone()),
+    }
+}
+
+/// Builds the common fixed workflow proof used by legacy and current reports.
+fn workflow_report(operation: &CompiledOperation) -> WorkflowConformance {
+    WorkflowConformance {
+        execute: operation
+            .workflow()
+            .execute()
+            .iter()
+            .map(step_report)
+            .collect(),
+        status: operation
+            .workflow()
+            .status()
+            .iter()
+            .map(step_report)
+            .collect(),
+        cancel: operation
+            .workflow()
+            .cancel()
+            .iter()
+            .map(step_report)
+            .collect(),
+        local_handle_mapped: true,
+        execution_state_mapped: mapped_state_contract(operation),
+    }
+}
+
 /// Converts one compiled workflow step to a report-safe summary.
 fn step_report(step: &CompiledWorkflowStep) -> StepConformance {
     StepConformance {
@@ -529,178 +664,10 @@ fn driver_name(kind: crate::DriverKind) -> String {
 }
 
 /// Confirms that the production compiler accepted every canonical execution phase mapping.
-fn mapped_state_contract(capability: &CompiledCapability) -> bool {
-    capability.workflow().execution_state_mapped()
+fn mapped_state_contract(operation: &CompiledOperation) -> bool {
+    operation.workflow().execution_state_mapped()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    /// The checked-in node configuration produces a deterministic report without contacting it.
-    #[test]
-    fn checked_in_config_compiles_offline() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml");
-        let report = compile_extension_config(&path).expect("checked-in config compiles");
-        assert!(report.offline_compile);
-        assert!(!report.controller_contacted);
-        assert!(!report.connections.is_empty());
-        assert!(!report.capabilities.is_empty());
-        assert!(report.checks.unique_capability_owner);
-        assert!(!report.runtime_probes_executed);
-        assert!(!report.hardware_probes_executed);
-        assert_eq!(report.lifecycle, report.implementation_guarantees);
-        assert_eq!(
-            report.implementation_guarantees.len(),
-            NODE_SERVICE_IMPLEMENTATION_GUARANTEES.len()
-        );
-    }
-
-    /// The conformance fixture exercises the shared lifecycle contract for all three drivers.
-    #[test]
-    fn all_supported_driver_families_share_lifecycle_shape() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/extension-conformance-v0.1/node.toml");
-        let report = compile_extension_config(&path).expect("multi-driver fixture compiles");
-        let drivers = report
-            .connections
-            .iter()
-            .map(|connection| connection.driver.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(drivers, ["grpc", "http", "mcp"].into_iter().collect());
-        assert_eq!(report.capabilities.len(), 3);
-        for capability in report.capabilities {
-            assert!(capability.exact_readiness);
-            assert!(capability.readiness.is_some());
-            assert!(!capability.workflow.execute.is_empty());
-            assert!(!capability.workflow.status.is_empty());
-            assert!(!capability.workflow.cancel.is_empty());
-            assert!(capability.workflow.local_handle_mapped);
-            assert!(capability.workflow.execution_state_mapped);
-        }
-        assert!(
-            report
-                .memory_providers
-                .iter()
-                .all(|provider| provider.node_ledger && !provider.shared_data_plane),
-            "conformance distinguishes local workflows from shared exchange readiness"
-        );
-    }
-
-    /// Invalid authored files return a path-bearing diagnostic instead of a transport error.
-    #[test]
-    fn invalid_config_reports_location() {
-        let directory = tempfile::tempdir().expect("temporary directory exists");
-        let path = directory.path().join("invalid.toml");
-        std::fs::write(
-            &path,
-            r#"
-schema = "roboguide.node-config/v0.6"
-node_id = "node"
-server_endpoint = "http://127.0.0.1:50051"
-state_directory = "state"
-
-[[local_systems]]
-id = "runtime"
-runtime_name = "eaios"
-runtime_version = "1"
-[local_systems.health]
-state_pointer = "/state"
-online = ["ONLINE"]
-degraded = ["DEGRADED"]
-offline = ["OFFLINE"]
-[local_systems.health.step]
-id = "health"
-connection = "health"
-[local_systems.health.step.operation]
-kind = "http"
-method = "GET"
-path = "/health"
-
-[[connections]]
-driver = "http"
-id = "health"
-local_system = "runtime"
-endpoint = "http://127.0.0.1:9000"
-
-[[capabilities]]
-contract = "compute.noop@v1"
-kind = "compute"
-owner = "runtime"
-[capabilities.workflow]
-execute = []
-status = []
-cancel = []
-"#,
-        )
-        .expect("invalid config writes");
-        let error = compile_extension_config(&path).expect_err("invalid config is rejected");
-        assert!(matches!(
-            error,
-            ConformanceError::Diagnostic(ConformanceDiagnostic { location, .. })
-                if location.contains("config")
-                    || location.contains("capabilities")
-                    || location.contains("workflow")
-        ));
-    }
-
-    /// Conformance rejects a v0.6 workflow that cannot distinguish every execution phase.
-    #[test]
-    fn incomplete_execution_state_mapping_is_diagnostic() {
-        let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml");
-        let source = std::fs::read_to_string(source_path).expect("checked-in config reads");
-        let source = source.replacen("accepted = [\"ACCEPTED\"]", "accepted = []", 1);
-        let directory = tempfile::tempdir().expect("temporary directory exists");
-        let path = directory.path().join("incomplete.toml");
-        std::fs::write(&path, source).expect("incomplete config writes");
-        assert!(matches!(
-            compile_extension_config(&path),
-            Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
-                code,
-                location,
-                ..
-            })) if code == "execution-state-incomplete"
-                && location == "capabilities.compute.noop@v1.workflow.execution_state"
-        ));
-    }
-
-    /// The JSON report does not expose credentials or mutable runtime state.
-    #[test]
-    fn json_report_is_stable_and_redacts_runtime_secrets() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml");
-        let json = compile_extension_config_json(&path).expect("report serializes");
-        assert!(json.contains("roboguide.extension-conformance/v0.1"));
-        assert!(!json.contains("Authorization"));
-        assert!(!json.contains("controller_password"));
-
-        let memory_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/extension-conformance-v0.1/node.toml");
-        let memory_json =
-            compile_extension_config_json(&memory_path).expect("Memory report serializes");
-        let memory_report: serde_json::Value =
-            serde_json::from_str(&memory_json).expect("Memory report JSON parses");
-        assert_eq!(memory_report["memory_providers"][0]["local_backend"], true);
-        assert!(memory_report["memory_providers"][0]["node_ledger"].is_null());
-    }
-
-    /// Invalid TOML diagnostics never echo a secret-bearing source line into local or CI logs.
-    #[test]
-    fn invalid_config_diagnostic_redacts_source_text() {
-        let directory = tempfile::tempdir().expect("temporary directory exists");
-        let path = directory.path().join("secret.toml");
-        std::fs::write(
-            &path,
-            concat!(
-                "schema = \"roboguide.node-config/v0.6\"\n",
-                "controller_password = \"TOP_SECRET_VALUE\"\n",
-            ),
-        )
-        .expect("invalid secret fixture writes");
-        let error = compile_extension_config(&path).expect_err("invalid config is rejected");
-        let rendered = error.to_string();
-        assert!(!rendered.contains("TOP_SECRET_VALUE"));
-        assert!(!rendered.contains("controller_password"));
-        assert!(rendered.contains("source text is redacted"));
-    }
-}
+#[path = "conformance/tests.rs"]
+mod tests;

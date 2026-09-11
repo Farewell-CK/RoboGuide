@@ -5,11 +5,11 @@ use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
 use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
-    Cancel, Capability, ExecutionEvent, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor,
-    MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NODE_CONTRACT_VERSION,
+    Cancel, Capability, CapabilityProfile, ExecutionEvent, Heartbeat, Hello, LocalRuntime,
+    LocalSystemDescriptor, MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility,
     NodeMessage, NodeRegistration, PROTOCOL_VERSION, PeerChannelReadiness, ProtocolError, Register,
-    RegistrationUpdate, Resource, Sensor, ServerMessage, StateExportDescriptor, StateObjectClass,
-    StateObservation, StateObservationBatch, StateSemantic,
+    RegistrationUpdate, Resource, ScalarValue, Sensor, ServerMessage, StateExportDescriptor,
+    StateObjectClass, StateObservation, StateObservationBatch, StateSemantic,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -65,7 +65,7 @@ impl NodeService {
                 message: Some(NodePayload::Hello(Hello {
                     node_id: catalog.node_id().to_string(),
                     protocol_versions: vec![PROTOCOL_VERSION.to_string()],
-                    node_contract_versions: vec![NODE_CONTRACT_VERSION.to_string()],
+                    node_contract_versions: vec![catalog.node_contract_version().to_string()],
                 })),
             })
             .map_err(|_| NodeServiceError::Closed)?;
@@ -79,7 +79,7 @@ impl NodeService {
             return Err(NodeServiceError::Protocol("expected Welcome".to_string()));
         };
         if welcome.selected_protocol_version != PROTOCOL_VERSION
-            || welcome.selected_node_contract_version != NODE_CONTRACT_VERSION
+            || welcome.selected_node_contract_version != catalog.node_contract_version()
         {
             return Err(NodeServiceError::Protocol(
                 "server selected an unsupported protocol or contract".to_string(),

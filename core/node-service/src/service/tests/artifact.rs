@@ -55,9 +55,7 @@ async fn artifact_finalization_marker_blocks_implicit_restart_resume() {
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine reopens journal");
     let mut events = engine.subscribe();
@@ -141,9 +139,7 @@ async fn artifact_preparation_marker_blocks_mutable_source_reread_after_restart(
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(true)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(true)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine reopens journal");
     let mut events = engine.subscribe();
@@ -332,6 +328,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         role_id: "consumer".to_string(),
         capability_contract: "mobility.reach_region@v1".to_string(),
         parameters,
+        intent: None,
     };
     let invocation_json = serde_json::json!({
         "mission_id": invocation.mission_id,
@@ -386,9 +383,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine reopens journal");
     engine.recover().expect("pending finalization is fenced");

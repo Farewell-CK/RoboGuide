@@ -137,6 +137,8 @@ fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
                 execution_state: state_mapping,
             },
         }],
+        capability_profiles: Vec::new(),
+        operations: Vec::new(),
         resources: vec![ResourceConfig {
             id: "base".to_string(),
             kind: "space".to_string(),

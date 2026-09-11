@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.6"
+schema = "roboguide.node-config/v0.7"
 node_id = "generic-node"
 server_endpoint = "http://127.0.0.1:50051"
 state_directory = "node-state"
@@ -74,12 +74,11 @@ local_system = "local-sensors"
 endpoint = "http://127.0.0.1:8082"
 timeout_ms = 5000
 
-[[capabilities]]
+[[capability_profiles]]
 contract = "compute.noop@v1"
 kind = "compute"
 owner = "local-runtime"
-required_resources = ["compute-slot"]
-local_locks = ["noop-executor"]
+attributes = {}
 
 [[resources]]
 id = "compute-slot"
@@ -125,32 +124,38 @@ visibility = "discoverable"
 payload_schema = "roboguide.example.local-artifact/v0.1"
 media_type = "application/octet-stream"
 
-[capabilities.workflow]
-poll_interval_ms = 250
-
-[capabilities.readiness]
+[capability_profiles.readiness]
 state_pointer = "/state"
 detail_pointer = "/detail"
 ready = ["READY"]
 unavailable = ["UNAVAILABLE"]
 
-[capabilities.readiness.step]
+[capability_profiles.readiness.step]
 id = "compute-readiness"
 connection = "local-http"
 
-[capabilities.readiness.step.operation]
+[capability_profiles.readiness.step.operation]
 kind = "http"
 method = "GET"
 path = "/v1/capabilities/compute.noop"
 
-[capabilities.readiness.step.request]
+[capability_profiles.readiness.step.request]
 base = {}
 
-[capabilities.workflow.local_handle]
+[[operations]]
+operation = "compute.noop@v1"
+owner = "local-runtime"
+required_resources = ["compute-slot"]
+local_locks = ["noop-executor"]
+
+[operations.workflow]
+poll_interval_ms = 250
+
+[operations.workflow.local_handle]
 kind = "pointer"
 pointer = "/steps/dispatch/execution_id"
 
-[capabilities.workflow.execution_state]
+[operations.workflow.execution_state]
 state_pointer = "/steps/status/state"
 reason_pointer = "/steps/status/detail"
 accepted = ["ACCEPTED"]
@@ -160,59 +165,59 @@ failed = ["FAILED"]
 cancelled = ["CANCELLED"]
 case_sensitive = false
 
-[[capabilities.workflow.execute]]
+[[operations.workflow.execute]]
 id = "dispatch"
 connection = "local-http"
 
-[capabilities.workflow.execute.operation]
+[operations.workflow.execute.operation]
 kind = "http"
 method = "POST"
 path = "/v1/executions"
 
-[capabilities.workflow.execute.request]
+[operations.workflow.execute.request]
 base = {}
 
-[[capabilities.workflow.execute.request.bindings]]
+[[operations.workflow.execute.request.bindings]]
 target = "/invocation"
 
-[capabilities.workflow.execute.request.bindings.value]
+[operations.workflow.execute.request.bindings.value]
 kind = "pointer"
 pointer = "/invocation"
 
-[[capabilities.workflow.status]]
+[[operations.workflow.status]]
 id = "status"
 connection = "local-http"
 
-[capabilities.workflow.status.operation]
+[operations.workflow.status.operation]
 kind = "http"
 method = "POST"
 path = "/v1/executions/status"
 
-[capabilities.workflow.status.request]
+[operations.workflow.status.request]
 base = {}
 
-[[capabilities.workflow.status.request.bindings]]
+[[operations.workflow.status.request.bindings]]
 target = "/execution_id"
 
-[capabilities.workflow.status.request.bindings.value]
+[operations.workflow.status.request.bindings.value]
 kind = "pointer"
 pointer = "/local_handle"
 
-[[capabilities.workflow.cancel]]
+[[operations.workflow.cancel]]
 id = "cancel"
 connection = "local-http"
 
-[capabilities.workflow.cancel.operation]
+[operations.workflow.cancel.operation]
 kind = "http"
 method = "POST"
 path = "/v1/executions/cancel"
 
-[capabilities.workflow.cancel.request]
+[operations.workflow.cancel.request]
 base = {}
 
-[[capabilities.workflow.cancel.request.bindings]]
+[[operations.workflow.cancel.request.bindings]]
 target = "/execution_id"
 
-[capabilities.workflow.cancel.request.bindings.value]
+[operations.workflow.cancel.request.bindings.value]
 kind = "pointer"
 pointer = "/local_handle"

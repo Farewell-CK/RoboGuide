@@ -3,7 +3,7 @@
 use crate::local_engine::driver::{DriverKind, LocalDriver};
 use crate::{
     ArtifactError, ArtifactFinalizationKind, ArtifactOperationConfig, ArtifactProvenance,
-    ArtifactStager, CapabilityReadinessFact, CompiledCapability, CompiledLocalCatalog,
+    ArtifactStager, CapabilityReadinessFact, CompiledLocalCatalog, CompiledOperation,
     ExecutionJournal, ExecutionSpec, FilesystemMemoryLedger, JournalError, JournalExecution,
     JournalStatus, LocalHealthState, LocalMemoryLedger, MappedExecutionFact, MappedExecutionPhase,
     MemoryQuery, PeerChannelReadinessFact, PrepareArtifactFreeze, PrepareDispatch,

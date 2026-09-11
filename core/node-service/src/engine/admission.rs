@@ -11,8 +11,8 @@ impl LocalIntegrationEngine {
         mut resource_ids: Vec<String>,
     ) -> Result<ExecuteDisposition, EngineError> {
         validate_invocation_identity(&execution_id, &invocation)?;
-        let contract = invocation.capability_contract.as_str();
-        let capability = self.capability(contract)?.clone();
+        let operation = invocation_operation(&invocation)?;
+        let capability = self.operation(&operation)?.clone();
         validate_resources(&self.inner.catalog, &capability, &resource_ids)?;
         resource_ids.sort();
         let invocation_json = canonical_invocation_json(&invocation, &resource_ids)?;
@@ -93,11 +93,8 @@ impl LocalIntegrationEngine {
             return Ok(());
         };
         let invocation = decode_invocation_json(record.spec().invocation_content())?;
-        let contract = invocation
-            .get("capability_contract")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| EngineError::Protocol("journal invocation lacks contract".into()))?;
-        let capability = self.capability(contract)?.clone();
+        let operation = journal_operation(&invocation)?;
+        let capability = self.operation(operation)?.clone();
         {
             let mut in_flight = self
                 .inner
@@ -131,12 +128,12 @@ impl LocalIntegrationEngine {
         Ok(())
     }
 
-    /// Returns one configured canonical capability or a stable rejection.
-    pub(super) fn capability(&self, contract: &str) -> Result<&CompiledCapability, EngineError> {
+    /// Returns one configured canonical operation workflow or a stable rejection.
+    pub(super) fn operation(&self, operation: &str) -> Result<&CompiledOperation, EngineError> {
         self.inner
             .catalog
-            .capabilities()
-            .get(contract)
-            .ok_or_else(|| EngineError::UnsupportedCapability(contract.to_string()))
+            .operations()
+            .get(operation)
+            .ok_or_else(|| EngineError::UnsupportedCapability(operation.to_string()))
     }
 }

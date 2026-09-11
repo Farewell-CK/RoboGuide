@@ -143,7 +143,7 @@ pub(super) fn accept_current_message(
                     Status::invalid_argument("RegistrationUpdate requires registration")
                 })?;
                 if registration.node_id != node_id
-                    || registration.node_contract_version != NODE_CONTRACT_VERSION
+                    || registration.node_contract_version != route.node_contract_version
                 {
                     return Ok(false);
                 }
@@ -223,12 +223,15 @@ pub(super) fn accept_current_message(
     Ok(true)
 }
 
-/// Validates complete v0.4 ownership without inferring Local How on the Server.
+/// Validates the explicitly versioned registration without inferring Local How on the Server.
 pub(super) fn validate_registration(
     registration: &crate::grpc::v0_4::NodeRegistration,
 ) -> Result<(), Status> {
     if registration.node_id.trim().is_empty()
-        || registration.node_contract_version != NODE_CONTRACT_VERSION
+        || !matches!(
+            registration.node_contract_version.as_str(),
+            NODE_CONTRACT_VERSION | LEGACY_NODE_CONTRACT_VERSION
+        )
     {
         return Err(Status::invalid_argument(
             "registration node and contract identities are invalid",
@@ -256,26 +259,7 @@ pub(super) fn validate_registration(
             "registration requires at least one local system",
         ));
     }
-    let mut contracts = BTreeSet::new();
-    for capability in &registration.capabilities {
-        require_known_owner(&capability.local_system_id, &local_system_ids)?;
-        if !matches!(
-            capability.kind.as_str(),
-            "mobility" | "transport" | "compute" | "observation"
-        ) || capability.contracts.is_empty()
-        {
-            return Err(Status::invalid_argument(
-                "capability kind is unsupported or has no canonical contracts",
-            ));
-        }
-        for contract in &capability.contracts {
-            if !valid_contract_identity(contract) || !contracts.insert(contract) {
-                return Err(Status::invalid_argument(
-                    "canonical capability contracts must have one unique owner",
-                ));
-            }
-        }
-    }
+    validate_capabilities(registration, &local_system_ids)?;
     let mut sensor_ids = BTreeSet::new();
     for sensor in &registration.sensors {
         require_known_owner(&sensor.local_system_id, &local_system_ids)?;
@@ -336,6 +320,60 @@ pub(super) fn validate_registration(
         }
     }
     Ok(())
+}
+
+/// Enforces one unambiguous capability representation for each Node Contract version.
+fn validate_capabilities(
+    registration: &crate::grpc::v0_4::NodeRegistration,
+    local_system_ids: &BTreeSet<&str>,
+) -> Result<(), Status> {
+    let mut contracts: BTreeSet<&str> = BTreeSet::new();
+    if registration.node_contract_version == LEGACY_NODE_CONTRACT_VERSION {
+        if !registration.capability_profiles.is_empty() {
+            return Err(Status::invalid_argument(
+                "Node Contract v0.4 cannot declare capability profiles",
+            ));
+        }
+        for capability in &registration.capabilities {
+            require_known_owner(&capability.local_system_id, local_system_ids)?;
+            if !valid_capability_kind(&capability.kind) || capability.contracts.is_empty() {
+                return Err(Status::invalid_argument(
+                    "capability kind is unsupported or has no canonical contracts",
+                ));
+            }
+            for contract in &capability.contracts {
+                if !valid_contract_identity(contract) || !contracts.insert(contract.as_str()) {
+                    return Err(Status::invalid_argument(
+                        "canonical capability contracts must have one unique owner",
+                    ));
+                }
+            }
+        }
+        return Ok(());
+    }
+    if !registration.capabilities.is_empty() {
+        return Err(Status::invalid_argument(
+            "Node Contract v0.5 cannot mix legacy capabilities with capability profiles",
+        ));
+    }
+    for profile in &registration.capability_profiles {
+        require_known_owner(&profile.local_system_id, local_system_ids)?;
+        if !valid_contract_identity(&profile.contract)
+            || !valid_capability_kind(&profile.kind)
+            || !contracts.insert(profile.contract.as_str())
+        {
+            return Err(Status::invalid_argument(
+                "capability profiles require unique contracts, known kinds, and one owner",
+            ));
+        }
+        super::validate_scalar_map(&profile.attributes, "capability profile attributes")?;
+    }
+    Ok(())
+}
+
+/// Returns whether the transitional coarse kind is understood by current Control.
+fn valid_capability_kind(kind: &str) -> bool {
+    matches!(kind, "mobility" | "transport" | "compute" | "observation")
 }
 
 /// Validates one bounded State batch against the current registration snapshot.

@@ -115,15 +115,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
   checkpoint acceptance, not transport receipt. Integration waits on an application completion
   envelope but never makes the Control/State/Runtime decision itself.
-- Node config v0.6 requires one fixed readiness observation per exact canonical
-  capability. Node Service observes before Register and emits complete RegistrationUpdate
-  snapshots on change; Integration preserves exact readiness, State stores it, and Control
-  consumes it only for later eligibility decisions. It also declares fixed State exports and
-  Memory providers and optional provider-local discover/export/import workflows; v0.2-v0.4
-  configs normalize those declarations to empty and v0.5 providers remain metadata-only. Optional
-  v0.6 peer-channel observers use fixed read-only routes and configuration-owned LocalSystem
+- Node config v0.7 separates exact capability profiles from canonical operation workflows. Every
+  profile owns typed scalar attributes plus one fixed readiness observation; Node Service observes
+  before Register and emits complete RegistrationUpdate snapshots on change. Node Contract v0.5
+  preserves these profiles through State into Control Matching. Operations independently map
+  semantic `ExecutionIntent` to Local How. Node config v0.2-v0.6 remains an explicit combined
+  declaration compatibility input. The config also declares fixed State exports and Memory
+  providers and optional provider-local discover/export/import workflows; v0.2-v0.4 normalize
+  those declarations to empty and v0.5 providers remain metadata-only. Optional v0.6+
+  peer-channel observers use fixed read-only routes and configuration-owned LocalSystem
   identity; their response observes established endpoints and never requests transport setup.
-- Node Protocol v0.4 carries complete State/Memory provider snapshots, bounded periodic State
+- Node Protocol v0.4 with Node Contract v0.5 carries complete capability-profile and State/Memory
+  provider snapshots, semantic invocation objective/operation/parameters, bounded periodic State
   observation batches plus identified peer-channel readiness facts. Local EAIOS establishes the
   actual peer channel; Controller verifies Node/LocalSystem/committed ContextRole ownership, and all
   logical peers must provide non-expired receive-relative acknowledgements for one
@@ -148,8 +151,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   `--simulate-execute` mode submits a synthetic Mission through the Controller HTTP API, emits only
   synthetic lifecycle facts after formal dispatch, uses a session-unique capability contract so it
   cannot select an existing Node, and never performs hardware I/O.
-- Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do
-  not interpret it, Runtime only routes it, and the configured Node Service workflow maps it to Local How.
+- Execution commands carry canonical `ExecutionIntent`; Matching and Scheduler do not interpret
+  objective or parameters, Runtime only routes them, and the configured Node Service operation
+  workflow maps the intact intent to Local How. Node Contract v0.4 cannot silently drop a meaningful
+  objective during compatibility routing.
 - Spatial map bytes use the independent Artifact data plane. `MapId`/`MapRevisionId` references
   may be carried as opaque intent parameters, while digest verification and local staging belong
   to Node Service and the independent Artifact data plane. Node Protocol never carries map bytes.

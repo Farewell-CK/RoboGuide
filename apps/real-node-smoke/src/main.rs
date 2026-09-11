@@ -12,9 +12,9 @@ use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
 use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
-    Capability, CommandKind, CommandReceipt, CommandReceiptStatus, ExecutionEvent, ExecutionPhase,
-    Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor, NODE_CONTRACT_VERSION, NodeMessage,
-    NodeRegistration, NodeStatus, PROTOCOL_VERSION, Register, Resource, ServerMessage,
+    CapabilityProfile, CommandKind, CommandReceipt, CommandReceiptStatus, ExecutionEvent,
+    ExecutionPhase, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor, NODE_CONTRACT_VERSION,
+    NodeMessage, NodeRegistration, NodeStatus, PROTOCOL_VERSION, Register, Resource, ServerMessage,
 };
 use std::env;
 use std::time::Duration;
@@ -194,11 +194,13 @@ fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistrat
             }),
             metadata: Default::default(),
         }],
-        capabilities: vec![Capability {
+        capabilities: Vec::new(),
+        capability_profiles: vec![CapabilityProfile {
+            contract: capability_contract.to_string(),
             kind: "compute".to_string(),
-            available: true,
-            contracts: vec![capability_contract.to_string()],
             local_system_id: "smoke-system".to_string(),
+            ready: true,
+            attributes: Default::default(),
         }],
         sensors: vec![],
         resources: vec![Resource {
@@ -363,14 +365,27 @@ async fn simulate_one_execute(
     let invocation = execute
         .invocation
         .ok_or_else(|| "server Execute omitted its canonical invocation".to_string())?;
-    if invocation.capability_contract != capability_contract
-        || execute.resource_ids != vec![smoke_resource_id(node_id)]
+    let intent = invocation
+        .intent
+        .as_ref()
+        .ok_or_else(|| "server Execute omitted its semantic intent".to_string())?;
+    let operation = intent
+        .operation
+        .as_ref()
+        .map(|operation| {
+            format!(
+                "{}.{}@{}",
+                operation.namespace, operation.name, operation.version
+            )
+        })
+        .ok_or_else(|| "server Execute omitted its canonical operation".to_string())?;
+    if operation != capability_contract || execute.resource_ids != vec![smoke_resource_id(node_id)]
     {
         return Err("server Execute does not match the synthetic smoke registration".to_string());
     }
     println!(
-        "simulating execution={} capability={} resources={:?}",
-        execute.execution_id, invocation.capability_contract, execute.resource_ids
+        "simulating execution={} operation={} objective={:?} resources={:?}",
+        execute.execution_id, operation, intent.objective, execute.resource_ids
     );
     outbound
         .send(NodeMessage {
@@ -459,7 +474,8 @@ mod tests {
                 "version": "v1-test"
             })
         );
-        assert_eq!(registration.capabilities[0].contracts, [contract]);
+        assert!(registration.capabilities.is_empty());
+        assert_eq!(registration.capability_profiles[0].contract, contract);
         assert_eq!(
             plan["tasks"][0]["roles"][0]["execution"]["parameters"]["probe"],
             "node-a"

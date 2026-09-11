@@ -94,9 +94,16 @@ Node Service；具体 EAIOS 的 facade 在部署侧维护，不是每种 EAIOS �
 或编译期插件。
 
 Local Integration Engine 只执行部署者提供的、启动时完整校验的本地配置。配置声明
-Local System、Capability、Sensor、Resource、固定 Endpoint、受限字段映射和执行生命
+Local System、Capability profile、canonical Operation workflow、Sensor、Resource、固定 Endpoint、
+受限字段映射和执行生命
 周期；不得把厂商 SDK、ROS Topic、Atlas/Pilot 等 Local How 提升为全局协议或 Control
 语义。新增 Local EAIOS 不修改或重新编译 RoboGuide Server 与 `roboguide-node`。
+
+Node Protocol v0.4 保持既有 session、sequence、command receipt 与 execution lifecycle；在该
+transport 上显式协商的 Node Contract v0.5 承载 exact capability profile 的 readiness/typed
+attributes，以及包含 canonical Operation、semantic objective 和 typed scalar parameters 的完整
+`ExecutionIntent`。Node config v0.7 分离 profile evidence 与 operation/workflow mapping。旧 Node
+Contract v0.4 和 node-config/v0.2-v0.6 是显式兼容输入，不能混用表示或静默丢弃 objective。
 
 ### Capability 与 Resource
 
@@ -244,7 +251,7 @@ State 不自动执行 last-writer-wins 跨来源覆盖，也不自动把 Observa
 命名的 provider。查询 facade 不成为新的写入 authority，也不绕过 Control、Runtime 或
 Mission lifecycle。
 
-Node Config v0.6 允许不同 EAIOS 选择性声明 State exports 和 Memory providers。State export
+Node Config v0.7 允许不同 EAIOS 选择性声明 State exports 和 Memory providers。State export
 固定 local-system owner、对象、Reported/Observed 语义、schema、TTL、采样周期和本地
 observation workflow；采样失败只让旧记录变 stale。部署 facade 必须保证 observation
 无副作用，离线配置检查不能替代运行时验证。Memory provider 声明静态最大 scope，并可用固定
@@ -366,15 +373,16 @@ How 与 Local Safety 属于 deployment-owned `integrations/` facade。
 多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行
 状态下自动切换本地系统或重放动作。
 
-Extension Conformance v0.1 复用 Node Service 的配置编译器，要求 Node Config v0.6 为每个
-exact capability 声明 readiness，并离线验证唯一 owner、固定 endpoint/method/service/tool、
+Extension Conformance v0.2 复用 Node Service 的配置编译器，要求 Node Config v0.7 分别声明
+exact capability profile 的 attributes/readiness 和 canonical operation workflow，并离线验证唯一
+owner、固定 endpoint/method/service/tool、
 受限 request mapping、execution state mapping、required resources 与选择性 State/Memory
 声明。验证不联系 Controller
 或 Local EAIOS，并显式声明没有执行 runtime/hardware probe。未知、timeout、重复 execution
 identity 和 restart ambiguity 的 fencing 是 Node Service implementation guarantee，由独立的
 engine/journal tests 覆盖，不冒充当前 deployment 的动态认证结果。
 开发者路径与真实三-driver 配置样例见
-[`docs/extensions/device-extension-conformance-v0.1.md`](../../extensions/device-extension-conformance-v0.1.md)，
+[`docs/extensions/device-extension-conformance-v0.2.md`](../../extensions/device-extension-conformance-v0.2.md)，
 ownership 决策见 [`ADR-0021`](../../decisions/0021-device-extension-boundary-conformance.md)，
 旧 HTTP adapter 退役与 Artifact Store 隔离见
 [`ADR-0022`](../../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。

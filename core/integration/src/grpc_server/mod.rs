@@ -4,8 +4,8 @@ use crate::grpc::v0_4::node_message::Message as NodePayload;
 use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
-    Ack, Cancel, Execute, NODE_CONTRACT_VERSION, NodeMessage, PROTOCOL_VERSION, Registered,
-    ServerMessage, Welcome,
+    Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, NODE_CONTRACT_VERSION, NodeMessage,
+    PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
@@ -154,6 +154,8 @@ struct RoutedSession {
     last_heartbeat: std::time::Instant,
     /// Maximum heartbeat silence before routing is fenced.
     lease_duration: std::time::Duration,
+    /// Explicit semantic contract negotiated for this route.
+    node_contract_version: String,
     /// Last accepted management sequence for heartbeat/registration updates.
     management_sequence: u64,
     /// State export identities accepted in the latest complete registration snapshot.
@@ -211,7 +213,6 @@ impl GrpcNodeRouter {
             || invocation.task_id.trim().is_empty()
             || invocation.group_id.trim().is_empty()
             || invocation.role_id.trim().is_empty()
-            || invocation.capability_contract.trim().is_empty()
         {
             return Err(Status::invalid_argument(
                 "Execute identity and canonical invocation fields must be nonblank",
@@ -240,6 +241,7 @@ impl GrpcNodeRouter {
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
+        let invocation = invocation_for_contract(invocation, &route.node_contract_version)?;
         route
             .sender
             .send(Ok(ServerMessage {
@@ -411,11 +413,15 @@ async fn run_grpc_session(
             "no compatible protocol version",
         ));
     }
-    let node_contract = hello
-        .node_contract_versions
-        .iter()
-        .find(|version| version.as_str() == NODE_CONTRACT_VERSION)
-        .cloned()
+    let node_contract = [NODE_CONTRACT_VERSION, LEGACY_NODE_CONTRACT_VERSION]
+        .into_iter()
+        .find(|supported| {
+            hello
+                .node_contract_versions
+                .iter()
+                .any(|offered| offered == supported)
+        })
+        .map(str::to_string)
         .ok_or_else(|| Status::failed_precondition("no compatible Node Contract version"))?;
     outbound
         .send(Ok(ServerMessage {
@@ -459,6 +465,7 @@ async fn run_grpc_session(
                 lease_id: lease_id.clone(),
                 last_heartbeat: std::time::Instant::now(),
                 lease_duration: std::time::Duration::from_millis(15_000),
+                node_contract_version: node_contract,
                 management_sequence: 0,
                 state_export_ids: registration
                     .state_exports
@@ -600,6 +607,97 @@ async fn run_grpc_session(
         emit_unavailable(&events, node_id, session_id);
     }
     session_result
+}
+
+/// Adapts and validates the invocation representation selected during contract negotiation.
+fn invocation_for_contract(
+    mut invocation: crate::grpc::v0_4::CanonicalInvocation,
+    node_contract_version: &str,
+) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
+    match node_contract_version {
+        NODE_CONTRACT_VERSION => {
+            if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {
+                return Err(Status::invalid_argument(
+                    "Node Contract v0.5 invocation cannot mix legacy fields with ExecutionIntent",
+                ));
+            }
+            let intent = invocation.intent.as_ref().ok_or_else(|| {
+                Status::failed_precondition("Node Contract v0.5 requires semantic ExecutionIntent")
+            })?;
+            let operation = intent
+                .operation
+                .as_ref()
+                .ok_or_else(|| Status::invalid_argument("ExecutionIntent requires OperationRef"))?;
+            if intent.objective.trim().is_empty()
+                || operation.namespace.trim().is_empty()
+                || operation.name.trim().is_empty()
+                || operation.version.trim().is_empty()
+            {
+                return Err(Status::invalid_argument(
+                    "ExecutionIntent operation and objective must be nonblank",
+                ));
+            }
+            validate_scalar_map(&intent.parameters, "ExecutionIntent parameters")?;
+            Ok(invocation)
+        }
+        LEGACY_NODE_CONTRACT_VERSION => {
+            if let Some(intent) = invocation.intent.take() {
+                if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {
+                    return Err(Status::invalid_argument(
+                        "legacy compatibility invocation cannot mix legacy and semantic fields",
+                    ));
+                }
+                let operation = intent.operation.as_ref().ok_or_else(|| {
+                    Status::invalid_argument("ExecutionIntent requires OperationRef")
+                })?;
+                let canonical_operation = format!(
+                    "{}.{}@{}",
+                    operation.namespace, operation.name, operation.version
+                );
+                if operation.namespace.trim().is_empty()
+                    || operation.name.trim().is_empty()
+                    || operation.version.trim().is_empty()
+                    || intent.objective != canonical_operation
+                {
+                    return Err(Status::failed_precondition(
+                        "legacy Node Contract v0.4 cannot preserve semantic objective",
+                    ));
+                }
+                validate_scalar_map(&intent.parameters, "legacy invocation parameters")?;
+                invocation.capability_contract = canonical_operation;
+                invocation.parameters = intent.parameters;
+            }
+            if invocation.capability_contract.trim().is_empty() {
+                return Err(Status::failed_precondition(
+                    "legacy Node Contract v0.4 requires capability contract",
+                ));
+            }
+            validate_scalar_map(&invocation.parameters, "legacy invocation parameters")?;
+            Ok(invocation)
+        }
+        _ => Err(Status::failed_precondition(
+            "route negotiated an unsupported Node Contract",
+        )),
+    }
+}
+
+/// Rejects absent and non-finite scalar values before they reach a Node workflow.
+fn validate_scalar_map(
+    values: &std::collections::HashMap<String, crate::grpc::v0_4::ScalarValue>,
+    kind: &str,
+) -> Result<(), Status> {
+    use crate::grpc::v0_4::scalar_value::Value;
+    if values.iter().any(|(key, value)| {
+        key.trim().is_empty()
+            || value.value.as_ref().is_none_or(
+                |value| matches!(value, Value::FloatValue(number) if !number.is_finite()),
+            )
+    }) {
+        return Err(Status::invalid_argument(format!(
+            "{kind} must have nonblank keys and finite typed values"
+        )));
+    }
+    Ok(())
 }
 
 mod session;

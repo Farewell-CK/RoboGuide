@@ -34,6 +34,7 @@ fn checkpoint_restore_is_conservative_across_process_boundary() {
                     node_contract_version: "roboguide.node.v0.3".to_string(),
                     state_exports: Vec::new(),
                     memory_providers: Vec::new(),
+                    capability_profiles: Vec::new(),
                 },
             },
             TimestampMs::new(100),

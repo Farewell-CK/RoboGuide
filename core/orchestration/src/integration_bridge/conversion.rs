@@ -163,6 +163,8 @@ pub(super) fn remote_status(status: ExecutionStatus) -> RemoteExecutionStatus {
 pub(super) fn registration_from_wire(
     wire: NodeRegistration,
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
+    let semantic_profiles =
+        wire.node_contract_version == integration::grpc::v0_4::NODE_CONTRACT_VERSION;
     let state_exports = wire
         .state_exports
         .iter()
@@ -191,25 +193,61 @@ pub(super) fn registration_from_wire(
     let mut capability_owners = BTreeMap::new();
     let mut contract_kinds = BTreeMap::new();
     let mut capability_readiness = BTreeMap::new();
-    for capability in wire.capabilities {
-        let kind = capability_kind(&capability.kind)?;
-        capability_kinds
-            .entry(kind)
-            .and_modify(|available| *available |= capability.available)
-            .or_insert(capability.available);
-        let owner = LocalSystemId::new(capability.local_system_id)?;
-        for contract in capability.contracts {
-            let contract = parse_contract(&contract)?;
-            if capability_owners
-                .insert(contract.clone(), owner.clone())
-                .is_some()
-            {
+    let mut capability_attributes = BTreeMap::new();
+    if semantic_profiles {
+        if !wire.capabilities.is_empty() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "Node Contract v0.5 mixes legacy capabilities with profiles".to_string(),
+            ));
+        }
+        for profile in wire.capability_profiles {
+            let kind = capability_kind(&profile.kind)?;
+            capability_kinds
+                .entry(kind)
+                .and_modify(|available| *available |= profile.ready)
+                .or_insert(profile.ready);
+            let contract = parse_contract(&profile.contract)?;
+            let owner = LocalSystemId::new(profile.local_system_id)?;
+            if capability_owners.insert(contract.clone(), owner).is_some() {
                 return Err(IntegrationRuntimeError::Protocol(
                     "canonical capability has multiple owners".to_string(),
                 ));
             }
+            let attributes = profile
+                .attributes
+                .into_iter()
+                .map(|(name, value)| Ok((name, execution_value(&value)?)))
+                .collect::<Result<BTreeMap<_, _>, IntegrationRuntimeError>>()?;
             contract_kinds.insert(contract.clone(), kind);
-            capability_readiness.insert(contract, capability.available);
+            capability_readiness.insert(contract.clone(), profile.ready);
+            capability_attributes.insert(contract, attributes);
+        }
+    } else {
+        if !wire.capability_profiles.is_empty() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "legacy Node Contract cannot declare capability profiles".to_string(),
+            ));
+        }
+        for capability in wire.capabilities {
+            let kind = capability_kind(&capability.kind)?;
+            capability_kinds
+                .entry(kind)
+                .and_modify(|available| *available |= capability.available)
+                .or_insert(capability.available);
+            let owner = LocalSystemId::new(capability.local_system_id)?;
+            for contract in capability.contracts {
+                let contract = parse_contract(&contract)?;
+                if capability_owners
+                    .insert(contract.clone(), owner.clone())
+                    .is_some()
+                {
+                    return Err(IntegrationRuntimeError::Protocol(
+                        "canonical capability has multiple owners".to_string(),
+                    ));
+                }
+                contract_kinds.insert(contract.clone(), kind);
+                capability_readiness.insert(contract, capability.available);
+            }
         }
     }
     let capabilities = capability_kinds
@@ -253,6 +291,7 @@ pub(super) fn registration_from_wire(
             resources,
             resource_owners,
         )?
+        .with_capability_attributes(capability_attributes)?
         .with_state_memory_exports(state_exports, memory_providers)?,
     )
 }
@@ -416,13 +455,39 @@ pub(super) fn invocation_from_command(command: &ExecutionCommand) -> CanonicalIn
         task_id: command.task_id().as_str().to_string(),
         group_id: command.group_id().as_str().to_string(),
         role_id: command.role_id().as_str().to_string(),
-        capability_contract: command.intent().capability_contract().to_string(),
-        parameters: command
-            .intent()
-            .parameters()
-            .iter()
-            .map(|(key, value)| (key.clone(), scalar(value)))
-            .collect(),
+        capability_contract: String::new(),
+        parameters: Default::default(),
+        intent: Some(integration::grpc::v0_4::ExecutionIntent {
+            operation: Some(integration::grpc::v0_4::OperationRef {
+                namespace: command.intent().operation().namespace().to_string(),
+                name: command.intent().operation().name().to_string(),
+                version: command.intent().operation().version().to_string(),
+            }),
+            objective: command.intent().objective().to_string(),
+            parameters: command
+                .intent()
+                .parameters()
+                .iter()
+                .map(|(key, value)| (key.clone(), scalar(value)))
+                .collect(),
+        }),
+    }
+}
+
+/// Converts one non-empty protobuf scalar into the transport-neutral Domain value.
+fn execution_value(value: &ScalarValue) -> Result<ExecutionValue, IntegrationRuntimeError> {
+    use integration::grpc::v0_4::scalar_value::Value;
+    match value.value.as_ref() {
+        Some(Value::BoolValue(value)) => Ok(ExecutionValue::Bool(*value)),
+        Some(Value::IntegerValue(value)) => Ok(ExecutionValue::Integer(*value)),
+        Some(Value::FloatValue(value)) if value.is_finite() => Ok(ExecutionValue::Float(*value)),
+        Some(Value::FloatValue(_)) => Err(IntegrationRuntimeError::Protocol(
+            "capability profile float is not finite".to_string(),
+        )),
+        Some(Value::StringValue(value)) => Ok(ExecutionValue::String(value.clone())),
+        None => Err(IntegrationRuntimeError::Protocol(
+            "capability profile scalar is empty".to_string(),
+        )),
     }
 }
 /// Converts one transport-neutral scalar.

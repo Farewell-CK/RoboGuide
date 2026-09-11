@@ -41,9 +41,7 @@ fn active_execution_does_not_reconcile_through_changed_workflow() {
 
     let engine = crate::LocalIntegrationEngine::new(
         catalog,
-        vec![Arc::new(GatedDriver {
-            completed: Arc::new(AtomicBool::new(false)),
-        }) as Arc<dyn LocalDriver>],
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(false)))) as Arc<dyn LocalDriver>],
     )
     .expect("engine opens journal");
     assert!(matches!(

@@ -88,6 +88,8 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   [`ADR-0022`](docs/decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 记录。
 - Node Protocol `Registered`/`Ack` 只在 Controller authority 与 durable checkpoint 接受事实后
   返回，见 [`ADR-0023`](docs/decisions/0023-application-accepted-node-protocol-facts.md)。
+- Capability profile、semantic ExecutionIntent 与显式版本兼容边界见
+  [`ADR-0035`](docs/decisions/0035-node-semantic-profile-and-intent-boundary.md)。
 - source-aware State federation 与 selective Memory ownership/exchange 见
   [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)；node-config/v0.6
   provider backend、discover/export/import workflow 与 scope 边界见
@@ -224,19 +226,23 @@ Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit�
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
 
-### Heterogeneous EAIOS Integration Contract v0.2
+### Heterogeneous EAIOS Integration Contract v0.3
 
-`ExecutionIntent` 以可扩展 `CapabilityContractRef(namespace, name, version)` 和稳定 scalar parameter
-map 表达 `What to execute`。它不使用 enum 固化 operation，也不携带厂商 Skill、ROS action、
-SDK method 或 shell command。MissionPlan v0.1 将 intent 与每个 Role 显式关联；Matching 与
-Scheduler 不解析 intent，Runtime 只路由，节点侧声明式 Local Integration Engine 负责
-将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
+`ExecutionIntent` 以独立 semantic objective、可扩展 `OperationRef(namespace, name, version)`
+和稳定 scalar parameter map 表达 `What to execute`。它不使用 enum 固化 operation，也不携带
+厂商 Skill、ROS action、SDK method 或 shell command。MissionPlan v0.7 将 intent 与每个
+TaskRole 显式关联；Matching 与 Scheduler 不解析 intent，Runtime 只路由，节点侧声明式
+Local Integration Engine 负责将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
-正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System，所有 Capability、
+正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System。显式协商的 Node Contract
+v0.5 通过 exact capability profiles 上报 readiness 与 typed feasibility attributes，并通过
+canonical invocation 原样传递 Operation、objective 和 scalar parameters。Capability profile
+回答节点能够证明什么，operation mapping 决定哪个本地 workflow 接收 intent，二者在 Node
+config v0.7 中分开声明。所有 Capability、
 Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
 已 Commit 的 resource IDs。它还承载带当前 session/management sequence 的 peer-channel
 readiness evidence；实际 peer transport 和高频控制仍完全属于 Local EAIOS。
-Node config v0.6 可用固定、只读、owner-qualified 的 observer 周期读取 Local EAIOS 已建立端点；
+Node config v0.7 可用固定、只读、owner-qualified 的 observer 周期读取 Local EAIOS 已建立端点；
 Local EAIOS 响应不能自行选择 `local_system_id` 或 TTL，采样失败由旧证据自然过期并 fence。
 `execution_id` 绑定 invocation、workflow digest 和 resources，冲突或模糊 dispatch 不重放。
 Execute/Cancel 还携带不可变 `command_id`；Node journal durable receipt 只证明命令已持久接受，
@@ -248,17 +254,18 @@ physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是�
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-Protocol 合同见 [`contracts/node/v0.7/`](contracts/node/v0.7/README.md)，Node config 合同见
-[`contracts/node/v0.6/`](contracts/node/v0.6/README.md)。Node config v0.6 为每个 exact
-canonical contract 提供固定 readiness observation，并增加选择性的 State export 与 Memory
-provider declaration、固定 discover/export/import workflow，以及可选的 peer-channel
+当前合同与版本关系见 [`contracts/node/v0.8/`](contracts/node/v0.8/README.md) 和
+[`contracts/node/README.md`](contracts/node/README.md)。Node config v0.7 为每个 exact
+canonical capability profile 提供固定 readiness observation 与 attributes，将 operation/workflow
+mapping 独立声明，并保留选择性的 State export、Memory provider、固定 discover/export/import
+workflow，以及可选的 peer-channel
 readiness observer；通过完整 RegistrationUpdate
 snapshot 更新后续 Matching 和 discovery。v0.5 provider 仍可作为 metadata-only 配置启动；
-v0.2-v0.4 配置仍可解析为空 State/Memory declaration，但不满足当前 extension conformance；
+v0.2-v0.6 配置仍作为原 combined capability/workflow 兼容输入；
 Node Protocol v0.2 endpoint 只返回明确迁移错误。
 
 设备扩展的离线合同、真实配置样例和开发者路径见
-[`docs/extensions/device-extension-conformance-v0.1.md`](docs/extensions/device-extension-conformance-v0.1.md)。
+[`docs/extensions/device-extension-conformance-v0.2.md`](docs/extensions/device-extension-conformance-v0.2.md)。
 可在不启动 Controller 或 Local EAIOS 的情况下运行：
 
 ```bash
@@ -652,7 +659,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── 0023-application-accepted-node-protocol-facts.md
     │   └── 0024-federated-state-and-selective-memory.md
     ├── extensions/
-    │   └── device-extension-conformance-v0.1.md
+    │   ├── device-extension-conformance-v0.1.md
+    │   └── device-extension-conformance-v0.2.md
     └── images/
         ├── README.md
         ├── roboguide-v2-overall-architecture.png

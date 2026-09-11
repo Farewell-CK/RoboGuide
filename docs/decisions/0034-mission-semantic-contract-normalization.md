@@ -44,12 +44,12 @@ or other Local How. Matching and Scheduler do not interpret the objective or par
 routes the immutable intent. The deployment-owned Local Integration Engine maps the operation and
 intent to Local How.
 
-The current Node Protocol may normalize a legacy executable contract as both an operation and its
-single provided capability during migration. Its invocation currently transports the canonical
-operation and scalar parameters, but not the new MissionPlan v0.7 objective. The objective remains
-durable Domain evidence until a later versioned Node Protocol contract carries it explicitly. Peers
-must not infer it from `RoleId`, and an existing protocol version must not silently acquire the field.
-That compatibility profile must remain explicit and must not collapse the domain types again.
+Legacy Node contracts may normalize one combined declaration as both an operation and its single
+provided capability during migration. Node Contract v0.5 now transports the independent objective,
+canonical operation, and scalar parameters as one `ExecutionIntent`, while capability profiles carry
+typed matching evidence separately. Peers must not infer objective or operation from `RoleId`.
+Node Contract v0.4 remains an explicit compatibility representation and cannot silently discard a
+meaningful objective. The versioned boundary is specified by ADR-0035.
 
 ### Actor and Role Identity
 

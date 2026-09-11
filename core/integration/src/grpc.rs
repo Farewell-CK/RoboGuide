@@ -27,8 +27,10 @@ pub mod v0_3 {
 pub mod v0_4 {
     /// Exact stream protocol version advertised during Hello negotiation.
     pub const PROTOCOL_VERSION: &str = "roboguide.node-protocol/v0.4";
-    /// Exact semantic Node Contract version advertised during Hello negotiation.
-    pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.4";
+    /// Current semantic Node Contract version advertised during Hello negotiation.
+    pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
+    /// Previous semantic Node Contract retained for explicit session compatibility.
+    pub const LEGACY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.4";
 
     tonic::include_proto!("roboguide.node.v0_4");
 }
@@ -40,6 +42,57 @@ mod tests {
         NodeRegistration, Resource,
     };
     use prost::Message;
+
+    /// Current additive wire fields preserve capability attributes and semantic objectives.
+    #[test]
+    fn v0_5_semantics_round_trip_without_legacy_fields() {
+        use super::v0_4::scalar_value::Value;
+
+        let registration = super::v0_4::NodeRegistration {
+            node_id: "arm-a".to_string(),
+            node_contract_version: super::v0_4::NODE_CONTRACT_VERSION.to_string(),
+            capability_profiles: vec![super::v0_4::CapabilityProfile {
+                contract: "manipulation.grasp@v1".to_string(),
+                kind: "transport".to_string(),
+                local_system_id: "manipulator".to_string(),
+                ready: true,
+                attributes: std::collections::HashMap::from([(
+                    "max-payload-grams".to_string(),
+                    super::v0_4::ScalarValue {
+                        value: Some(Value::IntegerValue(5_000)),
+                    },
+                )]),
+            }],
+            ..Default::default()
+        };
+        let decoded =
+            super::v0_4::NodeRegistration::decode(registration.encode_to_vec().as_slice())
+                .expect("current registration decodes");
+        assert_eq!(decoded, registration);
+        assert!(decoded.capabilities.is_empty());
+
+        let invocation = super::v0_4::CanonicalInvocation {
+            mission_id: "mission-a".to_string(),
+            task_id: "task-a".to_string(),
+            group_id: "group-a".to_string(),
+            role_id: "grasper".to_string(),
+            intent: Some(super::v0_4::ExecutionIntent {
+                operation: Some(super::v0_4::OperationRef {
+                    namespace: "object".to_string(),
+                    name: "relocate".to_string(),
+                    version: "v1".to_string(),
+                }),
+                objective: "Move the emergency kit to reception".to_string(),
+                parameters: Default::default(),
+            }),
+            ..Default::default()
+        };
+        let decoded =
+            super::v0_4::CanonicalInvocation::decode(invocation.encode_to_vec().as_slice())
+                .expect("current semantic invocation decodes");
+        assert_eq!(decoded, invocation);
+        assert!(decoded.capability_contract.is_empty());
+    }
 
     /// Proves v0.2 preserves multiple local-system owners across protobuf encoding.
     #[test]

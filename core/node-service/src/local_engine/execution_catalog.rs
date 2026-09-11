@@ -106,8 +106,15 @@ impl CompiledConnection {
     }
 }
 
-impl CompiledCapability {
-    /// Returns the canonical capability contract.
+impl CompiledOperation {
+    /// Returns the canonical operation identity.
+    pub fn operation(&self) -> &str {
+        &self.contract
+    }
+
+    /// Returns the legacy combined capability-contract identity.
+    ///
+    /// New operation-oriented code should use [`Self::operation`].
     pub fn contract(&self) -> &str {
         &self.contract
     }
@@ -145,6 +152,33 @@ impl CompiledCapability {
     /// Returns immutable local execution behavior.
     pub const fn workflow(&self) -> &CompiledWorkflow {
         &self.workflow
+    }
+}
+
+impl CompiledCapabilityProfile {
+    /// Returns the exact canonical capability represented by this evidence profile.
+    pub fn contract(&self) -> &str {
+        &self.contract
+    }
+
+    /// Returns the transitional coarse capability kind consumed by current Control matching.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    /// Returns the Local EAIOS identity that owns this capability evidence.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns immutable feasibility attributes keyed by canonical catalog field name.
+    pub const fn attributes(&self) -> &BTreeMap<String, domain::ExecutionValue> {
+        &self.attributes
+    }
+
+    /// Returns the exact-contract readiness observation route when configured.
+    pub const fn readiness(&self) -> Option<&CompiledCapabilityReadiness> {
+        self.readiness.as_ref()
     }
 }
 

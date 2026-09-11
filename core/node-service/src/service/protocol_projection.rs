@@ -86,7 +86,7 @@ pub(super) fn send_local_rejection(
 #[cfg(test)]
 pub(super) fn registration_from_catalog(catalog: &crate::CompiledLocalCatalog) -> NodeRegistration {
     let readiness = catalog
-        .capabilities()
+        .capability_profiles()
         .keys()
         .cloned()
         .map(|contract| (contract, true))
@@ -162,19 +162,47 @@ pub(super) fn registration_from_readiness(
             metadata: system.metadata().clone().into_iter().collect(),
         })
         .collect();
-    let capabilities = catalog
-        .capabilities()
-        .values()
-        .map(|capability| Capability {
-            kind: capability.kind().to_string(),
-            available: readiness
-                .get(capability.contract())
-                .copied()
-                .unwrap_or_else(|| capability.readiness().is_none()),
-            contracts: vec![capability.contract().to_string()],
-            local_system_id: capability.owner().to_string(),
-        })
-        .collect();
+    let current_contract =
+        catalog.node_contract_version() == integration::grpc::v0_4::NODE_CONTRACT_VERSION;
+    let capabilities = if current_contract {
+        Vec::new()
+    } else {
+        catalog
+            .capability_profiles()
+            .values()
+            .map(|profile| Capability {
+                kind: profile.kind().to_string(),
+                available: readiness
+                    .get(profile.contract())
+                    .copied()
+                    .unwrap_or_else(|| profile.readiness().is_none()),
+                contracts: vec![profile.contract().to_string()],
+                local_system_id: profile.owner().to_string(),
+            })
+            .collect()
+    };
+    let capability_profiles = if current_contract {
+        catalog
+            .capability_profiles()
+            .values()
+            .map(|profile| CapabilityProfile {
+                contract: profile.contract().to_string(),
+                kind: profile.kind().to_string(),
+                local_system_id: profile.owner().to_string(),
+                ready: readiness
+                    .get(profile.contract())
+                    .copied()
+                    .unwrap_or_else(|| profile.readiness().is_none()),
+                attributes: profile
+                    .attributes()
+                    .iter()
+                    .map(|(name, value)| (name.clone(), scalar_value(value)))
+                    .collect(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let resources = catalog
         .resources()
         .values()
@@ -254,10 +282,23 @@ pub(super) fn registration_from_readiness(
         sensors,
         resources,
         metadata: Default::default(),
-        node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+        node_contract_version: catalog.node_contract_version().to_string(),
         state_exports,
         memory_providers,
+        capability_profiles,
     }
+}
+
+/// Converts one transport-neutral scalar attribute into its protobuf representation.
+fn scalar_value(value: &domain::ExecutionValue) -> ScalarValue {
+    use integration::grpc::v0_4::scalar_value::Value;
+    let value = match value {
+        domain::ExecutionValue::Bool(value) => Value::BoolValue(*value),
+        domain::ExecutionValue::Integer(value) => Value::IntegerValue(*value),
+        domain::ExecutionValue::Float(value) => Value::FloatValue(*value),
+        domain::ExecutionValue::String(value) => Value::StringValue(value.clone()),
+    };
+    ScalarValue { value: Some(value) }
 }
 
 /// Reads one required Server stream message.

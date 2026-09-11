@@ -2,6 +2,8 @@
 
 #[path = "compile/artifact.rs"]
 mod artifact_compile;
+#[path = "compile/capability.rs"]
+mod capability_compile;
 mod catalog;
 pub mod driver;
 mod execution_catalog;
@@ -20,10 +22,11 @@ mod workflow_compile;
 
 use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
-    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityReadinessConfig, ConnectionConfig,
-    ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, PeerChannelObserverConfig,
-    ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
+    ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
+    CapabilityReadinessConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
+    LocalOperationConfig, LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig,
+    NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig, ResourceConfig,
+    SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -35,6 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use artifact_compile::*;
+use capability_compile::*;
 use observation_compile::*;
 use topology_compile::*;
 use workflow_compile::*;
@@ -49,6 +53,8 @@ pub const CONFIG_SCHEMA_V0_4: &str = "roboguide.node-config/v0.4";
 pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
 /// Schema identity adding executable heterogeneous Memory provider workflows.
 pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
+/// Schema identity separating capability profiles from executable operation workflows.
+pub const CONFIG_SCHEMA_V0_7: &str = "roboguide.node-config/v0.7";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
 /// Maximum JSON bytes accepted from one local peer readiness response.
@@ -79,8 +85,10 @@ pub struct CompiledLocalCatalog {
     connections: BTreeMap<String, CompiledConnection>,
     /// Local-system health observations by stable owner identity.
     health_checks: BTreeMap<String, CompiledHealthCheck>,
-    /// Canonical capability ownership by contract identity.
-    capabilities: BTreeMap<String, CompiledCapability>,
+    /// Canonical operation workflows by operation identity.
+    operations: BTreeMap<String, CompiledOperation>,
+    /// Exact capability readiness and feasibility evidence by contract identity.
+    capability_profiles: BTreeMap<String, CompiledCapabilityProfile>,
     /// Control-visible resources by stable identity.
     resources: BTreeMap<String, CompiledResource>,
     /// Sensors by stable identity.
@@ -314,6 +322,21 @@ pub struct CapabilityReadinessFact {
     pub detail: String,
 }
 
+/// Immutable exact capability evidence exposed through Node Contract v0.5.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledCapabilityProfile {
+    /// Canonical capability contract identity.
+    contract: String,
+    /// Transitional coarse kind consumed by the current Control compatibility model.
+    kind: String,
+    /// Sole local-system owner of this evidence.
+    owner: String,
+    /// Typed feasibility attributes in stable lexical order.
+    attributes: BTreeMap<String, domain::ExecutionValue>,
+    /// Exact-contract readiness observation.
+    readiness: Option<CompiledCapabilityReadiness>,
+}
+
 /// Immutable validated connection details for one local driver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledConnection {
@@ -362,10 +385,10 @@ pub enum CompiledConnection {
     },
 }
 
-/// Immutable capability owner, resource requirements, locks, and workflow.
+/// Immutable canonical operation owner, resource requirements, locks, and workflow.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CompiledCapability {
-    /// Canonical contract identity.
+pub struct CompiledOperation {
+    /// Canonical operation identity; named `contract` for legacy journal compatibility.
     contract: String,
     /// Coarse capability kind consumed by Control Matching.
     kind: String,
@@ -382,6 +405,12 @@ pub struct CompiledCapability {
     /// Compiled execute/status/cancel behavior.
     workflow: CompiledWorkflow,
 }
+
+/// Legacy name for a compiled canonical operation workflow.
+///
+/// Configurations through node-config/v0.6 combined capability evidence and execution workflow
+/// in one declaration. New code should use [`CompiledOperation`].
+pub type CompiledCapability = CompiledOperation;
 
 /// Immutable execute, status, cancel, and state-mapping workflow.
 #[derive(Debug, Clone, PartialEq)]

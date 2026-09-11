@@ -112,7 +112,7 @@ versioned projection、SQLite persistence 与 review contracts。
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。
 
-### Heterogeneous EAIOS Integration Contract v0.2
+### Heterogeneous EAIOS Integration Contract v0.3
 
 Domain `ExecutionIntent` 将 semantic objective、canonical `OperationRef` 与 transport-neutral
 typed parameters 绑定到 `PlannedTask` 的具体 Role；它与 RoleRequirement、Node assignment 和
@@ -120,10 +120,11 @@ typed parameters 绑定到 `PlannedTask` 的具体 Role；它与 RoleRequirement
 Matching/Scheduler 不解析 intent，Runtime 不翻译 intent。单一 `roboguide-node` 内的声明式
 Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP workflow 完成本地映射。
 
-当前 formal Node Protocol invocation 仍只传输 canonical operation 与 scalar parameters；
-MissionPlan v0.7 的 objective 在 Domain 与 durable Mission projection 中保留，但尚未跨 Node
-Protocol 交给 Local EAIOS。补齐 objective 或更丰富 entity/constraint values 必须使用新的
-versioned protocol contract，不能在现有版本下静默加字段或由 RoleId 推导。
+Node Protocol v0.4 的 session/sequence/receipt lifecycle 保持不变；显式协商的 Node Contract
+v0.5 传输完整 scalar-profile `ExecutionIntent`，包括 canonical operation、独立 objective 与
+typed parameters。Node Contract v0.4 的原 wire 保持兼容；只有 objective 等于 canonical
+operation identity 的 legacy-equivalent intent 才能显式降级，其他 objective 必须失败，不能静默
+丢弃或由 RoleId 推导。更丰富 entity/constraint values 仍需要后续版本化合同。
 
 `NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含具体
 传输类型。该同步 port 仍由 Runtime/testkit 的 legacy 测试合同使用，但旧 HTTP 实现已退役。
@@ -134,14 +135,15 @@ versioned protocol contract，不能在现有版本下静默加字段或由 Role
 ### Device Extension Conformance v0.1
 
 设备扩展的唯一正式机制是 `core/node-service` 内的 Local Integration Engine。新 Local EAIOS
-只需部署自己的 HTTP、dynamic gRPC 或 MCP facade，并在 Node Config v0.6 中声明固定
-connection、唯一 capability owner、exact readiness、execute/status/cancel workflow、受限
+只需部署自己的 HTTP、dynamic gRPC 或 MCP facade，并在 Node Config v0.7 中分别声明固定
+connection、唯一 capability-profile owner、typed attributes、exact readiness，以及 canonical
+operation 到 execute/status/cancel workflow 的映射、受限
 request mapping、状态映射、required resources，以及选择性的 State export/Memory provider
 与 discover/export/import workflow；v0.5 provider 保持 metadata-only 兼容；
 不得在 RoboGuide core 增加厂商分支。
 `core/integration` 只负责 formal Node Protocol wire/session/router，Controller 的
 `IntegrationRuntimeBridge` 位于 `core/orchestration`。完整可验证路径和真实配置样例见
-[`docs/extensions/device-extension-conformance-v0.1.md`](../extensions/device-extension-conformance-v0.1.md)，
+[`docs/extensions/device-extension-conformance-v0.2.md`](../extensions/device-extension-conformance-v0.2.md)，
 对应 ownership 与 conformance 决策见
 [`ADR-0021`](../decisions/0021-device-extension-boundary-conformance.md)；旧 HTTP adapter
 退役与 Artifact Store 隔离见
@@ -160,7 +162,8 @@ cargo run -p roboguide-node -- --validate \
 单独列出，并不表示当前 facade 已执行 runtime probe。认证、真实状态值、物理副作用、
 Local Safety、取消和重启语义仍需在 deployment-owned facade/硬件上单独验证。
 
-每个 canonical capability 在 Node 配置内只有一个 local-system owner；endpoint、method、
+每个 canonical capability profile 在 Node 配置内只有一个 local-system owner；operation workflow
+mapping 独立于 profile。endpoint、method、
 tool 和 descriptor 都由本地配置固定，网络输入只能进入受限 JSON Pointer/白名单函数映射。
 SQLite WAL journal 在本地 dispatch 前持久化 execution identity，Unknown 不自动重放。
 
