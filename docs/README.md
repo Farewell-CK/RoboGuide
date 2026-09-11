@@ -49,6 +49,7 @@
 - [`decisions/0031-canonical-capability-catalog.md`](decisions/0031-canonical-capability-catalog.md)：Planner/Reviewer 使用的稳定 canonical contract 与 scalar parameter 词汇表。
 - [`decisions/0032-mission-review-and-repair-loop.md`](decisions/0032-mission-review-and-repair-loop.md)：结构化 Review evidence、用户 clarification 分流与有界 MissionPlan Repair。
 - [`decisions/0033-task-satisfaction-boundary.md`](decisions/0033-task-satisfaction-boundary.md)：本地 execution completion、Task satisfaction 与 Mission completion 的显式边界。
+- [`decisions/0034-mission-semantic-contract-normalization.md`](decisions/0034-mission-semantic-contract-normalization.md)：Capability/Operation/Requirement、Role identity、Dialogue、Timing、Satisfaction 与风险审批的长期统一边界。
 
 ## 历史架构
 

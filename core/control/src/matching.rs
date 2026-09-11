@@ -2,8 +2,8 @@
 
 use crate::{ControlError, ControlPlane};
 use domain::{
-    CapabilityContractRef, CapabilityKind, CorrelationId, EventPayload, MissionPlan, NodeId,
-    RoleId, TaskId, TaskRef, TaskRequirement, TimestampMs,
+    CapabilityRequirement, CorrelationId, EventPayload, MissionPlan, NodeId, RoleId, TaskId,
+    TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
 
@@ -181,8 +181,8 @@ impl ControlPlane {
                 .expect("candidate exists");
             role_candidates.node_ids.retain(|node_id| {
                 state.node(node_id).is_some_and(|snapshot| {
-                    requirements.iter().all(|(capability, contract)| {
-                        node_supports_contract(snapshot.registration(), *capability, contract)
+                    requirements.iter().all(|requirement| {
+                        node_supports_requirement(snapshot.registration(), requirement)
                     })
                 })
             });
@@ -231,15 +231,10 @@ impl ControlPlane {
     }
 }
 
-/// Checks one node's advertised capability and exact contract pair.
-fn node_supports_contract(
+/// Checks one node's exact capability readiness and feasibility envelope.
+fn node_supports_requirement(
     registration: &domain::NodeRegistration,
-    capability: CapabilityKind,
-    contract: &CapabilityContractRef,
+    requirement: &CapabilityRequirement,
 ) -> bool {
-    registration
-        .capabilities()
-        .iter()
-        .any(|item| item.kind() == capability && item.is_available())
-        && registration.contract_is_available_for_kind(contract, capability)
+    registration.capability_requirement_is_available(requirement)
 }

@@ -1,4 +1,4 @@
-//! Canonical canonical capability contract identity and immutable execution intent values.
+//! Canonical capability and operation identities plus immutable execution intent values.
 
 use super::ExecutionValue;
 use crate::DomainError;
@@ -84,11 +84,67 @@ impl Display for CapabilityContractRef {
     }
 }
 
+/// Identifies one canonical semantic operation independently of provider capability evidence.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct OperationRef(CapabilityContractRef);
+
+impl OperationRef {
+    /// Creates an operation identity from canonical components.
+    pub fn new(
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Result<Self, DomainError> {
+        CapabilityContractRef::new(namespace, name, version).map(Self)
+    }
+
+    /// Returns the operation namespace.
+    pub fn namespace(&self) -> &str {
+        self.0.namespace()
+    }
+
+    /// Returns the operation name.
+    pub fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    /// Returns the independently versioned operation semantics.
+    pub fn version(&self) -> &str {
+        self.0.version()
+    }
+
+    /// Returns the structurally identical legacy contract reference for protocol compatibility.
+    pub const fn as_legacy_contract(&self) -> &CapabilityContractRef {
+        &self.0
+    }
+}
+
+impl From<CapabilityContractRef> for OperationRef {
+    /// Normalizes a legacy executable contract into a canonical operation identity.
+    fn from(value: CapabilityContractRef) -> Self {
+        Self(value)
+    }
+}
+
+impl Display for OperationRef {
+    /// Formats a stable canonical operation key for adapter lookup.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, formatter)
+    }
+}
+
 /// Describes what one role should execute without prescribing local implementation details.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionIntent {
-    /// Canonical operation translated by the target adapter or local EAIOS.
-    capability_contract: CapabilityContractRef,
+    /// Canonical operation translated by the target adapter or Local EAIOS.
+    #[serde(alias = "capability_contract")]
+    operation: OperationRef,
+    /// Human-readable semantic outcome delegated to the Local EAIOS.
+    #[serde(default = "legacy_objective")]
+    objective: String,
     /// Stable transport-neutral parameters keyed by semantic name.
     parameters: BTreeMap<String, ExecutionValue>,
 }
@@ -99,34 +155,64 @@ impl ExecutionIntent {
         capability_contract: CapabilityContractRef,
         parameters: BTreeMap<String, ExecutionValue>,
     ) -> Result<Self, DomainError> {
+        let operation = OperationRef::from(capability_contract);
+        let objective = operation.to_string();
+        Self::new_semantic(operation, objective, parameters)
+    }
+
+    /// Creates a semantic intent without prescribing the Local EAIOS implementation.
+    pub fn new_semantic(
+        operation: OperationRef,
+        objective: impl Into<String>,
+        parameters: BTreeMap<String, ExecutionValue>,
+    ) -> Result<Self, DomainError> {
+        let objective = objective.into();
+        if objective.trim().is_empty() {
+            return Err(DomainError::EmptyValue {
+                kind: "execution objective",
+            });
+        }
         if parameters.keys().any(|key| key.trim().is_empty()) {
             return Err(DomainError::EmptyValue {
                 kind: "execution parameter key",
             });
         }
-        if parameters
-            .values()
-            .any(|value| matches!(value, ExecutionValue::Float(number) if !number.is_finite()))
-        {
+        if parameters.values().any(|value| !value.is_finite()) {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "execution parameters must contain finite floats".to_string(),
             });
         }
         Ok(Self {
-            capability_contract,
+            operation,
+            objective,
             parameters,
         })
     }
 
-    /// Returns the canonical capability contract identity.
+    /// Returns the canonical operation identity.
+    pub const fn operation(&self) -> &OperationRef {
+        &self.operation
+    }
+
+    /// Returns the semantic objective delegated to the Local EAIOS.
+    pub fn objective(&self) -> &str {
+        &self.objective
+    }
+
+    /// Returns the legacy executable-contract view used by Node Protocol v0.4.
     pub const fn capability_contract(&self) -> &CapabilityContractRef {
-        &self.capability_contract
+        self.operation.as_legacy_contract()
     }
 
     /// Returns parameters in stable lexical key order.
     pub const fn parameters(&self) -> &BTreeMap<String, ExecutionValue> {
         &self.parameters
     }
+}
+
+/// Supplies a conservative semantic objective when restoring pre-v0.7 serialized intents.
+fn legacy_objective() -> String {
+    "legacy canonical operation".to_string()
 }
 
 /// Returns a canonical contract component or a typed domain invariant error.

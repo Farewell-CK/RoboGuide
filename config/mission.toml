@@ -1,8 +1,8 @@
 [mission]
 planner = "llm"
-contract_version = "roboguide.mission-plan/v0.6"
-schema_path = "contracts/mission/v0.6/mission-plan.schema.json"
-capability_catalog_path = "contracts/capability/v0.1/catalog.json"
+contract_version = "roboguide.mission-plan/v0.7"
+schema_path = "contracts/mission/v0.7/mission-plan.schema.json"
+capability_catalog_path = "contracts/capability/v0.2/catalog.json"
 review_enabled = true
 max_repair_attempts = 2
 

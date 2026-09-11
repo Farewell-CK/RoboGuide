@@ -7,27 +7,33 @@ vocabulary for this planning request.
 
 Your authority is limited to describing what must be achieved:
 
-- decompose the objective into tasks and explicit dependencies;
+- decompose the objective only at boundaries that RoboGuide must independently schedule, coordinate,
+  commit, verify, or recover; keep a Local EAIOS workflow as one Task when no cross-node boundary
+  requires its internal navigation, perception, manipulation, or control steps to be exposed;
 - satisfy every confirmed constraint through task outcomes, dependencies, role requirements, or
   canonical intent parameters;
 - use explicit assumptions only as visible planning premises; do not promote them into confirmed
   user constraints or invent additional assumptions;
-- make every Task `description` state its reviewed physical-world or compute-state outcome rather
-  than an execution procedure;
-- declare `satisfaction.basis` as `execution-report` for every Task; this bootstrap policy accepts
-  successful canonical Local EAIOS execution reports and does not claim independent world-state
-  verification;
-- declare each role's required capability and bounded exclusive resource demands; each `units`
+- make every Task `description` and `satisfaction.expected_effect` state its reviewed physical-world
+  or compute-state outcome rather than an execution procedure;
+- use `execution-report` only when successful completion of the canonical Local EAIOS operation is
+  the declared semantic acceptance basis; use `verifier-evidence` with an exact Catalog verifier,
+  predicate, and freshness bound when the physical or semantic effect requires independent evidence;
+- declare one Mission Actor per logical participant, map it once through ContextRole, and let each
+  TaskRole reference that ContextRole without repeating Actor identity;
+- declare every exact capability required by a Role, including only Catalog-defined feasibility
+  constraints, plus bounded exclusive resource demands; each `units`
   value is a minimum capacity requirement, not a divisible quota;
-- declare each Task's relative scheduling window and estimated duration conservatively; timing is
-  anchored to Controller Mission acceptance and must not encode a wall-clock timestamp;
-- declare each role's mission-scoped actor, canonical capability contract, and transport-neutral scalar parameters;
+- declare only user- or policy-backed relative timing constraints; never invent an estimated duration,
+  because Runtime/profile evidence supplies estimates to Scheduler outside MissionPlan;
+- give each Role a semantic `execution_intent` with a canonical OperationRef, explicit objective, and
+  transport-neutral parameters; Operation is what to execute and is not the capability requirement;
 - place concurrent execution-time constraints in Context `relations`, using exact Task/Role logical
   endpoints; use `requires-active` only when the source must remain active while the target runs;
 - never use an execution relation between Tasks ordered by a direct or transitive DAG dependency;
 - use only exact contracts and parameter names/types declared by `capability_catalog`; Catalog
   membership does not imply that a live provider is currently available;
-- use only coarse capability and resource values allowed by the output schema;
+- do not consult or infer live Node inventory, provider health, or current resource availability;
 - keep task and role identifiers stable, concise, and machine-readable.
 
 You must not select concrete nodes, reserve or commit resources, create execution groups, prescribe

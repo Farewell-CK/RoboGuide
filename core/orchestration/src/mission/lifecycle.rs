@@ -35,7 +35,6 @@ impl MissionOrchestrator {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<(), OrchestrationError> {
-        let group_id = self.group_for_task(mission_id, task_ref)?.clone();
         let satisfaction_basis = self
             .executions
             .get(mission_id)
@@ -53,11 +52,101 @@ impl MissionOrchestrator {
                     "Task satisfaction policy is absent from the accepted MissionPlan".to_string(),
                 )
             })?;
-        if satisfaction_basis != domain::TaskSatisfactionBasis::ExecutionReport {
+        if satisfaction_basis != &domain::TaskSatisfactionBasis::ExecutionReport {
             return Err(OrchestrationError::Mission(
                 "Task satisfaction basis cannot accept execution-report evidence".to_string(),
             ));
         }
+        self.finish_task_satisfaction(
+            mission_id,
+            task_ref,
+            satisfaction_basis.clone(),
+            control,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Accepts fresh positive verifier evidence matching the Mission-declared policy.
+    #[allow(clippy::too_many_arguments)]
+    pub fn satisfy_task_from_verifier<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        evidence: &domain::TaskSatisfactionEvidence,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        if evidence.task_ref().mission_id() != mission_id {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction evidence belongs to another Mission".to_string(),
+            ));
+        }
+        let basis = self
+            .executions
+            .get(mission_id)
+            .and_then(|execution| {
+                execution
+                    .plan()
+                    .task_graph()
+                    .tasks()
+                    .iter()
+                    .find(|task| task.requirement().task_ref() == evidence.task_ref())
+            })
+            .map(domain::PlannedTask::satisfaction_basis)
+            .ok_or_else(|| {
+                OrchestrationError::Mission(
+                    "Task satisfaction policy is absent from the accepted MissionPlan".to_string(),
+                )
+            })?;
+        let domain::TaskSatisfactionBasis::VerifierEvidence(spec) = basis else {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction basis cannot accept verifier evidence".to_string(),
+            ));
+        };
+        let evidence_age = timestamp
+            .as_millis()
+            .checked_sub(evidence.received_at().as_millis())
+            .ok_or_else(|| {
+                OrchestrationError::Mission(
+                    "Task satisfaction evidence receive time is in the future".to_string(),
+                )
+            })?;
+        if evidence.verifier() != spec.verifier()
+            || evidence.predicate() != spec.predicate()
+            || evidence_age > spec.max_evidence_age_ms()
+            || !evidence.is_satisfied()
+        {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction evidence does not establish the declared predicate".to_string(),
+            ));
+        }
+        self.finish_task_satisfaction(
+            mission_id,
+            evidence.task_ref(),
+            basis.clone(),
+            control,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Applies a validated satisfaction basis, releases Task ownership, and advances the DAG.
+    #[allow(clippy::too_many_arguments)]
+    fn finish_task_satisfaction<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+        satisfaction_basis: domain::TaskSatisfactionBasis,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        let group_id = self.group_for_task(mission_id, task_ref)?.clone();
         let task_resources = control
             .group(&group_id)
             .and_then(|group| group.task_execution(task_ref))

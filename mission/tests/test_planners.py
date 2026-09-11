@@ -14,6 +14,7 @@ from mission.config import MissionSettings, load_settings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner
+from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 from mission.responses import (
     ResponsesMissionInterpreter,
     ResponsesMissionPlanner,
@@ -162,17 +163,16 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     provider_schema = output_format["schema"]
     assert isinstance(provider_schema, dict)
     assert "$schema" not in provider_schema
-    properties = cast(JSONObject, provider_schema["properties"])
-    tasks_schema = cast(JSONObject, cast(JSONObject, properties["tasks"])["items"])
+    definitions = cast(JSONObject, provider_schema["$defs"])
+    tasks_schema = cast(JSONObject, definitions["task"])
     task_properties = cast(JSONObject, tasks_schema["properties"])
     depends_on_schema = cast(JSONObject, task_properties["depends_on"])
     assert "uniqueItems" not in depends_on_schema
-    contexts_schema = cast(JSONObject, cast(JSONObject, properties["contexts"])["items"])
+    contexts_schema = cast(JSONObject, definitions["context"])
     context_properties = cast(JSONObject, contexts_schema["properties"])
     assert set(cast(list[str], contexts_schema["required"])) == set(context_properties)
     shared_view_schema = cast(JSONObject, context_properties["shared_view"])
     assert {"type": "null"} in cast(list[JSONObject], shared_view_schema["anyOf"])
-    definitions = cast(JSONObject, provider_schema["$defs"])
     relation_schema = cast(JSONObject, definitions["relation"])
     relation_properties = cast(JSONObject, relation_schema["properties"])
     assert "allOf" not in relation_schema
@@ -280,9 +280,18 @@ def test_responses_interpreter_preserves_open_questions_before_planning() -> Non
     interpreter = ResponsesMissionInterpreter(
         _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
     )
-    assessment = interpreter.interpret("一只可建图的机器狗", ())
+    dialogue = (
+        DialogueTurn(
+            "turn-0001",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.INSTRUCTION,
+            "一只可建图的机器狗",
+            1,
+        ),
+    )
+    assessment = interpreter.interpret(dialogue)
 
     assert assessment.open_questions == ("需要建立哪个区域的地图？",)
     assert len(transport.requests) == 1
     request_input = json.loads(cast(str, transport.requests[0][2]["input"]))
-    assert request_input == {"instruction": "一只可建图的机器狗", "messages": []}
+    assert request_input == {"dialogue": [dialogue[0].to_json()]}

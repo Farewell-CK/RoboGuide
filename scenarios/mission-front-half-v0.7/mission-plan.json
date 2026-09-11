@@ -1,0 +1,79 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-relocate-aid-kit",
+    "objective": "将二楼储物间的急救包送到一楼前台",
+    "actors": [
+      {"id": "courier"}
+    ]
+  },
+  "contexts": [
+    {
+      "id": "delivery-context",
+      "roles": [
+        {"id": "carrier", "actor": "courier"}
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "relocate-aid-kit",
+      "description": "完成急救包从二楼储物间到一楼前台的交付",
+      "context_id": "delivery-context",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "delivery-role",
+          "context_role": "carrier",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {"namespace": "manipulation", "name": "grasp", "version": "v1"},
+                "constraints": [
+                  {"attribute": "max-payload-grams", "operator": "at-least", "value": 3000}
+                ]
+              },
+              {
+                "contract": {"namespace": "mobility", "name": "navigate", "version": "v1"},
+                "constraints": []
+              },
+              {
+                "contract": {"namespace": "object", "name": "relocate", "version": "v1"},
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {"kind": "space", "units": 1}
+            ]
+          },
+          "execution_intent": {
+            "operation": {"namespace": "object", "name": "relocate", "version": "v1"},
+            "objective": "将指定急救包从二楼储物间安全交付到一楼前台",
+            "parameters": {
+              "object": "first-aid-kit-2f",
+              "source": "storage-room-2f",
+              "destination": "reception-1f"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": 300000
+      },
+      "satisfaction": {
+        "expected_effect": "急救包 first-aid-kit-2f 位于 reception-1f 的接收区域",
+        "basis": "verifier-evidence",
+        "verifier": {
+          "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+          "predicate": "object first-aid-kit-2f is in reception-1f",
+          "max_evidence_age_ms": 5000
+        }
+      }
+    }
+  ]
+}

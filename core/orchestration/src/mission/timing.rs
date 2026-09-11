@@ -62,23 +62,21 @@ pub(super) fn plan_latest_activation_at(
     timing: &domain::TaskTiming,
     accepted_at: TimestampMs,
     task_ref: &TaskRef,
+    duration_ms: Option<u64>,
 ) -> Result<Option<TimestampMs>, OrchestrationError> {
     let latest_start = timing
         .latest_start_offset_ms()
         .map(|offset| checked_plan_timestamp(accepted_at, offset, task_ref))
         .transpose()?;
-    let completion_start = timing
+    let completion_deadline = timing
         .completion_deadline_offset_ms()
         .map(|offset| checked_plan_timestamp(accepted_at, offset, task_ref))
-        .transpose()?
-        .map(|deadline| {
-            TimestampMs::new(
-                deadline.as_millis()
-                    - timing
-                        .estimated_duration_ms()
-                        .expect("TaskTiming requires duration with completion deadline"),
-            )
-        });
+        .transpose()?;
+    let completion_start = completion_deadline.map(|deadline| {
+        duration_ms.map_or(deadline, |duration| {
+            TimestampMs::new(deadline.as_millis() - duration)
+        })
+    });
     Ok(match (latest_start, completion_start) {
         (Some(latest), Some(completion)) => Some(latest.min(completion)),
         (Some(latest), None) => Some(latest),

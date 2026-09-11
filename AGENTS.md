@@ -45,13 +45,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
-- The current Mission boundary uses `roboguide.mission-plan/v0.6`: Context/ContextRole
-  continuity, coupling mode, selective Group view, peer descriptor, and Execution Relation
-  specifications are Mission Intelligence metadata; Role resource sizing and Task-relative timing
-  are Scheduler inputs, while Task/Context resource ownership is recorded independently in Control
-  and its Group projection. Each Task also declares a satisfaction evidence basis; the current
-  `execution-report` bootstrap does not claim independent physical-world verification. v0.2-v0.5
-  remain compatibility inputs and normalize to that basis.
+- The current Mission boundary uses `roboguide.mission-plan/v0.7`: Mission Actors are declared once,
+  ContextRoles reference Actors, and TaskRoles reference ContextRoles while declaring multiple exact
+  capability requirements, independent semantic ExecutionIntent, resources, Mission timing
+  constraints, expected effect, and satisfaction evidence basis. Runtime/State duration estimates
+  are separate source-aware Scheduler evidence. v0.2-v0.6 remain compatibility inputs; their
+  `execution-report` basis does not claim independent physical-world verification.
 - Runtime successful terminal facts mean local execution completed, not that a Task or Mission is
   semantically satisfied. Control records `AwaitingSatisfaction` and retains bindings;
   Orchestration applies the Mission-declared basis, emits `TaskSatisfied`, then releases Task-scoped
@@ -164,10 +163,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current
   provider absence is a Control scheduling condition rather than a Mission semantic rejection. It
-  must not mirror execution lifecycle or choose physical nodes. Mission Request v0.2 separates
+  must not mirror execution lifecycle or choose physical nodes. Mission Request v0.3 separates
   Planner, Reviewer, and Repairer ports, persists revision-bound structured review evidence, bounds
   automatic repair, and routes missing user facts back to clarification instead of letting Repair
-  invent them. Dialogue remains separate from internal review history.
+  invent them. Structured DialogueTurn history remains separate from internal review evidence, and
+  context-aware approval rules persist the exact reasons bound to an immutable draft.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace
@@ -190,10 +190,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   but are never real evidence.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
-- `contracts/capability/v0.1/` is the deployment-independent Canonical Capability Catalog consumed
-  by Mission Intelligence. It validates known exact contracts and scalar parameters, never current
-  providers; live Node inventory remains Control eligibility evidence. The current catalog does not
-  freeze the final Capability/Operation/Requirement model.
+- `contracts/capability/v0.2/` is the deployment-independent Canonical Capability Catalog consumed
+  by Mission Intelligence. It separates capabilities/attributes from operations/parameters and
+  validates exact requirements without current providers; live Node inventory remains Control
+  eligibility evidence. The current catalog does not freeze embodiment taxonomy, structured entity
+  schemas, or Catalog distribution/negotiation.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

@@ -13,7 +13,7 @@ from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.request_record import IntentAssessment
+from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 
 
@@ -410,8 +410,7 @@ class ResponsesMissionInterpreter:
 
     def interpret(
         self,
-        instruction: str,
-        messages: tuple[str, ...],
+        dialogue: tuple[DialogueTurn, ...],
     ) -> IntentAssessment:
         """Return grounded intent or explicit questions without decomposing or executing Tasks."""
         schema: JSONObject = {
@@ -429,10 +428,7 @@ class ResponsesMissionInterpreter:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.interpreter_path),
             input_text=json.dumps(
-                {
-                    "instruction": instruction,
-                    "messages": list(messages),
-                },
+                {"dialogue": [turn.to_json() for turn in dialogue]},
                 ensure_ascii=False,
                 sort_keys=True,
             ),

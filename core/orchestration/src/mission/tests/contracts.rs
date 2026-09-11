@@ -155,7 +155,7 @@ fn v0_4_rejects_unbacked_task_coupling_mode() {
 fn phase1_fixture_contains_complete_dag_and_context() {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     let plan = decode_mission_plan(source).expect("Phase 1 MissionPlan should validate");
-    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
     assert_eq!(plan.contexts().len(), 1);
     assert_eq!(plan.task_graph().tasks().len(), 4);
     assert_eq!(
@@ -164,6 +164,40 @@ fn phase1_fixture_contains_complete_dag_and_context() {
             .resource_scope(plan.task_graph().tasks()[1].requirement().roles()[0].role_id()),
         domain::ResourceBindingScope::Context
     );
+}
+
+/// MissionPlan v0.7 keeps capability requirements, semantic operation, and completion distinct.
+#[test]
+fn v0_7_normalized_mission_round_trips_without_semantic_loss() {
+    let source = include_str!("../../../../../scenarios/mission-front-half-v0.7/mission-plan.json");
+    let plan = decode_mission_plan(source).expect("normalized MissionPlan should validate");
+    let task = &plan.task_graph().tasks()[0];
+    let role = &task.requirement().roles()[0];
+    let intent = task
+        .execution_intent(role.role_id())
+        .expect("normalized Role has one intent");
+
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
+    assert_eq!(plan.actors().len(), 1);
+    assert_eq!(role.capability_requirements().len(), 3);
+    assert_ne!(
+        intent.operation().as_legacy_contract(),
+        role.capability_requirements()[0].contract()
+    );
+    assert!(
+        task.requirement()
+            .timing()
+            .estimated_duration_ms()
+            .is_none()
+    );
+    assert!(matches!(
+        task.satisfaction_basis(),
+        domain::TaskSatisfactionBasis::VerifierEvidence(_)
+    ));
+
+    let restored = decode_mission_plan(&mission_plan_json(&plan).to_string())
+        .expect("normalized checkpoint should restore");
+    assert_eq!(restored, plan);
 }
 
 /// An exact submission retry returns existing authority without creating a second Group.
@@ -308,7 +342,7 @@ fn distributed_spatial_memory_fixtures_decode_in_both_directions() {
     ];
     for fixture in fixtures {
         let plan = decode_mission_plan(fixture).expect("Spatial Memory fixture should validate");
-        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
+        assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
         assert_eq!(plan.contexts().len(), 1);
         assert_eq!(plan.task_graph().tasks().len(), 2);
     }
@@ -452,7 +486,7 @@ fn legacy_plan_schema_is_rejected() {
 fn v0_2_plan_decodes_without_execution_relations() {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.2/mission-plan.json");
     let plan = decode_mission_plan(source).expect("v0.2 compatibility input should decode");
-    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_6);
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
     assert!(
         plan.contexts()
             .iter()

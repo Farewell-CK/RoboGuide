@@ -54,7 +54,7 @@ def build_engine(
         ResponsesMissionPlanner(planner_settings, environment),
         controller,
         capability_catalog,
-        service_settings.approval_required_contracts,
+        service_settings.approval_policy,
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=(planner_settings.max_repair_attempts if reviewer is not None else 0),

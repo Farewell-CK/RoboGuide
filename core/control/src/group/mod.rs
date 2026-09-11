@@ -90,7 +90,7 @@ pub(crate) struct UnboundRole {
 }
 
 /// A dynamic group of members, roles, and resource bindings.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionGroup {
     /// Dynamic execution-group identity.
     pub(crate) group_id: ExecutionGroupId,

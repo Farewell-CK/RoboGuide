@@ -9,6 +9,7 @@ mod memory;
 mod node_gateway;
 mod spatial_memory;
 mod state_record;
+mod task_satisfaction;
 
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
 pub use memory::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
@@ -18,6 +19,9 @@ pub use spatial_memory::{
     MapCatalogReader, MapCatalogWriter,
 };
 pub use state_record::{StateRecordError, StateRecordReader, StateRecordWriter};
+pub use task_satisfaction::{
+    TaskSatisfactionEvidenceReader, TaskSatisfactionEvidenceWriter, TaskSatisfactionStateError,
+};
 
 use domain::{
     CorrelationId, EventId, EventPayload, NodeHealthObservation, NodeId, NodeLivenessObservation,

@@ -9,6 +9,9 @@ from mission.request_engine import (
 )
 from mission.request_record import (
     MISSION_REQUEST_SCHEMA,
+    DialogueSpeaker,
+    DialogueTurn,
+    DialogueTurnKind,
     IntentAssessment,
     MissionInterpreter,
     MissionRequestError,
@@ -19,6 +22,9 @@ from mission.request_store import MissionRequestStore
 
 __all__ = [
     "Clock",
+    "DialogueSpeaker",
+    "DialogueTurn",
+    "DialogueTurnKind",
     "IdGenerator",
     "IntentAssessment",
     "MISSION_REQUEST_SCHEMA",

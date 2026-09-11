@@ -10,7 +10,9 @@
 mod actor;
 mod allocation;
 mod capability;
+mod capability_requirement;
 mod context;
+mod duration_estimate;
 mod error;
 mod event;
 mod execution;
@@ -40,11 +42,16 @@ pub use allocation::{
     ResourceBindingScope,
 };
 pub use capability::{Capability, CapabilityKind, LocalRuntime};
+pub use capability_requirement::{
+    CapabilityConstraint, CapabilityConstraintOperator, CapabilityRequirement,
+};
 pub use context::{ContextRole, CoordinationContext, TaskContinuity};
+pub use duration_estimate::TaskDurationEstimate;
 pub use error::DomainError;
 pub use event::{EventPayload, EventRecord};
 pub use execution::{
     CapabilityContractRef, ExecutionCommand, ExecutionIntent, ExecutionValue, NodeEvent,
+    OperationRef,
 };
 pub use execution_relation::{
     CoordinationMechanism, ExecutionCouplingMode, ExecutionRelationKind, ExecutionRelationSpec,
@@ -94,7 +101,9 @@ pub use state_model::{
 };
 pub use task_execution::{TaskExecution, TaskExecutionLifecycle};
 pub use task_requirement::{RoleRequirement, TaskRequirement};
-pub use task_satisfaction::TaskSatisfactionBasis;
+pub use task_satisfaction::{
+    TaskSatisfactionBasis, TaskSatisfactionEvidence, VerifierSatisfactionSpec,
+};
 pub use time::{TaskTiming, TimestampMs};
 
 /// Version identifier for the first cross-language Mission Plan contract.
@@ -117,6 +126,9 @@ pub const MISSION_PLAN_SCHEMA_V0_5: &str = "roboguide.mission-plan/v0.5";
 
 /// Version identifier for Mission Plans declaring Task satisfaction evidence policy.
 pub const MISSION_PLAN_SCHEMA_V0_6: &str = "roboguide.mission-plan/v0.6";
+
+/// Version identifier for normalized capability, operation, actor, timing, and satisfaction semantics.
+pub const MISSION_PLAN_SCHEMA_V0_7: &str = "roboguide.mission-plan/v0.7";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";

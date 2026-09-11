@@ -3,7 +3,7 @@
 use crate::{ActorId, MissionId, NodeId};
 
 /// Declares one logical participant in a mission without selecting a node.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MissionActor {
     /// Stable mission-local identity.
     id: ActorId,

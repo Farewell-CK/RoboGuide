@@ -1,6 +1,6 @@
 //! Serde-only MissionPlan wire documents.
 
-use super::nullable_millis::NullableMillis;
+use super::nullable_millis::{NullableMillis, NullableMillisField};
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 
@@ -26,6 +26,17 @@ pub(super) struct MissionDocument {
     pub(super) id: String,
     /// User-visible outcome.
     pub(super) objective: String,
+    /// Explicit logical Actor declarations introduced by v0.7.
+    #[serde(default)]
+    pub(super) actors: Option<Vec<MissionActorDocument>>,
+}
+
+/// Wire Mission-scoped logical Actor declaration.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct MissionActorDocument {
+    /// Stable Actor identity inside the Mission.
+    pub(super) id: String,
 }
 
 /// Wire semantic context.
@@ -207,6 +218,24 @@ pub(super) struct TaskDocument {
 pub(super) struct TaskSatisfactionDocument {
     /// Evidence basis Orchestration may accept after local execution ends.
     pub(super) basis: TaskSatisfactionBasisDocument,
+    /// Human-readable semantic effect whose evidence is being accepted.
+    #[serde(default)]
+    pub(super) expected_effect: Option<String>,
+    /// External verifier policy required by verifier-evidence basis.
+    #[serde(default)]
+    pub(super) verifier: Option<VerifierSatisfactionDocument>,
+}
+
+/// Wire source-aware external verifier satisfaction policy.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct VerifierSatisfactionDocument {
+    /// Canonical verifier/evidence contract.
+    pub(super) contract: ContractDocument,
+    /// Exact semantic predicate the verifier must establish.
+    pub(super) predicate: String,
+    /// Maximum RoboGuide-local receive age for accepted evidence.
+    pub(super) max_evidence_age_ms: u64,
 }
 
 /// Closed satisfaction bases implemented by the current Mission boundary.
@@ -215,6 +244,8 @@ pub(super) struct TaskSatisfactionDocument {
 pub(super) enum TaskSatisfactionBasisDocument {
     /// Successful aggregate Role execution reports satisfy the Task.
     ExecutionReport,
+    /// Separate verifier evidence satisfies the Task.
+    VerifierEvidence,
 }
 
 /// Wire relative scheduling constraints anchored to Mission acceptance.
@@ -228,7 +259,8 @@ pub(super) struct TimingDocument {
     /// Optional completion deadline offset.
     pub(super) completion_deadline_offset_ms: NullableMillis,
     /// Optional planning duration.
-    pub(super) estimated_duration_ms: NullableMillis,
+    #[serde(default)]
+    pub(super) estimated_duration_ms: NullableMillisField,
 }
 
 /// Wire Task role requirement and continuity declaration.
@@ -238,11 +270,17 @@ pub(super) struct RoleDocument {
     /// Task-local role identity.
     pub(super) id: String,
     /// Mission actor identity.
-    pub(super) actor: String,
+    #[serde(default)]
+    pub(super) actor: Option<String>,
     /// Canonical coarse capability kind.
-    pub(super) capability: CapabilityDocument,
+    #[serde(default)]
+    pub(super) capability: Option<CapabilityDocument>,
     /// Exact capability contract.
-    pub(super) contract: ContractDocument,
+    #[serde(default)]
+    pub(super) contract: Option<ContractDocument>,
+    /// Normalized capability and resource requirements introduced by v0.7.
+    #[serde(default)]
+    pub(super) requirements: Option<RoleRequirementsDocument>,
     /// Optional exclusive resource category.
     #[serde(default, deserialize_with = "resource_kind_field")]
     pub(super) resource_kind: ResourceKindField,
@@ -250,7 +288,11 @@ pub(super) struct RoleDocument {
     #[serde(default)]
     pub(super) resources: Option<Vec<ResourceRequirementDocument>>,
     /// Canonical execution operation.
-    pub(super) execution: IntentDocument,
+    #[serde(default)]
+    pub(super) execution: Option<IntentDocument>,
+    /// Semantic operation intent introduced by v0.7.
+    #[serde(default)]
+    pub(super) execution_intent: Option<IntentDocument>,
     /// Optional ContextRole identity.
     pub(super) context_role: Option<String>,
     /// Resource lifetime for this role.
@@ -302,9 +344,60 @@ pub(super) struct ContractDocument {
 #[serde(deny_unknown_fields)]
 pub(super) struct IntentDocument {
     /// Exact capability contract invoked by this intent.
-    pub(super) capability_contract: ContractDocument,
+    #[serde(default)]
+    pub(super) capability_contract: Option<ContractDocument>,
+    /// Canonical operation identity introduced by v0.7.
+    #[serde(default)]
+    pub(super) operation: Option<ContractDocument>,
+    /// Semantic objective delegated to Local EAIOS.
+    #[serde(default)]
+    pub(super) objective: Option<String>,
     /// Transport-neutral scalar parameters.
     pub(super) parameters: BTreeMap<String, serde_json::Value>,
+}
+
+/// Wire normalized Role requirement set.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RoleRequirementsDocument {
+    /// Exact capability requirements evaluated together.
+    pub(super) capabilities: Vec<CapabilityRequirementDocument>,
+    /// Exclusive resource requirements retained from v0.5.
+    pub(super) resources: Vec<ResourceRequirementDocument>,
+}
+
+/// Wire exact capability requirement and feasibility envelope.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CapabilityRequirementDocument {
+    /// Exact canonical capability identity.
+    pub(super) contract: ContractDocument,
+    /// Typed feasibility predicates over provider-declared attributes.
+    pub(super) constraints: Vec<CapabilityConstraintDocument>,
+}
+
+/// Wire comparison over one provider capability attribute.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CapabilityConstraintDocument {
+    /// Catalog-defined attribute identity.
+    pub(super) attribute: String,
+    /// Closed comparison operator.
+    pub(super) operator: CapabilityConstraintOperatorDocument,
+    /// Scalar required value.
+    pub(super) value: serde_json::Value,
+}
+
+/// Supported capability feasibility comparisons.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum CapabilityConstraintOperatorDocument {
+    /// Exact equality.
+    Equals,
+    /// Provider value must be greater than or equal to requirement.
+    AtLeast,
+    /// Provider value must be less than or equal to requirement.
+    AtMost,
 }
 
 /// Supported capability kinds in MissionPlan v0.2.
@@ -334,7 +427,7 @@ pub(super) enum ResourceDocument {
 }
 
 /// Supported role resource lifetimes.
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum ScopeDocument {
     /// Release after Task terminal handling.

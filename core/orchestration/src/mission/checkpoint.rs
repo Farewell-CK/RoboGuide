@@ -268,9 +268,20 @@ impl MissionOrchestrator {
                     requirement.timing().earliest_start_offset_ms(),
                     decision.task_ref(),
                 )?;
-                let expected_end = requirement
-                    .timing()
-                    .estimated_duration_ms()
+                let duration_ms = decision
+                    .duration_estimate()
+                    .map(domain::TaskDurationEstimate::duration_ms)
+                    .or_else(|| requirement.timing().estimated_duration_ms());
+                if decision
+                    .duration_estimate()
+                    .is_some_and(|estimate| estimate.task_ref() != decision.task_ref())
+                {
+                    return Err(OrchestrationError::Mission(format!(
+                        "restored scheduling decision for {} carries cross-Task duration evidence",
+                        decision.task_ref()
+                    )));
+                }
+                let expected_end = duration_ms
                     .map(|duration| {
                         checked_plan_timestamp(decision.starts_at(), duration, decision.task_ref())
                     })
@@ -279,6 +290,7 @@ impl MissionOrchestrator {
                     requirement.timing(),
                     execution.accepted_at(),
                     decision.task_ref(),
+                    duration_ms,
                 )?;
                 if decision.starts_at() < earliest_at
                     || decision.ends_at() != expected_end

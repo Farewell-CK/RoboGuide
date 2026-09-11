@@ -3,6 +3,10 @@
 - Status: Accepted for Mission Semantic Admission v0.2
 - Date: 2026-09-10
 
+> Follow-up: ADR-0034 and Capability Catalog v0.2 separate capability/attribute definitions from
+> operation/parameter definitions and admit multiple constrained capability requirements. This ADR
+> remains the origin of the deployment-independent Catalog authority boundary.
+
 ## Context
 
 ADR-0030 separated Mission semantic admission from current deployment feasibility. Once live

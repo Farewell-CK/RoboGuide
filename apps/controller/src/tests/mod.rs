@@ -40,7 +40,7 @@ fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
         .iter()
         .map(|role| {
             let intent = match role.capability() {
-                CapabilityKind::Compute => test_intent("compute", "infer"),
+                Some(CapabilityKind::Compute) => test_intent("compute", "infer"),
                 _ => test_intent("mobility", "move"),
             };
             (role.role_id().clone(), intent)

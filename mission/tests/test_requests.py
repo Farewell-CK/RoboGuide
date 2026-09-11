@@ -22,6 +22,9 @@ from mission.controller import (
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.requests import (
+    DialogueSpeaker,
+    DialogueTurn,
+    DialogueTurnKind,
     IntentAssessment,
     MissionRequestEngine,
     MissionRequestError,
@@ -34,10 +37,10 @@ FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
 
 
-def test_request_v02_contract_accepts_current_and_compatible_plan_versions() -> None:
-    """Current request projections retain v0.3-v0.5 while admitting v0.6 plans."""
+def test_request_v03_contract_accepts_current_and_compatible_plan_versions() -> None:
+    """Current request projections retain v0.3-v0.6 while admitting v0.7 plans."""
     schema = json.loads(
-        Path("contracts/mission/request-v0.2/mission-request.schema.json").read_text(
+        Path("contracts/mission/request-v0.3/mission-request.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -48,6 +51,7 @@ def test_request_v02_contract_accepts_current_and_compatible_plan_versions() -> 
         "../v0.4/mission-plan.schema.json",
         "../v0.5/mission-plan.schema.json",
         "../v0.6/mission-plan.schema.json",
+        "../v0.7/mission-plan.schema.json",
     }
 
 
@@ -57,18 +61,41 @@ class FakeInterpreter:
     def __init__(self, assessments: list[IntentAssessment]) -> None:
         """Initialize a finite assessment queue."""
         self.assessments = assessments
-        self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.calls: list[tuple[DialogueTurn, ...]] = []
 
     def interpret(
         self,
-        instruction: str,
-        messages: tuple[str, ...],
+        dialogue: tuple[DialogueTurn, ...],
     ) -> IntentAssessment:
         """Record one grounding call and return its scripted result."""
-        self.calls.append((instruction, messages))
+        self.calls.append(dialogue)
         if not self.assessments:
             raise AssertionError("fake interpreter assessment queue is empty")
         return self.assessments.pop(0)
+
+
+def _dialogue(*answers: str) -> tuple[DialogueTurn, ...]:
+    """Build deterministic user dialogue for direct durable-record tests."""
+    turns = [
+        DialogueTurn(
+            "turn-0001",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.INSTRUCTION,
+            "test",
+            1,
+        )
+    ]
+    turns.extend(
+        DialogueTurn(
+            f"turn-{index + 2:04d}",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.CLARIFICATION_ANSWER,
+            answer,
+            1,
+        )
+        for index, answer in enumerate(answers)
+    )
+    return tuple(turns)
 
 
 class FakePlanner:
@@ -259,12 +286,21 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
 
     initial = engine.create("一只可以运输的机器狗")
     assert initial.lifecycle is MissionRequestLifecycle.NEEDS_CLARIFICATION
+    assert [turn.kind for turn in initial.dialogue] == [
+        DialogueTurnKind.INSTRUCTION,
+        DialogueTurnKind.CLARIFICATION_QUESTION,
+    ]
     assert planner.calls == []
     assert controller.submissions == []
 
     accepted = engine.add_message(initial.request_id, "把物品送到实验室入口")
     assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
     assert accepted.messages == ("把物品送到实验室入口",)
+    assert accepted.dialogue[-1].in_reply_to == initial.dialogue[-1].turn_id
+    projection = accepted.to_json()
+    assert "instruction" not in projection
+    assert "messages" not in projection
+    assert "dialogue" in projection
     assert len(planner.calls) == 1
     assert planner.calls[0][1] == GroundedIntent(
         "deliver the payload through the approved route",
@@ -291,12 +327,14 @@ def test_risk_policy_requires_revision_bound_approval(tmp_path: Path) -> None:
     waiting = engine.create("执行明确的运输任务")
     assert waiting.lifecycle is MissionRequestLifecycle.AWAITING_APPROVAL
     assert waiting.approval_required is True
+    assert waiting.approval_reasons == (f"legacy-contract:{_fixture_contracts()[0]}",)
     assert waiting.draft_digest is not None
     with pytest.raises(MissionRequestError, match="stale"):
         engine.approve(waiting.request_id, waiting.draft_revision + 1, waiting.draft_digest)
 
     accepted = engine.approve(waiting.request_id, waiting.draft_revision, waiting.draft_digest)
     assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    assert accepted.approval_reasons == waiting.approval_reasons
     assert len(controller.submissions) == 1
 
 
@@ -314,7 +352,9 @@ def test_zero_current_providers_do_not_block_semantically_valid_mission(tmp_path
     assert accepted.issues == ()
     assert len(controller.submissions) == 1
     assert controller.inventory_calls == 0
-    assert interpreter.calls == [("执行明确的运输任务", ())]
+    assert len(interpreter.calls) == 1
+    assert interpreter.calls[0][0].content == "执行明确的运输任务"
+    assert interpreter.calls[0][0].kind is DialogueTurnKind.INSTRUCTION
 
 
 def test_live_capability_readiness_does_not_change_mission_admission(
@@ -410,8 +450,7 @@ def test_v01_request_projection_restores_with_empty_review_history() -> None:
     record = MissionRequestRecord(
         request_id="request-" + "1" * 32,
         mission_id="mission-" + "2" * 32,
-        instruction="test",
-        messages=(),
+        dialogue=_dialogue(),
         lifecycle=MissionRequestLifecycle.FAILED,
         assessment=None,
         plan=None,
@@ -424,6 +463,9 @@ def test_v01_request_projection_restores_with_empty_review_history() -> None:
     )
     value = record.to_json()
     value["schema_version"] = "roboguide.mission-request/v0.1"
+    value["instruction"] = record.instruction
+    value["messages"] = list(record.messages)
+    del value["dialogue"]
     del value["repair_attempts"]
     del value["review_history"]
 
@@ -431,7 +473,7 @@ def test_v01_request_projection_restores_with_empty_review_history() -> None:
 
     assert restored.repair_attempts == 0
     assert restored.review_history == ()
-    assert restored.to_json()["schema_version"] == "roboguide.mission-request/v0.2"
+    assert restored.to_json()["schema_version"] == "roboguide.mission-request/v0.3"
 
 
 def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None:
@@ -440,8 +482,7 @@ def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None
     record = MissionRequestRecord(
         request_id="request-" + "1" * 32,
         mission_id="mission-" + "2" * 32,
-        instruction="test",
-        messages=(),
+        dialogue=_dialogue(),
         lifecycle=MissionRequestLifecycle.SUBMITTING,
         assessment=None,
         plan=None,
@@ -475,8 +516,7 @@ def test_restart_fences_received_request_for_explicit_retry(tmp_path: Path) -> N
     record = MissionRequestRecord(
         request_id="request-" + "3" * 32,
         mission_id="mission-" + "4" * 32,
-        instruction="test",
-        messages=("clarified target",),
+        dialogue=_dialogue("clarified target"),
         lifecycle=MissionRequestLifecycle.RECEIVED,
         assessment=None,
         plan=None,

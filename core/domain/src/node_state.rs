@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `CapabilityContractRef` is a structured value rather than a scalar string, so
 /// serde_json cannot use it directly as an object key during controller checkpoint
 /// serialization.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NodeRegistration {
     /// Logical node identity exposed to DEAIOS.
     node_id: NodeId,
@@ -30,6 +30,9 @@ pub struct NodeRegistration {
     /// Latest observed readiness of each canonical contract.
     #[serde(default, with = "capability_readiness_map_serde")]
     capability_readiness: BTreeMap<CapabilityContractRef, bool>,
+    /// Provider-declared feasibility attributes for each exact capability.
+    #[serde(default, with = "capability_attribute_map_serde")]
+    capability_attributes: BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>>,
     /// Sensors exposed by configured local systems.
     sensors: Vec<SensorDescriptor>,
     /// Resources currently advertised by the node.
@@ -138,6 +141,38 @@ mod capability_kind_map_serde {
     }
 }
 
+/// Encodes structured capability attribute keys as checkpoint-safe records.
+mod capability_attribute_map_serde {
+    use super::{CapabilityContractRef, ExecutionValue};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    /// Serializes each capability attribute map as one typed record.
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    /// Restores capability attributes and rejects duplicate contract identities.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>>, D::Error> {
+        let entries: Vec<(CapabilityContractRef, BTreeMap<String, ExecutionValue>)> =
+            Vec::deserialize(deserializer)?;
+        let mut values = BTreeMap::new();
+        for (contract, attributes) in entries {
+            if values.insert(contract, attributes).is_some() {
+                return Err(serde::de::Error::custom(
+                    "duplicate capability attribute contract",
+                ));
+            }
+        }
+        Ok(values)
+    }
+}
+
 /// Encodes resource owner mappings as checkpoint-safe records.
 mod resource_owner_map_serde {
     use super::{LocalSystemId, ResourceId};
@@ -217,6 +252,7 @@ impl NodeRegistration {
                 .cloned()
                 .map(|contract| (contract, true))
                 .collect(),
+            capability_attributes: BTreeMap::new(),
             capability_kinds: exact_kind
                 .map(|kind| {
                     supported_contracts
@@ -357,6 +393,7 @@ impl NodeRegistration {
             capability_owners,
             capability_kinds,
             capability_readiness,
+            capability_attributes: BTreeMap::new(),
             sensors,
             resources,
             resource_owners,
@@ -415,6 +452,28 @@ impl NodeRegistration {
         }
         self.state_exports = state_exports;
         self.memory_providers = memory_providers;
+        Ok(self)
+    }
+
+    /// Adds provider-declared capability attributes after validating ownership and values.
+    pub fn with_capability_attributes(
+        mut self,
+        capability_attributes: BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>>,
+    ) -> Result<Self, DomainError> {
+        if capability_attributes.keys().any(|contract| {
+            !self.capability_owners.contains_key(contract)
+                || !self.supported_contracts.contains(contract)
+        }) || capability_attributes.values().any(|attributes| {
+            attributes
+                .iter()
+                .any(|(name, value)| name.trim().is_empty() || !value.is_finite())
+        }) {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "capability attributes must belong to declared contracts and be finite"
+                    .to_string(),
+            });
+        }
+        self.capability_attributes = capability_attributes;
         Ok(self)
     }
 
@@ -495,6 +554,13 @@ impl NodeRegistration {
         &self.capability_readiness
     }
 
+    /// Returns provider-declared feasibility attributes in deterministic contract/key order.
+    pub const fn capability_attributes(
+        &self,
+    ) -> &BTreeMap<CapabilityContractRef, BTreeMap<String, ExecutionValue>> {
+        &self.capability_attributes
+    }
+
     /// Returns the selective State channels declared by this node.
     pub fn state_exports(&self) -> &[StateExportDescriptor] {
         &self.state_exports
@@ -522,18 +588,32 @@ impl NodeRegistration {
 
     /// Checks whether this registration can satisfy one role requirement.
     pub fn supports_role(&self, requirement: &RoleRequirement) -> bool {
-        let has_capability = self.capabilities.iter().any(|capability| {
-            capability.kind() == requirement.capability() && capability.is_available()
+        let has_capability = requirement.capability().is_none_or(|kind| {
+            self.capabilities
+                .iter()
+                .any(|capability| capability.kind() == kind && capability.is_available())
         });
-        let has_contract = requirement.required_contract().is_none_or(|contract| {
-            self.contract_is_available_for_kind(contract, requirement.capability())
-        });
+        let has_contract = requirement
+            .capability_requirements()
+            .iter()
+            .all(|required| self.capability_requirement_is_available(required));
         let has_resource = requirement.resource_requirements().iter().all(|required| {
             self.resources.iter().any(|resource| {
                 resource.kind() == required.kind() && resource.capacity() >= required.units()
             })
         });
         has_capability && has_contract && has_resource
+    }
+
+    /// Checks exact readiness and every feasibility predicate for one capability requirement.
+    pub fn capability_requirement_is_available(&self, requirement: &CapabilityRequirement) -> bool {
+        self.contract_is_available(requirement.contract())
+            && requirement.constraints().iter().all(|constraint| {
+                self.capability_attributes
+                    .get(requirement.contract())
+                    .and_then(|attributes| attributes.get(constraint.attribute()))
+                    .is_some_and(|actual| constraint.is_satisfied_by(actual))
+            })
     }
 
     /// Returns all resource identifiers of the requested category.
@@ -554,7 +634,7 @@ impl NodeRegistration {
 }
 
 /// The latest shared registration, reported health, and liveness facts for one node.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NodeStateSnapshot {
     /// Local runtime, capability, and resource facts advertised by the node.
     registration: NodeRegistration,

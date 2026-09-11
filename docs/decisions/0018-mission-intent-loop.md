@@ -9,6 +9,10 @@
 >
 > ADR-0032 moves semantic Review out of the Planner's hidden call path and adds structured findings,
 > bounded Repair, and explicit clarification routing in Mission Request v0.2.
+>
+> ADR-0034 and Mission Request v0.3 replace `instruction + messages` persistence with structured
+> DialogueTurn history and replace contract-name-only approval with context-aware, revision-bound
+> policy reasons.
 
 ## Context
 

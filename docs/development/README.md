@@ -98,24 +98,32 @@ apps -> orchestration -> integration/control/runtime/state -> ports -> domain
 apps -> artifact-store -> ports -> domain
 ```
 
-Mission Intelligence 从 `contracts/capability/v0.1/catalog.json` 读取稳定 canonical contract
-词汇表，并在 Reviewer 与提交前确定性校验 exact identity 和 scalar parameters。Catalog 不读取
-Shared Node State，也不回答当前是否可调度；Control Matching 仍是 live eligibility authority。
+Mission Intelligence 从 `contracts/capability/v0.2/catalog.json` 读取稳定 Capability/Operation
+词汇表，并在 Reviewer 与提交前确定性校验 exact identity、scalar parameters 和 typed capability
+constraints。Catalog 不读取 Shared Node State，也不回答当前是否可调度；Control Matching 仍是
+live eligibility authority。
 
-Mission Request v0.2 由 Engine 显式编排 Draft -> Review -> bounded Repair；Reviewer 只产生
-结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回
-`NeedsClarification`。`request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py`
-分别承担 orchestration、versioned projection、SQLite persistence 与 review contracts。
+Mission Request v0.3 由 Engine 显式编排 Dialogue -> Draft -> Review -> bounded Repair；Reviewer
+只产生结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回
+`NeedsClarification`。用户 DialogueTurn 与 revision-bound review history 分开保存；
+`request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py` 分别承担 orchestration、
+versioned projection、SQLite persistence 与 review contracts。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。
 
 ### Heterogeneous EAIOS Integration Contract v0.2
 
-Domain `ExecutionIntent` 将 canonical `OperationRef` 与 scalar parameters 绑定到
-`PlannedTask` 的具体 Role；它与 RoleRequirement、Node assignment 和本地 Skill 名分离。
+Domain `ExecutionIntent` 将 semantic objective、canonical `OperationRef` 与 transport-neutral
+typed parameters 绑定到 `PlannedTask` 的具体 Role；它与 RoleRequirement、Node assignment 和
+本地 Skill 名分离。
 Matching/Scheduler 不解析 intent，Runtime 不翻译 intent。单一 `roboguide-node` 内的声明式
 Local Integration Engine 使用启动时冻结的 HTTP、dynamic gRPC 或 MCP workflow 完成本地映射。
+
+当前 formal Node Protocol invocation 仍只传输 canonical operation 与 scalar parameters；
+MissionPlan v0.7 的 objective 在 Domain 与 durable Mission projection 中保留，但尚未跨 Node
+Protocol 交给 Local EAIOS。补齐 objective 或更丰富 entity/constraint values 必须使用新的
+versioned protocol contract，不能在现有版本下静默加字段或由 RoleId 推导。
 
 `NodeGateway` 位于 `core/ports/node_gateway.rs`，status 是 fallible，且错误分类不包含具体
 传输类型。该同步 port 仍由 Runtime/testkit 的 legacy 测试合同使用，但旧 HTTP 实现已退役。
@@ -259,19 +267,20 @@ policy。Composition layer 仍分别调用 Proposal、Commit 和 Bind/Rebind，a
 Controller restore 会用 orchestration-owned acceptance time 与原始 Task timing 重算 calendar
 decision 的 earliest/end/latest activation，拒绝被扩宽的 checkpoint 证据。
 
-### Task Satisfaction Boundary v0.1
+### Task Satisfaction Boundary v0.2
 
-MissionPlan v0.6 在保留 v0.5 scheduling contract 的基础上，为每个 Task 增加
-`satisfaction.basis`。当前唯一实现值 `execution-report` 表示：Runtime 归约出的所有当前 Role
-成功终态可以由 Orchestration 接纳为该 Task 的 satisfaction evidence。它是明确的 bootstrap
-policy，不代表独立传感器或 World State 已验证物理目标。
+MissionPlan v0.7 为每个 Task 增加 explicit `expected_effect`，并支持
+`execution-report` 与 `verifier-evidence`。前者保留兼容 bootstrap；后者要求 exact verifier
+contract/predicate 和最大 evidence age。State 按 exact source 分开保存 verdict，使用 RoboGuide
+receive time 排序；它不融合来源，也不决定 Task 是否满足。
 
 Runtime 只报告 execution completion。Control 将 Task 从 `Active` 迁移到
 `AwaitingSatisfaction`，保留 Task binding、reservation 和后继 DAG fence，并记录
 `TaskExecutionCompleted`。Orchestration 随后应用 Mission policy，记录 `TaskSatisfied`，再释放
-Task-scoped ownership、推进 DAG，并仅在全部 Task 已满足后完成 Mission。历史 v0.2-v0.5
-MissionPlan 兼容输入归一化为 `execution-report`。State/Verifier-backed evidence、负向 verification
-与 disputed evidence 仍是后续独立合同。
+Task-scoped ownership、推进 DAG，并仅在全部 Task 已满足后完成 Mission。历史 v0.2-v0.6
+MissionPlan 兼容输入保持 `execution-report`。Orchestration 对 verifier evidence 校验 TaskRef、
+contract、predicate、positive verdict 与 receive-time freshness；多源 conflict resolution、
+negative-verdict recovery 和 disputed evidence policy 仍是后续独立合同。
 
 Mission Actor 的物理 placement 是独立的 Control deployment policy，不是 MissionPlan 字段。
 可选 `(MissionId, ActorId) -> NodeId` constraint 在首次 Matching 时生成 singleton candidate，

@@ -12,6 +12,7 @@ from mission.models import JSONObject, MissionPlan, MissionPlanError
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 RELATION_FIXTURE = Path("scenarios/execution-relations-v0.1/mission-plan.json")
+NORMALIZED_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 
 
 def _fixture_json() -> JSONObject:
@@ -23,6 +24,12 @@ def _fixture_json() -> JSONObject:
 def _relation_fixture_json() -> JSONObject:
     """Load a mutable execution coordination relation fixture."""
     decoded = json.loads(RELATION_FIXTURE.read_text(encoding="utf-8"))
+    return cast(JSONObject, decoded)
+
+
+def _v0_7_fixture_json() -> JSONObject:
+    """Load the normalized semantic MissionPlan fixture."""
+    decoded = json.loads(NORMALIZED_FIXTURE.read_text(encoding="utf-8"))
     return cast(JSONObject, decoded)
 
 
@@ -181,6 +188,42 @@ def test_v0_6_task_satisfaction_round_trip_and_v0_5_default() -> None:
     historical = MissionPlan.from_json(_v0_5_fixture_json())
     assert historical.tasks[0].satisfaction_basis == "execution-report"
     assert historical.to_json() == _v0_5_fixture_json()
+
+
+def test_v0_7_normalizes_actor_role_operation_timing_and_satisfaction() -> None:
+    """Current plans avoid duplicated Actor/contract fields and retain semantic completion."""
+    raw = _v0_7_fixture_json()
+    plan = MissionPlan.from_json(raw)
+    role = plan.tasks[0].roles[0]
+
+    assert plan.to_json() == raw
+    assert plan.mission.actors[0].actor_id == "courier"
+    assert role.actor_id is None
+    assert role.context_role == "carrier"
+    assert len(role.capabilities) == 3
+    assert role.execution.operation.name == "relocate"
+    assert role.execution.operation.to_json() != role.capabilities[0].contract.to_json()
+    assert plan.tasks[0].timing is not None
+    assert plan.tasks[0].timing.estimated_duration_ms is None
+    assert plan.tasks[0].satisfaction.expected_effect.startswith("急救包")
+    assert plan.tasks[0].satisfaction.verifier is not None
+
+
+def test_v0_7_rejects_duplicated_role_actor_and_planner_duration() -> None:
+    """Current Role and timing fields cannot reintroduce legacy duplication or guessed estimates."""
+    duplicated_actor = _v0_7_fixture_json()
+    tasks = cast(list[JSONObject], duplicated_actor["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    roles[0]["actor"] = "courier"
+    with pytest.raises(MissionPlanError, match="unknown=\\['actor'\\]"):
+        MissionPlan.from_json(duplicated_actor)
+
+    guessed_duration = _v0_7_fixture_json()
+    tasks = cast(list[JSONObject], guessed_duration["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["estimated_duration_ms"] = 120_000
+    with pytest.raises(MissionPlanError, match="estimated_duration_ms"):
+        MissionPlan.from_json(guessed_duration)
 
 
 def test_v0_6_requires_supported_task_satisfaction_basis() -> None:

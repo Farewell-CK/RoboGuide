@@ -108,6 +108,56 @@ impl MissionOrchestrator {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<domain::TaskExecution, OrchestrationError> {
+        self.prepare_task_with_optional_duration_estimate(
+            mission_id,
+            task_ref,
+            state,
+            control,
+            timestamp,
+            correlation_id,
+            events,
+            None,
+        )
+    }
+
+    /// Prepares one Ready Task using fresh source-aware duration evidence for time placement.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_task_with_duration_estimate<S: SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+        state: &S,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+        duration_estimate: &domain::TaskDurationEstimate,
+    ) -> Result<domain::TaskExecution, OrchestrationError> {
+        self.prepare_task_with_optional_duration_estimate(
+            mission_id,
+            task_ref,
+            state,
+            control,
+            timestamp,
+            correlation_id,
+            events,
+            Some(duration_estimate),
+        )
+    }
+
+    /// Implements shared preparation while keeping duration evidence outside MissionPlan.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_task_with_optional_duration_estimate<S: SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+        state: &S,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+        duration_estimate: Option<&domain::TaskDurationEstimate>,
+    ) -> Result<domain::TaskExecution, OrchestrationError> {
         let (plan, requirement, group_id, accepted_at, window_already_missed) = {
             let execution = self.executions.get(mission_id).ok_or_else(|| {
                 OrchestrationError::Mission(format!("unknown Mission {mission_id}"))
@@ -244,13 +294,12 @@ impl MissionOrchestrator {
         } else {
             let snapshot = control.scheduling_snapshot_for_task(timestamp, &group_id, task_ref)?;
             let scheduler = BoundedJointScheduler::new();
-            let outcome = match scheduler.schedule_task_with_snapshot(
+            let outcome = match scheduler.schedule_task_with_snapshot_and_estimate(
                 state,
                 &requirement,
                 &candidates,
                 &snapshot,
-                accepted_at,
-                timestamp,
+                control::TaskSchedulingContext::new(accepted_at, timestamp, duration_estimate),
             ) {
                 Ok(outcome) => outcome,
                 Err(control::SchedulerError::SearchLimited) => {

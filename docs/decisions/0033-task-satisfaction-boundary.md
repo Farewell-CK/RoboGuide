@@ -3,6 +3,11 @@
 - Status: Accepted for Task Satisfaction Boundary v0.1
 - Date: 2026-09-10
 
+> Follow-up: ADR-0034 and MissionPlan v0.7 add explicit expected effects plus source-aware
+> `verifier-evidence`. State preserves independent verdict evidence; Orchestration validates the
+> declared contract, predicate, positive verdict, and receive-time freshness before satisfaction.
+> Multi-source truth fusion and disputed-evidence policy remain deferred.
+
 ## Context
 
 Runtime previously reduced successful terminal role facts to `ObservedTaskResult::Succeeded`.

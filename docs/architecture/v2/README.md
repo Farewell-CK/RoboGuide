@@ -44,9 +44,18 @@ ADR-0030。
 Canonical Capability Catalog 是 Mission Intelligence 的稳定系统语言：Planner/Reviewer 只能
 引用 Catalog 中已知的 exact contract 与参数，未知 contract 使草案无效；Catalog 不包含实时
 Node、health、readiness 或 resource availability。已知 contract 即使当前 provider 为零，Mission
-仍可被接纳并在 Control Matching 后等待。v0.1 Catalog 只关闭 identity 与 scalar parameter
-schema，不冻结最终 Capability taxonomy、Operation/Requirement 分层或 feasibility envelope。
-详见 ADR-0031。
+仍可被接纳并在 Control Matching 后等待。v0.2 Catalog 分别定义 Capability attributes、
+Operation parameters 和 Operation 的 baseline capability requirements，但不冻结 embodiment
+taxonomy、结构化 entity schema 或动态 Catalog negotiation。详见 ADR-0031 与 ADR-0034。
+
+Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
+Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability
+并附带可由 Node profile 证明的 typed constraints；Operation 是下发给 Local EAIOS 的 canonical
+语义动作身份；ExecutionIntent 同时保留 Task-level objective、Operation 和结构化参数，不把
+RoleId、厂商 Skill 或执行步骤当作 operation。Canonical Capability Catalog 分别定义合法
+Capability/attribute 与 Operation/parameter，并声明 Operation 的基础 capability requirements。
+Live Node evidence 只由 Control 用于 Matching/Scheduling，Catalog membership 不表示当前可用。
+详见 ADR-0034。
 
 Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Planner 内部不可观察的
 异常路径。Reviewer 只返回结构化问题及所需下一步，不直接修改草案；Mission Request Engine
@@ -54,14 +63,22 @@ Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Plan
 `NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
 或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
 
-Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.6 为每个 Task 显式
-声明 `satisfaction.basis`；当前 bootstrap 只实现 `execution-report`，表示该 canonical Local
-EAIOS contract 的成功终态可被 Orchestration 接纳为 Task 满足证据。Runtime 只归约并报告
-execution completion，不拥有 Task 或 Mission completion authority。Control 先将 TaskExecution
-置为 `AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；Orchestration 应用 Mission 声明的
-policy 后才记录 `TaskSatisfied`、释放 Task-scoped binding、推进 DAG，并在所有 Task 满足后结束
-Mission。`execution-report` 不等于独立物理世界验证；State/Verifier evidence basis 仍需后续
-版本单独定义。详见 ADR-0033。
+Mission Actor、ContextRole 和 TaskRole 表达三个不同层级：Actor 是 Mission 范围的逻辑参与者，
+ContextRole 将 Actor 放入持续协作上下文，TaskRole 只引用 ContextRole 并声明该 Task 的执行槽。
+TaskRole 不重复 Actor。用户 Dialogue 使用有 speaker/kind/identity/reply/time 的持久化 turn；
+Draft/Review/Repair 属于单独的内部 deliberation trace。Planner 只声明用户/策略给出的时间约束，
+candidate/runtime-specific duration estimate 由 Control 消费带 provenance 的 planning estimate。
+Approval 是 operation、intent、world context 与 policy 的风险判断，不由 contract 名单单独决定。
+
+Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
+声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
+`verifier-evidence` 要求 exact verifier contract/predicate，并由 State 保存相互独立、带 source、
+source time 和 RoboGuide receive time 的 verdict。Runtime 只归约 execution completion，不拥有
+Task 或 Mission completion authority。Control 先将 TaskExecution 置为
+`AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；Orchestration 校验当前 Task policy、
+positive verdict 与 receive-time freshness 后才记录 `TaskSatisfied`、释放 Task-scoped binding、
+推进 DAG，并在所有 Task 满足后结束 Mission。该 slice 不进行多源融合、争议裁决或宣称全局
+物理真值。详见 ADR-0033 与 ADR-0034。
 
 ## 3. 核心抽象
 
@@ -83,13 +100,20 @@ Local System、Capability、Sensor、Resource、固定 Endpoint、受限字段�
 
 ### Capability 与 Resource
 
-Capability 描述 Node 当前能够执行什么；静态能力支持不代表运行时一定可用。
+Capability 描述 Node 可证明的执行能力与 feasibility envelope；Operation 描述对 Local EAIOS 的
+canonical semantic invocation。Embodiment 是 Node profile 的独立描述维度，不是互斥 Capability
+分类。Role Requirement 回答“承担这个槽位必须证明什么”，ExecutionIntent 回答“被选中后要完成
+什么语义目标”，二者不互相复制。静态能力支持不代表运行时一定可用。
 RoboGuide 联合调度四类资源：
 
 - Capability：可执行的具身或计算能力；
 - Compute：CPU、GPU、NPU、模型和执行容量；
 - Space：位置、路线、区域、占用和共享物理设施；
 - Time：前置关系、同步窗口、截止时间和占用区间。
+
+这里的 Time 是 Scheduler 的约束与 reservation 维度，不等于一个普通 `kind + integer capacity`
+资源。Space 也允许后续由 typed spatial evidence/authority 演化；当前 exclusive ResourceId 模型
+只是已实现的 bootstrap commitment profile，不是最终本体。
 
 ### Embodied Execution Group（具身执行组）
 
@@ -396,7 +420,8 @@ Detect → Reconcile → Adapt
 - Local Safety 不能被远程全局控制覆盖；
 - Shared Belief 表达不确定性、过期性、来源和冲突；
 - Node 在线状态与 Capability 可用性相互区分；
-- 任务完成是系统级 Execution State，不是单次动作的返回值；
+- Runtime execution completion 与 Orchestration-owned Task satisfaction 是不同系统事实，均不等于
+  单次 adapter 调用返回值；
 - Task DAG 与 live execution relation 相互补充：前者控制 readiness，后者约束并发运行；
 - Execution relation 的稳定端点是逻辑 Task/Role，不是 NodeId 或 adapter-local handle；
 - 恢复必须针对当前世界重新对账，不能重放过期命令；

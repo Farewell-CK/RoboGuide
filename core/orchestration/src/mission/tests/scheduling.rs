@@ -73,7 +73,7 @@ fn v0_5_defaults_task_satisfaction_to_execution_report() {
 
     let decoded = decode_mission_plan(&document.to_string()).expect("v0.5 remains compatible");
     assert!(decoded.task_graph().tasks().iter().all(|task| {
-        task.satisfaction_basis() == domain::TaskSatisfactionBasis::ExecutionReport
+        task.satisfaction_basis() == &domain::TaskSatisfactionBasis::ExecutionReport
     }));
 }
 
@@ -180,7 +180,14 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
         .get(first_role.actor_id().expect("fixture role has an actor"))
         .expect("fixture actor has requirements")
         .iter()
-        .map(|(kind, contract)| (contract.clone(), *kind))
+        .map(|requirement| {
+            (
+                requirement.contract().clone(),
+                first_role
+                    .capability()
+                    .expect("legacy fixture has a coarse capability"),
+            )
+        })
         .collect::<Vec<_>>();
     let actor_capabilities = actor_contracts
         .iter()
@@ -319,7 +326,7 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
         TaskId::new("task-competing").expect("task id valid"),
         vec![domain::RoleRequirement::new(
             domain::RoleId::new("worker").expect("role id valid"),
-            first_capability,
+            first_capability.expect("legacy fixture has a coarse capability"),
             Some(ResourceKind::Compute),
         )],
     )

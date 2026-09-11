@@ -207,6 +207,107 @@
         );
     }
 
+    /// Matching evaluates every canonical capability and its provider feasibility envelope.
+    #[test]
+    fn matching_uses_multiple_capability_requirements_and_constraints() {
+        let grasp = CapabilityContractRef::new("manipulation", "grasp", "v1")
+            .expect("grasp contract valid");
+        let navigate = CapabilityContractRef::new("mobility", "navigate", "v1")
+            .expect("navigation contract valid");
+        let relocate = CapabilityContractRef::new("object", "relocate", "v1")
+            .expect("relocation contract valid");
+        let contracts = vec![grasp.clone(), navigate.clone(), relocate.clone()];
+        let registration = |node_id: &str, resource_id: &str, payload_grams: i64| {
+            let mut attributes = BTreeMap::new();
+            attributes.insert(
+                grasp.clone(),
+                BTreeMap::from([(
+                    "max-payload-grams".to_string(),
+                    domain::ExecutionValue::Integer(payload_grams),
+                )]),
+            );
+            NodeRegistration::new_with_contracts(
+                NodeId::new(node_id).expect("node id valid"),
+                domain::LocalRuntime::new("fake-eaios", "0.1.0").expect("runtime valid"),
+                domain::NodeContractVersion::v0_1(),
+                vec![Capability::new(CapabilityKind::Transport, true)],
+                contracts.clone(),
+                vec![Resource::new(
+                    ResourceId::new(resource_id).expect("resource id valid"),
+                    ResourceKind::Space,
+                    1,
+                )
+                .expect("resource valid")],
+            )
+            .with_capability_attributes(attributes)
+            .expect("capability attributes valid")
+        };
+        let role = RoleId::new("delivery-role").expect("role id valid");
+        let requirement = TaskRequirement::new(
+            domain::MissionId::new("mission-constrained").expect("mission id valid"),
+            TaskId::new("relocate").expect("task id valid"),
+            vec![RoleRequirement::new_normalized(
+                role.clone(),
+                None,
+                vec![
+                    domain::CapabilityRequirement::new(
+                        grasp.clone(),
+                        vec![domain::CapabilityConstraint::new(
+                            "max-payload-grams",
+                            domain::CapabilityConstraintOperator::AtLeast,
+                            domain::ExecutionValue::Integer(3_000),
+                        )
+                        .expect("constraint valid")],
+                    )
+                    .expect("capability requirement valid"),
+                    domain::CapabilityRequirement::exact(navigate),
+                    domain::CapabilityRequirement::exact(relocate),
+                ],
+                vec![ResourceRequirement::new(ResourceKind::Space, 1)
+                    .expect("resource requirement valid")],
+            )
+            .expect("normalized Role valid")],
+        )
+        .expect("Task requirement valid");
+        let timestamp = TimestampMs::new(0);
+        let correlation_id = correlation();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        for node in [
+            registration("node-under-capacity", "space-a", 2_500),
+            registration("node-capable", "space-b", 5_000),
+        ] {
+            control
+                .register_node(
+                    &mut state,
+                    node,
+                    NodeStatus::new(NodeHealth::Online, timestamp),
+                    timestamp,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("node registration succeeds");
+        }
+
+        let candidates = control
+            .match_capabilities(
+                &state,
+                &requirement,
+                timestamp,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("one provider satisfies the complete feasibility envelope");
+        assert_eq!(
+            candidates
+                .for_role(&role)
+                .expect("Role candidates exist")
+                .node_ids(),
+            &[NodeId::new("node-capable").expect("node id valid")]
+        );
+    }
+
     /// Concurrent missions share node facts while retaining distinct TaskRefs.
     #[test]
     fn multi_mission_matching_shares_state_without_identity_collision() {

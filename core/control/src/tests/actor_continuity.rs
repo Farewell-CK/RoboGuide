@@ -367,7 +367,9 @@ fn actor_recovery_cannot_bypass_binding_or_placement_authority() {
         t1.task_id().clone(),
         vec![RoleRequirement::new(
             t1.roles()[0].role_id().clone(),
-            t1.roles()[0].capability(),
+            t1.roles()[0]
+                .capability()
+                .expect("legacy fixture has a coarse capability"),
             t1.roles()[0].resource_kind(),
         )],
     )

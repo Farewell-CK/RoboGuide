@@ -329,7 +329,7 @@ fn role_for_capability(
     let matching_roles = requirement
         .roles()
         .iter()
-        .filter(|role| role.capability() == capability)
+        .filter(|role| role.capability() == Some(capability))
         .collect::<Vec<_>>();
     match matching_roles.as_slice() {
         [role] => Ok(role.role_id().clone()),

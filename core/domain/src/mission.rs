@@ -54,6 +54,9 @@ pub struct PlannedTask {
     /// Mission-declared evidence basis for accepting the human-readable Task outcome.
     #[serde(default)]
     satisfaction_basis: TaskSatisfactionBasis,
+    /// Explicit semantic effect that must hold before the Task advances the DAG.
+    #[serde(default = "legacy_expected_effect")]
+    expected_effect: String,
 }
 
 impl PlannedTask {
@@ -85,9 +88,38 @@ impl PlannedTask {
         satisfaction_basis: TaskSatisfactionBasis,
     ) -> Result<Self, DomainError> {
         let description = description.into();
+        Self::new_with_completion(
+            description.clone(),
+            requirement,
+            execution_intents,
+            dependencies,
+            continuity,
+            description,
+            satisfaction_basis,
+        )
+    }
+
+    /// Creates a Task with an explicit expected effect and satisfaction evidence policy.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_completion(
+        description: impl Into<String>,
+        requirement: TaskRequirement,
+        execution_intents: BTreeMap<RoleId, ExecutionIntent>,
+        dependencies: Vec<TaskId>,
+        continuity: TaskContinuity,
+        expected_effect: impl Into<String>,
+        satisfaction_basis: TaskSatisfactionBasis,
+    ) -> Result<Self, DomainError> {
+        let description = description.into();
+        let expected_effect = expected_effect.into();
         if description.trim().is_empty() {
             return Err(DomainError::EmptyValue {
                 kind: "task description",
+            });
+        }
+        if expected_effect.trim().is_empty() {
+            return Err(DomainError::EmptyValue {
+                kind: "task expected effect",
             });
         }
         let unique_dependencies: BTreeSet<&TaskId> = dependencies.iter().collect();
@@ -131,22 +163,6 @@ impl PlannedTask {
                 ),
             });
         }
-        for role in requirement.roles() {
-            if let Some(contract) = role.required_contract() {
-                let intent = execution_intents
-                    .get(role.role_id())
-                    .expect("role set validated");
-                if intent.capability_contract() != contract {
-                    return Err(DomainError::InvalidMissionPlan {
-                        reason: format!(
-                            "task {} role {} contract differs from execution intent",
-                            requirement.task_id(),
-                            role.role_id()
-                        ),
-                    });
-                }
-            }
-        }
         Ok(Self {
             description,
             requirement,
@@ -154,6 +170,7 @@ impl PlannedTask {
             dependencies,
             continuity,
             satisfaction_basis,
+            expected_effect,
         })
     }
 
@@ -193,9 +210,19 @@ impl PlannedTask {
     }
 
     /// Returns the evidence policy Orchestration applies after local execution completes.
-    pub const fn satisfaction_basis(&self) -> TaskSatisfactionBasis {
-        self.satisfaction_basis
+    pub const fn satisfaction_basis(&self) -> &TaskSatisfactionBasis {
+        &self.satisfaction_basis
     }
+
+    /// Returns the semantic effect whose evidence is required for Task satisfaction.
+    pub fn expected_effect(&self) -> &str {
+        &self.expected_effect
+    }
+}
+
+/// Supplies a compatibility marker when restoring a pre-v0.7 checkpoint.
+fn legacy_expected_effect() -> String {
+    "legacy Task description defines the expected effect".to_string()
 }
 
 /// A validated acyclic Task Graph owned by one mission.
@@ -295,6 +322,9 @@ impl TaskGraph {
 pub struct MissionPlan {
     /// User-visible goal preserved across planning and recovery.
     goal: MissionGoal,
+    /// Mission-scoped logical participants independent of concrete Node placement.
+    #[serde(default)]
+    actors: Vec<MissionActor>,
     /// Validated task decomposition and execution requirements.
     task_graph: TaskGraph,
     /// Mission Intelligence contexts available to every planned Task.
@@ -305,6 +335,25 @@ impl MissionPlan {
     /// Creates a plan only when the goal and Task Graph share one mission identity.
     pub fn new(
         goal: MissionGoal,
+        task_graph: TaskGraph,
+        contexts: Vec<CoordinationContext>,
+    ) -> Result<Self, DomainError> {
+        let actors = contexts
+            .iter()
+            .flat_map(CoordinationContext::roles)
+            .map(ContextRole::actor_id)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(MissionActor::new)
+            .collect();
+        Self::new_with_actors(goal, actors, task_graph, contexts)
+    }
+
+    /// Creates a plan with explicit logical Actors and normalized ContextRole references.
+    pub fn new_with_actors(
+        goal: MissionGoal,
+        actors: Vec<MissionActor>,
         task_graph: TaskGraph,
         contexts: Vec<CoordinationContext>,
     ) -> Result<Self, DomainError> {
@@ -320,6 +369,21 @@ impl MissionPlan {
         if context_ids.len() != contexts.len() {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "Mission Plan has duplicate context ids".to_string(),
+            });
+        }
+        let actor_ids = actors.iter().map(MissionActor::id).collect::<BTreeSet<_>>();
+        if actor_ids.len() != actors.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "Mission Plan actors must be unique".to_string(),
+            });
+        }
+        if contexts
+            .iter()
+            .flat_map(CoordinationContext::roles)
+            .any(|role| !actor_ids.contains(role.actor_id()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "ContextRole references an undeclared Mission Actor".to_string(),
             });
         }
         let relation_ids = contexts
@@ -419,6 +483,7 @@ impl MissionPlan {
         }
         Ok(Self {
             goal,
+            actors,
             task_graph,
             contexts,
         })
@@ -426,12 +491,17 @@ impl MissionPlan {
 
     /// Returns the versioned adapter contract represented by this domain shape.
     pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_6
+        MISSION_PLAN_SCHEMA_V0_7
     }
 
     /// Returns the original mission goal.
     pub const fn goal(&self) -> &MissionGoal {
         &self.goal
+    }
+
+    /// Returns logical Mission Actors in stable declaration order.
+    pub fn actors(&self) -> &[MissionActor] {
+        &self.actors
     }
 
     /// Returns the validated Task Graph.

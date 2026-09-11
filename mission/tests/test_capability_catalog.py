@@ -9,10 +9,12 @@ from typing import cast
 
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
-from mission.models import ExecutionIntent, JSONObject, MissionPlan
+from mission.models import JSONObject, MissionPlan
 
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
+CURRENT_CATALOG = Path("contracts/capability/v0.2/catalog.json")
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
+NORMALIZED_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 
 
 def _catalog_json() -> JSONObject:
@@ -49,26 +51,52 @@ def test_catalog_loads_with_stable_contract_and_parameter_order() -> None:
 
 def test_catalog_covers_all_checked_in_mission_scenarios() -> None:
     """Every maintained MissionPlan fixture must use the configured semantic vocabulary."""
-    catalog = CanonicalCapabilityCatalog.load(CATALOG)
+    catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
     validated: list[Path] = []
+    supported_versions = {
+        "roboguide.mission-plan/v0.3",
+        "roboguide.mission-plan/v0.4",
+        "roboguide.mission-plan/v0.5",
+        "roboguide.mission-plan/v0.6",
+        "roboguide.mission-plan/v0.7",
+    }
     for path in sorted(Path("scenarios").rglob("*.json")):
         decoded: object = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(decoded, dict) or not str(decoded.get("schema_version", "")).startswith(
-            "roboguide.mission-plan/"
-        ):
+        if not isinstance(decoded, dict) or decoded.get("schema_version") not in supported_versions:
             continue
-        tasks = cast(list[JSONObject], decoded["tasks"])
-        for task_index, task in enumerate(tasks):
-            roles = cast(list[JSONObject], task["roles"])
-            for role_index, role in enumerate(roles):
-                path_prefix = f"{path}:tasks[{task_index}].roles[{role_index}].execution"
-                catalog.validate_intent(
-                    ExecutionIntent.from_json(role["execution"], path_prefix),
-                    path_prefix,
-                )
+        catalog.validate_plan(MissionPlan.from_json(cast(JSONObject, decoded)))
         validated.append(path)
 
     assert validated
+
+
+def test_v02_catalog_separates_capabilities_from_operations() -> None:
+    """A semantic operation may require several independently matchable capabilities."""
+    catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+    plan = MissionPlan.from_json(
+        cast(JSONObject, json.loads(NORMALIZED_FIXTURE.read_text(encoding="utf-8")))
+    )
+
+    catalog.validate_plan(plan)
+    role = plan.tasks[0].roles[0]
+    assert len(role.capabilities) == 3
+    assert role.execution.operation.name == "relocate"
+    assert role.execution.objective.startswith("将指定急救包")
+
+
+def test_v02_catalog_rejects_unknown_requirement_before_live_matching() -> None:
+    """Unknown language is invalid even though current provider availability is never consulted."""
+    raw = cast(JSONObject, json.loads(NORMALIZED_FIXTURE.read_text(encoding="utf-8")))
+    tasks = cast(list[JSONObject], raw["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    requirements = cast(JSONObject, roles[0]["requirements"])
+    capabilities = cast(list[JSONObject], requirements["capabilities"])
+    capability_contract = cast(JSONObject, capabilities[0]["contract"])
+    capability_contract["name"] = "magic-grasp"
+    plan = MissionPlan.from_json(raw)
+
+    with pytest.raises(CapabilityCatalogError, match="magic-grasp"):
+        CanonicalCapabilityCatalog.load(CURRENT_CATALOG).validate_plan(plan)
 
 
 def test_catalog_rejects_duplicate_contract_identity() -> None:

@@ -50,16 +50,16 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
 - 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner/Reviewer/Repairer；Mission
-  Request v0.2 持久化结构化 Review history，并将 repair、重新 clarification 与不可修复 reject
-  分流；Interpreter 不读取 live Node inventory，当前无 provider 不再使合法 Mission 被 Mission
-  Intelligence 拒绝；
-- `contracts/capability/v0.1/` 提供 deployment-independent Canonical Capability Catalog；Planner
-  与 Reviewer 获得同一词汇表，确定性 admission 拒绝 unknown contract、未知/缺失参数和类型
-  不匹配，但 Catalog membership 不代表当前存在 provider；
-- Mission 输出使用 `contracts/mission/v0.6/` 中的版本化合同；v0.2-v0.5 作为兼容输入；每个 Role 分别声明
-  Capability/Resource requirement 与 canonical `ExecutionIntent`，CoordinationContext 可声明
-  不绑定 NodeId 的 execution-time cross-role relation；每个 Task 显式声明 satisfaction evidence
-  policy，当前仅实现 `execution-report`；
+  Request v0.3 持久化结构化 Dialogue 和独立 Review history，并将 repair、重新 clarification 与
+  不可修复 reject 分流；Interpreter 不读取 live Node inventory，当前无 provider 不再使合法
+  Mission 被 Mission Intelligence 拒绝；
+- `contracts/capability/v0.2/` 提供 deployment-independent Canonical Capability Catalog；Planner
+  与 Reviewer 获得同一 capability/operation 词汇表，确定性 admission 拒绝 unknown identity、
+  未知/缺失参数、约束属性和类型不匹配，但 Catalog membership 不代表当前存在 provider；
+- Mission 输出使用 `contracts/mission/v0.7/` 中的版本化合同；v0.2-v0.6 作为兼容输入；Mission
+  Actor、ContextRole 与 TaskRole 已正规化，每个 TaskRole 可声明多个 exact Capability requirements、
+  Resource requirements 与独立 semantic `ExecutionIntent`；每个 Task 显式声明 expected effect 及
+  `execution-report` 或 `verifier-evidence` satisfaction policy；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过
@@ -121,17 +121,19 @@ Control Matching/Scheduling/Commit 使用。实现可以使用 LLM、VLM、符�
 
 Canonical Capability Catalog 回答“这个 contract 是否属于 RoboGuide 当前语义语言”；live
 Inventory 与 Capability Matching 回答“当前谁能执行”。Mission Intelligence 在 Reviewer 前
-确定性校验 Catalog identity 与 scalar parameters，但不读取当前 provider。当前 v0.1 Catalog
-不解决多 capability requirements、feasibility envelope、embodiment taxonomy 或
-Capability/Operation/ExecutionIntent 的最终分层，见
-[`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md)。
+确定性校验 Catalog identity、scalar parameters 和 typed capability constraints，但不读取当前
+provider。当前 v0.2 Catalog 已区分 Capability、Operation 及其 baseline requirements；它仍不
+定义 embodiment taxonomy、结构化 entity schema 或动态 Catalog negotiation，见
+[`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md) 与
+[`ADR-0034`](docs/decisions/0034-mission-semantic-contract-normalization.md)。
 
 Mission Review 不再隐藏在 Planner 调用内部。Reviewer 对 exact draft 返回结构化 issue，Mission
 Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最多自动修复两次，
 `RequestClarification` 返回用户对话，`RejectDraft` 或 repair budget exhausted 才失败。Repairer
 不能补写 GroundedIntent 中不存在的用户事实，见
-[`ADR-0032`](docs/decisions/0032-mission-review-and-repair-loop.md)。当前 dialogue 仍是
-`instruction + messages`，完整 `DialogueTurn` 结构化留待后续。
+[`ADR-0032`](docs/decisions/0032-mission-review-and-repair-loop.md)。Mission Request v0.3 使用带
+speaker、kind、turn identity、reply identity 和 receive time 的 `DialogueTurn`；Planner draft、
+Reviewer issue 与 Repair attempt 保留在独立、revision-bound 的内部 deliberation trace。
 
 ### Control Plane
 
@@ -418,9 +420,11 @@ Runtime 是持续驱动已经 Commit 的分布式具身执行运行下去的执�
 Mission-level Group 的 live execution context。当前 slice 已实现 TaskExecution 的 execution
 identity、事件顺序归约、checkpoint fencing、recovery-required evidence 和 lifecycle
 transition。Runtime 成功终态只形成 `TaskExecutionCompleted`，Task 先进入
-`AwaitingSatisfaction`；Orchestration 按 MissionPlan v0.6 的 policy 接纳后才产生
-`TaskSatisfied`、推进 DAG 和释放 Task-scoped ownership。当前 `execution-report` 是显式 bootstrap
-policy，不等于独立物理世界验证。MissionPlan v0.6 还允许 Context 声明 coupling mode、typed Execution Coordination
+`AwaitingSatisfaction`；Orchestration 按 MissionPlan v0.7 的 policy 接纳后才产生
+`TaskSatisfied`、推进 DAG 和释放 Task-scoped ownership。`execution-report` 是兼容 bootstrap
+policy；`verifier-evidence` 要求 exact verifier contract/predicate、source-aware State evidence 和
+RoboGuide receive-time freshness。后者仍不是全局物理真值或多源 belief fusion。MissionPlan
+v0.7 还允许 Context 声明 coupling mode、typed Execution Coordination
 Relation、选择性的 Group shared view 和 transport-neutral peer channel；端点是稳定的
 `(TaskId, RoleId)` 逻辑槽，Runtime 将其解析到当前 attempt，归约
 `Dormant/Pending/Satisfied/Violated/Unknown`，并以 relation fence 阻止未经满足证明的 target
@@ -562,9 +566,9 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── mission-service.toml
 │   └── node.toml
 ├── contracts/
-│   ├── capability/v0.1/
-│   ├── mission/v0.2/ + v0.3/ + v0.4/ + v0.5/
-│   ├── mission/request-v0.1/ + request-v0.2/
+│   ├── capability/v0.1/ + v0.2/
+│   ├── mission/v0.2/ ... v0.7/
+│   ├── mission/request-v0.1/ ... request-v0.3/
 │   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ ... v0.7/
 │   ├── state/v0.1/

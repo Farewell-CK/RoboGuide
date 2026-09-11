@@ -21,10 +21,10 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert settings.prompts.reviewer_path.is_file()
     assert settings.prompts.repairer_path.is_file()
     assert settings.max_repair_attempts == 2
-    assert settings.contract_version == "roboguide.mission-plan/v0.6"
-    assert settings.schema_path == Path.cwd() / "contracts/mission/v0.6/mission-plan.schema.json"
+    assert settings.contract_version == "roboguide.mission-plan/v0.7"
+    assert settings.schema_path == Path.cwd() / "contracts/mission/v0.7/mission-plan.schema.json"
     assert settings.capability_catalog_path == (
-        Path.cwd() / "contracts/capability/v0.1/catalog.json"
+        Path.cwd() / "contracts/capability/v0.2/catalog.json"
     )
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
     assert "sk-" not in path.read_text(encoding="utf-8")
@@ -63,3 +63,7 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     assert "must not select concrete nodes" in planner_prompt
     assert "Reject meta-tasks" in reviewer_prompt
     assert "do not invent user facts" in repairer_prompt
+    assert "never invent an estimated duration" in planner_prompt
+    assert "Local EAIOS workflow steps are not over-decomposed" in reviewer_prompt
+    assert "Operation is what to execute" in planner_prompt
+    assert "do not consult or infer live Node inventory" in planner_prompt

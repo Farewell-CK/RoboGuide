@@ -11,6 +11,9 @@ from mission.controller import SubmissionReceipt
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.request_record import (
+    DialogueSpeaker,
+    DialogueTurn,
+    DialogueTurnKind,
     IntentAssessment,
     MissionRequestLifecycle,
     MissionRequestRecord,
@@ -30,9 +33,9 @@ class FakeInterpreter:
         """Create a finite number of identical resolved assessments."""
         self.remaining = count
 
-    def interpret(self, instruction: str, messages: tuple[str, ...]) -> IntentAssessment:
+    def interpret(self, dialogue: tuple[DialogueTurn, ...]) -> IntentAssessment:
         """Consume one call without using deployment facts or changing the objective."""
-        del instruction, messages
+        del dialogue
         if self.remaining <= 0:
             raise AssertionError("fake Interpreter call budget is exhausted")
         self.remaining -= 1
@@ -42,6 +45,19 @@ class FakeInterpreter:
             assumptions=(),
             open_questions=(),
         )
+
+
+def _dialogue() -> tuple[DialogueTurn, ...]:
+    """Build one deterministic instruction turn for direct persistence tests."""
+    return (
+        DialogueTurn(
+            "turn-0001",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.INSTRUCTION,
+            "test",
+            1,
+        ),
+    )
 
 
 class FakePlanner:
@@ -262,11 +278,14 @@ def test_review_clarification_returns_to_dialogue_without_repair(tmp_path: Path)
     )
     assert repairer.calls == []
     assert controller.submissions == []
+    assert waiting.dialogue[-1].kind is DialogueTurnKind.CLARIFICATION_QUESTION
+    assert len(waiting.review_history) == 1
 
     accepted = engine.add_message(waiting.request_id, "指定地点是实验室入口")
 
     assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
     assert accepted.messages == ("指定地点是实验室入口",)
+    assert accepted.dialogue[-1].in_reply_to == waiting.dialogue[-1].turn_id
     assert accepted.repair_attempts == 0
     assert [attempt.draft_revision for attempt in accepted.review_history] == [1, 2]
     assert len(controller.submissions) == 1
@@ -343,8 +362,7 @@ def test_restart_fences_interrupted_repair_for_explicit_retry(tmp_path: Path) ->
     record = MissionRequestRecord(
         request_id="request-" + "1" * 32,
         mission_id="mission-" + "2" * 32,
-        instruction="test",
-        messages=(),
+        dialogue=_dialogue(),
         lifecycle=MissionRequestLifecycle.REPAIRING,
         assessment=None,
         plan=None,

@@ -159,7 +159,11 @@ fn registration_supports_role(
         .iter()
         .filter(|capability| {
             capability.available
-                && capability.kind == capability_kind_name(role.capability())
+                && capability.kind
+                    == capability_kind_name(
+                        role.capability()
+                            .expect("legacy fixture has a coarse capability"),
+                    )
                 && capability.contracts.iter().any(|item| item == &contract)
         })
         .count();

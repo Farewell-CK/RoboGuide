@@ -89,26 +89,50 @@ impl BoundedJointScheduler {
         mission_accepted_at: TimestampMs,
         now: TimestampMs,
     ) -> Result<TaskSchedulingOutcome, SchedulerError> {
+        self.schedule_task_with_snapshot_and_estimate(
+            state,
+            requirement,
+            candidates,
+            snapshot,
+            TaskSchedulingContext::new(mission_accepted_at, now, None),
+        )
+    }
+
+    /// Jointly schedules with explicit attributed duration evidence outside the MissionPlan.
+    pub fn schedule_task_with_snapshot_and_estimate<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        requirement: &TaskRequirement,
+        candidates: &CandidateSet,
+        snapshot: &SchedulingSnapshot,
+        context: TaskSchedulingContext<'_>,
+    ) -> Result<TaskSchedulingOutcome, SchedulerError> {
         validate_candidate_set(requirement, candidates)?;
+        let explicit_estimate =
+            validate_duration_estimate(requirement, context.duration_estimate, context.now)?;
+        let duration_ms = explicit_estimate
+            .map(TaskDurationEstimate::duration_ms)
+            .or_else(|| requirement.timing().estimated_duration_ms());
         let timing = requirement.timing();
-        let earliest =
-            checked_timestamp_add(mission_accepted_at, timing.earliest_start_offset_ms())?;
-        let earliest = TimestampMs::new(earliest.as_millis().max(now.as_millis()));
+        let earliest = checked_timestamp_add(
+            context.mission_accepted_at,
+            timing.earliest_start_offset_ms(),
+        )?;
+        let earliest = TimestampMs::new(earliest.as_millis().max(context.now.as_millis()));
         let latest = timing
             .latest_start_offset_ms()
-            .map(|offset| checked_timestamp_add(mission_accepted_at, offset))
+            .map(|offset| checked_timestamp_add(context.mission_accepted_at, offset))
             .transpose()
             .map_err(|_| SchedulerError::InvalidTimeWindow)?;
         let completion_deadline = timing
             .completion_deadline_offset_ms()
-            .map(|offset| checked_timestamp_add(mission_accepted_at, offset))
+            .map(|offset| checked_timestamp_add(context.mission_accepted_at, offset))
             .transpose()
             .map_err(|_| SchedulerError::InvalidTimeWindow)?;
         let completion_start_deadline = completion_deadline.map(|deadline| {
-            let duration = timing
-                .estimated_duration_ms()
-                .expect("TaskTiming requires duration with completion deadline");
-            TimestampMs::new(deadline.as_millis() - duration)
+            duration_ms.map_or(deadline, |duration| {
+                TimestampMs::new(deadline.as_millis() - duration)
+            })
         });
         let latest_activation_at = match (latest, completion_start_deadline) {
             (Some(latest), Some(completion)) => Some(latest.min(completion)),
@@ -120,7 +144,7 @@ impl BoundedJointScheduler {
             return Ok(TaskSchedulingOutcome::WindowMissed);
         }
         let mut starts = vec![earliest];
-        if timing.estimated_duration_ms().is_some() {
+        if duration_ms.is_some() {
             starts.extend(
                 snapshot
                     .occupancies()
@@ -135,8 +159,7 @@ impl BoundedJointScheduler {
             if latest_activation_at.is_some_and(|latest| starts_at > latest) {
                 break;
             }
-            let ends_at = timing
-                .estimated_duration_ms()
+            let ends_at = duration_ms
                 .map(|duration| checked_timestamp_add(starts_at, duration))
                 .transpose()
                 .map_err(|_| SchedulerError::InvalidTimeWindow)?;
@@ -160,19 +183,20 @@ impl BoundedJointScheduler {
                 &mut expansions,
                 self.max_expansions,
             )? {
-                if starts_at > now && ends_at.is_none() {
+                if starts_at > context.now && ends_at.is_none() {
                     return Ok(TaskSchedulingOutcome::Deferred);
                 }
-                let decision = TaskSchedulingDecision::new(
-                    requirement.task_ref().clone(),
+                let decision = TaskSchedulingDecision {
+                    task_ref: requirement.task_ref().clone(),
                     selections,
                     starts_at,
                     ends_at,
                     latest_activation_at,
-                    snapshot.version(),
+                    snapshot_version: snapshot.version(),
                     expansions,
-                );
-                return Ok(if starts_at <= now {
+                    duration_estimate: explicit_estimate.cloned(),
+                };
+                return Ok(if starts_at <= context.now {
                     TaskSchedulingOutcome::SelectedNow(decision)
                 } else {
                     TaskSchedulingOutcome::SelectedFuture(decision)
@@ -253,6 +277,28 @@ impl BoundedJointScheduler {
         );
         Ok(RecoverySchedulingOutcome::Selected(decision))
     }
+}
+
+/// Validates task identity and receive-time freshness before scheduling consumes an estimate.
+fn validate_duration_estimate<'a>(
+    requirement: &TaskRequirement,
+    estimate: Option<&'a TaskDurationEstimate>,
+    now: TimestampMs,
+) -> Result<Option<&'a TaskDurationEstimate>, SchedulerError> {
+    let Some(estimate) = estimate else {
+        return Ok(None);
+    };
+    if estimate.task_ref() != requirement.task_ref() {
+        return Err(SchedulerError::InvalidDurationEstimate(
+            "evidence belongs to another Task".to_string(),
+        ));
+    }
+    if !estimate.is_fresh_at(now) {
+        return Err(SchedulerError::InvalidDurationEstimate(
+            "evidence is stale or from the future".to_string(),
+        ));
+    }
+    Ok(Some(estimate))
 }
 
 /// Validates exact CandidateSet coverage before search begins.

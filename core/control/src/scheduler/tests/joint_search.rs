@@ -398,3 +398,111 @@ fn joint_scheduler_distinguishes_window_miss_and_unbounded_future() {
         TaskSchedulingOutcome::Deferred
     );
 }
+
+/// Source-aware estimates bound scheduling without becoming Mission-authored constraints.
+#[test]
+fn joint_scheduler_consumes_fresh_external_duration_evidence() {
+    let mut state = InMemorySharedNodeState::new();
+    record_node(
+        &mut state,
+        registration("node-a", CapabilityKind::Compute, Vec::new()),
+    )
+    .expect("node records");
+    let role = scheduled_role("worker", CapabilityKind::Compute, Vec::new());
+    let task = TaskRequirement::new_scheduled(
+        MissionId::new("mission-estimate").expect("mission valid"),
+        TaskId::new("task-estimate").expect("task valid"),
+        vec![role.clone()],
+        domain::TaskTiming::new_constraints(0, None, Some(50)).expect("constraints valid"),
+    )
+    .expect("task valid");
+    let candidates = CandidateSet::new(
+        task.task_ref().clone(),
+        vec![RoleCandidates::new(
+            role.role_id().clone(),
+            vec![NodeId::new("node-a").expect("node valid")],
+        )],
+    );
+    let estimate = domain::TaskDurationEstimate::new(
+        task.task_ref().clone(),
+        20,
+        domain::StateSource::roboguide("duration-profile").expect("source valid"),
+        TimestampMs::new(10),
+        100,
+    )
+    .expect("estimate valid");
+
+    let TaskSchedulingOutcome::SelectedNow(decision) = BoundedJointScheduler::new()
+        .schedule_task_with_snapshot_and_estimate(
+            &state,
+            &task,
+            &candidates,
+            &SchedulingSnapshot::empty(),
+            TaskSchedulingContext::new(TimestampMs::new(0), TimestampMs::new(10), Some(&estimate)),
+        )
+        .expect("fresh estimate schedules")
+    else {
+        panic!("task should schedule immediately");
+    };
+    assert_eq!(decision.ends_at(), Some(TimestampMs::new(30)));
+    assert_eq!(decision.latest_activation_at(), Some(TimestampMs::new(30)));
+    assert_eq!(decision.duration_estimate(), Some(&estimate));
+}
+
+/// Scheduler rejects stale and cross-Task duration evidence before selecting resources.
+#[test]
+fn joint_scheduler_rejects_invalid_duration_evidence() {
+    let mut state = InMemorySharedNodeState::new();
+    record_node(
+        &mut state,
+        registration("node-a", CapabilityKind::Compute, Vec::new()),
+    )
+    .expect("node records");
+    let role = scheduled_role("worker", CapabilityKind::Compute, Vec::new());
+    let task = requirement("mission-estimate", "task-estimate", vec![role.clone()]);
+    let candidates = CandidateSet::new(
+        task.task_ref().clone(),
+        vec![RoleCandidates::new(
+            role.role_id().clone(),
+            vec![NodeId::new("node-a").expect("node valid")],
+        )],
+    );
+    let source = domain::StateSource::roboguide("duration-profile").expect("source valid");
+    let stale = domain::TaskDurationEstimate::new(
+        task.task_ref().clone(),
+        20,
+        source.clone(),
+        TimestampMs::new(10),
+        5,
+    )
+    .expect("estimate valid");
+    let wrong_task = domain::TaskDurationEstimate::new(
+        TaskRef::new(
+            MissionId::new("mission-estimate").expect("mission valid"),
+            TaskId::new("other-task").expect("task valid"),
+        ),
+        20,
+        source,
+        TimestampMs::new(20),
+        100,
+    )
+    .expect("estimate valid");
+    let scheduler = BoundedJointScheduler::new();
+
+    for estimate in [&stale, &wrong_task] {
+        assert!(matches!(
+            scheduler.schedule_task_with_snapshot_and_estimate(
+                &state,
+                &task,
+                &candidates,
+                &SchedulingSnapshot::empty(),
+                TaskSchedulingContext::new(
+                    TimestampMs::new(0),
+                    TimestampMs::new(20),
+                    Some(estimate),
+                ),
+            ),
+            Err(SchedulerError::InvalidDurationEstimate(_))
+        ));
+    }
+}

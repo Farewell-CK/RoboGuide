@@ -9,19 +9,25 @@ Approve it only when all of the following hold:
 - the Task Graph is acyclic and every dependency is necessary and resolvable;
 - every execution relation uses exact logical Task/Role endpoints in one Context, connects
   concurrently runnable Tasks, and does not contain Node or adapter-local identity;
-- each Task description states the expected semantic outcome rather than a local execution
-  procedure, and its satisfaction basis is exactly `execution-report`;
-- each role carries an actor, matching canonical capability contract and parameters without adapter-local skill names;
+- each Task is an independent RoboGuide scheduling, coordination, commitment, verification, or
+  recovery boundary; Local EAIOS workflow steps are not over-decomposed into separate Tasks;
+- each Task description and expected effect state the semantic outcome rather than a local execution
+  procedure, and its satisfaction basis does not claim stronger evidence than it actually requires;
+- Mission Actors, ContextRoles, and TaskRoles form one consistent reference chain without duplicated
+  Actor identity;
+- each Role declares all exact capability requirements separately from its canonical semantic
+  Operation and contains no adapter-local skill name;
 - every canonical contract and parameter conforms to the supplied Catalog without treating Catalog
   membership as proof of a current provider;
 - every task causes an observable physical-world or compute-state transition;
-- capabilities and resource categories stay within the contract vocabulary;
+- capability constraints and operation parameters stay within the Catalog vocabulary;
+- timing contains only grounded Mission constraints and never a model-invented duration estimate;
 - the plan does not select nodes, commit resources, create execution groups, or prescribe local
   actuator behavior.
 
-Treat `execution-report` as an explicit bootstrap acceptance policy, not proof that an independent
-physical-world verifier exists. Reject any plan text that claims stronger verification than the
-declared basis provides.
+Treat `execution-report` as local workflow completion accepted by explicit Mission policy, not proof
+of independent physical-world verification. Require `verifier-evidence` when the expected effect
+must be established independently, and reject claims stronger than the declared basis provides.
 
 Return no issues when approving. When rejecting, return one or more structured issues containing:
 

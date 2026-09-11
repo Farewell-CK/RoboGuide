@@ -1,4 +1,4 @@
-//! MissionPlan v0.2-v0.6 JSON boundary owned by Mission orchestration.
+//! MissionPlan v0.2-v0.7 JSON boundary owned by Mission orchestration.
 
 mod decode;
 mod enum_conversion;

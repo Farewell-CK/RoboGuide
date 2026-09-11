@@ -5,8 +5,24 @@ state_db = "artifacts/mission-service/requests.sqlite3"
 controller_endpoint = "http://127.0.0.1:8080"
 controller_timeout_seconds = 30
 max_request_bytes = 1048576
-approval_required_contracts = [
-  "mobility.move@v1",
-  "spatial.map.build@v0",
-  "spatial.map.import@v0",
-]
+
+[[service.approval_rules]]
+id = "mobility-move"
+operation = "mobility.move@v1"
+parameter_equals = {}
+objective_contains = []
+grounded_constraint_contains = []
+
+[[service.approval_rules]]
+id = "spatial-map-build"
+operation = "spatial.map.build@v0"
+parameter_equals = {}
+objective_contains = []
+grounded_constraint_contains = []
+
+[[service.approval_rules]]
+id = "spatial-map-import"
+operation = "spatial.map.import@v0"
+parameter_equals = {}
+objective_contains = []
+grounded_constraint_contains = []

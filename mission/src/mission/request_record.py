@@ -10,9 +10,10 @@ from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 
-MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.2"
+MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.3"
 _COMPATIBLE_MISSION_REQUEST_SCHEMAS = {
     "roboguide.mission-request/v0.1",
+    "roboguide.mission-request/v0.2",
     MISSION_REQUEST_SCHEMA,
 }
 
@@ -36,6 +37,86 @@ class MissionRequestLifecycle(StrEnum):
     BLOCKED = "Blocked"
     FAILED = "Failed"
     CANCELLED = "Cancelled"
+
+
+class DialogueSpeaker(StrEnum):
+    """Identify the semantic source of one user-facing dialogue turn."""
+
+    USER = "User"
+    MISSION_INTELLIGENCE = "MissionIntelligence"
+
+
+class DialogueTurnKind(StrEnum):
+    """Distinguish initial instruction from clarification exchange."""
+
+    INSTRUCTION = "Instruction"
+    CLARIFICATION_QUESTION = "ClarificationQuestion"
+    CLARIFICATION_ANSWER = "ClarificationAnswer"
+
+
+@dataclass(frozen=True, slots=True)
+class DialogueTurn:
+    """Persist one ordered user-facing turn independently from internal review evidence."""
+
+    turn_id: str
+    speaker: DialogueSpeaker
+    kind: DialogueTurnKind
+    content: str
+    created_at_ms: int
+    in_reply_to: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject blank identities/content and invalid timestamp or speaker-kind combinations."""
+        if not self.turn_id.strip() or not self.content.strip():
+            raise MissionRequestError("Dialogue turn identity and content must be nonblank")
+        if self.created_at_ms < 0:
+            raise MissionRequestError("Dialogue turn timestamp must be nonnegative")
+        expected_speaker = (
+            DialogueSpeaker.MISSION_INTELLIGENCE
+            if self.kind is DialogueTurnKind.CLARIFICATION_QUESTION
+            else DialogueSpeaker.USER
+        )
+        if self.speaker is not expected_speaker:
+            raise MissionRequestError("Dialogue turn speaker does not match its kind")
+        if self.kind is DialogueTurnKind.INSTRUCTION and self.in_reply_to is not None:
+            raise MissionRequestError("Dialogue instruction cannot reply to another turn")
+
+    def to_json(self) -> JSONObject:
+        """Serialize one closed Mission Request dialogue turn."""
+        return {
+            "turn_id": self.turn_id,
+            "speaker": self.speaker.value,
+            "kind": self.kind.value,
+            "content": self.content,
+            "created_at_ms": self.created_at_ms,
+            "in_reply_to": self.in_reply_to,
+        }
+
+    @classmethod
+    def from_json(cls, value: object, path: str) -> DialogueTurn:
+        """Restore one current dialogue turn without accepting internal planning fields."""
+        item = _json_object(value, path)
+        expected = {"turn_id", "speaker", "kind", "content", "created_at_ms", "in_reply_to"}
+        if set(item) != expected:
+            raise MissionRequestError(f"{path} fields do not match v0.3")
+        try:
+            speaker = DialogueSpeaker(_required_text(item, "speaker"))
+            kind = DialogueTurnKind(_required_text(item, "kind"))
+        except ValueError as error:
+            raise MissionRequestError(f"{path} has unknown speaker or kind") from error
+        in_reply_to = item["in_reply_to"]
+        if in_reply_to is not None and (
+            not isinstance(in_reply_to, str) or not in_reply_to.strip()
+        ):
+            raise MissionRequestError(f"{path}.in_reply_to must be nonblank text or null")
+        return cls(
+            turn_id=_required_text(item, "turn_id"),
+            speaker=speaker,
+            kind=kind,
+            content=_required_text(item, "content"),
+            created_at_ms=_required_integer(item, "created_at_ms"),
+            in_reply_to=in_reply_to,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,8 +175,7 @@ class MissionInterpreter(Protocol):
 
     def interpret(
         self,
-        instruction: str,
-        messages: tuple[str, ...],
+        dialogue: tuple[DialogueTurn, ...],
     ) -> IntentAssessment:
         """Return a normalized objective or explicit open questions."""
         ...
@@ -107,8 +187,7 @@ class MissionRequestRecord:
 
     request_id: str
     mission_id: str
-    instruction: str
-    messages: tuple[str, ...]
+    dialogue: tuple[DialogueTurn, ...]
     lifecycle: MissionRequestLifecycle
     assessment: IntentAssessment | None
     plan: MissionPlan | None
@@ -120,6 +199,7 @@ class MissionRequestRecord:
     updated_at_ms: int
     repair_attempts: int = 0
     review_history: tuple[MissionPlanReviewAttempt, ...] = ()
+    approval_reasons: tuple[str, ...] = ()
 
     def to_json(self) -> JSONObject:
         """Serialize the versioned status projection returned by the Mission Request API."""
@@ -127,14 +207,14 @@ class MissionRequestRecord:
             "schema_version": MISSION_REQUEST_SCHEMA,
             "request_id": self.request_id,
             "mission_id": self.mission_id,
-            "instruction": self.instruction,
-            "messages": list(self.messages),
+            "dialogue": [turn.to_json() for turn in self.dialogue],
             "lifecycle": self.lifecycle.value,
             "assessment": self.assessment.to_json() if self.assessment is not None else None,
             "plan": self.plan.to_json() if self.plan is not None else None,
             "draft_revision": self.draft_revision,
             "draft_digest": self.draft_digest,
             "approval_required": self.approval_required,
+            "approval_reasons": list(self.approval_reasons),
             "issues": list(self.issues),
             "repair_attempts": self.repair_attempts,
             "review_history": [attempt.to_json() for attempt in self.review_history],
@@ -153,9 +233,7 @@ class MissionRequestRecord:
             raise MissionRequestError("unsupported Mission Request schema")
         request_id = _required_text(value, "request_id")
         mission_id = _required_text(value, "mission_id")
-        instruction = _required_text(value, "instruction")
         lifecycle_text = _required_text(value, "lifecycle")
-        messages = _text_array(value, "messages")
         issues = _text_array(value, "issues")
         assessment_value = value.get("assessment")
         plan_value = value.get("plan")
@@ -170,17 +248,35 @@ class MissionRequestRecord:
         draft_revision = _required_integer(value, "draft_revision")
         created_at_ms = _required_integer(value, "created_at_ms")
         updated_at_ms = _required_integer(value, "updated_at_ms")
+        if schema_version == MISSION_REQUEST_SCHEMA:
+            dialogue_value = value.get("dialogue")
+            if not isinstance(dialogue_value, list):
+                raise MissionRequestError("dialogue must be an array")
+            dialogue = tuple(
+                DialogueTurn.from_json(turn, f"dialogue[{index}]")
+                for index, turn in enumerate(dialogue_value)
+            )
+        else:
+            instruction = _required_text(value, "instruction")
+            messages = _text_array(value, "messages")
+            dialogue = _legacy_dialogue(instruction, messages, created_at_ms)
+        _validate_dialogue(dialogue)
         draft_digest = value.get("draft_digest")
         if draft_digest is not None and not isinstance(draft_digest, str):
             raise MissionRequestError("draft_digest must be text or null")
         approval_required = value.get("approval_required")
         if not isinstance(approval_required, bool):
             raise MissionRequestError("approval_required must be a boolean")
+        approval_reasons = (
+            _text_array(value, "approval_reasons")
+            if schema_version == MISSION_REQUEST_SCHEMA
+            else ()
+        )
         try:
             lifecycle = MissionRequestLifecycle(lifecycle_text)
         except ValueError as error:
             raise MissionRequestError("unknown Mission Request lifecycle") from error
-        if schema_version == MISSION_REQUEST_SCHEMA:
+        if schema_version in {"roboguide.mission-request/v0.2", MISSION_REQUEST_SCHEMA}:
             repair_attempts = _required_integer(value, "repair_attempts")
             history_value = value.get("review_history")
             if not isinstance(history_value, list):
@@ -205,8 +301,7 @@ class MissionRequestRecord:
         return cls(
             request_id=request_id,
             mission_id=mission_id,
-            instruction=instruction,
-            messages=messages,
+            dialogue=dialogue,
             lifecycle=lifecycle,
             assessment=assessment,
             plan=plan,
@@ -218,7 +313,64 @@ class MissionRequestRecord:
             updated_at_ms=updated_at_ms,
             repair_attempts=repair_attempts,
             review_history=review_history,
+            approval_reasons=approval_reasons,
         )
+
+    @property
+    def instruction(self) -> str:
+        """Return the initial user instruction from the normalized dialogue source."""
+        return next(
+            turn.content for turn in self.dialogue if turn.kind is DialogueTurnKind.INSTRUCTION
+        )
+
+    @property
+    def messages(self) -> tuple[str, ...]:
+        """Return legacy clarification-answer text without duplicating durable state."""
+        return tuple(
+            turn.content
+            for turn in self.dialogue
+            if turn.kind is DialogueTurnKind.CLARIFICATION_ANSWER
+        )
+
+
+def _legacy_dialogue(
+    instruction: str, messages: tuple[str, ...], created_at_ms: int
+) -> tuple[DialogueTurn, ...]:
+    """Normalize v0.1-v0.2 instruction/messages into explicit user dialogue turns."""
+    turns = [
+        DialogueTurn(
+            "legacy-instruction",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.INSTRUCTION,
+            instruction,
+            created_at_ms,
+        )
+    ]
+    turns.extend(
+        DialogueTurn(
+            f"legacy-answer-{index + 1}",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.CLARIFICATION_ANSWER,
+            message,
+            created_at_ms,
+        )
+        for index, message in enumerate(messages)
+    )
+    return tuple(turns)
+
+
+def _validate_dialogue(dialogue: tuple[DialogueTurn, ...]) -> None:
+    """Require one initial instruction, unique identities, and valid reply references."""
+    if not dialogue or dialogue[0].kind is not DialogueTurnKind.INSTRUCTION:
+        raise MissionRequestError("dialogue must begin with one user instruction")
+    turn_ids = [turn.turn_id for turn in dialogue]
+    if len(set(turn_ids)) != len(turn_ids):
+        raise MissionRequestError("dialogue contains duplicate turn identities")
+    known: set[str] = set()
+    for turn in dialogue:
+        if turn.in_reply_to is not None and turn.in_reply_to not in known:
+            raise MissionRequestError("dialogue reply references an unknown or future turn")
+        known.add(turn.turn_id)
 
 
 def _json_object(value: JSONValue | object, field: str) -> JSONObject:

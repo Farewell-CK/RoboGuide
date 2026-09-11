@@ -84,6 +84,31 @@ impl TaskTiming {
         })
     }
 
+    /// Creates Mission-authored constraints without requiring a Planner duration estimate.
+    pub fn new_constraints(
+        earliest_start_offset_ms: u64,
+        latest_start_offset_ms: Option<u64>,
+        completion_deadline_offset_ms: Option<u64>,
+    ) -> Result<Self, DomainError> {
+        if latest_start_offset_ms.is_some_and(|latest| latest < earliest_start_offset_ms) {
+            return Err(DomainError::InvalidDuration {
+                kind: "task start window",
+            });
+        }
+        if completion_deadline_offset_ms.is_some_and(|deadline| deadline < earliest_start_offset_ms)
+        {
+            return Err(DomainError::InvalidDuration {
+                kind: "task completion deadline",
+            });
+        }
+        Ok(Self {
+            earliest_start_offset_ms,
+            latest_start_offset_ms,
+            completion_deadline_offset_ms,
+            estimated_duration_ms: None,
+        })
+    }
+
     /// Returns the earliest start offset from Mission acceptance.
     pub const fn earliest_start_offset_ms(&self) -> u64 {
         self.earliest_start_offset_ms

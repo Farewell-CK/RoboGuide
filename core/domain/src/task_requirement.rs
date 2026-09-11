@@ -5,16 +5,21 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 /// A role and the capability/resource facts required to perform it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RoleRequirement {
     /// Responsibility identity required by the task.
     role_id: RoleId,
     /// Capability category needed to perform the role.
-    capability: CapabilityKind,
+    #[serde(default, rename = "capability")]
+    legacy_capability: Option<CapabilityKind>,
     /// Optional mission actor whose node binding must remain continuous across tasks.
     actor_id: Option<ActorId>,
     /// Exact canonical capability contract required by the role.
-    contract: Option<CapabilityContractRef>,
+    #[serde(default, rename = "contract")]
+    legacy_contract: Option<CapabilityContractRef>,
+    /// Exact extensible capability requirements evaluated together by Control.
+    #[serde(default)]
+    capabilities: Vec<CapabilityRequirement>,
     /// Optional resource category that must be bound to the role.
     resource_kind: Option<ResourceKind>,
     /// Quantitative resource requirements evaluated together by Scheduler v0.2.
@@ -31,9 +36,10 @@ impl RoleRequirement {
     ) -> Self {
         Self {
             role_id,
-            capability,
+            legacy_capability: Some(capability),
             actor_id: None,
-            contract: None,
+            legacy_contract: None,
+            capabilities: Vec::new(),
             resource_kind,
             resources: resource_kind
                 .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
@@ -51,9 +57,10 @@ impl RoleRequirement {
     ) -> Self {
         Self {
             role_id,
-            capability,
+            legacy_capability: Some(capability),
             actor_id: Some(actor_id),
-            contract: Some(contract),
+            legacy_contract: Some(contract.clone()),
+            capabilities: vec![CapabilityRequirement::exact(contract)],
             resource_kind,
             resources: resource_kind
                 .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
@@ -80,9 +87,58 @@ impl RoleRequirement {
         }
         Ok(Self {
             role_id,
-            capability,
+            legacy_capability: Some(capability),
             actor_id,
-            contract,
+            legacy_contract: contract.clone(),
+            capabilities: contract
+                .into_iter()
+                .map(CapabilityRequirement::exact)
+                .collect(),
+            resource_kind: match resources.as_slice() {
+                [resource] => Some(resource.kind()),
+                _ => None,
+            },
+            resources,
+        })
+    }
+
+    /// Creates a normalized Role with one or more extensible capability requirements.
+    pub fn new_normalized(
+        role_id: RoleId,
+        actor_id: Option<ActorId>,
+        capabilities: Vec<CapabilityRequirement>,
+        resources: Vec<ResourceRequirement>,
+    ) -> Result<Self, DomainError> {
+        if capabilities.is_empty() {
+            return Err(DomainError::EmptyValue {
+                kind: "role capability requirements",
+            });
+        }
+        let mut contracts = BTreeSet::new();
+        if let Some(duplicate) = capabilities
+            .iter()
+            .map(CapabilityRequirement::contract)
+            .find(|contract| !contracts.insert((*contract).clone()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("role {role_id} repeats capability {duplicate}"),
+            });
+        }
+        let mut kinds = BTreeSet::new();
+        if resources
+            .iter()
+            .any(|resource| !kinds.insert(resource.kind()))
+        {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!("role {role_id} has duplicate resource kinds"),
+            });
+        }
+        Ok(Self {
+            role_id,
+            legacy_capability: None,
+            actor_id,
+            legacy_contract: None,
+            capabilities,
             resource_kind: match resources.as_slice() {
                 [resource] => Some(resource.kind()),
                 _ => None,
@@ -97,8 +153,8 @@ impl RoleRequirement {
     }
 
     /// Returns the required capability.
-    pub const fn capability(&self) -> CapabilityKind {
-        self.capability
+    pub const fn capability(&self) -> Option<CapabilityKind> {
+        self.legacy_capability
     }
 
     /// Returns the mission actor, when this role participates in continuity.
@@ -108,7 +164,22 @@ impl RoleRequirement {
 
     /// Returns the exact canonical contract, when declared.
     pub fn required_contract(&self) -> Option<&CapabilityContractRef> {
-        self.contract.as_ref()
+        self.capabilities
+            .first()
+            .map(CapabilityRequirement::contract)
+            .or(self.legacy_contract.as_ref())
+    }
+
+    /// Returns all canonical capability requirements evaluated for this Role.
+    pub fn capability_requirements(&self) -> Cow<'_, [CapabilityRequirement]> {
+        if self.capabilities.is_empty() {
+            match &self.legacy_contract {
+                Some(contract) => Cow::Owned(vec![CapabilityRequirement::exact(contract.clone())]),
+                None => Cow::Borrowed(&self.capabilities),
+            }
+        } else {
+            Cow::Borrowed(&self.capabilities)
+        }
     }
 
     /// Returns the optional resource category required by this role.
@@ -126,7 +197,7 @@ impl RoleRequirement {
 }
 
 /// A mission task's role-level execution requirements.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskRequirement {
     /// Mission-scoped task whose execution requirements are being described.
     task_ref: TaskRef,

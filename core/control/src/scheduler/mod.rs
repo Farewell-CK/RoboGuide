@@ -7,7 +7,7 @@
 use super::{CandidateSet, RecoveryCandidateSet};
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, NodeId, ResourceId, RoleAssignment, RoleId,
-    RoleRequirement, TaskRef, TaskRequirement, TimestampMs,
+    RoleRequirement, TaskDurationEstimate, TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,6 +30,8 @@ pub enum SchedulerError {
     SearchLimited,
     /// Time arithmetic could not represent the requested scheduling window.
     InvalidTimeWindow,
+    /// Supplied duration evidence was stale or belonged to another Task.
+    InvalidDurationEstimate(String),
 }
 
 impl Display for SchedulerError {
@@ -54,6 +56,9 @@ impl Display for SchedulerError {
             Self::SearchLimited => formatter.write_str("joint scheduler search budget exhausted"),
             Self::InvalidTimeWindow => {
                 formatter.write_str("joint scheduler time window is invalid")
+            }
+            Self::InvalidDurationEstimate(reason) => {
+                write!(formatter, "invalid task duration estimate: {reason}")
             }
         }
     }
@@ -120,6 +125,32 @@ impl RoleSchedulingSelection {
     }
 }
 
+/// Non-authoritative temporal context supplied to one Task scheduling decision.
+#[derive(Debug, Clone, Copy)]
+pub struct TaskSchedulingContext<'a> {
+    /// RoboGuide-local time at which Orchestration accepted the Mission.
+    mission_accepted_at: TimestampMs,
+    /// RoboGuide-local time at which this scheduling decision is evaluated.
+    now: TimestampMs,
+    /// Optional source-aware duration evidence admitted for this decision.
+    duration_estimate: Option<&'a TaskDurationEstimate>,
+}
+
+impl<'a> TaskSchedulingContext<'a> {
+    /// Creates one immutable scheduling context without granting estimate authority.
+    pub const fn new(
+        mission_accepted_at: TimestampMs,
+        now: TimestampMs,
+        duration_estimate: Option<&'a TaskDurationEstimate>,
+    ) -> Self {
+        Self {
+            mission_accepted_at,
+            now,
+            duration_estimate,
+        }
+    }
+}
+
 /// Complete normal-task selection evidence produced before proposal validation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSchedulingDecision {
@@ -137,30 +168,12 @@ pub struct TaskSchedulingDecision {
     snapshot_version: u64,
     /// Number of bounded search candidates examined.
     expansions: u32,
+    /// Explicit attributed duration evidence consumed by this decision, when supplied.
+    #[serde(default)]
+    duration_estimate: Option<TaskDurationEstimate>,
 }
 
 impl TaskSchedulingDecision {
-    /// Creates a complete normal-task decision from deterministic role selections.
-    fn new(
-        task_ref: TaskRef,
-        selections: Vec<RoleSchedulingSelection>,
-        starts_at: TimestampMs,
-        ends_at: Option<TimestampMs>,
-        latest_activation_at: Option<TimestampMs>,
-        snapshot_version: u64,
-        expansions: u32,
-    ) -> Self {
-        Self {
-            task_ref,
-            selections,
-            starts_at,
-            ends_at,
-            latest_activation_at,
-            snapshot_version,
-            expansions,
-        }
-    }
-
     /// Returns the mission-scoped task represented by this decision.
     pub const fn task_ref(&self) -> &TaskRef {
         &self.task_ref
@@ -194,6 +207,11 @@ impl TaskSchedulingDecision {
     /// Returns the number of candidate combinations examined.
     pub const fn expansions(&self) -> u32 {
         self.expansions
+    }
+
+    /// Returns explicit source-aware duration evidence retained with the decision.
+    pub const fn duration_estimate(&self) -> Option<&TaskDurationEstimate> {
+        self.duration_estimate.as_ref()
     }
 
     /// Builds fresh proposal-validation inputs without granting proposal authority.

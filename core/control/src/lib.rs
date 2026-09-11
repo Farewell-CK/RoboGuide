@@ -27,7 +27,7 @@ pub use reconciliation::{
 pub use scheduler::{
     BoundedJointScheduler, RecoverySchedulingDecision, RecoverySchedulingOutcome,
     RoleSchedulingSelection, SchedulerError, SchedulingOccupancy, SchedulingRoleConstraint,
-    SchedulingSnapshot, TaskSchedulingDecision, TaskSchedulingOutcome,
+    SchedulingSnapshot, TaskSchedulingContext, TaskSchedulingDecision, TaskSchedulingOutcome,
 };
 
 use coordination::Reservation;

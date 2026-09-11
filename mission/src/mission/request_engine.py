@@ -10,12 +10,16 @@ import uuid
 from dataclasses import replace
 from typing import Protocol
 
+from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionPlanSubmitter
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan
 from mission.planners import MissionPlanner
 from mission.request_record import (
+    DialogueSpeaker,
+    DialogueTurn,
+    DialogueTurnKind,
     IntentAssessment,
     MissionInterpreter,
     MissionRequestError,
@@ -75,7 +79,7 @@ class MissionRequestEngine:
         planner: MissionPlanner,
         controller: MissionPlanSubmitter,
         capability_catalog: CanonicalCapabilityCatalog,
-        approval_required_contracts: frozenset[str],
+        approval_policy: ApprovalPolicy | frozenset[str],
         id_generator: IdGenerator = uuid_token,
         clock: Clock = unix_time_ms,
         reviewer: MissionPlanReviewer | None = None,
@@ -92,7 +96,11 @@ class MissionRequestEngine:
         self._planner = planner
         self._controller = controller
         self._capability_catalog = capability_catalog
-        self._approval_required_contracts = approval_required_contracts
+        self._approval_policy = (
+            ApprovalPolicy.from_contracts(approval_policy)
+            if isinstance(approval_policy, frozenset)
+            else approval_policy
+        )
         self._id_generator = id_generator
         self._clock = clock
         self._reviewer = reviewer
@@ -111,14 +119,22 @@ class MissionRequestEngine:
             record = MissionRequestRecord(
                 request_id=f"request-{self._id_generator()}",
                 mission_id=f"mission-{self._id_generator()}",
-                instruction=instruction,
-                messages=(),
+                dialogue=(
+                    DialogueTurn(
+                        turn_id="turn-0001",
+                        speaker=DialogueSpeaker.USER,
+                        kind=DialogueTurnKind.INSTRUCTION,
+                        content=instruction,
+                        created_at_ms=now,
+                    ),
+                ),
                 lifecycle=MissionRequestLifecycle.RECEIVED,
                 assessment=None,
                 plan=None,
                 draft_revision=0,
                 draft_digest=None,
                 approval_required=False,
+                approval_reasons=(),
                 issues=(),
                 created_at_ms=now,
                 updated_at_ms=now,
@@ -152,12 +168,13 @@ class MissionRequestEngine:
                 )
             updated = self._update(
                 record,
-                messages=(*record.messages, text),
+                dialogue=(*record.dialogue, self._clarification_answer(record, text)),
                 lifecycle=MissionRequestLifecycle.RECEIVED,
                 assessment=None,
                 plan=None,
                 draft_digest=None,
                 approval_required=False,
+                approval_reasons=(),
                 issues=(),
                 repair_attempts=0,
             )
@@ -217,10 +234,14 @@ class MissionRequestEngine:
         """Interpret and plan until clarification, approval, or submission is required."""
         try:
             record = self._update(record, lifecycle=MissionRequestLifecycle.INTERPRETING)
-            assessment = self._interpreter.interpret(record.instruction, record.messages)
+            assessment = self._interpreter.interpret(record.dialogue)
             if assessment.open_questions:
                 return self._update(
                     record,
+                    dialogue=(
+                        *record.dialogue,
+                        *self._clarification_questions(record, assessment.open_questions),
+                    ),
                     lifecycle=MissionRequestLifecycle.NEEDS_CLARIFICATION,
                     assessment=assessment,
                     plan=None,
@@ -269,6 +290,7 @@ class MissionRequestEngine:
             draft_revision=revision,
             draft_digest=_plan_digest(plan),
             approval_required=False,
+            approval_reasons=(),
             issues=(),
             repair_attempts=(
                 record.repair_attempts if repair_attempts is None else repair_attempts
@@ -317,8 +339,13 @@ class MissionRequestEngine:
             if route is MissionReviewRoute.APPROVED:
                 return self._advance_admitted_draft(record)
             if route is MissionReviewRoute.CLARIFICATION:
+                questions = tuple(issue.message for issue in review.issues)
                 return self._update(
                     record,
+                    dialogue=(
+                        *record.dialogue,
+                        *self._clarification_questions(record, questions),
+                    ),
                     lifecycle=MissionRequestLifecycle.NEEDS_CLARIFICATION,
                     approval_required=False,
                     issues=(),
@@ -381,12 +408,16 @@ class MissionRequestEngine:
         plan = record.plan
         if plan is None:
             raise MissionRequestError("approved request has no MissionPlan")
-        contracts = _plan_contracts(plan)
-        if contracts & self._approval_required_contracts:
+        assessment = record.assessment
+        if assessment is None:
+            raise MissionRequestError("approved request has no grounded intent assessment")
+        decision = self._approval_policy.evaluate(plan, assessment.grounded_intent())
+        if decision.required:
             return self._update(
                 record,
                 lifecycle=MissionRequestLifecycle.AWAITING_APPROVAL,
                 approval_required=True,
+                approval_reasons=decision.matched_rule_ids,
             )
         return self._submit(record)
 
@@ -424,7 +455,7 @@ class MissionRequestEngine:
         self,
         record: MissionRequestRecord,
         *,
-        messages: tuple[str, ...] | None = None,
+        dialogue: tuple[DialogueTurn, ...] | None = None,
         lifecycle: MissionRequestLifecycle | None = None,
         assessment: IntentAssessment | None | _Unset = _UNSET,
         plan: MissionPlan | None | _Unset = _UNSET,
@@ -434,11 +465,12 @@ class MissionRequestEngine:
         issues: tuple[str, ...] | None = None,
         repair_attempts: int | None = None,
         review_history: tuple[MissionPlanReviewAttempt, ...] | None = None,
+        approval_reasons: tuple[str, ...] | None = None,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
             record,
-            messages=record.messages if messages is None else messages,
+            dialogue=record.dialogue if dialogue is None else dialogue,
             lifecycle=record.lifecycle if lifecycle is None else lifecycle,
             assessment=(record.assessment if isinstance(assessment, _Unset) else assessment),
             plan=record.plan if isinstance(plan, _Unset) else plan,
@@ -454,10 +486,51 @@ class MissionRequestEngine:
                 record.repair_attempts if repair_attempts is None else repair_attempts
             ),
             review_history=(record.review_history if review_history is None else review_history),
+            approval_reasons=(
+                record.approval_reasons if approval_reasons is None else approval_reasons
+            ),
             updated_at_ms=self._clock(),
         )
         self._store.save(updated)
         return updated
+
+    def _clarification_questions(
+        self, record: MissionRequestRecord, questions: tuple[str, ...]
+    ) -> tuple[DialogueTurn, ...]:
+        """Create ordered Mission Intelligence question turns without mixing review evidence."""
+        created_at_ms = self._clock()
+        offset = len(record.dialogue)
+        return tuple(
+            DialogueTurn(
+                turn_id=f"turn-{offset + index + 1:04d}",
+                speaker=DialogueSpeaker.MISSION_INTELLIGENCE,
+                kind=DialogueTurnKind.CLARIFICATION_QUESTION,
+                content=question,
+                created_at_ms=created_at_ms,
+            )
+            for index, question in enumerate(questions)
+        )
+
+    def _clarification_answer(self, record: MissionRequestRecord, text: str) -> DialogueTurn:
+        """Link one user answer to the latest unanswered clarification question when available."""
+        answered = {turn.in_reply_to for turn in record.dialogue if turn.in_reply_to is not None}
+        question = next(
+            (
+                turn
+                for turn in reversed(record.dialogue)
+                if turn.kind is DialogueTurnKind.CLARIFICATION_QUESTION
+                and turn.turn_id not in answered
+            ),
+            None,
+        )
+        return DialogueTurn(
+            turn_id=f"turn-{len(record.dialogue) + 1:04d}",
+            speaker=DialogueSpeaker.USER,
+            kind=DialogueTurnKind.CLARIFICATION_ANSWER,
+            content=text,
+            created_at_ms=self._clock(),
+            in_reply_to=None if question is None else question.turn_id,
+        )
 
     def _recover_interrupted(self) -> None:
         """Fence process-interrupted transient states instead of resuming model or HTTP effects."""
@@ -490,13 +563,3 @@ def _plan_digest(plan: MissionPlan) -> str:
         plan.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
-
-
-def _plan_contracts(plan: MissionPlan) -> frozenset[str]:
-    """Return every canonical contract required by a plan without selecting physical nodes."""
-    return frozenset(
-        f"{contract.namespace}.{contract.name}@{contract.version}"
-        for task in plan.tasks
-        for role in task.roles
-        for contract in (role.execution.capability_contract,)
-    )

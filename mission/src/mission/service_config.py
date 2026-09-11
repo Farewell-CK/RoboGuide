@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from mission.approval import ApprovalPolicy, ApprovalRule, ApprovalScalar
+
 
 class MissionServiceConfigError(ValueError):
     """Report an invalid Mission Service deployment setting."""
@@ -23,7 +25,18 @@ class MissionServiceSettings:
     controller_endpoint: str
     controller_timeout_seconds: float
     max_request_bytes: int
-    approval_required_contracts: frozenset[str]
+    approval_policy: ApprovalPolicy
+
+    @property
+    def approval_required_contracts(self) -> frozenset[str]:
+        """Return unconditional operation rules through the legacy diagnostics view."""
+        return frozenset(
+            rule.operation
+            for rule in self.approval_policy.rules
+            if not rule.parameter_equals
+            and not rule.objective_contains
+            and not rule.grounded_constraint_contains
+        )
 
 
 def load_service_settings(
@@ -50,13 +63,7 @@ def load_service_settings(
         raise MissionServiceConfigError(
             "service.controller_endpoint must be a fixed HTTP(S) origin"
         )
-    contracts_value = service.get("approval_required_contracts")
-    if not isinstance(contracts_value, list) or not all(
-        isinstance(contract, str) and _valid_contract(contract) for contract in contracts_value
-    ):
-        raise MissionServiceConfigError(
-            "service.approval_required_contracts must contain canonical contracts"
-        )
+    approval_policy = _approval_policy(service)
     root = repository_root if repository_root is not None else path.parent.parent
     return MissionServiceSettings(
         listen_host=host,
@@ -65,7 +72,7 @@ def load_service_settings(
         controller_endpoint=endpoint,
         controller_timeout_seconds=_positive_number(service, "controller_timeout_seconds"),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
-        approval_required_contracts=frozenset(contracts_value),
+        approval_policy=approval_policy,
     )
 
 
@@ -119,3 +126,89 @@ def _valid_contract(value: str) -> bool:
         )
         and not any(character.isspace() for character in name + version)
     )
+
+
+def _approval_policy(service: Mapping[str, object]) -> ApprovalPolicy:
+    """Parse current structured rules or normalize the legacy contract list."""
+    rules_value = service.get("approval_rules")
+    contracts_value = service.get("approval_required_contracts")
+    if rules_value is not None and contracts_value is not None:
+        raise MissionServiceConfigError(
+            "service cannot define both approval_rules and approval_required_contracts"
+        )
+    if rules_value is None:
+        if not isinstance(contracts_value, list) or not all(
+            isinstance(contract, str) and _valid_contract(contract) for contract in contracts_value
+        ):
+            raise MissionServiceConfigError(
+                "service.approval_required_contracts must contain canonical contracts"
+            )
+        return ApprovalPolicy.from_contracts(frozenset(contracts_value))
+    if not isinstance(rules_value, list):
+        raise MissionServiceConfigError("service.approval_rules must be an array of tables")
+    rules = tuple(
+        _approval_rule(value, f"service.approval_rules[{index}]")
+        for index, value in enumerate(rules_value)
+    )
+    try:
+        return ApprovalPolicy(rules)
+    except ValueError as error:
+        raise MissionServiceConfigError(str(error)) from error
+
+
+def _approval_rule(value: object, path: str) -> ApprovalRule:
+    """Parse one closed context-aware approval rule from deployment configuration."""
+    rule = _table(value, path)
+    expected = {
+        "id",
+        "operation",
+        "parameter_equals",
+        "objective_contains",
+        "grounded_constraint_contains",
+    }
+    if set(rule) != expected:
+        raise MissionServiceConfigError(f"{path} fields must be {sorted(expected)}")
+    operation = rule.get("operation")
+    if not isinstance(operation, str) or not _valid_contract(operation):
+        raise MissionServiceConfigError(f"{path}.operation must be canonical")
+    parameters = _table(rule.get("parameter_equals"), f"{path}.parameter_equals")
+    parameter_values: list[tuple[str, ApprovalScalar]] = []
+    for name, parameter in parameters.items():
+        if (
+            not name.strip()
+            or isinstance(parameter, (list, dict))
+            or parameter is None
+            or not isinstance(parameter, str | int | float | bool)
+        ):
+            raise MissionServiceConfigError(f"{path}.parameter_equals must contain scalars")
+        parameter_values.append((name, parameter))
+    try:
+        return ApprovalRule(
+            rule_id=_rule_text(rule, "id", path),
+            operation=operation,
+            parameter_equals=tuple(sorted(parameter_values)),
+            objective_contains=_rule_text_array(rule, "objective_contains", path),
+            grounded_constraint_contains=_rule_text_array(
+                rule, "grounded_constraint_contains", path
+            ),
+        )
+    except ValueError as error:
+        raise MissionServiceConfigError(str(error)) from error
+
+
+def _rule_text(rule: Mapping[str, object], key: str, path: str) -> str:
+    """Read one nonblank approval-rule string with an exact diagnostic path."""
+    value = rule.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise MissionServiceConfigError(f"{path}.{key} must be nonblank text")
+    return value
+
+
+def _rule_text_array(rule: Mapping[str, object], key: str, path: str) -> tuple[str, ...]:
+    """Read one approval-rule text array while rejecting empty predicates."""
+    value = rule.get(key)
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise MissionServiceConfigError(f"{path}.{key} must contain nonblank text")
+    return tuple(value)

@@ -6,7 +6,7 @@ mod node_event;
 mod value;
 
 pub use command::ExecutionCommand;
-pub use intent::{CapabilityContractRef, ExecutionIntent};
+pub use intent::{CapabilityContractRef, ExecutionIntent, OperationRef};
 pub use node_event::NodeEvent;
 pub use value::ExecutionValue;
 
