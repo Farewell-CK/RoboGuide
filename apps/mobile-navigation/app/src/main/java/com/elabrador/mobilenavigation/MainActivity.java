@@ -159,6 +159,17 @@ public class MainActivity extends AppCompatActivity {
     private volatile int vinsResetCount;
     private int consecutiveUninitializedPoses;
     private volatile long latestVinsPoseNanos;
+    private static final long AUTO_CALIBRATE_POSE_SETTLE_NANOS = TimeUnit.SECONDS.toNanos(2);
+    private static final long AUTO_CALIBRATE_HEADING_STABLE_NANOS = TimeUnit.SECONDS.toNanos(1);
+    private static final float AUTO_CALIBRATE_HEADING_JITTER_DEGREES = 3f;
+    private long vinsReadySinceNanos;
+    private long headingStableSinceNanos;
+    private float previousStabilityHeading = Float.NaN;
+    private final Object autoCalibrateLock = new Object();
+    // Entry-time VINS initialization calibrates automatically; after any mid-session
+    // VINS restart the user holds the devices separately, so calibration must be
+    // triggered manually from the re-aligned posture via the button instead.
+    private volatile boolean manualCalibrationAfterRestart;
     private final GuidanceStabilizer guidanceStabilizer = new GuidanceStabilizer();
     private long destinationGeneration;
     private Runnable pendingDestinationSearch;
@@ -295,6 +306,7 @@ public class MainActivity extends AppCompatActivity {
                 latestHeadingNanos = SystemClock.elapsedRealtimeNanos();
                 headingText.setText(String.format(
                         Locale.CHINA, "朝向\n%.0f° %s", headingDegrees, cardinalDirection(headingDegrees)));
+                autoCalibrateHeadingIfNeeded();
                 updateNavigationGuidance();
             }
 
@@ -574,7 +586,7 @@ public class MainActivity extends AppCompatActivity {
                 lastLocation.getLatitude(),
                 lastLocation.getLongitude(),
                 lastLocation.hasAccuracy() ? lastLocation.getAccuracy() : 0f,
-                Float.NaN);
+                currentTrueNorthHeading());
         if (guidance == null) {
             return;
         }
@@ -596,9 +608,10 @@ public class MainActivity extends AppCompatActivity {
                 : "";
         navigationStatusText.setText(String.format(
                 Locale.CHINA,
-                "剩余 %s · 距下一步 %s\n目标方位 %.0f° · %s%s%s",
+                "剩余 %s · 距下一步 %s\n%s\n目标方位 %.0f° · %s%s%s",
                 formatNavigationDistance(guidance.remainingMeters),
                 formatNavigationDistance(guidance.distanceToInstructionMeters),
+                guidance.instruction,
                 guidance.targetBearingDegrees,
                 cameraTarget,
                 deviation,
@@ -614,6 +627,24 @@ public class MainActivity extends AppCompatActivity {
             toggleNavigationButton.setEnabled(false);
             guidanceText.setText("");
         }
+    }
+
+    /** Return the phone compass heading corrected from magnetic north to true north. */
+    private float currentTrueNorthHeading() {
+        if (!Float.isFinite(currentHeading) || latestHeadingNanos == 0L
+                || SystemClock.elapsedRealtimeNanos() - latestHeadingNanos
+                > TimeUnit.SECONDS.toNanos(2)) {
+            return Float.NaN;
+        }
+        Location location = lastLocation;
+        if (location == null) return currentHeading;
+        GeomagneticField field = new GeomagneticField(
+                (float) location.getLatitude(),
+                (float) location.getLongitude(),
+                location.hasAltitude() ? (float) location.getAltitude() : 0f,
+                System.currentTimeMillis());
+        return (float) DynamicHeadingCalibrator.normalizeDegrees(
+                currentHeading + field.getDeclination());
     }
 
     private String formatNavigationDistance(int meters) {
@@ -644,12 +675,97 @@ public class MainActivity extends AppCompatActivity {
             trueHeading = (float) DynamicHeadingCalibrator.normalizeDegrees(
                     trueHeading + magneticField.getDeclination());
         }
-        if (dynamicHeadingCalibrator.calibrateAligned(trueHeading, pose)) {
+        if (dynamicHeadingCalibrator.calibrateAligned(trueHeading, pose, "重新标定")) {
             dynamicHeadingCalibrator.save(getPreferences(MODE_PRIVATE));
+            if (calibrateAlignedButton != null) {
+                calibrateAlignedButton.setVisibility(View.GONE);
+            }
         }
         renderDynamicHeadingCalibration();
         resetLocalPlanning();
         requestLocalPlanRefresh();
+    }
+
+    /**
+     * Automatically snapshot the phone compass against the settled VINS world frame.
+     * Only valid for the entry-time initialization, when the user deliberately holds
+     * the phone top aligned with the D455F optical forward direction. After a
+     * mid-session VINS restart the devices are held separately, so this must not
+     * run again; the restart path shows the manual button instead.
+     */
+    private void autoCalibrateHeadingIfNeeded() {
+        boolean calibrated = false;
+        synchronized (autoCalibrateLock) {
+            if (manualCalibrationAfterRestart) return;
+            if (dynamicHeadingCalibrator.isReady()) return;
+            long nowNanos = SystemClock.elapsedRealtimeNanos();
+            VinsMono.Pose pose = latestVinsPose;
+            if (pose == null || !pose.initialized
+                    || latestVinsPoseNanos == 0L
+                    || nowNanos - latestVinsPoseNanos > AUTO_CALIBRATE_POSE_SETTLE_NANOS) {
+                vinsReadySinceNanos = 0L;
+                return;
+            }
+            if (vinsReadySinceNanos == 0L) {
+                vinsReadySinceNanos = nowNanos;
+                return;
+            }
+            if (nowNanos - vinsReadySinceNanos < AUTO_CALIBRATE_POSE_SETTLE_NANOS) return;
+            if (!Float.isFinite(currentHeading)
+                    || latestHeadingNanos == 0L
+                    || nowNanos - latestHeadingNanos > AUTO_CALIBRATE_HEADING_STABLE_NANOS) {
+                headingStableSinceNanos = 0L;
+                previousStabilityHeading = Float.NaN;
+                return;
+            }
+            if (Float.isFinite(previousStabilityHeading)
+                    && Math.abs(DynamicHeadingCalibrator.normalizeDegrees(
+                            currentHeading - previousStabilityHeading))
+                            > AUTO_CALIBRATE_HEADING_JITTER_DEGREES) {
+                headingStableSinceNanos = 0L;
+            }
+            if (headingStableSinceNanos == 0L) {
+                headingStableSinceNanos = nowNanos;
+                previousStabilityHeading = currentHeading;
+                return;
+            }
+            previousStabilityHeading = currentHeading;
+            if (nowNanos - headingStableSinceNanos < AUTO_CALIBRATE_HEADING_STABLE_NANOS) return;
+
+            float trueHeading = currentHeading;
+            Location location = lastLocation;
+            if (location != null) {
+                GeomagneticField magneticField = new GeomagneticField(
+                        (float) location.getLatitude(), (float) location.getLongitude(),
+                        location.hasAltitude() ? (float) location.getAltitude() : 0f,
+                        System.currentTimeMillis());
+                trueHeading = (float) DynamicHeadingCalibrator.normalizeDegrees(
+                        trueHeading + magneticField.getDeclination());
+            }
+            calibrated = dynamicHeadingCalibrator.calibrateAligned(
+                    trueHeading, pose, "自动标定");
+            if (calibrated) {
+                dynamicHeadingCalibrator.save(getPreferences(MODE_PRIVATE));
+                vinsReadySinceNanos = 0L;
+                headingStableSinceNanos = 0L;
+                previousStabilityHeading = Float.NaN;
+            }
+        }
+        if (calibrated) {
+            runOnUiThread(() -> {
+                renderDynamicHeadingCalibration();
+                resetLocalPlanning();
+                requestLocalPlanRefresh();
+            });
+        }
+    }
+
+    private void resetAutoCalibrationState() {
+        synchronized (autoCalibrateLock) {
+            vinsReadySinceNanos = 0L;
+            headingStableSinceNanos = 0L;
+            previousStabilityHeading = Float.NaN;
+        }
     }
 
     private void updateDynamicHeadingCalibration(Location location) {
@@ -1241,6 +1357,7 @@ public class MainActivity extends AppCompatActivity {
             if (!wasInitialized) vinsInitialized = pose.initialized;
             latestVinsPose = pose;
             latestVinsPoseNanos = SystemClock.elapsedRealtimeNanos();
+            autoCalibrateHeadingIfNeeded();
             calibrationVinsPoseHistory.add(pose);
             if (semanticSegmenter != null) semanticSegmenter.updateVinsPose(pose);
         }
@@ -1257,18 +1374,25 @@ public class MainActivity extends AppCompatActivity {
         vinsInitialized = false;
         latestVinsPose = null;
         latestVinsPoseNanos = 0L;
+        // After the restart the user is walking with one device in each hand; the
+        // automatic entry-time snapshot must never fire again in this session.
+        manualCalibrationAfterRestart = true;
         resetVinsDependents();
     }
 
     private void resetVinsDependents() {
         calibrationVinsPoseHistory.clear();
         dynamicHeadingCalibrator.resetForVinsRestart();
+        resetAutoCalibrationState();
         latestSemanticResult = SemanticSegmenter.Result.waiting();
         latestSemanticResultNanos = 0L;
         SemanticSegmenter segmenter = semanticSegmenter;
         if (segmenter != null) segmenter.resetVinsState();
         runOnUiThread(() -> {
             resetLocalPlanning();
+            if (manualCalibrationAfterRestart && calibrateAlignedButton != null) {
+                calibrateAlignedButton.setVisibility(View.VISIBLE);
+            }
             renderDynamicHeadingCalibration();
             renderVinsStatus(vinsInput.status());
         });
@@ -1553,7 +1677,7 @@ public class MainActivity extends AppCompatActivity {
         RouteFollower.Guidance guidance = routeFollower.update(
                 lastLocation.getLatitude(), lastLocation.getLongitude(),
                 lastLocation.hasAccuracy() ? lastLocation.getAccuracy() : 0f,
-                Float.NaN);
+                currentTrueNorthHeading());
         if (guidance == null) {
             return LocalPlanner.PathResult.waiting("等待全局路线目标");
         }

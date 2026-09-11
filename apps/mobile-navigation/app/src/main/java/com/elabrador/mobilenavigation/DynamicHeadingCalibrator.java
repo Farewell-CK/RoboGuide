@@ -26,7 +26,7 @@ final class DynamicHeadingCalibrator {
     private boolean collecting;
     private boolean ready;
     private double northOffsetDegrees = Double.NaN;
-    private String status = "默认镜头前方局部避障；地理方向未对齐（可选室内同向标定）";
+    private String status = "请将手机与 D455F 对齐，正在初始化和标定…";
 
     synchronized void save(SharedPreferences prefs) {
         if (!ready || !Double.isFinite(northOffsetDegrees)) return;
@@ -50,19 +50,26 @@ final class DynamicHeadingCalibrator {
         // A reset creates arbitrary new world axes; an old offset is not valid here.
         ready = false;
         northOffsetDegrees = Double.NaN;
-        status = "默认镜头前方局部避障；地理方向未对齐（可选室内同向标定）";
+        status = "VINS 已重启：请对齐手机与 D455F，初始化完成后点击「重新标定」";
     }
 
     synchronized boolean calibrateAligned(float phoneTrueHeadingDegrees, VinsMono.Pose pose) {
+        return calibrateAligned(phoneTrueHeadingDegrees, pose, "室内同向标定");
+    }
+
+    /** Same math for both entry points; the label only distinguishes who triggered it
+     *  (automatic entry snapshot or manual restart button) in the status text. */
+    synchronized boolean calibrateAligned(float phoneTrueHeadingDegrees, VinsMono.Pose pose,
+                                          String sourceLabel) {
         offsetsDegrees.clear();
         anchor = null;
         collecting = false;
         if (!Float.isFinite(phoneTrueHeadingDegrees)) {
-            status = "室内同向标定失败：等待手机方向传感器";
+            status = sourceLabel + "失败：等待手机方向传感器";
             return false;
         }
         if (pose == null || !pose.initialized) {
-            status = "室内同向标定失败：等待 VINS 初始化";
+            status = sourceLabel + "失败：等待 VINS 初始化";
             return false;
         }
         double cameraForwardVinsBearing = -Math.toDegrees(pose.egoRightAxisYawRadians());
@@ -70,7 +77,7 @@ final class DynamicHeadingCalibrator {
                 phoneTrueHeadingDegrees - cameraForwardVinsBearing);
         ready = true;
         status = String.format(java.util.Locale.CHINA,
-                "室内同向标定完成：北向偏角 %+.1f°", northOffsetDegrees);
+                sourceLabel + "成功：北向偏角 %+.1f°", northOffsetDegrees);
         return true;
     }
 

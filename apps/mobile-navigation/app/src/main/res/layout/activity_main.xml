@@ -200,7 +200,7 @@
         android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_marginTop="6dp"
-        android:text="室内同向标定"
+        android:text="重新标定"
         android:textAllCaps="false"
         android:visibility="gone" />
 
@@ -211,7 +211,7 @@
         android:layout_marginTop="6dp"
         android:background="@color/nav_surface"
         android:padding="10dp"
-        android:text="默认镜头前方局部避障；地理方向未对齐。室内同向标定时请将手机顶部与镜头同向"
+        android:text="请将手机与 D455F 对齐，正在初始化和标定…"
         android:textColor="@color/nav_muted"
         android:textSize="14sp" />
 

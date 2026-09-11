@@ -703,7 +703,8 @@ public class LocalPlannerStateTest {
 
         calibrator.resetForVinsRestart();
         assertFalse(calibrator.isReady());
-        assertTrue(calibrator.status().contains("地理方向未对齐"));
+        assertTrue(calibrator.status().contains("请对齐手机与 D455F"));
+        assertTrue(calibrator.status().contains("重新标定"));
     }
 
     @Test

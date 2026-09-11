@@ -15,8 +15,8 @@ android {
         applicationId 'com.elabrador.mobilenavigation'
         minSdk 24
         targetSdk 35
-        versionCode 86
-        versionName '0.9.61'
+        versionCode 88
+        versionName '0.9.63'
         testInstrumentationRunner 'com.elabrador.mobilenavigation.SemanticBenchmarkInstrumentation'
 
         externalNativeBuild {
