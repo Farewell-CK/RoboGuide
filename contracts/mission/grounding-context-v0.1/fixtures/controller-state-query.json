@@ -1,0 +1,29 @@
+{
+  "schema": "roboguide.state-query/v0.1",
+  "observed_at_ms": 30,
+  "records": [
+    {
+      "object": {
+        "class": "world",
+        "object_type": "place",
+        "object_id": "front-desk"
+      },
+      "semantic": "observed",
+      "source": "node:camera-a/local-system:perception",
+      "channel_id": "semantic-places",
+      "value": {
+        "payload_schema": "roboguide.semantic-place/v0.1",
+        "value": {
+          "label": "front desk"
+        },
+        "source_observed_at_ms": 9000,
+        "received_at_ms": 20,
+        "valid_for_ms": 100,
+        "confidence_millionths": 900000,
+        "source_epoch": "session-a",
+        "sequence": 2
+      },
+      "stale": false
+    }
+  ]
+}

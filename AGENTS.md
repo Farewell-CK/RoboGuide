@@ -171,8 +171,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current
   provider absence is a Control scheduling condition rather than a Mission semantic rejection. It
   must not mirror execution lifecycle or choose physical nodes. Mission Request v0.4 captures one
-  immutable, digest-bound Mission Grounding snapshot per deliberation from attributed World State
-  records and Global Semantic/Experience/Spatial Memory metadata. It excludes live Node/Resource,
+  immutable, digest-bound Mission Grounding snapshot per deliberation from deployment-admitted,
+  attributed World State payload schemas and Global Semantic/Experience/Spatial Memory metadata.
+  `World` classification is not visibility: schema admission fails closed, its identity is retained,
+  and native per-record consumer scope remains deferred. Nested evidence uses defensive-copy access,
+  canonical restore ordering, and shared Rust/Python facade fixtures. It excludes live Node/Resource,
   lease, reservation, calendar, and Runtime-attempt facts; Memory metadata never claims content was
   read. Interpreter, Planner, Reviewer, and Repairer share the same snapshot, while Controller
   freshness and source provenance remain intact. Mission Request v0.3 introduced the separate

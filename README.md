@@ -141,11 +141,14 @@ speaker、kind、turn identity、reply identity 和 receive time 的 `DialogueTu
 Reviewer issue 与 Repair attempt 保留在独立、revision-bound 的内部 deliberation trace。
 
 Mission Grounding v0.1 从既有只读 State/Memory facade capture 一份 digest-bound snapshot，供
-Interpreter、Planner、Reviewer 与 Repairer 在同一 deliberation cycle 共同使用。它只包含带完整
-source/freshness/provenance 的 World State evidence，以及 Global Semantic/Experience/Spatial
+Interpreter、Planner、Reviewer 与 Repairer 在同一 deliberation cycle 共同使用。它只包含部署
+明确批准为全 Mission 可消费 payload schema 的、带完整 source/freshness/provenance 的 World
+State evidence，以及 Global Semantic/Experience/Spatial
 Memory manifest metadata；Memory bytes 尚未读取。Node health/liveness、capability/resource
 inventory、leases、reservations、calendar 和 Runtime attempts 不进入 LLM context。State source
-失败会成为可审计 gap，空 context 仍然合法；clarification answer 才触发下一份 snapshot。边界见
+失败会成为可审计 gap，空 context 仍然合法；`World` object class 不等价于 visibility，schema
+admission 默认 fail-closed，嵌套 evidence 不能绕过 digest 原地修改。clarification answer 才触发
+下一份 snapshot；不同 Mission Request 的慢 Grounding/model 调用不再持有全局生命周期锁。边界见
 [`ADR-0037`](docs/decisions/0037-mission-grounding-context.md)。
 
 ### Control Plane

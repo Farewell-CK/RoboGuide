@@ -8,6 +8,8 @@ artifact_endpoint = "http://127.0.0.1:8090"
 grounding_timeout_seconds = 5
 max_grounding_state_evidence = 64
 max_grounding_memory_evidence = 32
+# World object classification is not visibility. Admit only schemas approved for every Mission.
+grounding_world_payload_schemas = []
 max_request_bytes = 1048576
 
 [[service.approval_rules]]

@@ -17,6 +17,7 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     assert settings.artifact_endpoint == "http://127.0.0.1:8090"
     assert settings.max_grounding_state_evidence == 64
     assert settings.max_grounding_memory_evidence == 32
+    assert settings.grounding_world_payload_schemas == frozenset()
     assert "spatial.map.import@v0" in settings.approval_required_contracts
     assert [rule.rule_id for rule in settings.approval_policy.rules] == [
         "mobility-move",
@@ -74,3 +75,27 @@ grounded_constraint_contains = ["supervisor approval"]
     assert rule.parameter_equals == (("object", "hazardous-device"),)
     assert rule.objective_contains == ("restricted area",)
     assert rule.grounded_constraint_contains == ("supervisor approval",)
+
+
+def test_service_configuration_rejects_duplicate_grounding_schema_admission(
+    tmp_path: Path,
+) -> None:
+    """Global Mission grounding admission must be explicit and unambiguous."""
+    path = tmp_path / "mission-service.toml"
+    path.write_text(
+        """
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+grounding_world_payload_schemas = ["place/v1", "place/v1"]
+max_request_bytes = 1024
+approval_required_contracts = []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MissionServiceConfigError, match="duplicates"):
+        load_service_settings(path, repository_root=tmp_path)

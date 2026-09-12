@@ -117,19 +117,23 @@ versioned projection、SQLite persistence 与 review contracts。
 ### Mission Grounding Context v0.1
 
 `mission.grounding_reader` 通过既有只读 Controller State facade 和 Memory catalog capture 一个
-有界、immutable `GroundingContextSnapshot`。首个 selection policy 只允许 World State 的
-`Reported/Observed/Derived/Belief` evidence，以及 Global Semantic/Experience/Spatial Memory
+有界、immutable `GroundingContextSnapshot`。当前 selection policy 只允许部署配置显式批准的
+World payload schema 所承载的 `Reported/Observed/Derived/Belief` evidence，以及 Global
+Semantic/Experience/Spatial Memory
 manifest metadata；Node inventory、lease、resource availability、Control commitment、calendar
 和 Runtime execution state 不进入 Mission model input。Reader 不读取 Memory Artifact bytes，
 因此 `MetadataOnly` 不能被 Planner 当作已经获得的语义内容。
 
 State freshness 由 Controller 在 RoboGuide receive-time domain 中计算并原样保存；Mission
 Service 不用自己的 Unix time 重新推导。State 和 Memory 两个 source 独立 fail-soft，缺失形成
-可审计 `GroundingGap`。同一 Snapshot 传给 Interpreter、Planner、Reviewer、Repairer，并连同
+可审计 `GroundingGap`。`World` 不是 visibility；未配置 schema 时 State evidence fail-closed 为空，
+admission set digest 保存在 selection policy identity。嵌套 JSON 使用 defensive copy，restore
+要求 canonical order，Rust/Python 共享 facade fixtures。不同 Mission Request 使用 request-scoped
+serialization，不因一个慢 HTTP/model 调用阻塞全部请求。同一 Snapshot 传给 Interpreter、Planner、Reviewer、Repairer，并连同
 review context digest 持久化在 Mission Request v0.4。Clarification answer 会 capture 新 snapshot；
 一次 repair cycle 不刷新 Context。当前没有 schema-aware relevance ranking、Memory content
 retrieval/prefetch、cross-process clock synchronization、belief fusion 或 grounding-driven Control
-decision。完整 authority 见 ADR-0037。
+decision，也没有 State-native per-record consumer scope/visibility。完整 authority 见 ADR-0037。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。

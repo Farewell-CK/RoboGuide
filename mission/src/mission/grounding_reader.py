@@ -19,11 +19,51 @@ from mission.grounding_context import (
     StateGroundingEvidence,
     dialogue_digest,
     evidence_id,
+    grounding_selection_policy_ref,
 )
 from mission.models import JSONObject, JSONValue
 from mission.request_record import DialogueTurn
 
 MAX_GROUNDING_RESPONSE_BYTES = 2 * 1024 * 1024
+_STATE_RECORD_FIELDS = {
+    "object",
+    "semantic",
+    "source",
+    "channel_id",
+    "value",
+    "stale",
+}
+_STATE_VALUE_FIELDS = {
+    "payload_schema",
+    "value",
+    "source_observed_at_ms",
+    "received_at_ms",
+    "valid_for_ms",
+    "confidence_millionths",
+    "source_epoch",
+    "sequence",
+}
+_MEMORY_MANIFEST_FIELDS = {
+    "schema",
+    "selector",
+    "kind",
+    "provider_id",
+    "owner",
+    "scope",
+    "visibility",
+    "payload_schema",
+    "media_type",
+    "artifact",
+    "source_mission_id",
+    "source_execution_id",
+    "source_task_ref",
+    "created_at",
+}
+_SPATIAL_MEMORY_VIEW_FIELDS = {
+    *_MEMORY_MANIFEST_FIELDS,
+    "typed_extension",
+    "status",
+}
 
 
 class GroundingReadError(RuntimeError):
@@ -57,6 +97,7 @@ class EmptyMissionGroundingReader:
             request_id=request_id,
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
             captured_at_ms=captured_at_ms,
+            selection_policy_ref=grounding_selection_policy_ref(frozenset()),
         )
 
 
@@ -125,6 +166,8 @@ class HttpMissionGroundingReader:
         max_state_evidence: int,
         max_memory_evidence: int,
         transport: GroundingJsonTransport | None = None,
+        *,
+        admitted_world_payload_schemas: frozenset[str] = frozenset(),
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -137,6 +180,10 @@ class HttpMissionGroundingReader:
         self._max_state_evidence = max_state_evidence
         self._max_memory_evidence = max_memory_evidence
         self._transport = transport or UrllibGroundingJsonTransport()
+        if any(not schema.strip() for schema in admitted_world_payload_schemas):
+            raise GroundingReadError("admitted World payload schemas must be nonblank")
+        self._admitted_world_payload_schemas = admitted_world_payload_schemas
+        self._selection_policy_ref = grounding_selection_policy_ref(admitted_world_payload_schemas)
 
     def capture(
         self,
@@ -154,6 +201,7 @@ class HttpMissionGroundingReader:
             state_evidence=state,
             memory_evidence=memory,
             gaps=(*state_gaps, *memory_gaps),
+            selection_policy_ref=self._selection_policy_ref,
         )
 
     def _read_state(self) -> tuple[tuple[StateGroundingEvidence, ...], tuple[GroundingGap, ...]]:
@@ -172,7 +220,7 @@ class HttpMissionGroundingReader:
         gaps: list[GroundingGap] = []
         for index, raw in enumerate(records):
             try:
-                item = _state_evidence(raw)
+                item = _state_evidence(raw, self._admitted_world_payload_schemas)
             except (GroundingContextError, KeyError) as error:
                 gaps.append(
                     GroundingGap(
@@ -234,16 +282,24 @@ class HttpMissionGroundingReader:
         return tuple(evidence), tuple(gaps)
 
 
-def _state_evidence(raw: JSONValue) -> StateGroundingEvidence | None:
+def _state_evidence(
+    raw: JSONValue, admitted_world_payload_schemas: frozenset[str]
+) -> StateGroundingEvidence | None:
     """Sanitize one federated State record and exclude every deployment/control object."""
     item = _object(raw, "State record")
+    _require_fields(item, _STATE_RECORD_FIELDS, "State record")
     object_ref = _object(item.get("object"), "State record.object")
+    _require_fields(object_ref, {"class", "object_type", "object_id"}, "State record.object")
     if object_ref.get("class") != "world":
         return None
     semantic = _text(item, "semantic")
     if semantic not in {"reported", "observed", "derived", "belief"}:
         return None
     payload = _object(item.get("value"), "State record.value")
+    _require_fields(payload, _STATE_VALUE_FIELDS, "State record.value")
+    payload_schema = _text(payload, "payload_schema")
+    if payload_schema not in admitted_world_payload_schemas:
+        return None
     stale = item.get("stale")
     if not isinstance(stale, bool):
         raise GroundingContextError("World State record must carry a freshness assessment")
@@ -256,8 +312,8 @@ def _state_evidence(raw: JSONValue) -> StateGroundingEvidence | None:
         "semantic": semantic,
         "source": _text(item, "source"),
         "channel_id": _text(item, "channel_id"),
-        "payload_schema": _text(payload, "payload_schema"),
-        "value": payload.get("value"),
+        "payload_schema": payload_schema,
+        "value": payload["value"],
         "source_observed_at_ms": _optional_integer(payload, "source_observed_at_ms"),
         "received_at_ms": _integer(payload, "received_at_ms"),
         "valid_for_ms": _integer(payload, "valid_for_ms"),
@@ -274,17 +330,54 @@ def _state_evidence(raw: JSONValue) -> StateGroundingEvidence | None:
 def _memory_evidence(raw: JSONValue) -> MemoryGroundingEvidence | None:
     """Sanitize one manifest while excluding local/group scope and unsupported Memory kinds."""
     item = _object(raw, "Memory manifest")
+    schema = _text(item, "schema")
+    if schema == "roboguide.memory-manifest/v0.1":
+        _require_fields(item, _MEMORY_MANIFEST_FIELDS, "Memory manifest")
+    elif schema == "roboguide.memory-manifest-view/v0.1":
+        _require_fields(item, _SPATIAL_MEMORY_VIEW_FIELDS, "Spatial Memory manifest view")
+        if item["typed_extension"] != "map":
+            raise GroundingContextError("unsupported typed Memory manifest extension")
+        if _text(item, "status") not in {"Declared", "Published"}:
+            raise GroundingContextError("unknown Spatial Memory revision status")
+    else:
+        raise GroundingContextError("unsupported Memory manifest schema")
     kind = _text(item, "kind")
+    if schema == "roboguide.memory-manifest-view/v0.1" and kind != "spatial":
+        raise GroundingContextError("typed map Memory view must declare spatial kind")
     scope_value = _object(item.get("scope"), "Memory manifest.scope")
     scope = _text(scope_value, "kind")
+    if scope == "execution_group":
+        _require_fields(
+            scope_value,
+            {"kind", "execution_group_id"},
+            "Memory manifest.scope",
+        )
+        _text(scope_value, "execution_group_id")
+    elif scope in {"local", "global"}:
+        _require_fields(scope_value, {"kind"}, "Memory manifest.scope")
+    else:
+        raise GroundingContextError("Memory manifest has an unknown scope kind")
     if kind not in {"semantic", "experience", "spatial"} or scope != "global":
         return None
     selector = _object(item.get("selector"), "Memory manifest.selector")
+    _require_fields(selector, {"memory_id", "revision_id"}, "Memory manifest.selector")
     owner = _object(item.get("owner"), "Memory manifest.owner")
+    _validate_memory_owner(
+        owner,
+        local_system_id_optional=schema == "roboguide.memory-manifest-view/v0.1",
+    )
     artifact_raw = item.get("artifact")
     artifact = None if artifact_raw is None else _object(artifact_raw, "Memory manifest.artifact")
+    if artifact is not None:
+        _require_fields(artifact, {"content_digest", "byte_size"}, "Memory manifest.artifact")
+        _text(artifact, "content_digest")
+        _nonnegative_integer(artifact, "byte_size")
     task_raw = item.get("source_task_ref")
     source_task = None if task_raw is None else _object(task_raw, "Memory manifest.source_task_ref")
+    if source_task is not None:
+        _require_fields(source_task, {"mission_id", "task_id"}, "Memory manifest.source_task_ref")
+        _text(source_task, "mission_id")
+        _text(source_task, "task_id")
     created_at = item.get("created_at")
     if isinstance(created_at, dict):
         created_at = created_at.get("millis")
@@ -379,3 +472,39 @@ def _optional_integer(value: Mapping[str, JSONValue], field: str) -> int | None:
     if isinstance(item, bool) or not isinstance(item, int):
         raise GroundingContextError(f"{field} must be an integer or null")
     return item
+
+
+def _nonnegative_integer(value: Mapping[str, JSONValue], field: str) -> int:
+    """Read one nonnegative integer without accepting Boolean coercion."""
+    item = _integer(value, field)
+    if item < 0:
+        raise GroundingContextError(f"{field} must be nonnegative")
+    return item
+
+
+def _validate_memory_owner(owner: JSONObject, *, local_system_id_optional: bool) -> None:
+    """Validate the exact existing generic or typed-map Memory ownership envelope."""
+    owner_kind = _text(owner, "owner")
+    if owner_kind == "robo_guide":
+        _require_fields(owner, {"owner", "component"}, "Memory manifest.owner")
+        _text(owner, "component")
+        return
+    if owner_kind == "node":
+        _require_fields(
+            owner,
+            {"owner", "node_id", "local_system_id"},
+            "Memory manifest.owner",
+        )
+        _text(owner, "node_id")
+        if local_system_id_optional:
+            _optional_text(owner, "local_system_id")
+        else:
+            _text(owner, "local_system_id")
+        return
+    raise GroundingContextError("Memory manifest has an unknown owner kind")
+
+
+def _require_fields(value: Mapping[str, JSONValue], expected: set[str], path: str) -> None:
+    """Reject missing or additional fields in one versioned grounding source object."""
+    if set(value) != expected:
+        raise GroundingContextError(f"{path} fields do not match its declared schema")

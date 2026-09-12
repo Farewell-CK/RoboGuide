@@ -33,6 +33,7 @@ class MissionServiceSettings:
     grounding_timeout_seconds: float
     max_grounding_state_evidence: int
     max_grounding_memory_evidence: int
+    grounding_world_payload_schemas: frozenset[str]
     max_request_bytes: int
     approval_policy: ApprovalPolicy
 
@@ -82,6 +83,9 @@ def load_service_settings(
         ),
         max_grounding_memory_evidence=_optional_positive_integer(
             service, "max_grounding_memory_evidence", _DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE
+        ),
+        grounding_world_payload_schemas=_optional_text_set(
+            service, "grounding_world_payload_schemas"
         ),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
@@ -153,6 +157,20 @@ def _optional_positive_number(table: Mapping[str, object], key: str, default: fl
     if key not in table:
         return default
     return _positive_number(table, key)
+
+
+def _optional_text_set(table: Mapping[str, object], key: str) -> frozenset[str]:
+    """Read an optional duplicate-free set of explicitly admitted schema identities."""
+    if key not in table:
+        return frozenset()
+    value = table.get(key)
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise MissionServiceConfigError(f"service.{key} must contain nonblank text")
+    if len(value) != len(set(value)):
+        raise MissionServiceConfigError(f"service.{key} must not contain duplicates")
+    return frozenset(value)
 
 
 def _valid_contract(value: str) -> bool:

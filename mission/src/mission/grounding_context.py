@@ -13,7 +13,11 @@ from typing import cast
 from mission.models import JSONObject, JSONValue
 
 GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.1"
-GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/world-and-global-memory/v0.1"
+GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2"
+EMPTY_GROUNDING_SELECTION_POLICY_REF = (
+    f"{GROUNDING_SELECTION_POLICY}#world-payload-schemas="
+    "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+)
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 
 
@@ -85,6 +89,13 @@ class StateGroundingEvidence:
         if self.source_epoch is not None:
             _require_text(self.source_epoch, "source_epoch")
         object.__setattr__(self, "value", _clone_json(self.value, "state evidence value"))
+
+    def __getattribute__(self, name: str) -> object:
+        """Return defensive JSON copies so frozen evidence cannot be mutated through containers."""
+        value = object.__getattribute__(self, name)
+        if name == "value":
+            return _clone_json(cast(JSONValue, value), "state evidence value")
+        return value
 
     def to_json(self) -> JSONObject:
         """Serialize one exact attributed World State record for model input and persistence."""
@@ -213,6 +224,13 @@ class MemoryGroundingEvidence:
                 "source_task_ref",
                 _clone_object(self.source_task_ref, "memory source TaskRef"),
             )
+
+    def __getattribute__(self, name: str) -> object:
+        """Return defensive copies of nested Memory metadata owned by this frozen value."""
+        value = object.__getattribute__(self, name)
+        if name in {"owner", "artifact", "source_task_ref"} and value is not None:
+            return _clone_object(cast(JSONObject, value), f"memory {name}")
+        return value
 
     def to_json(self) -> JSONObject:
         """Serialize discovery evidence while explicitly declaring that bytes were not read."""
@@ -344,7 +362,7 @@ class GroundingContextSnapshot:
         state_evidence: tuple[StateGroundingEvidence, ...] = (),
         memory_evidence: tuple[MemoryGroundingEvidence, ...] = (),
         gaps: tuple[GroundingGap, ...] = (),
-        selection_policy_ref: str = GROUNDING_SELECTION_POLICY,
+        selection_policy_ref: str = EMPTY_GROUNDING_SELECTION_POLICY_REF,
     ) -> GroundingContextSnapshot:
         """Create a deterministic snapshot and bind its digest to all included evidence."""
         state_evidence = tuple(sorted(state_evidence, key=lambda item: item.evidence_id))
@@ -389,6 +407,18 @@ class GroundingContextSnapshot:
         ids.extend(item.evidence_id for item in self.memory_evidence)
         if len(ids) != len(set(ids)):
             raise GroundingContextError("grounding evidence identities must be unique")
+        if self.state_evidence != tuple(
+            sorted(self.state_evidence, key=lambda item: item.evidence_id)
+        ):
+            raise GroundingContextError("State grounding evidence must use canonical order")
+        if self.memory_evidence != tuple(
+            sorted(self.memory_evidence, key=lambda item: item.evidence_id)
+        ):
+            raise GroundingContextError("Memory grounding evidence must use canonical order")
+        if self.gaps != tuple(
+            sorted(self.gaps, key=lambda item: (item.source, item.code, item.detail))
+        ):
+            raise GroundingContextError("grounding gaps must use canonical order")
         expected = _digest(
             _snapshot_payload(
                 self.request_id,
@@ -460,6 +490,12 @@ def dialogue_digest(dialogue: tuple[JSONObject, ...]) -> str:
 def evidence_id(prefix: str, value: JSONValue) -> str:
     """Create a stable evidence identity from sanitized content rather than list position."""
     return f"{prefix}:{_digest(value).removeprefix('sha256:')}"
+
+
+def grounding_selection_policy_ref(admitted_world_payload_schemas: frozenset[str]) -> str:
+    """Bind one policy reference to the exact deployment-approved World schema set."""
+    schema_digest = _digest(cast(JSONValue, sorted(admitted_world_payload_schemas)))
+    return f"{GROUNDING_SELECTION_POLICY}#world-payload-schemas={schema_digest}"
 
 
 def _snapshot_payload(

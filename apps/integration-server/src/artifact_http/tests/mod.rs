@@ -3,8 +3,8 @@ use super::*;
 use artifact_store::digest_bytes;
 use domain::{
     ContentDigest, LocalSystemId, MapArtifactRef, MapId, MapReplicaStatus, MapRevisionId,
-    MemoryArtifactRef, MemoryKind, MemoryOwner, MemoryScope, MemoryVisibility, MissionId,
-    SpatialAnchorId,
+    MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner, MemoryRevisionId, MemoryScope,
+    MemorySelector, MemoryVisibility, MissionId, SpatialAnchorId,
 };
 use ports::MapCatalogReader;
 

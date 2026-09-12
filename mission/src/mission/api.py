@@ -65,6 +65,7 @@ def build_engine(
             service_settings.grounding_timeout_seconds,
             service_settings.max_grounding_state_evidence,
             service_settings.max_grounding_memory_evidence,
+            admitted_world_payload_schemas=(service_settings.grounding_world_payload_schemas),
         ),
     )
     return engine, service_settings

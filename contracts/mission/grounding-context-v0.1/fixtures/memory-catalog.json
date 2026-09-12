@@ -1,0 +1,29 @@
+{
+  "schema": "roboguide.memory-catalog/v0.1",
+  "memories": [
+    {
+      "schema": "roboguide.memory-manifest/v0.1",
+      "selector": {
+        "memory_id": "semantic-front-desk",
+        "revision_id": "r1"
+      },
+      "kind": "semantic",
+      "provider_id": "semantic-memory",
+      "owner": {
+        "owner": "robo_guide",
+        "component": "semantic-index"
+      },
+      "scope": {
+        "kind": "global"
+      },
+      "visibility": "discoverable",
+      "payload_schema": "roboguide.semantic-place/v0.1",
+      "media_type": "application/json",
+      "artifact": null,
+      "source_mission_id": null,
+      "source_execution_id": null,
+      "source_task_ref": null,
+      "created_at": 15
+    }
+  ]
+}

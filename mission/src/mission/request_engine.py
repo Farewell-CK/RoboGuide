@@ -7,6 +7,8 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Protocol
 
@@ -71,6 +73,15 @@ class _Unset:
 _UNSET = _Unset()
 
 
+class _RequestLockEntry:
+    """Retain one request-scoped reentrant lock while active callers reference it."""
+
+    def __init__(self) -> None:
+        """Initialize an unused lock entry for one Mission Request identity."""
+        self.lock = threading.RLock()
+        self.users = 0
+
+
 class MissionRequestEngine:
     """Drive clarification, planning, review, approval, and accepted-plan submission."""
 
@@ -110,7 +121,9 @@ class MissionRequestEngine:
         self._repairer = repairer
         self._max_repair_attempts = max_repair_attempts
         self._grounding_reader = grounding_reader or EmptyMissionGroundingReader()
-        self._lock = threading.RLock()
+        self._identity_lock = threading.Lock()
+        self._request_locks_guard = threading.Lock()
+        self._request_locks: dict[str, _RequestLockEntry] = {}
         self._recover_interrupted()
 
     def create(self, instruction: str) -> MissionRequestRecord:
@@ -118,7 +131,7 @@ class MissionRequestEngine:
         instruction = instruction.strip()
         if not instruction:
             raise MissionRequestError("instruction must be nonblank text")
-        with self._lock:
+        with self._identity_lock:
             now = self._clock()
             record = MissionRequestRecord(
                 request_id=f"request-{self._id_generator()}",
@@ -147,6 +160,7 @@ class MissionRequestEngine:
                 review_history=(),
             )
             self._store.save(record)
+        with self._locked_request(record.request_id):
             return self._process(record)
 
     def get(self, request_id: str) -> MissionRequestRecord:
@@ -161,7 +175,7 @@ class MissionRequestEngine:
         text = text.strip()
         if not text:
             raise MissionRequestError("message text must be nonblank")
-        with self._lock:
+        with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle in {
                 MissionRequestLifecycle.ACCEPTED,
@@ -190,7 +204,7 @@ class MissionRequestEngine:
         self, request_id: str, draft_revision: int, draft_digest: str
     ) -> MissionRequestRecord:
         """Approve only the current risk-gated immutable draft and submit it once."""
-        with self._lock:
+        with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle is not MissionRequestLifecycle.AWAITING_APPROVAL:
                 raise MissionRequestError("request is not awaiting approval")
@@ -204,7 +218,7 @@ class MissionRequestEngine:
 
     def retry(self, request_id: str) -> MissionRequestRecord:
         """Retry deliberation from dialogue or resubmit an unchanged rejected draft."""
-        with self._lock:
+        with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle not in {
                 MissionRequestLifecycle.FAILED,
@@ -224,7 +238,7 @@ class MissionRequestEngine:
 
     def cancel(self, request_id: str) -> MissionRequestRecord:
         """Cancel pre-execution deliberation without fabricating Mission cancellation."""
-        with self._lock:
+        with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle is MissionRequestLifecycle.ACCEPTED:
                 raise MissionRequestError("accepted Missions must use the Mission cancel API")
@@ -275,6 +289,21 @@ class MissionRequestEngine:
                 issues=(str(error),),
             )
         return self._review_and_advance(record, grounded_intent)
+
+    @contextmanager
+    def _locked_request(self, request_id: str) -> Iterator[None]:
+        """Serialize one Request lifecycle without holding a service-wide external-call lock."""
+        with self._request_locks_guard:
+            entry = self._request_locks.setdefault(request_id, _RequestLockEntry())
+            entry.users += 1
+        try:
+            with entry.lock:
+                yield
+        finally:
+            with self._request_locks_guard:
+                entry.users -= 1
+                if entry.users == 0:
+                    del self._request_locks[request_id]
 
     def _record_draft(
         self,

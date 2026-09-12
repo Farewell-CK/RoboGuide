@@ -26,6 +26,7 @@ from mission.requests import (
     DialogueSpeaker,
     DialogueTurn,
     DialogueTurnKind,
+    EmptyMissionGroundingReader,
     IntentAssessment,
     MissionRequestEngine,
     MissionRequestError,
@@ -232,6 +233,34 @@ class SequenceClock:
         return self.value
 
 
+class BlockingFirstGroundingReader:
+    """Pause the first request while allowing later request captures to be observed."""
+
+    def __init__(self) -> None:
+        """Initialize synchronization evidence and an empty grounding delegate."""
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self._capture_lock = threading.Lock()
+        self._captures = 0
+        self._delegate = EmptyMissionGroundingReader()
+
+    def capture(
+        self,
+        request_id: str,
+        dialogue: tuple[DialogueTurn, ...],
+        captured_at_ms: int,
+    ) -> GroundingContextSnapshot:
+        """Block only the first capture, then return a valid request-bound empty snapshot."""
+        with self._capture_lock:
+            self._captures += 1
+            capture_number = self._captures
+        if capture_number == 1:
+            self.entered.set()
+            if not self.release.wait(timeout=5):
+                raise AssertionError("test did not release the first grounding capture")
+        return self._delegate.capture(request_id, dialogue, captured_at_ms)
+
+
 def _assessment(*questions: str) -> IntentAssessment:
     """Build one normalized objective with optional open questions."""
     return IntentAssessment(
@@ -338,6 +367,57 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
     assert first_context.context_digest != second_context.context_digest
     assert first_context.dialogue_digest != second_context.dialogue_digest
     assert accepted.grounding_context == second_context
+
+
+def test_slow_grounding_for_one_request_does_not_block_another_request(
+    tmp_path: Path,
+) -> None:
+    """Request-scoped serialization permits independent Mission deliberations to progress."""
+    reader = BlockingFirstGroundingReader()
+    engine = MissionRequestEngine(
+        MissionRequestStore(tmp_path / "concurrent-requests.sqlite3"),
+        FakeInterpreter([_assessment("clarify"), _assessment("clarify")]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+        _catalog(),
+        frozenset(),
+        SequenceIds(),
+        SequenceClock(),
+        grounding_reader=reader,
+    )
+    completed = threading.Event()
+    results: list[MissionRequestRecord] = []
+    failures: list[BaseException] = []
+
+    def create_request(instruction: str, signal_completion: bool) -> None:
+        """Run one request in a worker and retain its result or failure for assertions."""
+        try:
+            results.append(engine.create(instruction))
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            if signal_completion:
+                completed.set()
+
+    first = threading.Thread(target=create_request, args=("first", False))
+    second = threading.Thread(target=create_request, args=("second", True))
+    first.start()
+    assert reader.entered.wait(timeout=2)
+    second.start()
+    try:
+        assert completed.wait(timeout=2), "second Mission was blocked by the first Mission"
+    finally:
+        reader.release.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert failures == []
+    assert len(results) == 2
+    assert all(
+        result.lifecycle is MissionRequestLifecycle.NEEDS_CLARIFICATION for result in results
+    )
 
 
 def test_assessment_with_questions_cannot_form_a_grounded_planner_input() -> None:

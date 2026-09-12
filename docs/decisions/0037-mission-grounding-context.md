@@ -27,10 +27,16 @@ Mission Intelligence depends on a narrow `MissionGroundingReader` and consumes a
 and Memory catalog HTTP facades; Mission domain logic receives normalized evidence and does not
 depend on Rust State implementations, Artifact storage, or Control internals.
 
-The v0.1 selection policy admits only:
+The corrected bootstrap selection policy admits only:
 
-- World State records with `Reported`, `Observed`, `Derived`, or explicit `Belief` semantics;
+- World State records with `Reported`, `Observed`, `Derived`, or explicit `Belief` semantics whose
+  payload schema is explicitly approved for global Mission grounding by deployment configuration;
 - Global `Semantic`, `Experience`, or `Spatial` Memory revision metadata.
+
+`World` is an object classification, not a visibility grant. The schema admission set fails closed
+to empty and its deterministic digest is carried in `selection_policy_ref`. This is a conservative
+bootstrap boundary until State has an explicit per-record consumer scope/visibility contract; a
+deployment must not approve a schema that can carry Mission-private values.
 
 It excludes Node/RoboGuide deployment records, Desired/Committed state, health, liveness,
 capability and operation support, resources, leases, candidate sets, reservations, calendars,
@@ -76,8 +82,13 @@ durable `GroundingGap`; it does not erase valid evidence from the other source o
 valid Mission semantically invalid. Empty context is a supported bootstrap outcome.
 
 All model stages treat strings embedded in grounding evidence as untrusted data, not provider
-instructions. Snapshot construction detaches nested JSON containers and canonical digest
-validation detects persisted content changes.
+instructions. Snapshot construction and access detach nested JSON containers, restored arrays must
+retain canonical ordering, and canonical digest validation detects persisted content changes.
+Versioned State and Memory items are checked against their exact existing wire shapes. Shared
+fixtures are consumed by Python and asserted against Rust facade output.
+
+Mission Request lifecycle commands serialize per Request identity. Slow Grounding, model, or
+Controller calls for one Request do not hold a service-wide lock that blocks unrelated Requests.
 
 ## Consequences
 
@@ -91,6 +102,9 @@ validation detects persisted content changes.
   retrieval, schema-aware decoding, relevance ranking, and prompt budgeting remain future slices.
 - The first policy may include irrelevant Global records because no semantic query planner exists;
   bounded deterministic selection prevents unbounded input but does not claim optimal relevance.
+- State does not yet carry native per-record Mission-consumer scope or visibility. Deployment-owned
+  payload-schema admission is deliberately coarse and fail-closed rather than pretending that
+  `World` implies global disclosure.
 
 ## Not Implemented
 
@@ -100,3 +114,4 @@ validation detects persisted content changes.
 - cross-process clock synchronization or timestamp comparison;
 - grounding-driven scheduling, reservation, execution, or automatic recovery;
 - dynamic grounding policy negotiation or per-schema relevance ranking.
+- native State-record consumer scope/visibility and Mission-specific disclosure policy.

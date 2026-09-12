@@ -163,6 +163,37 @@ fn state_query_filters_semantics_sources_and_staleness() {
     ));
 }
 
+/// The Controller State facade retains the fixture consumed by Mission Grounding.
+#[test]
+fn state_query_matches_mission_grounding_contract_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../contracts/mission/grounding-context-v0.1/fixtures/controller-state-query.json"
+    ))
+    .expect("shared State query fixture is JSON");
+    let projected = state_view_record(
+        "world",
+        "place",
+        "front-desk",
+        "observed",
+        "node:camera-a/local-system:perception",
+        "semantic-places",
+        serde_json::json!({
+            "payload_schema": "roboguide.semantic-place/v0.1",
+            "value": {"label": "front desk"},
+            "source_observed_at_ms": 9000,
+            "received_at_ms": 20,
+            "valid_for_ms": 100,
+            "confidence_millionths": 900000,
+            "source_epoch": "session-a",
+            "sequence": 2,
+        }),
+        Some(false),
+    );
+
+    assert_eq!(fixture["schema"], "roboguide.state-query/v0.1");
+    assert_eq!(fixture["records"][0], projected);
+}
+
 /// Empty inventory still carries a versioned advisory snapshot rather than an error.
 #[test]
 fn inventory_snapshot_is_versioned_and_empty_before_registration() {

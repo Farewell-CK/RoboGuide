@@ -1,5 +1,41 @@
 use super::*;
 
+/// The generic Memory facade retains the fixture consumed by Mission Grounding.
+#[test]
+fn memory_catalog_matches_mission_grounding_contract_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../contracts/mission/grounding-context-v0.1/fixtures/memory-catalog.json"
+    ))
+    .expect("shared Memory catalog fixture is JSON");
+    let manifest = MemoryArtifactManifest::new(
+        MemorySelector::new(
+            MemoryId::new("semantic-front-desk").expect("Memory id is valid"),
+            MemoryRevisionId::new("r1").expect("revision id is valid"),
+        ),
+        MemoryKind::Semantic,
+        "semantic-memory",
+        MemoryOwner::RoboGuide {
+            component: "semantic-index".to_string(),
+        },
+        MemoryScope::Global,
+        MemoryVisibility::Discoverable,
+        "roboguide.semantic-place/v0.1",
+        "application/json",
+        None,
+        None,
+        None,
+        None,
+        TimestampMs::new(15),
+    )
+    .expect("shared fixture manifest is valid");
+
+    assert_eq!(fixture["schema"], "roboguide.memory-catalog/v0.1");
+    assert_eq!(
+        fixture["memories"][0],
+        serde_json::to_value(manifest).expect("manifest serializes")
+    );
+}
+
 /// All five Memory kinds publish through one catalog while their bytes remain in CAS.
 #[tokio::test]
 async fn generic_memory_catalog_publishes_all_kinds_and_tracks_selective_exchange() {
