@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 
@@ -178,6 +179,7 @@ class MissionPlanReviewAttempt:
     draft_digest: str
     review: MissionPlanReview
     reviewed_at_ms: int
+    grounding_context_digest: str | None = None
 
     def __post_init__(self) -> None:
         """Reject invalid draft identities and negative review evidence timestamps."""
@@ -191,6 +193,11 @@ class MissionPlanReviewAttempt:
             raise MissionReviewError("review attempt draft_digest must be text")
         if _DRAFT_DIGEST.fullmatch(self.draft_digest) is None:
             raise MissionReviewError("review attempt draft_digest is invalid")
+        if self.grounding_context_digest is not None and (
+            not isinstance(self.grounding_context_digest, str)
+            or _DRAFT_DIGEST.fullmatch(self.grounding_context_digest) is None
+        ):
+            raise MissionReviewError("review attempt grounding_context_digest is invalid")
         if (
             isinstance(self.reviewed_at_ms, bool)
             or not isinstance(self.reviewed_at_ms, int)
@@ -202,8 +209,9 @@ class MissionPlanReviewAttempt:
     def from_json(cls, value: JSONValue, path: str) -> MissionPlanReviewAttempt:
         """Restore one review attempt while validating its immutable draft identity."""
         item = _object(value, path)
-        expected = {"draft_revision", "draft_digest", "review", "reviewed_at_ms"}
-        if set(item) != expected:
+        compatible = {"draft_revision", "draft_digest", "review", "reviewed_at_ms"}
+        current = {*compatible, "grounding_context_digest"}
+        if frozenset(item) not in {frozenset(compatible), frozenset(current)}:
             raise MissionReviewError(f"{path} fields do not match review attempt v0.1")
         revision = item["draft_revision"]
         reviewed_at = item["reviewed_at_ms"]
@@ -217,6 +225,11 @@ class MissionPlanReviewAttempt:
         return cls(
             draft_revision=revision,
             draft_digest=digest,
+            grounding_context_digest=(
+                None
+                if "grounding_context_digest" not in item
+                else _optional_digest(item["grounding_context_digest"], path)
+            ),
             review=MissionPlanReview.from_json(_object(item["review"], f"{path}.review")),
             reviewed_at_ms=reviewed_at,
         )
@@ -226,6 +239,7 @@ class MissionPlanReviewAttempt:
         return {
             "draft_revision": self.draft_revision,
             "draft_digest": self.draft_digest,
+            "grounding_context_digest": self.grounding_context_digest,
             "review": self.review.to_json(),
             "reviewed_at_ms": self.reviewed_at_ms,
         }
@@ -239,6 +253,7 @@ class MissionPlanReviewer(Protocol):
         grounded_intent: GroundedIntent,
         plan: MissionPlan,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Return structured approval evidence or blocking issues."""
         ...
@@ -254,6 +269,17 @@ class MissionPlanRepairer(Protocol):
         rejected_plan: MissionPlan,
         review: MissionPlanReview,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Return a revised plan without answering user clarification questions."""
         ...
+
+
+def _optional_digest(value: JSONValue, path: str) -> str | None:
+    """Read one optional canonical digest from compatible review evidence."""
+    if value is None:
+        return None
+    digest = _text(value, f"{path}.grounding_context_digest")
+    if _DRAFT_DIGEST.fullmatch(digest) is None:
+        raise MissionReviewError(f"{path}.grounding_context_digest is invalid")
+    return digest

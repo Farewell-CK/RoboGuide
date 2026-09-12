@@ -48,9 +48,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 - ADR-0001 提议由 Rust 负责 Domain、Control、Runtime 和 State 等长期核心；
 - Python 承载 Mission Intelligence、模型、仿真和研究型 Adapter；
-- 当前 `mission/` 已提供文本 Mission Request 澄清闭环、resolved GroundedIntent handoff、
+- 当前 `mission/` 已提供文本 Mission Request 澄清闭环、source-aware Mission Grounding View、resolved GroundedIntent handoff、
   确定性 Fixture Planner 和可配置的 Responses Interpreter/Planner/Reviewer/Repairer；Mission
-  Request v0.3 持久化结构化 Dialogue 和独立 Review history，并将 repair、重新 clarification 与
+  Request v0.4 持久化结构化 Dialogue、immutable Grounding snapshot 和独立 Review history，并将 repair、重新 clarification 与
   不可修复 reject 分流；Interpreter 不读取 live Node inventory，当前无 provider 不再使合法
   Mission 被 Mission Intelligence 拒绝；
 - `contracts/capability/v0.3/` 提供 deployment-independent Canonical Capability Catalog；Planner
@@ -139,6 +139,14 @@ Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最�
 [`ADR-0032`](docs/decisions/0032-mission-review-and-repair-loop.md)。Mission Request v0.3 使用带
 speaker、kind、turn identity、reply identity 和 receive time 的 `DialogueTurn`；Planner draft、
 Reviewer issue 与 Repair attempt 保留在独立、revision-bound 的内部 deliberation trace。
+
+Mission Grounding v0.1 从既有只读 State/Memory facade capture 一份 digest-bound snapshot，供
+Interpreter、Planner、Reviewer 与 Repairer 在同一 deliberation cycle 共同使用。它只包含带完整
+source/freshness/provenance 的 World State evidence，以及 Global Semantic/Experience/Spatial
+Memory manifest metadata；Memory bytes 尚未读取。Node health/liveness、capability/resource
+inventory、leases、reservations、calendar 和 Runtime attempts 不进入 LLM context。State source
+失败会成为可审计 gap，空 context 仍然合法；clarification answer 才触发下一份 snapshot。边界见
+[`ADR-0037`](docs/decisions/0037-mission-grounding-context.md)。
 
 ### Control Plane
 
@@ -579,7 +587,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── contracts/
 │   ├── capability/v0.1/ ... v0.3/
 │   ├── mission/v0.2/ ... v0.7/
-│   ├── mission/request-v0.1/ ... request-v0.3/
+│   ├── mission/request-v0.1/ ... request-v0.4/
+│   ├── mission/grounding-context-v0.1/
 │   ├── mission/inventory-v0.1/
 │   ├── node/v0.2/ ... v0.9/
 │   ├── state/v0.1/
@@ -693,7 +702,9 @@ Mission 配置位于 [`config/mission.toml`](config/mission.toml)，版本化 Pr
 
 外部文本入口由 [`apps/mission-service/`](apps/mission-service/) 提供，部署配置位于
 [`config/mission-service.toml`](config/mission-service.toml)。默认 `127.0.0.1:8070`；
-Controller 继续在 `127.0.0.1:8080` 接受内部完整 MissionPlan，并提供只读 inventory。
+Controller 继续在 `127.0.0.1:8080` 接受内部完整 MissionPlan，并提供只读 inventory 与 State
+federation；Artifact HTTP 默认在 `127.0.0.1:8090` 提供 Memory catalog。Mission Service 仅从
+后两者构建受限 Mission Grounding snapshot，不把 live inventory 用于语义 admission。
 
 ```bash
 uv sync --dev

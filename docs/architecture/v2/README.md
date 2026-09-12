@@ -50,6 +50,18 @@ integrated Local EAIOS operation 不把内部 grasp/navigation/perception 等 Lo
 requirements。Catalog 仍不冻结 embodiment
 taxonomy、结构化 entity schema 或动态 Catalog negotiation。详见 ADR-0031 与 ADR-0034。
 
+Mission Intelligence 通过 immutable `GroundingContextSnapshot` 消费 State & Memory evidence，
+但不直接查询各 authority 或获得写权限。v0.1 Grounding View 只纳入带 source/channel、source
+time、RoboGuide receive time、TTL、freshness 和 confidence 的 World State
+`Reported/Observed/Derived/Belief` records，以及 Global `Semantic/Experience/Spatial` Memory
+revision metadata。Memory metadata 明确不代表 payload 已被读取或理解；Node health/liveness、
+capability/operation support、resources、leases、reservations、calendar、placement 与 Runtime
+attempts 全部继续隔离在 live deployment / Control 边界。Controller 计算的 receive-relative
+freshness 原样进入 Snapshot，Mission Service 不比较不同进程的 clock。Interpreter、Planner、
+Reviewer 与 Repairer 在一次 deliberation 内使用同一 digest-bound context；新的 clarification
+answer 或显式重新 deliberation 才重新 capture。Context source 失败以 gap 保留，空 Context 合法。
+详见 ADR-0037。
+
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability
 并附带可由 Node profile 证明的 typed constraints；Operation 是下发给 Local EAIOS 的 canonical

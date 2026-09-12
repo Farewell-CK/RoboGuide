@@ -4,6 +4,10 @@ listen_port = 8070
 state_db = "artifacts/mission-service/requests.sqlite3"
 controller_endpoint = "http://127.0.0.1:8080"
 controller_timeout_seconds = 30
+artifact_endpoint = "http://127.0.0.1:8090"
+grounding_timeout_seconds = 5
+max_grounding_state_evidence = 64
+max_grounding_memory_evidence = 32
 max_request_bytes = 1048576
 
 [[service.approval_rules]]

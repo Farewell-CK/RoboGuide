@@ -86,7 +86,7 @@ reference transport 和 configured command bridge 已
 | Controller composition | `core/orchestration` 中把 Node Protocol facts 接到 Control/State/Runtime 的 bridge | transport framing、Local EAIOS endpoint 或 reservation policy |
 | Node Service | 单一节点服务、声明式 Local Integration Engine、durable journal 与 Memory manifest ledger/reference fallback | 每种 EAIOS 的代码插件、真实 EAIOS Memory semantic/storage authority 或独立 RoboGuide 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
-| Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批和 deliberation persistence | live inventory eligibility、Node assignment、Commit、Group/Runtime execution lifecycle |
+| Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批、attributed Mission grounding 和 deliberation persistence | live inventory eligibility、Node assignment、Commit、Group/Runtime execution lifecycle |
 | Apps | 依赖组装、配置、启动和关闭 | 领域规则 |
 | Quality Tools | 标准 Linter 未覆盖的静态仓库检查 | 运行时行为和生产依赖 |
 
@@ -107,11 +107,29 @@ Node Contract v0.6 将 canonical `OperationSupport` 与 Capability Profile、Nod
 Binding 分开。Normalized Mission 与 Recovery 在 Match、Proposal、Commit 边界验证 exact operation
 support；Scheduler 只消费已过滤 Candidate Set，不解析 Operation 或 Local How。
 
-Mission Request v0.3 由 Engine 显式编排 Dialogue -> Draft -> Review -> bounded Repair；Reviewer
+Mission Request v0.4 由 Engine 显式编排 Dialogue -> Grounding Snapshot -> Draft -> Review ->
+bounded Repair；Reviewer
 只产生结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回
 `NeedsClarification`。用户 DialogueTurn 与 revision-bound review history 分开保存；
 `request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py` 分别承担 orchestration、
 versioned projection、SQLite persistence 与 review contracts。
+
+### Mission Grounding Context v0.1
+
+`mission.grounding_reader` 通过既有只读 Controller State facade 和 Memory catalog capture 一个
+有界、immutable `GroundingContextSnapshot`。首个 selection policy 只允许 World State 的
+`Reported/Observed/Derived/Belief` evidence，以及 Global Semantic/Experience/Spatial Memory
+manifest metadata；Node inventory、lease、resource availability、Control commitment、calendar
+和 Runtime execution state 不进入 Mission model input。Reader 不读取 Memory Artifact bytes，
+因此 `MetadataOnly` 不能被 Planner 当作已经获得的语义内容。
+
+State freshness 由 Controller 在 RoboGuide receive-time domain 中计算并原样保存；Mission
+Service 不用自己的 Unix time 重新推导。State 和 Memory 两个 source 独立 fail-soft，缺失形成
+可审计 `GroundingGap`。同一 Snapshot 传给 Interpreter、Planner、Reviewer、Repairer，并连同
+review context digest 持久化在 Mission Request v0.4。Clarification answer 会 capture 新 snapshot；
+一次 repair cycle 不刷新 Context。当前没有 schema-aware relevance ranking、Memory content
+retrieval/prefetch、cross-process clock synchronization、belief fusion 或 grounding-driven Control
+decision。完整 authority 见 ADR-0037。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。

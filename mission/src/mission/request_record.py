@@ -6,14 +6,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 
-MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.3"
+MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.4"
 _COMPATIBLE_MISSION_REQUEST_SCHEMAS = {
     "roboguide.mission-request/v0.1",
     "roboguide.mission-request/v0.2",
+    "roboguide.mission-request/v0.3",
     MISSION_REQUEST_SCHEMA,
 }
 
@@ -176,6 +178,7 @@ class MissionInterpreter(Protocol):
     def interpret(
         self,
         dialogue: tuple[DialogueTurn, ...],
+        grounding_context: GroundingContextSnapshot,
     ) -> IntentAssessment:
         """Return a normalized objective or explicit open questions."""
         ...
@@ -200,6 +203,15 @@ class MissionRequestRecord:
     repair_attempts: int = 0
     review_history: tuple[MissionPlanReviewAttempt, ...] = ()
     approval_reasons: tuple[str, ...] = ()
+    grounding_context: GroundingContextSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        """Reject a grounding snapshot detached from this Mission Request identity."""
+        context = self.grounding_context
+        if context is None:
+            return
+        if context.request_id != self.request_id:
+            raise MissionRequestError("grounding context belongs to another Mission Request")
 
     def to_json(self) -> JSONObject:
         """Serialize the versioned status projection returned by the Mission Request API."""
@@ -211,6 +223,9 @@ class MissionRequestRecord:
             "lifecycle": self.lifecycle.value,
             "assessment": self.assessment.to_json() if self.assessment is not None else None,
             "plan": self.plan.to_json() if self.plan is not None else None,
+            "grounding_context": (
+                self.grounding_context.to_json() if self.grounding_context is not None else None
+            ),
             "draft_revision": self.draft_revision,
             "draft_digest": self.draft_digest,
             "approval_required": self.approval_required,
@@ -245,10 +260,18 @@ class MissionRequestRecord:
         plan = (
             None if plan_value is None else MissionPlan.from_json(_json_object(plan_value, "plan"))
         )
+        if schema_version == MISSION_REQUEST_SCHEMA and "grounding_context" not in value:
+            raise MissionRequestError("Mission Request v0.4 must carry grounding_context")
+        context_value = value.get("grounding_context")
+        grounding_context = (
+            GroundingContextSnapshot.from_json(context_value)
+            if schema_version == MISSION_REQUEST_SCHEMA and context_value is not None
+            else None
+        )
         draft_revision = _required_integer(value, "draft_revision")
         created_at_ms = _required_integer(value, "created_at_ms")
         updated_at_ms = _required_integer(value, "updated_at_ms")
-        if schema_version == MISSION_REQUEST_SCHEMA:
+        if schema_version in {"roboguide.mission-request/v0.3", MISSION_REQUEST_SCHEMA}:
             dialogue_value = value.get("dialogue")
             if not isinstance(dialogue_value, list):
                 raise MissionRequestError("dialogue must be an array")
@@ -269,18 +292,29 @@ class MissionRequestRecord:
             raise MissionRequestError("approval_required must be a boolean")
         approval_reasons = (
             _text_array(value, "approval_reasons")
-            if schema_version == MISSION_REQUEST_SCHEMA
+            if schema_version in {"roboguide.mission-request/v0.3", MISSION_REQUEST_SCHEMA}
             else ()
         )
         try:
             lifecycle = MissionRequestLifecycle(lifecycle_text)
         except ValueError as error:
             raise MissionRequestError("unknown Mission Request lifecycle") from error
-        if schema_version in {"roboguide.mission-request/v0.2", MISSION_REQUEST_SCHEMA}:
+        if schema_version in {
+            "roboguide.mission-request/v0.2",
+            "roboguide.mission-request/v0.3",
+            MISSION_REQUEST_SCHEMA,
+        }:
             repair_attempts = _required_integer(value, "repair_attempts")
             history_value = value.get("review_history")
             if not isinstance(history_value, list):
                 raise MissionRequestError("review_history must be an array")
+            if schema_version == MISSION_REQUEST_SCHEMA and any(
+                not isinstance(attempt, dict) or "grounding_context_digest" not in attempt
+                for attempt in history_value
+            ):
+                raise MissionRequestError(
+                    "Mission Request v0.4 review attempts must carry grounding context identity"
+                )
             try:
                 review_history = tuple(
                     MissionPlanReviewAttempt.from_json(attempt, f"review_history[{index}]")
@@ -305,6 +339,7 @@ class MissionRequestRecord:
             lifecycle=lifecycle,
             assessment=assessment,
             plan=plan,
+            grounding_context=grounding_context,
             draft_revision=draft_revision,
             draft_digest=draft_digest,
             approval_required=approval_required,

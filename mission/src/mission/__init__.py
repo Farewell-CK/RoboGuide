@@ -6,6 +6,19 @@ from mission.capability_catalog import (
     CapabilityCatalogError,
 )
 from mission.config import MissionSettings, load_settings
+from mission.grounding_context import (
+    GroundingContextSnapshot,
+    GroundingFreshness,
+    GroundingGap,
+    MemoryContentStatus,
+    MemoryGroundingEvidence,
+    StateGroundingEvidence,
+)
+from mission.grounding_reader import (
+    EmptyMissionGroundingReader,
+    HttpMissionGroundingReader,
+    MissionGroundingReader,
+)
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan, MissionPlanError
 from mission.planners import FixturePlanner, MissionPlanner
@@ -41,6 +54,9 @@ __all__ = [
     "DialogueTurn",
     "DialogueTurnKind",
     "FixturePlanner",
+    "GroundingContextSnapshot",
+    "GroundingFreshness",
+    "GroundingGap",
     "GroundedIntent",
     "MissionPlan",
     "MissionPlanRepairer",
@@ -50,6 +66,7 @@ __all__ = [
     "MissionPlanError",
     "MissionReviewIssue",
     "MissionPlanner",
+    "MissionGroundingReader",
     "MissionRequestEngine",
     "MissionRequestLifecycle",
     "ResponsesMissionInterpreter",
@@ -58,5 +75,10 @@ __all__ = [
     "ResponsesMissionRepairer",
     "ResponsesMissionReviewer",
     "ReviewIssueAction",
+    "EmptyMissionGroundingReader",
+    "HttpMissionGroundingReader",
+    "MemoryContentStatus",
+    "MemoryGroundingEvidence",
+    "StateGroundingEvidence",
     "load_settings",
 ]

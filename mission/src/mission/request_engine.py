@@ -13,6 +13,8 @@ from typing import Protocol
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionPlanSubmitter
+from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan
 from mission.planners import MissionPlanner
@@ -85,6 +87,7 @@ class MissionRequestEngine:
         reviewer: MissionPlanReviewer | None = None,
         repairer: MissionPlanRepairer | None = None,
         max_repair_attempts: int = 0,
+        grounding_reader: MissionGroundingReader | None = None,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
@@ -106,6 +109,7 @@ class MissionRequestEngine:
         self._reviewer = reviewer
         self._repairer = repairer
         self._max_repair_attempts = max_repair_attempts
+        self._grounding_reader = grounding_reader or EmptyMissionGroundingReader()
         self._lock = threading.RLock()
         self._recover_interrupted()
 
@@ -131,6 +135,7 @@ class MissionRequestEngine:
                 lifecycle=MissionRequestLifecycle.RECEIVED,
                 assessment=None,
                 plan=None,
+                grounding_context=None,
                 draft_revision=0,
                 draft_digest=None,
                 approval_required=False,
@@ -172,6 +177,7 @@ class MissionRequestEngine:
                 lifecycle=MissionRequestLifecycle.RECEIVED,
                 assessment=None,
                 plan=None,
+                grounding_context=None,
                 draft_digest=None,
                 approval_required=False,
                 approval_reasons=(),
@@ -234,7 +240,11 @@ class MissionRequestEngine:
         """Interpret and plan until clarification, approval, or submission is required."""
         try:
             record = self._update(record, lifecycle=MissionRequestLifecycle.INTERPRETING)
-            assessment = self._interpreter.interpret(record.dialogue)
+            grounding_context = self._grounding_reader.capture(
+                record.request_id, record.dialogue, self._clock()
+            )
+            record = self._update(record, grounding_context=grounding_context)
+            assessment = self._interpreter.interpret(record.dialogue, grounding_context)
             if assessment.open_questions:
                 return self._update(
                     record,
@@ -254,6 +264,7 @@ class MissionRequestEngine:
                 mission_id=record.mission_id,
                 grounded_intent=grounded_intent,
                 capability_catalog=self._capability_catalog,
+                grounding_context=grounding_context,
             )
             record = self._record_draft(record, assessment, grounded_intent, plan)
         except Exception as error:
@@ -318,6 +329,7 @@ class MissionRequestEngine:
                     grounded_intent,
                     plan,
                     self._capability_catalog,
+                    self._require_grounding_context(record),
                 )
             except Exception as error:
                 return self._update(
@@ -328,6 +340,7 @@ class MissionRequestEngine:
             attempt = MissionPlanReviewAttempt(
                 draft_revision=record.draft_revision,
                 draft_digest=digest,
+                grounding_context_digest=self._require_grounding_context(record).context_digest,
                 review=review,
                 reviewed_at_ms=self._clock(),
             )
@@ -387,6 +400,7 @@ class MissionRequestEngine:
                     plan,
                     review,
                     self._capability_catalog,
+                    self._require_grounding_context(record),
                 )
                 record = self._record_draft(
                     record,
@@ -466,6 +480,7 @@ class MissionRequestEngine:
         repair_attempts: int | None = None,
         review_history: tuple[MissionPlanReviewAttempt, ...] | None = None,
         approval_reasons: tuple[str, ...] | None = None,
+        grounding_context: GroundingContextSnapshot | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
@@ -489,10 +504,21 @@ class MissionRequestEngine:
             approval_reasons=(
                 record.approval_reasons if approval_reasons is None else approval_reasons
             ),
+            grounding_context=(
+                record.grounding_context
+                if isinstance(grounding_context, _Unset)
+                else grounding_context
+            ),
             updated_at_ms=self._clock(),
         )
         self._store.save(updated)
         return updated
+
+    def _require_grounding_context(self, record: MissionRequestRecord) -> GroundingContextSnapshot:
+        """Return the immutable context shared by this deliberation or fail closed."""
+        if record.grounding_context is None:
+            raise MissionRequestError("Mission deliberation has no grounding context snapshot")
+        return record.grounding_context
 
     def _clarification_questions(
         self, record: MissionRequestRecord, questions: tuple[str, ...]

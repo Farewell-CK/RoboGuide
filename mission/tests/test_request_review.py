@@ -8,6 +8,7 @@ from typing import cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import SubmissionReceipt
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.request_record import (
@@ -32,10 +33,16 @@ class FakeInterpreter:
     def __init__(self, count: int = 1) -> None:
         """Create a finite number of identical resolved assessments."""
         self.remaining = count
+        self.grounding_contexts: list[GroundingContextSnapshot] = []
 
-    def interpret(self, dialogue: tuple[DialogueTurn, ...]) -> IntentAssessment:
+    def interpret(
+        self,
+        dialogue: tuple[DialogueTurn, ...],
+        grounding_context: GroundingContextSnapshot,
+    ) -> IntentAssessment:
         """Consume one call without using deployment facts or changing the objective."""
         del dialogue
+        self.grounding_contexts.append(grounding_context)
         if self.remaining <= 0:
             raise AssertionError("fake Interpreter call budget is exhausted")
         self.remaining -= 1
@@ -63,13 +70,19 @@ def _dialogue() -> tuple[DialogueTurn, ...]:
 class FakePlanner:
     """Create valid fixture-shaped drafts with the Engine-owned Mission identity."""
 
+    def __init__(self) -> None:
+        """Initialize an inspectable grounding context trace."""
+        self.grounding_contexts: list[GroundingContextSnapshot] = []
+
     def plan(
         self,
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Return one admitted initial draft without running semantic Review."""
+        self.grounding_contexts.append(grounding_context)
         raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
         mission = cast(JSONObject, raw["mission"])
         mission["id"] = mission_id
@@ -125,15 +138,18 @@ class FakeReviewer:
         """Initialize a finite review queue for deterministic orchestration tests."""
         self.reviews = reviews
         self.calls: list[MissionPlan] = []
+        self.grounding_contexts: list[GroundingContextSnapshot] = []
 
     def review(
         self,
         grounded_intent: GroundedIntent,
         plan: MissionPlan,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Record one admitted draft and return the next scripted outcome."""
         del grounded_intent, capability_catalog
+        self.grounding_contexts.append(grounding_context)
         self.calls.append(plan)
         if not self.reviews:
             raise AssertionError("fake Reviewer result queue is empty")
@@ -146,6 +162,7 @@ class FakeRepairer:
     def __init__(self) -> None:
         """Initialize an empty repair call trace."""
         self.calls: list[tuple[MissionPlan, MissionPlanReview]] = []
+        self.grounding_contexts: list[GroundingContextSnapshot] = []
 
     def repair(
         self,
@@ -154,9 +171,11 @@ class FakeRepairer:
         rejected_plan: MissionPlan,
         review: MissionPlanReview,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Return a valid revision with a deterministic description-only repair marker."""
         del capability_catalog
+        self.grounding_contexts.append(grounding_context)
         self.calls.append((rejected_plan, review))
         raw = rejected_plan.to_json()
         mission = cast(JSONObject, raw["mission"])
@@ -177,6 +196,7 @@ class UnknownContractRepairer(FakeRepairer):
         rejected_plan: MissionPlan,
         review: MissionPlanReview,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Deliberately replace one canonical contract after recording the repair call."""
         repaired = super().repair(
@@ -185,6 +205,7 @@ class UnknownContractRepairer(FakeRepairer):
             rejected_plan,
             review,
             capability_catalog,
+            grounding_context,
         )
         raw = repaired.to_json()
         tasks = cast(list[JSONObject], raw["tasks"])
@@ -224,12 +245,13 @@ def _engine(
     repairer: FakeRepairer,
     controller: AcceptingController,
     max_repair_attempts: int = 2,
+    planner: FakePlanner | None = None,
 ) -> MissionRequestEngine:
     """Compose one persistent deterministic Review/Repair orchestration fixture."""
     return MissionRequestEngine(
         MissionRequestStore(tmp_path / "review-requests.sqlite3"),
         interpreter,
-        FakePlanner(),
+        planner or FakePlanner(),
         controller,
         CanonicalCapabilityCatalog.load(CATALOG),
         frozenset(),
@@ -246,7 +268,9 @@ def test_repairable_review_produces_a_new_approved_draft_revision(tmp_path: Path
     reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN), _review()])
     repairer = FakeRepairer()
     controller = AcceptingController()
-    engine = _engine(tmp_path, FakeInterpreter(), reviewer, repairer, controller)
+    interpreter = FakeInterpreter()
+    planner = FakePlanner()
+    engine = _engine(tmp_path, interpreter, reviewer, repairer, controller, planner=planner)
 
     accepted = engine.create("执行明确的运输任务")
     restored = engine.get(accepted.request_id)
@@ -261,6 +285,19 @@ def test_repairable_review_produces_a_new_approved_draft_revision(tmp_path: Path
     assert len(repairer.calls) == 1
     assert controller.submissions == [accepted.plan]
     assert restored == accepted
+    assert accepted.grounding_context is not None
+    context_digest = accepted.grounding_context.context_digest
+    assert [item.context_digest for item in interpreter.grounding_contexts] == [context_digest]
+    assert [item.context_digest for item in planner.grounding_contexts] == [context_digest]
+    assert [item.context_digest for item in reviewer.grounding_contexts] == [
+        context_digest,
+        context_digest,
+    ]
+    assert [item.context_digest for item in repairer.grounding_contexts] == [context_digest]
+    assert [attempt.grounding_context_digest for attempt in accepted.review_history] == [
+        context_digest,
+        context_digest,
+    ]
 
 
 def test_review_clarification_returns_to_dialogue_without_repair(tmp_path: Path) -> None:
@@ -366,6 +403,7 @@ def test_restart_fences_interrupted_repair_for_explicit_retry(tmp_path: Path) ->
         lifecycle=MissionRequestLifecycle.REPAIRING,
         assessment=None,
         plan=None,
+        grounding_context=None,
         draft_revision=1,
         draft_digest=None,
         approval_required=False,

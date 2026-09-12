@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/grounding-context-v0.1/grounding-context.schema.json",
+  "title": "RoboGuide Mission Grounding Context v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "context_digest",
+    "request_id",
+    "dialogue_digest",
+    "captured_at_ms",
+    "selection_policy_ref",
+    "state_evidence",
+    "memory_evidence",
+    "gaps"
+  ],
+  "properties": {
+    "schema_version": {"const": "roboguide.grounding-context/v0.1"},
+    "context_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "request_id": {"type": "string", "minLength": 1},
+    "dialogue_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "captured_at_ms": {"type": "integer", "minimum": 0},
+    "selection_policy_ref": {"type": "string", "minLength": 1},
+    "state_evidence": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/state_evidence"}
+    },
+    "memory_evidence": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/memory_evidence"}
+    },
+    "gaps": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/gap"}
+    }
+  },
+  "$defs": {
+    "json_value": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/json_value"}},
+        {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/json_value"}
+        }
+      ]
+    },
+    "state_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "object",
+        "semantic",
+        "source",
+        "channel_id",
+        "payload_schema",
+        "value",
+        "source_observed_at_ms",
+        "received_at_ms",
+        "valid_for_ms",
+        "freshness",
+        "confidence_millionths",
+        "source_epoch",
+        "sequence"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "object": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "object_type", "object_id"],
+          "properties": {
+            "class": {"const": "world"},
+            "object_type": {"type": "string", "minLength": 1},
+            "object_id": {"type": "string", "minLength": 1}
+          }
+        },
+        "semantic": {"enum": ["reported", "observed", "derived", "belief"]},
+        "source": {"type": "string", "minLength": 1},
+        "channel_id": {"type": "string", "minLength": 1},
+        "payload_schema": {"type": "string", "minLength": 1},
+        "value": {"$ref": "#/$defs/json_value"},
+        "source_observed_at_ms": {"type": ["integer", "null"], "minimum": 0},
+        "received_at_ms": {"type": "integer", "minimum": 0},
+        "valid_for_ms": {"type": "integer", "minimum": 1},
+        "freshness": {"enum": ["Fresh", "Stale"]},
+        "confidence_millionths": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "source_epoch": {"type": ["string", "null"], "minLength": 1},
+        "sequence": {"type": "integer", "minimum": 0}
+      }
+    },
+    "memory_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "selector",
+        "kind",
+        "provider_id",
+        "owner",
+        "scope",
+        "visibility",
+        "payload_schema",
+        "media_type",
+        "artifact",
+        "source_mission_id",
+        "source_execution_id",
+        "source_task_ref",
+        "created_at_ms",
+        "content_status"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["memory_id", "revision_id"],
+          "properties": {
+            "memory_id": {"type": "string", "minLength": 1},
+            "revision_id": {"type": "string", "minLength": 1}
+          }
+        },
+        "kind": {"enum": ["semantic", "experience", "spatial"]},
+        "provider_id": {"type": "string", "minLength": 1},
+        "owner": {"type": "object"},
+        "scope": {"const": "global"},
+        "visibility": {"enum": ["discoverable", "exchangeable"]},
+        "payload_schema": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "artifact": {"type": ["object", "null"]},
+        "source_mission_id": {"type": ["string", "null"], "minLength": 1},
+        "source_execution_id": {"type": ["string", "null"], "minLength": 1},
+        "source_task_ref": {"type": ["object", "null"]},
+        "created_at_ms": {"type": "integer", "minimum": 0},
+        "content_status": {"const": "MetadataOnly"}
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "source", "detail"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "source": {"type": "string", "minLength": 1},
+        "detail": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

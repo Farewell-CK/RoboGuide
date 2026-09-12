@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.request_record import DialogueTurn, IntentAssessment
@@ -283,6 +284,7 @@ class ResponsesMissionPlanner:
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate a strict MissionPlan from the complete resolved Mission intent."""
         schema = self._client._load_schema()
@@ -294,6 +296,7 @@ class ResponsesMissionPlanner:
                     "mission_id": mission_id,
                     "grounded_intent": grounded_intent.to_json(),
                     "capability_catalog": capability_catalog.to_json(),
+                    "grounding_context": grounding_context.to_json(),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -327,6 +330,7 @@ class ResponsesMissionReviewer:
         grounded_intent: GroundedIntent,
         plan: MissionPlan,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Review the plan against its exact grounded input and authority boundaries."""
         response = self._client._request(
@@ -337,6 +341,7 @@ class ResponsesMissionReviewer:
                     "grounded_intent": grounded_intent.to_json(),
                     "mission_plan": plan.to_json(),
                     "capability_catalog": capability_catalog.to_json(),
+                    "grounding_context": grounding_context.to_json(),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -367,6 +372,7 @@ class ResponsesMissionRepairer:
         rejected_plan: MissionPlan,
         review: MissionPlanReview,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate and validate one complete replacement draft from structured findings."""
         schema = self._client._load_schema()
@@ -380,6 +386,7 @@ class ResponsesMissionRepairer:
                     "rejected_plan": rejected_plan.to_json(),
                     "review": review.to_json(),
                     "capability_catalog": capability_catalog.to_json(),
+                    "grounding_context": grounding_context.to_json(),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -411,6 +418,7 @@ class ResponsesMissionInterpreter:
     def interpret(
         self,
         dialogue: tuple[DialogueTurn, ...],
+        grounding_context: GroundingContextSnapshot,
     ) -> IntentAssessment:
         """Return grounded intent or explicit questions without decomposing or executing Tasks."""
         schema: JSONObject = {
@@ -428,7 +436,10 @@ class ResponsesMissionInterpreter:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.interpreter_path),
             input_text=json.dumps(
-                {"dialogue": [turn.to_json() for turn in dialogue]},
+                {
+                    "dialogue": [turn.to_json() for turn in dialogue],
+                    "grounding_context": grounding_context.to_json(),
+                },
                 ensure_ascii=False,
                 sort_keys=True,
             ),

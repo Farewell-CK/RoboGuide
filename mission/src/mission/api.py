@@ -13,6 +13,7 @@ from typing import Any, cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
+from mission.grounding_reader import HttpMissionGroundingReader
 from mission.models import JSONObject
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
 from mission.responses import (
@@ -58,6 +59,13 @@ def build_engine(
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=(planner_settings.max_repair_attempts if reviewer is not None else 0),
+        grounding_reader=HttpMissionGroundingReader(
+            service_settings.controller_endpoint,
+            service_settings.artifact_endpoint,
+            service_settings.grounding_timeout_seconds,
+            service_settings.max_grounding_state_evidence,
+            service_settings.max_grounding_memory_evidence,
+        ),
     )
     return engine, service_settings
 

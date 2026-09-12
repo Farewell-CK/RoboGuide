@@ -19,6 +19,7 @@ from mission.controller import (
     InventorySnapshot,
     SubmissionReceipt,
 )
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.requests import (
@@ -55,20 +56,42 @@ def test_request_v03_contract_accepts_current_and_compatible_plan_versions() -> 
     }
 
 
+def test_request_v04_contract_persists_grounding_and_review_context_identity() -> None:
+    """Current request projections make grounding and Review attribution explicit."""
+    schema = json.loads(
+        Path("contracts/mission/request-v0.4/mission-request.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert schema["properties"]["schema_version"]["const"] == ("roboguide.mission-request/v0.4")
+    assert "grounding_context" in schema["required"]
+    assert "grounding_context_digest" in schema["$defs"]["review_attempt"]["required"]
+    grounding_schema = json.loads(
+        Path("contracts/mission/grounding-context-v0.1/grounding-context.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert grounding_schema["properties"]["schema_version"]["const"] == (
+        "roboguide.grounding-context/v0.1"
+    )
+
+
 class FakeInterpreter:
     """Return scripted assessments and retain deployment-independent dialogue calls."""
 
     def __init__(self, assessments: list[IntentAssessment]) -> None:
         """Initialize a finite assessment queue."""
         self.assessments = assessments
-        self.calls: list[tuple[DialogueTurn, ...]] = []
+        self.calls: list[tuple[tuple[DialogueTurn, ...], GroundingContextSnapshot]] = []
 
     def interpret(
         self,
         dialogue: tuple[DialogueTurn, ...],
+        grounding_context: GroundingContextSnapshot,
     ) -> IntentAssessment:
         """Record one grounding call and return its scripted result."""
-        self.calls.append(dialogue)
+        self.calls.append((dialogue, grounding_context))
         if not self.assessments:
             raise AssertionError("fake interpreter assessment queue is empty")
         return self.assessments.pop(0)
@@ -103,16 +126,17 @@ class FakePlanner:
 
     def __init__(self) -> None:
         """Initialize an inspectable call list."""
-        self.calls: list[tuple[str, GroundedIntent]] = []
+        self.calls: list[tuple[str, GroundedIntent, GroundingContextSnapshot]] = []
 
     def plan(
         self,
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Return a strict plan while retaining the complete grounded Planner input."""
-        self.calls.append((mission_id, grounded_intent))
+        self.calls.append((mission_id, grounded_intent, grounding_context))
         raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
         mission = cast(JSONObject, raw["mission"])
         mission["id"] = mission_id
@@ -130,10 +154,11 @@ class UnknownContractPlanner(FakePlanner):
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Bypass the supplied Catalog as a deliberately faulty Planner implementation."""
         del capability_catalog
-        self.calls.append((mission_id, grounded_intent))
+        self.calls.append((mission_id, grounded_intent, grounding_context))
         raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
         mission = cast(JSONObject, raw["mission"])
         mission["id"] = mission_id
@@ -308,6 +333,11 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
         (),
     )
     assert len(controller.submissions) == 1
+    first_context = interpreter.calls[0][1]
+    second_context = interpreter.calls[1][1]
+    assert first_context.context_digest != second_context.context_digest
+    assert first_context.dialogue_digest != second_context.dialogue_digest
+    assert accepted.grounding_context == second_context
 
 
 def test_assessment_with_questions_cannot_form_a_grounded_planner_input() -> None:
@@ -353,8 +383,8 @@ def test_zero_current_providers_do_not_block_semantically_valid_mission(tmp_path
     assert len(controller.submissions) == 1
     assert controller.inventory_calls == 0
     assert len(interpreter.calls) == 1
-    assert interpreter.calls[0][0].content == "执行明确的运输任务"
-    assert interpreter.calls[0][0].kind is DialogueTurnKind.INSTRUCTION
+    assert interpreter.calls[0][0][0].content == "执行明确的运输任务"
+    assert interpreter.calls[0][0][0].kind is DialogueTurnKind.INSTRUCTION
 
 
 def test_live_capability_readiness_does_not_change_mission_admission(
@@ -454,6 +484,7 @@ def test_v01_request_projection_restores_with_empty_review_history() -> None:
         lifecycle=MissionRequestLifecycle.FAILED,
         assessment=None,
         plan=None,
+        grounding_context=None,
         draft_revision=0,
         draft_digest=None,
         approval_required=False,
@@ -473,7 +504,7 @@ def test_v01_request_projection_restores_with_empty_review_history() -> None:
 
     assert restored.repair_attempts == 0
     assert restored.review_history == ()
-    assert restored.to_json()["schema_version"] == "roboguide.mission-request/v0.3"
+    assert restored.to_json()["schema_version"] == "roboguide.mission-request/v0.4"
 
 
 def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None:
@@ -486,6 +517,7 @@ def test_restart_fences_interrupted_submission_as_failed(tmp_path: Path) -> None
         lifecycle=MissionRequestLifecycle.SUBMITTING,
         assessment=None,
         plan=None,
+        grounding_context=None,
         draft_revision=0,
         draft_digest=None,
         approval_required=False,
@@ -520,6 +552,7 @@ def test_restart_fences_received_request_for_explicit_retry(tmp_path: Path) -> N
         lifecycle=MissionRequestLifecycle.RECEIVED,
         assessment=None,
         plan=None,
+        grounding_context=None,
         draft_revision=0,
         draft_digest=None,
         approval_required=False,

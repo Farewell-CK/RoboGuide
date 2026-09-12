@@ -11,6 +11,8 @@ from typing import cast
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
+from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner
@@ -83,6 +85,13 @@ def _catalog() -> CanonicalCapabilityCatalog:
     return CanonicalCapabilityCatalog.load(CATALOG)
 
 
+def _grounding(
+    dialogue: tuple[DialogueTurn, ...] = (),
+) -> GroundingContextSnapshot:
+    """Build one attributed empty snapshot for deterministic provider tests."""
+    return EmptyMissionGroundingReader().capture("request-test", dialogue, 10)
+
+
 def _review_output(action: str = "RepairPlan") -> JSONObject:
     """Build one strict rejected-review provider payload for adapter tests."""
     return {
@@ -103,7 +112,7 @@ def test_fixture_planner_loads_the_approved_plan() -> None:
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     mission = raw["mission"]
     plan = FixturePlanner(FIXTURE).plan(
-        mission["id"], GroundedIntent(mission["objective"], (), ()), _catalog()
+        mission["id"], GroundedIntent(mission["objective"], (), ()), _catalog(), _grounding()
     )
     assert plan.mission.mission_id == "mission-phase1-001"
 
@@ -117,6 +126,7 @@ def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
             mission["id"],
             GroundedIntent(mission["objective"], ("keep the marked aisle clear",), ()),
             _catalog(),
+            _grounding(),
         )
 
 
@@ -138,7 +148,8 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     )
 
     capability_catalog = _catalog()
-    plan = planner.plan(mission["id"], grounded_intent, capability_catalog)
+    grounding = _grounding()
+    plan = planner.plan(mission["id"], grounded_intent, capability_catalog, grounding)
 
     assert plan.to_json() == plan_json
     assert len(transport.requests) == 1
@@ -154,6 +165,7 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
         "mission_id": mission["id"],
         "grounded_intent": grounded_intent.to_json(),
         "capability_catalog": capability_catalog.to_json(),
+        "grounding_context": grounding.to_json(),
     }
     text_config = planning_payload["text"]
     assert isinstance(text_config, dict)
@@ -196,7 +208,8 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
     plan = MissionPlan.from_json(plan_json)
     grounded_intent = GroundedIntent(mission["objective"], ("avoid stairs",), ())
 
-    review = reviewer.review(grounded_intent, plan, _catalog())
+    grounding = _grounding()
+    review = reviewer.review(grounded_intent, plan, _catalog(), grounding)
 
     assert review.approved is False
     assert review.issues[0].required_action is ReviewIssueAction.REPAIR_PLAN
@@ -210,6 +223,7 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
         "grounded_intent": grounded_intent.to_json(),
         "mission_plan": plan_json,
         "capability_catalog": _catalog().to_json(),
+        "grounding_context": grounding.to_json(),
     }
 
 
@@ -227,7 +241,8 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
     grounded_intent = GroundedIntent(mission["objective"], (), ())
     review = MissionPlanReview.from_json(_review_output())
 
-    repaired = repairer.repair(mission["id"], grounded_intent, plan, review, _catalog())
+    grounding = _grounding()
+    repaired = repairer.repair(mission["id"], grounded_intent, plan, review, _catalog(), grounding)
 
     assert repaired == plan
     payload = transport.requests[0][2]
@@ -241,6 +256,7 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
         "rejected_plan": plan_json,
         "review": review.to_json(),
         "capability_catalog": _catalog().to_json(),
+        "grounding_context": grounding.to_json(),
     }
 
 
@@ -263,6 +279,7 @@ def test_responses_planner_rejects_unknown_contract_before_review() -> None:
             plan_json["mission"]["id"],
             GroundedIntent(plan_json["mission"]["objective"], (), ()),
             _catalog(),
+            _grounding(),
         )
 
     assert len(transport.requests) == 1
@@ -289,9 +306,13 @@ def test_responses_interpreter_preserves_open_questions_before_planning() -> Non
             1,
         ),
     )
-    assessment = interpreter.interpret(dialogue)
+    grounding = _grounding(dialogue)
+    assessment = interpreter.interpret(dialogue, grounding)
 
     assert assessment.open_questions == ("需要建立哪个区域的地图？",)
     assert len(transport.requests) == 1
     request_input = json.loads(cast(str, transport.requests[0][2]["input"]))
-    assert request_input == {"dialogue": [dialogue[0].to_json()]}
+    assert request_input == {
+        "dialogue": [dialogue[0].to_json()],
+        "grounding_context": grounding.to_json(),
+    }

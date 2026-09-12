@@ -1,5 +1,18 @@
 """Public facade for durable Mission Request deliberation."""
 
+from mission.grounding_context import (
+    GroundingContextSnapshot,
+    GroundingFreshness,
+    GroundingGap,
+    MemoryContentStatus,
+    MemoryGroundingEvidence,
+    StateGroundingEvidence,
+)
+from mission.grounding_reader import (
+    EmptyMissionGroundingReader,
+    HttpMissionGroundingReader,
+    MissionGroundingReader,
+)
 from mission.request_engine import (
     Clock,
     IdGenerator,
@@ -25,15 +38,24 @@ __all__ = [
     "DialogueSpeaker",
     "DialogueTurn",
     "DialogueTurnKind",
+    "EmptyMissionGroundingReader",
+    "GroundingContextSnapshot",
+    "GroundingFreshness",
+    "GroundingGap",
+    "HttpMissionGroundingReader",
     "IdGenerator",
     "IntentAssessment",
     "MISSION_REQUEST_SCHEMA",
     "MissionInterpreter",
+    "MissionGroundingReader",
     "MissionRequestEngine",
     "MissionRequestError",
     "MissionRequestLifecycle",
     "MissionRequestRecord",
     "MissionRequestStore",
+    "MemoryContentStatus",
+    "MemoryGroundingEvidence",
+    "StateGroundingEvidence",
     "unix_time_ms",
     "uuid_token",
 ]

@@ -14,6 +14,9 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     settings = load_service_settings(path, repository_root=Path.cwd())
     assert settings.listen_port == 8070
     assert settings.controller_endpoint == "http://127.0.0.1:8080"
+    assert settings.artifact_endpoint == "http://127.0.0.1:8090"
+    assert settings.max_grounding_state_evidence == 64
+    assert settings.max_grounding_memory_evidence == 32
     assert "spatial.map.import@v0" in settings.approval_required_contracts
     assert [rule.rule_id for rule in settings.approval_policy.rules] == [
         "mobility-move",

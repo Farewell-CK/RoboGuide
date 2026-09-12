@@ -10,6 +10,11 @@ from urllib.parse import urlparse
 
 from mission.approval import ApprovalPolicy, ApprovalRule, ApprovalScalar
 
+_DEFAULT_ARTIFACT_ENDPOINT = "http://127.0.0.1:8090"
+_DEFAULT_GROUNDING_TIMEOUT_SECONDS = 5.0
+_DEFAULT_MAX_GROUNDING_STATE_EVIDENCE = 64
+_DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE = 32
+
 
 class MissionServiceConfigError(ValueError):
     """Report an invalid Mission Service deployment setting."""
@@ -24,6 +29,10 @@ class MissionServiceSettings:
     state_db: Path
     controller_endpoint: str
     controller_timeout_seconds: float
+    artifact_endpoint: str
+    grounding_timeout_seconds: float
+    max_grounding_state_evidence: int
+    max_grounding_memory_evidence: int
     max_request_bytes: int
     approval_policy: ApprovalPolicy
 
@@ -51,18 +60,11 @@ def load_service_settings(
     if port > 65_535:
         raise MissionServiceConfigError("service.listen_port exceeds 65535")
     endpoint = _text(service, "controller_endpoint").rstrip("/")
-    parsed = urlparse(endpoint)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise MissionServiceConfigError(
-            "service.controller_endpoint must be a fixed HTTP(S) origin"
-        )
+    _validate_origin(endpoint, "controller_endpoint")
+    artifact_endpoint = _optional_text(
+        service, "artifact_endpoint", _DEFAULT_ARTIFACT_ENDPOINT
+    ).rstrip("/")
+    _validate_origin(artifact_endpoint, "artifact_endpoint")
     approval_policy = _approval_policy(service)
     root = repository_root if repository_root is not None else path.parent.parent
     return MissionServiceSettings(
@@ -71,9 +73,34 @@ def load_service_settings(
         state_db=(root / _text(service, "state_db")).resolve(),
         controller_endpoint=endpoint,
         controller_timeout_seconds=_positive_number(service, "controller_timeout_seconds"),
+        artifact_endpoint=artifact_endpoint,
+        grounding_timeout_seconds=_optional_positive_number(
+            service, "grounding_timeout_seconds", _DEFAULT_GROUNDING_TIMEOUT_SECONDS
+        ),
+        max_grounding_state_evidence=_optional_positive_integer(
+            service, "max_grounding_state_evidence", _DEFAULT_MAX_GROUNDING_STATE_EVIDENCE
+        ),
+        max_grounding_memory_evidence=_optional_positive_integer(
+            service, "max_grounding_memory_evidence", _DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE
+        ),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
     )
+
+
+def _validate_origin(value: str, key: str) -> None:
+    """Reject credentials, paths, redirects-by-configuration, and ambiguous HTTP origins."""
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise MissionServiceConfigError(f"service.{key} must be a fixed HTTP(S) origin")
 
 
 def _table(value: object, path: str) -> dict[str, object]:
@@ -91,6 +118,13 @@ def _text(table: Mapping[str, object], key: str) -> str:
     return value
 
 
+def _optional_text(table: Mapping[str, object], key: str, default: str) -> str:
+    """Read an additive text setting while preserving compatible local defaults."""
+    if key not in table:
+        return default
+    return _text(table, key)
+
+
 def _positive_integer(table: Mapping[str, object], key: str) -> int:
     """Read one strictly positive integer without Boolean coercion."""
     value = table.get(key)
@@ -99,12 +133,26 @@ def _positive_integer(table: Mapping[str, object], key: str) -> int:
     return value
 
 
+def _optional_positive_integer(table: Mapping[str, object], key: str, default: int) -> int:
+    """Read an additive positive integer setting or its bounded default."""
+    if key not in table:
+        return default
+    return _positive_integer(table, key)
+
+
 def _positive_number(table: Mapping[str, object], key: str) -> float:
     """Read one strictly positive request timeout."""
     value = table.get(key)
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
         raise MissionServiceConfigError(f"service.{key} must be positive")
     return float(value)
+
+
+def _optional_positive_number(table: Mapping[str, object], key: str, default: float) -> float:
+    """Read an additive positive numeric setting or its bounded default."""
+    if key not in table:
+        return default
+    return _positive_number(table, key)
 
 
 def _valid_contract(value: str) -> bool:

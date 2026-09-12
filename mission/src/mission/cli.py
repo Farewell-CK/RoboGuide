@@ -9,9 +9,12 @@ from typing import cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings, current_environment, load_settings
+from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import FixturePlanner, MissionPlanner
+from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 from mission.responses import (
     ResponsesMissionPlanner,
     ResponsesMissionRepairer,
@@ -67,6 +70,7 @@ def _review_and_repair_plan(
     grounded_intent: GroundedIntent,
     capability_catalog: CanonicalCapabilityCatalog,
     plan: MissionPlan,
+    grounding_context: GroundingContextSnapshot,
 ) -> MissionPlan:
     """Apply the same bounded semantic review policy for direct LLM CLI planning."""
     if not settings.review_enabled:
@@ -76,7 +80,7 @@ def _review_and_repair_plan(
     repairer = ResponsesMissionRepairer(settings, environment)
     repairs = 0
     while True:
-        review = reviewer.review(grounded_intent, plan, capability_catalog)
+        review = reviewer.review(grounded_intent, plan, capability_catalog, grounding_context)
         route = route_mission_review(review)
         if route is MissionReviewRoute.APPROVED:
             return plan
@@ -93,6 +97,7 @@ def _review_and_repair_plan(
             plan,
             review,
             capability_catalog,
+            grounding_context,
         )
         repairs += 1
 
@@ -113,10 +118,23 @@ def main() -> int:
         tuple(cast(list[str], arguments.assumption)),
     )
     mission_id = cast(str, arguments.mission_id)
+    dialogue = (
+        DialogueTurn(
+            "turn-cli-0001",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.INSTRUCTION,
+            grounded_intent.objective,
+            0,
+        ),
+    )
+    grounding_context = EmptyMissionGroundingReader().capture(
+        f"request-cli-{mission_id}", dialogue, 0
+    )
     plan = planner.plan(
         mission_id=mission_id,
         grounded_intent=grounded_intent,
         capability_catalog=capability_catalog,
+        grounding_context=grounding_context,
     )
     if arguments.fixture is None:
         plan = _review_and_repair_plan(
@@ -125,6 +143,7 @@ def main() -> int:
             grounded_intent,
             capability_catalog,
             plan,
+            grounding_context,
         )
     output_path = cast(Path, arguments.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
+from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 
@@ -19,6 +20,7 @@ class MissionPlanner(Protocol):
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Plan one resolved intent or raise a configuration, provider, or contract error."""
         ...
@@ -36,9 +38,15 @@ class FixturePlanner:
         mission_id: str,
         grounded_intent: GroundedIntent,
         capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Load an objective-matched fixture when no unrepresented grounding facts exist."""
-        if grounded_intent.constraints or grounded_intent.assumptions:
+        if (
+            grounded_intent.constraints
+            or grounded_intent.assumptions
+            or grounding_context.state_evidence
+            or grounding_context.memory_evidence
+        ):
             raise ValueError(
                 "fixture planning cannot prove nonempty constraints or assumptions are represented"
             )
