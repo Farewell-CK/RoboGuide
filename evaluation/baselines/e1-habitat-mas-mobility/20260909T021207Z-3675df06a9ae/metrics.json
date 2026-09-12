@@ -1,0 +1,46 @@
+{
+  "details": {
+    "emos_episode_batch_size": 1,
+    "emos_episode_ids": [
+      "20"
+    ],
+    "emos_pddl_success_average": null,
+    "emos_token_usage_by_agent": {
+      "FetchRobot": 1226,
+      "SpotRobot": 1266,
+      "agent_0": 22107,
+      "agent_1": 15650,
+      "leader": 1426
+    },
+    "emos_token_usage_source_path": "chat_history_output/2026-09-09/llm_spot_fetch_mobility/FULL/20/token_usage.json",
+    "unavailable_metrics": {
+      "coordination_latency": "measurement boundary frozen in evaluation/README.md; collection gated on explicit protocol agreement before formal E1 runs",
+      "subgoal_success_rate": "EMOS evaluator reported no subgoal_success_rate average; raw subgoal aggregates stay in details (see evaluation/README.md)",
+      "success": "evaluator reported no pddl_success average in stdout"
+    },
+    "wall_time_source": "harness_process_duration"
+  },
+  "raw_evidence": [
+    {
+      "description": "persisted process stdout",
+      "media_type": "text/plain",
+      "path": "stdout.log"
+    },
+    {
+      "description": "persisted process stderr",
+      "media_type": "text/plain",
+      "path": "stderr.log"
+    },
+    {
+      "description": "EMOS official per-agent token totals for episode 20",
+      "media_type": "application/json",
+      "path": "raw-evidence/token_usage-20.json"
+    }
+  ],
+  "schema": "roboguide-eval.metrics/v0.2",
+  "values": {
+    "simulation_steps": 3000,
+    "token_usage": 41675,
+    "wall_time": 811.282
+  }
+}

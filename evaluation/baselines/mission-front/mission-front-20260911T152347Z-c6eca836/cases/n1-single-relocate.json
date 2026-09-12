@@ -1,0 +1,248 @@
+{
+  "case_id": "n1-single-relocate",
+  "category": "normal",
+  "instruction": "把客厅的杯子搬到卧室的床头柜上",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 26.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 3 clarification question(s): 如果有多个卧室或床头柜，请指定目标卧室和床头柜。 | 如果客厅有多个杯子，请确认要搬运哪一个，还是搬运全部杯子。 | 杯子中是否装有液体，或是否属于易碎物品？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 3 clarification question(s): 如果有多个卧室或床头柜，请指定目标卧室和床头柜。 | 如果客厅有多个杯子，请确认要搬运哪一个，还是搬运全部杯子。 | 杯子中是否装有液体，或是否属于易碎物品？",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 25905.8,
+      "request_bytes": 1973,
+      "response_bytes": 14283,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f23192f8c80c5b7016aa41d05ec1487d182c42b99fc5367b8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 70,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "rs_0f23192f8c80c5b7016aa41d06d5a887d1b9808fde36014613": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f23192f8c80c5b7016aa41d102c5487d19eff9e6503398a5c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 488
+            },
+            "msg_0f23192f8c80c5b7016aa41d190f4487d19b65e1c20baa2e20": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 195
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 195
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 361,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1199,
+        "output_tokens_details": {
+          "reasoning_tokens": 1004
+        },
+        "total_tokens": 1560
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 361,
+    "output_tokens": 1199,
+    "total_tokens": 1560
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-38cb4d930835428a87d5da4514fcb7ef",
+    "mission_id": "mission-24ffaa37c75b4133ad0e6cc9c4fbbe1f",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把客厅的杯子搬到卧室的床头柜上",
+        "created_at_ms": 1789140228059,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果有多个卧室或床头柜，请指定目标卧室和床头柜。",
+        "created_at_ms": 1789140254064,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果客厅有多个杯子，请确认要搬运哪一个，还是搬运全部杯子。",
+        "created_at_ms": 1789140254064,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "杯子中是否装有液体，或是否属于易碎物品？",
+        "created_at_ms": 1789140254064,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将用户指定的杯子从客厅搬运并放置到卧室的床头柜上表面。",
+      "constraints": [
+        "起点范围限定为客厅。",
+        "目标位置限定为卧室内的床头柜上表面。",
+        "任务对象为杯子。"
+      ],
+      "assumptions": [
+        "未假定住宅中只有一个卧室、一个床头柜或一个杯子。",
+        "“床头柜上”解释为放置在床头柜的上表面，而不是抽屉或柜内。"
+      ],
+      "open_questions": [
+        "如果有多个卧室或床头柜，请指定目标卧室和床头柜。",
+        "如果客厅有多个杯子，请确认要搬运哪一个，还是搬运全部杯子。",
+        "杯子中是否装有液体，或是否属于易碎物品？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140228059,
+    "updated_at_ms": 1789140254064
+  }
+}

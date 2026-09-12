@@ -1,0 +1,4 @@
+{"seq": 1, "time": "2026-09-09T02:35:01+00:00", "event": "run_started", "detail": {"experiment_id": "e1-habitat-mas-mobility", "system": "emos", "episode_id": "seed-pinned-sample", "seed": 7, "run_id": "20260909T023501Z-27d808473193"}}
+{"seq": 2, "time": "2026-09-09T02:48:18+00:00", "event": "process_completed", "detail": {"status": "completed", "exit_code": 0, "duration_seconds": 797.7174455388449}}
+{"seq": 3, "time": "2026-09-09T02:48:18+00:00", "event": "episode_identity", "detail": {"resolution": "resolved"}}
+{"seq": 4, "time": "2026-09-09T02:48:18+00:00", "event": "run_completed", "detail": {"failure_reason": null}}

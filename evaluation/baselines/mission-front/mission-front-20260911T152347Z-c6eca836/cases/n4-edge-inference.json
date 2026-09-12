@@ -1,0 +1,265 @@
+{
+  "case_id": "n4-edge-inference",
+  "category": "normal",
+  "instruction": "把边缘节点上录制的激光点云数据做一次推理分析",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 19.5,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 要使用哪个边缘节点以及其中的哪批点云数据（文件、时间范围或数据集标识）？ | 推理分析的具体目标是什么，例如目标检测、语义分割、分类、跟踪或其他任务？是否有指定模型及版本？ | 需要生成哪些结果，以及结果应以何种格式保存或交付？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['compute.infer@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 要使用哪个边缘节点以及其中的哪批点云数据（文件、时间范围或数据集标识）？ | 推理分析的具体目标是什么，例如目标检测、语义分割、分类、跟踪或其他任务？是否有指定模型及版本？ | 需要生成哪些结果，以及结果应以何种格式保存或交付？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['compute.infer@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 19287.0,
+      "request_bytes": 1994,
+      "response_bytes": 13117,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_06e7ddcc4b0706ff016aa41d4c490087d19be0dac2557d0450": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 73,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 73,
+              "output_tokens": 0
+            },
+            "rs_06e7ddcc4b0706ff016aa41d4cdac887d1aef24c95bb1b7c9d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_06e7ddcc4b0706ff016aa41d562a9887d1b4ee53db8684187b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 193
+            },
+            "msg_06e7ddcc4b0706ff016aa41d59c84487d1a8887301b1523c88": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 265
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 265
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 364,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 974,
+        "output_tokens_details": {
+          "reasoning_tokens": 709
+        },
+        "total_tokens": 1338
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 364,
+    "output_tokens": 974,
+    "total_tokens": 1338
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-e2c5352f6a49492eb4c1334108a5c1a1",
+    "mission_id": "mission-294d64820292491894f1745394a8aee3",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把边缘节点上录制的激光点云数据做一次推理分析",
+        "created_at_ms": 1789140299301,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要使用哪个边缘节点以及其中的哪批点云数据（文件、时间范围或数据集标识）？",
+        "created_at_ms": 1789140318705,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "推理分析的具体目标是什么，例如目标检测、语义分割、分类、跟踪或其他任务？是否有指定模型及版本？",
+        "created_at_ms": 1789140318705,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要生成哪些结果，以及结果应以何种格式保存或交付？",
+        "created_at_ms": 1789140318705,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "何种条件算作分析完成，例如指定数据全部处理成功、生成报告，或达到某项质量指标？",
+        "created_at_ms": 1789140318705,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "分析结果是否会用于控制或其他安全相关决策；如会，是否有额外的验证、审批或质量要求？",
+        "created_at_ms": 1789140318705,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "对边缘节点上已录制的激光点云数据执行一次推理分析，并生成相应的分析结果。",
+      "constraints": [
+        "数据来源限定为边缘节点上已录制的激光点云数据。",
+        "用户要求执行一次推理分析。"
+      ],
+      "assumptions": [
+        "假设这是对已录制数据进行的一次离线推理分析，而不是实时采集或实时推理。",
+        "未假定具体边缘节点、数据集、推理模型、输出位置或本地实现方式。"
+      ],
+      "open_questions": [
+        "要使用哪个边缘节点以及其中的哪批点云数据（文件、时间范围或数据集标识）？",
+        "推理分析的具体目标是什么，例如目标检测、语义分割、分类、跟踪或其他任务？是否有指定模型及版本？",
+        "需要生成哪些结果，以及结果应以何种格式保存或交付？",
+        "何种条件算作分析完成，例如指定数据全部处理成功、生成报告，或达到某项质量指标？",
+        "分析结果是否会用于控制或其他安全相关决策；如会，是否有额外的验证、审批或质量要求？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140299301,
+    "updated_at_ms": 1789140318705
+  }
+}

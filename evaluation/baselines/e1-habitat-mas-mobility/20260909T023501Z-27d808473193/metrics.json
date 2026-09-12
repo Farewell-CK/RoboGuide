@@ -1,0 +1,59 @@
+{
+  "details": {
+    "emos_average_metrics": {
+      "did_collide": 0.0,
+      "num_agents_collide": 0.0,
+      "num_steps": 3000.0,
+      "object_to_goal_distance.0": 12.4184,
+      "pddl_subgoal_reward": 0.0,
+      "rearrange_cooperate_reward": 0.0,
+      "reward": 3.4997
+    },
+    "emos_episode_batch_size": 1,
+    "emos_episode_ids": [
+      "20"
+    ],
+    "emos_pddl_success_average": 0.0,
+    "emos_stage_goal_success": {
+      "pddl_stage_goals.robot_at_object_0_success": 0.0,
+      "pddl_stage_goals.robot_at_receptacle_0_success": 1.0
+    },
+    "emos_token_usage_by_agent": {
+      "FetchRobot": 1245,
+      "SpotRobot": 1300,
+      "agent_0": 22114,
+      "agent_1": 15627,
+      "leader": 1392
+    },
+    "emos_token_usage_source_path": "chat_history_output/2026-09-09/llm_spot_fetch_mobility/FULL/20/token_usage.json",
+    "unavailable_metrics": {
+      "coordination_latency": "measurement boundary frozen in evaluation/README.md; collection gated on explicit protocol agreement before formal E1 runs"
+    },
+    "wall_time_source": "harness_process_duration"
+  },
+  "raw_evidence": [
+    {
+      "description": "persisted process stdout",
+      "media_type": "text/plain",
+      "path": "stdout.log"
+    },
+    {
+      "description": "persisted process stderr",
+      "media_type": "text/plain",
+      "path": "stderr.log"
+    },
+    {
+      "description": "EMOS official per-agent token totals for episode 20",
+      "media_type": "application/json",
+      "path": "raw-evidence/token_usage-20.json"
+    }
+  ],
+  "schema": "roboguide-eval.metrics/v0.2",
+  "values": {
+    "simulation_steps": 3000,
+    "subgoal_success_rate": 0.5,
+    "success": false,
+    "token_usage": 41678,
+    "wall_time": 797.717
+  }
+}

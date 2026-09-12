@@ -1,0 +1,81 @@
+{
+  "benchmark": "habitat-mas",
+  "command": [
+    "conda",
+    "run",
+    "--no-capture-output",
+    "-n",
+    "habitat",
+    "python",
+    "-u",
+    "-m",
+    "habitat_baselines.run",
+    "--config-name=multi_rearrange/llm_spot_fetch_mobility.yaml",
+    "habitat_baselines.evaluate=True",
+    "habitat_baselines.num_environments=1",
+    "habitat.seed=7",
+    "habitat.environment.iterator_options.num_episode_sample=1",
+    "habitat.environment.iterator_options.shuffle=False",
+    "habitat_baselines.video_dir=evaluation/results/e1-habitat-mas-mobility/20260909T015602Z-6e98b81b2973/video"
+  ],
+  "config_digest": "a66428e353863bdc9fb45d68a0e9aa5f4aaada192b4b6d1ea04f7d7ebd10c783",
+  "context": {
+    "robots": "spot+fetch"
+  },
+  "ended_at": "2026-09-09T02:10:06+00:00",
+  "environment_information": {
+    "conda_environment": "habitat",
+    "platform": "Linux-6.17.0-35-generic-x86_64-with-glibc2.39",
+    "python_version": "3.13.5"
+  },
+  "environment_overrides": {
+    "CUDA_VISIBLE_DEVICES": "1",
+    "EMOS_LLM_MODEL": "gpt-5.6-luna",
+    "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+    "OPENAI_BASE_URL": "http://101.43.45.215:8080/v1"
+  },
+  "episode_id": "seed-pinned-sample",
+  "episode_selection": {
+    "resolution": {
+      "dataset_index": 20,
+      "dataset_note": null,
+      "dataset_record": "mobility_episodes_1.json.gz#20@20",
+      "dataset_status": "resolved",
+      "evidence_source": [
+        "stdout: Episode Step Info banner (habitat Env.log_episode_steps)",
+        "pinned dataset (digest-verified)"
+      ],
+      "official_num_steps": 3000,
+      "resolved_episode_id": "20",
+      "resolved_scene_id": "data/scene_datasets/mp3d/jtcxE69GiFV/jtcxE69GiFV.glb",
+      "status": "resolved"
+    },
+    "seed": 7,
+    "selector": "seed-pinned-sample"
+  },
+  "exit_code": 1,
+  "experiment_id": "e1-habitat-mas-mobility",
+  "failure_reason": "process exited with code 1",
+  "llm": {
+    "provider": "openai",
+    "reasoning_effort": "medium",
+    "reasoning_options": {},
+    "reported_model": null,
+    "requested_model": "gpt-5.6-luna"
+  },
+  "process_status": "completed",
+  "provenance": {
+    "dataset_digest": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "dataset_identity": "habitat-mas-mp3d-mobility@mobility_episodes_1",
+    "roboguide_git_sha": "1259dfb68f45b8a54edc9733fc41f0cf211beab1",
+    "system_version": "e9501db45d634b087bf5d1a14228266685e8feeb"
+  },
+  "run_id": "20260909T015602Z-6e98b81b2973",
+  "schema": "roboguide-eval.run-manifest/v0.1",
+  "seed": 7,
+  "started_at": "2026-09-09T01:56:02+00:00",
+  "system": "emos",
+  "task": "mobility",
+  "timed_out": false,
+  "working_directory": "/data/workspace/code/emos-baseline"
+}

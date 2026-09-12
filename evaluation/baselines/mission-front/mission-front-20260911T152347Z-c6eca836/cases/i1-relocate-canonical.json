@@ -1,0 +1,248 @@
+{
+  "case_id": "i1-relocate-canonical",
+  "category": "integrated",
+  "instruction": "把厨房的易拉罐搬到储藏室的货架上",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 24.0,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 3 clarification question(s): 需要搬运厨房内全部易拉罐，还是指定数量或指定位置的易拉罐？ | 储藏室中应放置到哪一个货架或层位？ | 任务由单台机器人执行，还是允许或要求多台机器人协同？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 3 clarification question(s): 需要搬运厨房内全部易拉罐，还是指定数量或指定位置的易拉罐？ | 储藏室中应放置到哪一个货架或层位？ | 任务由单台机器人执行，还是允许或要求多台机器人协同？",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 23840.4,
+      "request_bytes": 1976,
+      "response_bytes": 14343,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e41cfe487175ace016aa41e7d068c87d1a7da996e3035608d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 71,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 71,
+              "output_tokens": 0
+            },
+            "rs_0e41cfe487175ace016aa41e7e1cc087d1a26a5edec39af564": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0e41cfe487175ace016aa41e876e5c87d1a71c5bef67fab748": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0e41cfe487175ace016aa41e90e16487d18bfb25460d2af25d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 180
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 180
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 362,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1214,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 1576
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 362,
+    "output_tokens": 1214,
+    "total_tokens": 1576
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-7fec13951419447a980b408a2f1f4c22",
+    "mission_id": "mission-516c1181fd864ea1b286bbebd6615b97",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把厨房的易拉罐搬到储藏室的货架上",
+        "created_at_ms": 1789140604329,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要搬运厨房内全部易拉罐，还是指定数量或指定位置的易拉罐？",
+        "created_at_ms": 1789140628270,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "储藏室中应放置到哪一个货架或层位？",
+        "created_at_ms": 1789140628270,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "任务由单台机器人执行，还是允许或要求多台机器人协同？",
+        "created_at_ms": 1789140628270,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将厨房中的易拉罐搬运并放置到储藏室的货架上。",
+      "constraints": [
+        "物品来源限定为厨房。",
+        "物品类型为易拉罐。",
+        "目标区域限定为储藏室内的货架。"
+      ],
+      "assumptions": [
+        "暂按“货架上”理解为将易拉罐稳定放置在货架承载面上。",
+        "不预设具体机器人、物理节点或执行方式。"
+      ],
+      "open_questions": [
+        "需要搬运厨房内全部易拉罐，还是指定数量或指定位置的易拉罐？",
+        "储藏室中应放置到哪一个货架或层位？",
+        "任务由单台机器人执行，还是允许或要求多台机器人协同？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140604329,
+    "updated_at_ms": 1789140628270
+  }
+}

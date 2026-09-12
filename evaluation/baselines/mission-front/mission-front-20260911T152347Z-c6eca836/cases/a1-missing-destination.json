@@ -1,0 +1,360 @@
+{
+  "case_id": "a1-missing-destination",
+  "category": "ambiguity",
+  "instruction": "把桌子上的杯子搬走",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 28.7,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "8 clarification question(s) asked: 要搬走哪一张桌子上的哪些杯子？ | 杯子应搬到哪里？ | 是否需要保留杯中液体，或有易碎、防洒等安全要求？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 1 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 14908.8,
+      "request_bytes": 1955,
+      "response_bytes": 9619,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_047c227458d0798c016aa41d5f845887d1b25fdc325af5f159": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 63,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 63,
+              "output_tokens": 0
+            },
+            "rs_047c227458d0798c016aa41d60ebd887d1855e817291860360": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_047c227458d0798c016aa41d6a4bdc87d1a52c5994a864fe26": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 185
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 185
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 354,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 701,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1055
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13443.9,
+      "request_bytes": 3113,
+      "response_bytes": 9522,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09587dbfe393defb016aa41d6e94d087d1b066e4252c5476bc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 390,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 390,
+              "output_tokens": 0
+            },
+            "rs_09587dbfe393defb016aa41d6f2c6c87d1be273e9c1f8c0d5b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 493
+            },
+            "msg_09587dbfe393defb016aa41d78337487d1b66a1e6be408c9c9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 169
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 169
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 681,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 662,
+        "output_tokens_details": {
+          "reasoning_tokens": 493
+        },
+        "total_tokens": 1343
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1035,
+    "output_tokens": 1363,
+    "total_tokens": 2398
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-e42a2a616aad485fa7837d82578df95e",
+    "mission_id": "mission-7da2e31d7b8e42d6aafd89385cc05638",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把桌子上的杯子搬走",
+        "created_at_ms": 1789140318773,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要搬走哪一张桌子上的哪些杯子？",
+        "created_at_ms": 1789140333798,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "杯子应搬到哪里？",
+        "created_at_ms": 1789140333798,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否需要保留杯中液体，或有易碎、防洒等安全要求？",
+        "created_at_ms": 1789140333798,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "何种状态算完成：所有相关杯子均已离开桌面，还是仅搬走某些杯子？",
+        "created_at_ms": 1789140333798,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "搬到卧室的床头柜上",
+        "created_at_ms": 1789140333853,
+        "in_reply_to": "turn-0005"
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要搬哪一张桌子上的哪些杯子？",
+        "created_at_ms": 1789140347396,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否需要保留杯中液体？是否有易碎、防洒等安全要求？",
+        "created_at_ms": 1789140347396,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0009",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成条件是什么：所有相关杯子都离开桌面，还是只搬走指定的部分杯子？",
+        "created_at_ms": 1789140347396,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0010",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果有多个卧室或床头柜，需要指定具体的卧室和床头柜吗？",
+        "created_at_ms": 1789140347396,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将桌子上的目标杯子搬到卧室的床头柜上。",
+      "constraints": [
+        "目的地为卧室的床头柜上。"
+      ],
+      "assumptions": [
+        "将“搬到卧室的床头柜上”解释为对目的地问题的回答，而不是对完成条件问题的回答。"
+      ],
+      "open_questions": [
+        "需要搬哪一张桌子上的哪些杯子？",
+        "是否需要保留杯中液体？是否有易碎、防洒等安全要求？",
+        "完成条件是什么：所有相关杯子都离开桌面，还是只搬走指定的部分杯子？",
+        "如果有多个卧室或床头柜，需要指定具体的卧室和床头柜吗？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140318773,
+    "updated_at_ms": 1789140347396
+  }
+}

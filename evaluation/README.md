@@ -278,3 +278,18 @@ episode 身份由 `EmosRunner` 从官方输出解析后写入 manifest 的
   subgoals 文件——**无 KeyError，无需任何 override**。mobility 的 pddl
   spec 也定义了 `stage_goals`，per-episode stage 数据会正常落
   `episode_log/**/*_subgoals.json`（subgoal metric 接入留待后续轮次）。
+
+## 结果入库约定（baselines/）
+
+`evaluation/results/` 是工作输出区，保持 Git 忽略；需要跨机器同步、评审或
+作为论文证据的结果快照，显式复制到 `evaluation/baselines/<suite-name>/`
+后提交（2026-09 起经项目负责人确认的约定变更）。当前已入库：
+
+- `e1-habitat-mas-mobility/`：E1 EMOS 臂 4 次 smoke run（含失败→修复→成功
+  的完整迭代证据与逐调用 token 记账）；
+- `mission-front/mission-front-20260911T152347Z-c6eca836/`：Mission
+  Front-half 29 case 首轮真实模型 baseline（0/29 通过；主导发现：Interpreter
+  对简单指令也大量触发澄清，24/29 case 停在 NeedsClarification——属待
+  review 的前半段行为 evidence，非 harness 故障）。
+
+入库前检查约定：无凭据（精确扫描）、无超大文件（单文件 >1MB 需说明）。

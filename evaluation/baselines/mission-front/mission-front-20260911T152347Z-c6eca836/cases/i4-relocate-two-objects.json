@@ -1,0 +1,228 @@
+{
+  "case_id": "i4-relocate-two-objects",
+  "category": "integrated",
+  "instruction": "先把工具箱搬到车库，再把备件盒搬上货架",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 24.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 1 clarification question(s): 请确认具体是哪一个工具箱、哪一个备件盒、哪一个车库和哪一个货架；如果每类对象或位置都只有一个，则请确认可按其名称识别。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 1 clarification question(s): 请确认具体是哪一个工具箱、哪一个备件盒、哪一个车库和哪一个货架；如果每类对象或位置都只有一个，则请确认可按其名称识别。",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 23888.7,
+      "request_bytes": 1985,
+      "response_bytes": 14529,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f9fc0e233204fc1016aa41ec79e7887d1ab65e1079c39ef55": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 72,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 72,
+              "output_tokens": 0
+            },
+            "rs_0f9fc0e233204fc1016aa41ec850e887d19889c6fcd1b98a89": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f9fc0e233204fc1016aa41ed1a56c87d1a8b5cefc297afb85": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0f9fc0e233204fc1016aa41edb1b8087d1b13139ba4fa3878f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 189
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 189
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 363,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1223,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 1586
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 363,
+    "output_tokens": 1223,
+    "total_tokens": 1586
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-e4fee5ae45da496fabc99fb414d6e572",
+    "mission_id": "mission-27b39a11ab3d4d4bb97838e1535ab1a8",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先把工具箱搬到车库，再把备件盒搬上货架",
+        "created_at_ms": 1789140678638,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请确认具体是哪一个工具箱、哪一个备件盒、哪一个车库和哪一个货架；如果每类对象或位置都只有一个，则请确认可按其名称识别。",
+        "created_at_ms": 1789140702652,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "按顺序完成两项搬运：先将工具箱搬到车库，再将备件盒放置到货架上。",
+      "constraints": [
+        "必须先完成将工具箱搬到车库，再开始将备件盒搬上货架。"
+      ],
+      "assumptions": [
+        "“工具箱”“备件盒”“车库”和“货架”分别对应环境中可识别的对象或位置；未假定任何具体 NodeId、ResourceId 或路线。",
+        "“搬到”与“搬上”均以物体在目标位置稳定放置为完成标准。"
+      ],
+      "open_questions": [
+        "请确认具体是哪一个工具箱、哪一个备件盒、哪一个车库和哪一个货架；如果每类对象或位置都只有一个，则请确认可按其名称识别。"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140678638,
+    "updated_at_ms": 1789140702652
+  }
+}

@@ -1,0 +1,252 @@
+{
+  "case_id": "c3-sequential-handoff",
+  "category": "cross_node",
+  "instruction": "先让一台机器人在入口做访客登记引导，等登记完成后另一台机器人把访客送到三楼会议室",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 16.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 4 clarification question(s): 需要服务的是一位访客，还是多位访客？ | 如果现场有多个入口或三楼有多个会议室，请提供具体入口和会议室的可识别名称或位置。 | 如何判定“登记完成”（例如登记系统确认、工作人员确认或访客确认）？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 4 clarification question(s): 需要服务的是一位访客，还是多位访客？ | 如果现场有多个入口或三楼有多个会议室，请提供具体入口和会议室的可识别名称或位置。 | 如何判定“登记完成”（例如登记系统确认、工作人员确认或访客确认）？",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 16174.6,
+      "request_bytes": 2048,
+      "response_bytes": 10550,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d9d645e1b4d3d87016aa41f11614087d1ba1efe469aa4f357": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 85,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 85,
+              "output_tokens": 0
+            },
+            "rs_0d9d645e1b4d3d87016aa41f11db6487d1bebafb913a5346ed": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0d9d645e1b4d3d87016aa41f1b50c487d1b9c5a381c610f6d2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 307
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 307
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 376,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 823,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1199
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 376,
+    "output_tokens": 823,
+    "total_tokens": 1199
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-c8e039ae2e6e44b3aa95d814ccdb618b",
+    "mission_id": "mission-38eb0de20f5c436faec7ecbf81e04f1b",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先让一台机器人在入口做访客登记引导，等登记完成后另一台机器人把访客送到三楼会议室",
+        "created_at_ms": 1789140752689,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要服务的是一位访客，还是多位访客？",
+        "created_at_ms": 1789140768972,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果现场有多个入口或三楼有多个会议室，请提供具体入口和会议室的可识别名称或位置。",
+        "created_at_ms": 1789140768972,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如何判定“登记完成”（例如登记系统确认、工作人员确认或访客确认）？",
+        "created_at_ms": 1789140768972,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“送到会议室”是指机器人陪同访客步行引导，还是需要其他形式的运送？",
+        "created_at_ms": 1789140768972,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "组织一次两阶段访客服务：由一台机器人在入口引导访客完成登记；登记确认完成后，由另一台机器人将访客送到三楼会议室。",
+      "constraints": [
+        "任务必须按顺序执行：先在入口完成访客登记引导，再执行前往三楼会议室的环节。",
+        "登记引导和送访客前往会议室应由两台不同的机器人分别执行。",
+        "第二阶段只能在访客登记完成后开始。",
+        "目标区域包括入口和三楼的会议室，但未确定其具体物理位置。"
+      ],
+      "assumptions": [
+        "“另一台机器人”指与负责登记引导的机器人不同的第二台机器人。",
+        "未假设入口和三楼会议室对应的具体地图节点、房间编号或路线。",
+        "未假设“送到”具体表示陪同引导、带路，还是其他运输方式。"
+      ],
+      "open_questions": [
+        "需要服务的是一位访客，还是多位访客？",
+        "如果现场有多个入口或三楼有多个会议室，请提供具体入口和会议室的可识别名称或位置。",
+        "如何判定“登记完成”（例如登记系统确认、工作人员确认或访客确认）？",
+        "“送到会议室”是指机器人陪同访客步行引导，还是需要其他形式的运送？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140752689,
+    "updated_at_ms": 1789140768972
+  }
+}

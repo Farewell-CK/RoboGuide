@@ -1,0 +1,79 @@
+{
+  "suite_id": "mission-front-20260911T152347Z-c6eca836",
+  "model": "gpt-5.6-luna",
+  "relay_base_url": "http://101.43.45.215:8080",
+  "cases_executed": 29,
+  "cases_passed": 0,
+  "by_category": {
+    "normal": {
+      "total": 4,
+      "passed": 0
+    },
+    "ambiguity": {
+      "total": 5,
+      "passed": 0
+    },
+    "heterogeneous": {
+      "total": 4,
+      "passed": 0
+    },
+    "integrated": {
+      "total": 4,
+      "passed": 0
+    },
+    "cross_node": {
+      "total": 3,
+      "passed": 0
+    },
+    "resource_timing": {
+      "total": 5,
+      "passed": 0
+    },
+    "multi_role": {
+      "total": 4,
+      "passed": 0
+    }
+  },
+  "failed_invariants": {
+    "final_lifecycle": 29,
+    "decomposition_sanity": 29,
+    "clarification_behavior": 24,
+    "capability_coverage": 11,
+    "integrated_operation": 9,
+    "objective_fidelity": 3,
+    "timing_presence": 3,
+    "resource_kinds": 3
+  },
+  "token_totals": {
+    "input_tokens": 14087,
+    "output_tokens": 37679,
+    "total_tokens": 51766
+  },
+  "llm_calls": 34,
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  }
+}

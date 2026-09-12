@@ -1,0 +1,401 @@
+{
+  "case_id": "a5-vague-scope",
+  "category": "ambiguity",
+  "instruction": "把仓库整理一下",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 46.2,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "11 clarification question(s) asked: “整理”具体包括哪些工作：分类、归位、搬运、清理、贴标、盘点，还是其他操作？ | 整理范围是整个仓库，还是指定区域、货架或通道？ | 完成标准是什么，例如物品分类归位、通道清空、货架按规则摆放或完成盘点？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11287.0,
+      "request_bytes": 1949,
+      "response_bytes": 8582,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0672ef28c086391b016aa41de72b1087d18e548979ed21c1b1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 60,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 60,
+              "output_tokens": 0
+            },
+            "rs_0672ef28c086391b016aa41de7d73c87d18ad166bb5fa20233": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 327
+            },
+            "msg_0672ef28c086391b016aa41dede7f887d19ea8695af6a72aaa": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 195
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 195
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 351,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 522,
+        "output_tokens_details": {
+          "reasoning_tokens": 327
+        },
+        "total_tokens": 873
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 34580.2,
+      "request_bytes": 3561,
+      "response_bytes": 19694,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_05404af094d15f7b016aa41df2693487d19d3420465a30bce5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 497,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 497,
+              "output_tokens": 0
+            },
+            "rs_05404af094d15f7b016aa41df2e26487d19cd8ce73452b207b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_05404af094d15f7b016aa41dfc33dc87d18cf96167d978ece7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_05404af094d15f7b016aa41e05882c87d18a19d36ac6f87e3a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_05404af094d15f7b016aa41e0efddc87d18b1b5ca188d9563c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 290
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 290
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 788,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1842,
+        "output_tokens_details": {
+          "reasoning_tokens": 1552
+        },
+        "total_tokens": 2630
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1139,
+    "output_tokens": 2364,
+    "total_tokens": 3503
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-1d1cfb87c7144569a24e77676165c666",
+    "mission_id": "mission-dd55363eda6946878d0119279a3077e4",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把仓库整理一下",
+        "created_at_ms": 1789140454327,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“整理”具体包括哪些工作：分类、归位、搬运、清理、贴标、盘点，还是其他操作？",
+        "created_at_ms": 1789140465723,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "整理范围是整个仓库，还是指定区域、货架或通道？",
+        "created_at_ms": 1789140465723,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成标准是什么，例如物品分类归位、通道清空、货架按规则摆放或完成盘点？",
+        "created_at_ms": 1789140465723,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要多少个执行者或机器人参与，是否允许人工协同？",
+        "created_at_ms": 1789140465723,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否有安全或操作限制，例如禁止移动、丢弃或拆卸某些物品，或需避开人员、危险品和易碎品？",
+        "created_at_ms": 1789140465723,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "把货架上的成品箱子搬运到出货区",
+        "created_at_ms": 1789140465775,
+        "in_reply_to": "turn-0006"
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "搬运范围是整个仓库的所有货架，还是指定区域、货架、箱子、SKU、批次或订单？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0009",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要搬运全部符合条件的成品箱子，还是指定数量或指定箱子？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0010",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "出货区是否只有一个；如有多个出货区，应送往哪一个？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0011",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成标准是什么：所有指定箱子到达出货区即可，还是需要按订单、批次或其他规则摆放并确认？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0012",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要多少个执行者或机器人参与，是否允许人工协同？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0013",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否存在安全或操作限制，例如箱子的重量、尺寸、易碎性、危险品属性，或禁止移动、需要避开的物品和人员？",
+        "created_at_ms": 1789140500456,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将货架上的成品箱子搬运至出货区。",
+      "constraints": [
+        "搬运对象为货架上的成品箱子。",
+        "目的地为出货区。",
+        "当前未确认需要执行其他整理操作。"
+      ],
+      "assumptions": [
+        "将用户的最新回复理解为把任务收窄为搬运作业，而不是泛化执行分类、清理、贴标或盘点等其他整理工作。",
+        "暂不假定涉及全部货架、全部成品箱子、特定数量、批次或订单。"
+      ],
+      "open_questions": [
+        "搬运范围是整个仓库的所有货架，还是指定区域、货架、箱子、SKU、批次或订单？",
+        "需要搬运全部符合条件的成品箱子，还是指定数量或指定箱子？",
+        "出货区是否只有一个；如有多个出货区，应送往哪一个？",
+        "完成标准是什么：所有指定箱子到达出货区即可，还是需要按订单、批次或其他规则摆放并确认？",
+        "需要多少个执行者或机器人参与，是否允许人工协同？",
+        "是否存在安全或操作限制，例如箱子的重量、尺寸、易碎性、危险品属性，或禁止移动、需要避开的物品和人员？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140454327,
+    "updated_at_ms": 1789140500456
+  }
+}

@@ -1,0 +1,357 @@
+{
+  "case_id": "a2-missing-object",
+  "category": "ambiguity",
+  "instruction": "去厨房把东西拿过来",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 40.1,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "6 clarification question(s) asked: 需要取哪些物品、各取多少？ | “拿过来”具体是送到您当前所在位置，还是厨房外的某个指定地点？ | 完成标准是交到您手上，还是放在指定位置？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 1 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 22525.4,
+      "request_bytes": 1955,
+      "response_bytes": 14430,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_099f64a414b8bee3016aa41d7c1cec87d1a9c71ef5658b1508": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 62,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 62,
+              "output_tokens": 0
+            },
+            "rs_099f64a414b8bee3016aa41d7c895887d1b9acd298cb7ddb95": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_099f64a414b8bee3016aa41d85de1487d1af3ccb060056a568": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 424
+            },
+            "msg_099f64a414b8bee3016aa41d8d9fd887d1a841790e7c253813": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 210
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 210
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 353,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1150,
+        "output_tokens_details": {
+          "reasoning_tokens": 940
+        },
+        "total_tokens": 1503
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 17236.5,
+      "request_bytes": 3149,
+      "response_bytes": 12092,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_065527832a0eabe9016aa41d92f9b087d18e5df050b09bf9ef": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 392,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 392,
+              "output_tokens": 0
+            },
+            "rs_065527832a0eabe9016aa41d938fd087d1a7ba522054e0f50d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_065527832a0eabe9016aa41d9ce3e887d182ab81ca6e2cd96f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 183
+            },
+            "msg_065527832a0eabe9016aa41da0526487d1a64aa92ad590e764": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 167
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 167
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 683,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 866,
+        "output_tokens_details": {
+          "reasoning_tokens": 699
+        },
+        "total_tokens": 1549
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1036,
+    "output_tokens": 2016,
+    "total_tokens": 3052
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-e103413503ab4523ae2f74959705cfdc",
+    "mission_id": "mission-292db75c2db043a1b6502a440542180f",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去厨房把东西拿过来",
+        "created_at_ms": 1789140347441,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要取哪些物品、各取多少？",
+        "created_at_ms": 1789140370067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“拿过来”具体是送到您当前所在位置，还是厨房外的某个指定地点？",
+        "created_at_ms": 1789140370067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成标准是交到您手上，还是放在指定位置？",
+        "created_at_ms": 1789140370067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "物品是否有易碎、危险、温控或其他特殊处理要求？",
+        "created_at_ms": 1789140370067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "拿红色的水壶，放到餐桌上",
+        "created_at_ms": 1789140370120,
+        "in_reply_to": "turn-0005"
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "水壶是否有易碎、危险、温控、装有液体或其他特殊处理要求？",
+        "created_at_ms": 1789140387457,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果厨房内有多个红色水壶，应取哪一个？",
+        "created_at_ms": 1789140387457,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "从厨房取出红色水壶，并将其放到餐桌上。",
+      "constraints": [
+        "取物地点为厨房。",
+        "目标物品为红色水壶。",
+        "交付地点为餐桌。",
+        "完成标准是将水壶放到餐桌上。"
+      ],
+      "assumptions": [
+        "将“红色的水壶”理解为厨房内唯一或可明确识别的目标水壶。",
+        "将单数表述理解为取一个水壶。"
+      ],
+      "open_questions": [
+        "水壶是否有易碎、危险、温控、装有液体或其他特殊处理要求？",
+        "如果厨房内有多个红色水壶，应取哪一个？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140347441,
+    "updated_at_ms": 1789140387457
+  }
+}

@@ -1,0 +1,271 @@
+{
+  "case_id": "m4-map-relocate-verify",
+  "category": "multi_role",
+  "instruction": "先给新库房建图，然后把三箱样品搬入库房，最后拍照确认上架情况",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 20.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 6 clarification question(s): 目标新库房具体是哪一个区域或位置？建图范围是整个库房还是其中的指定区域？ | 三箱样品当前位于哪里，如何识别这三箱样品？ | 样品应放置在库房内的哪个货架、库位或区域？“搬入库房”是否必须完成上架，还是放在库房内即可？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 3 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['spatial.map.build@v0', 'object.relocate@v1', 'observation.verify@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 6 clarification question(s): 目标新库房具体是哪一个区域或位置？建图范围是整个库房还是其中的指定区域？ | 三箱样品当前位于哪里，如何识别这三箱样品？ | 样品应放置在库房内的哪个货架、库位或区域？“搬入库房”是否必须完成上架，还是放在库房内即可？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['spatial.map.build@v0', 'object.relocate@v1', 'observation.verify@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 20016.9,
+      "request_bytes": 2018,
+      "response_bytes": 10564,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d75a948d7a40ddd016aa41feb255887d19ec6f7d83c12f2f8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 80,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 80,
+              "output_tokens": 0
+            },
+            "rs_0d75a948d7a40ddd016aa41fec1c6c87d1915a1ddaf3be7577": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0d75a948d7a40ddd016aa41ff588cc87d1b9ff59823fea742f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 391
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 391
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 371,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 907,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1278
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 371,
+    "output_tokens": 907,
+    "total_tokens": 1278
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-a57350a579a44a97a01f6650bfd757f0",
+    "mission_id": "mission-446e6d16d5c24006bd508be092fe31d7",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先给新库房建图，然后把三箱样品搬入库房，最后拍照确认上架情况",
+        "created_at_ms": 1789140968576,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "目标新库房具体是哪一个区域或位置？建图范围是整个库房还是其中的指定区域？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "三箱样品当前位于哪里，如何识别这三箱样品？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "样品应放置在库房内的哪个货架、库位或区域？“搬入库房”是否必须完成上架，还是放在库房内即可？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "建图完成的验收标准是什么，例如覆盖范围、地图质量或是否需要保存并确认地图？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "拍照需要包含哪些内容或视角，是否需要同时清晰展示三箱样品及其库位？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "三箱样品是否有重量、易碎性、朝向或其他搬运安全限制？",
+        "created_at_ms": 1789140988710,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "为目标新库房建立可用地图；在建图完成后，将三箱样品从其当前存放位置搬入该库房并放置到指定存储位置；全部搬运和上架完成后拍照，作为上架状态确认。",
+      "constraints": [
+        "必须先完成新库房建图，再搬运样品。",
+        "需要搬运三箱样品。",
+        "三箱样品应被搬入目标库房，并完成用户要求的上架或存放。",
+        "搬运和上架完成后，最后拍照确认上架情况。"
+      ],
+      "assumptions": [
+        "“新库房”是需要进行完整建图的目标空间，但其具体身份和边界尚未确认。",
+        "三箱样品在执行时能够被识别并搬运，且存在可到达的取货位置。",
+        "用户所说的“上架”可能意味着将样品放置到库房内指定货架或存储位置，但具体位置尚未明确。"
+      ],
+      "open_questions": [
+        "目标新库房具体是哪一个区域或位置？建图范围是整个库房还是其中的指定区域？",
+        "三箱样品当前位于哪里，如何识别这三箱样品？",
+        "样品应放置在库房内的哪个货架、库位或区域？“搬入库房”是否必须完成上架，还是放在库房内即可？",
+        "建图完成的验收标准是什么，例如覆盖范围、地图质量或是否需要保存并确认地图？",
+        "拍照需要包含哪些内容或视角，是否需要同时清晰展示三箱样品及其库位？",
+        "三箱样品是否有重量、易碎性、朝向或其他搬运安全限制？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140968576,
+    "updated_at_ms": 1789140988710
+  }
+}

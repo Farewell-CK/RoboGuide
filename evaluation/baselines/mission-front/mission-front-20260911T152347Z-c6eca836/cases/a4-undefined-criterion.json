@@ -1,0 +1,393 @@
+{
+  "case_id": "a4-undefined-criterion",
+  "category": "ambiguity",
+  "instruction": "把贵重物品搬到安全的地方",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 42.6,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "11 clarification question(s) asked: 具体要搬运哪些物品，数量是多少？ | 物品当前位于哪里，涉及的空间范围是什么？ | 安全地点是哪里，或需要满足哪些安全标准？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 26276.8,
+      "request_bytes": 1964,
+      "response_bytes": 14233,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0c660f103dc330ee016aa41dbc84ec87d1af31a50f2b174765": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 65,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 65,
+              "output_tokens": 0
+            },
+            "rs_0c660f103dc330ee016aa41dbd213887d1b0036852d7c383a0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0c660f103dc330ee016aa41dc6740c87d1a01e2ad590e7e76b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 465
+            },
+            "msg_0c660f103dc330ee016aa41dcef37487d19e3495f8fa32acf7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 229
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 229
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 356,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1210,
+        "output_tokens_details": {
+          "reasoning_tokens": 981
+        },
+        "total_tokens": 1566
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 15880.3,
+      "request_bytes": 3736,
+      "response_bytes": 10370,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_02ba16710f49d2ee016aa41dd6f2c887d1af66778ae209056d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 535,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 535,
+              "output_tokens": 0
+            },
+            "rs_02ba16710f49d2ee016aa41dd76fe087d1ae5e7c0cf6a9df1e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_02ba16710f49d2ee016aa41de0e3e887d1a20659495745de25": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 267
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 267
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 826,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 783,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1609
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1182,
+    "output_tokens": 1993,
+    "total_tokens": 3175
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-a70eb03887e04a2792ac35b5fda77ca5",
+    "mission_id": "mission-7b3af8a28d994f2288317ddb68038344",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贵重物品搬到安全的地方",
+        "created_at_ms": 1789140411720,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "具体要搬运哪些物品，数量是多少？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "物品当前位于哪里，涉及的空间范围是什么？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "安全地点是哪里，或需要满足哪些安全标准？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否存在易碎、重量、禁触、温湿度、防盗或其他搬运限制？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要多少名或多少台参与者（如机器人或人员），是否允许协同？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "什么条件表示任务完成：到达目的地、完成固定或上锁，还是还需要用户确认？",
+        "created_at_ms": 1789140438097,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "贵重物品是保险柜里的文件，安全的地方是二楼档案室",
+        "created_at_ms": 1789140438147,
+        "in_reply_to": "turn-0007"
+      },
+      {
+        "turn_id": "turn-0009",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要搬运保险柜内的全部文件，还是其中指定的文件？文件数量是多少？",
+        "created_at_ms": 1789140454269,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0010",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "保险柜及二楼档案室的具体位置或可识别范围是什么？档案室内应存放到哪里？",
+        "created_at_ms": 1789140454269,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0011",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "文件是否有易碎、保密、禁触、重量、温湿度、防盗或授权取放等特殊限制？",
+        "created_at_ms": 1789140454269,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0012",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要多少名人员或多少台机器人参与，是否允许协同搬运？",
+        "created_at_ms": 1789140454269,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0013",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "任务完成的判定是什么：文件到达档案室、完成归档或上锁，还是还需要用户确认？",
+        "created_at_ms": 1789140454269,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将保险柜内的贵重文件搬运至二楼档案室，并按要求安全存放。",
+      "constraints": [
+        "物品为贵重文件，当前位于保险柜内。",
+        "目标地点为二楼档案室。",
+        "未确认文件的数量、具体范围及搬运过程中的特殊保护要求。"
+      ],
+      "assumptions": [
+        "任务对象是从保险柜中取出的文件，而不是搬运整个保险柜。",
+        "用户所说的“二楼档案室”是目标安全地点，但尚未指定房间内的具体存放位置。"
+      ],
+      "open_questions": [
+        "需要搬运保险柜内的全部文件，还是其中指定的文件？文件数量是多少？",
+        "保险柜及二楼档案室的具体位置或可识别范围是什么？档案室内应存放到哪里？",
+        "文件是否有易碎、保密、禁触、重量、温湿度、防盗或授权取放等特殊限制？",
+        "需要多少名人员或多少台机器人参与，是否允许协同搬运？",
+        "任务完成的判定是什么：文件到达档案室、完成归档或上锁，还是还需要用户确认？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140411720,
+    "updated_at_ms": 1789140454269
+  }
+}

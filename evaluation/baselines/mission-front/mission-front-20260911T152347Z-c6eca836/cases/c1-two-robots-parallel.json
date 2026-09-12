@@ -1,0 +1,265 @@
+{
+  "case_id": "c1-two-robots-parallel",
+  "category": "cross_node",
+  "instruction": "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 33.4,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 4 clarification question(s): 如果A区有多个货物，需要明确要运输哪些货物或数量。 | 如果C区有多个货架，需要明确要推送哪一个或哪些货架。 | 需要明确货架在D区的具体放置位置、朝向或“到达D区”所对应的完成条件。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": false,
+      "detail": "objective dropped terms ['A 区', 'B 区', 'D 区']; plan objective: ''"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 4 clarification question(s): 如果A区有多个货物，需要明确要运输哪些货物或数量。 | 如果C区有多个货架，需要明确要推送哪一个或哪些货架。 | 需要明确货架在D区的具体放置位置、朝向或“到达D区”所对应的完成条件。",
+    "objective_fidelity: objective dropped terms ['A 区', 'B 区', 'D 区']; plan objective: ''",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 33217.0,
+      "request_bytes": 2033,
+      "response_bytes": 19564,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_098c9526e3e1a4ad016aa41edf66b087d1a138a3726baef4aa": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 88,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 88,
+              "output_tokens": 0
+            },
+            "rs_098c9526e3e1a4ad016aa41edfdb2487d1a94e9ec072003f30": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_098c9526e3e1a4ad016aa41ee9301c87d1878ec46f025b0376": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_098c9526e3e1a4ad016aa41ef2804887d1b4a3a319decc3fc9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 407
+            },
+            "msg_098c9526e3e1a4ad016aa41ef9f82487d1bf40174e10ded272": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 326
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 326
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 379,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1767,
+        "output_tokens_details": {
+          "reasoning_tokens": 1441
+        },
+        "total_tokens": 2146
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 379,
+    "output_tokens": 1767,
+    "total_tokens": 2146
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-f6c92df46cc440308000fa0e50273a59",
+    "mission_id": "mission-7045acca9f07472fa15e4ef21f6f4eab",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区",
+        "created_at_ms": 1789140702708,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果A区有多个货物，需要明确要运输哪些货物或数量。",
+        "created_at_ms": 1789140736025,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果C区有多个货架，需要明确要推送哪一个或哪些货架。",
+        "created_at_ms": 1789140736025,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要明确货架在D区的具体放置位置、朝向或“到达D区”所对应的完成条件。",
+        "created_at_ms": 1789140736025,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否存在必须遵守的安全限制，例如人员避让、禁行区域、货物或货架重量限制等？",
+        "created_at_ms": 1789140736025,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "让机器人甲将A区的目标货物运送到B区卸货点，同时让机器人乙将C区的目标货架推送到D区。",
+      "constraints": [
+        "机器人甲负责将A区的货物送至B区卸货点。",
+        "机器人乙负责将C区的货架推至D区。",
+        "两项运输任务需要同时进行或存在重叠执行。",
+        "不得据此指派具体物理NodeId、ResourceId、路线或底层执行接口。"
+      ],
+      "assumptions": [
+        "A区、B区、C区和D区是系统可识别的语义区域；B区存在可识别的卸货点。",
+        "机器人甲和机器人乙是用户指定的两个逻辑参与者，具体物理资源映射由后续控制阶段确定。",
+        "用户未要求机器人甲在到达B区卸货点后额外执行卸货动作；当前目标仅确认将货物送至该卸货点。"
+      ],
+      "open_questions": [
+        "如果A区有多个货物，需要明确要运输哪些货物或数量。",
+        "如果C区有多个货架，需要明确要推送哪一个或哪些货架。",
+        "需要明确货架在D区的具体放置位置、朝向或“到达D区”所对应的完成条件。",
+        "是否存在必须遵守的安全限制，例如人员避让、禁行区域、货物或货架重量限制等？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140702708,
+    "updated_at_ms": 1789140736026
+  }
+}

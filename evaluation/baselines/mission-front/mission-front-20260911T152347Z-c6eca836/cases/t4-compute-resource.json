@@ -1,0 +1,243 @@
+{
+  "case_id": "t4-compute-resource",
+  "category": "resource_timing",
+  "instruction": "把刚才录制的巡检视频在边缘 GPU 节点上做缺陷检测推理",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 15.5,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 3 clarification question(s): 要处理的具体视频是哪一个？请提供视频标识，或确认使用最近录制的巡检视频。 | 应使用哪个缺陷检测模型，或检测哪些缺陷类型？ | 推理结果需要以何种格式输出，以及保存或发送到哪里？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['compute.infer@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": false,
+      "detail": "missing resource kinds ['compute']; plan declared []"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 3 clarification question(s): 要处理的具体视频是哪一个？请提供视频标识，或确认使用最近录制的巡检视频。 | 应使用哪个缺陷检测模型，或检测哪些缺陷类型？ | 推理结果需要以何种格式输出，以及保存或发送到哪里？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['compute.infer@v1']; plan declared []",
+    "resource_kinds: missing resource kinds ['compute']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 15312.6,
+      "request_bytes": 2002,
+      "response_bytes": 10145,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0545541fd225540e016aa41f6073e487d1bfc3d363fc803163": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 78,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 78,
+              "output_tokens": 0
+            },
+            "rs_0545541fd225540e016aa41f617ccc87d1832bc4404009d479": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0545541fd225540e016aa41f6af12c87d1a1bc7de235a76d60": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 225
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 225
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 369,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 741,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1110
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 369,
+    "output_tokens": 741,
+    "total_tokens": 1110
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-9e2f7506be264ea797a181ad0d758b77",
+    "mission_id": "mission-5d158253eabf4413b3a4be4e4ed3f688",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把刚才录制的巡检视频在边缘 GPU 节点上做缺陷检测推理",
+        "created_at_ms": 1789140831748,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要处理的具体视频是哪一个？请提供视频标识，或确认使用最近录制的巡检视频。",
+        "created_at_ms": 1789140847160,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "应使用哪个缺陷检测模型，或检测哪些缺陷类型？",
+        "created_at_ms": 1789140847160,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "推理结果需要以何种格式输出，以及保存或发送到哪里？",
+        "created_at_ms": 1789140847160,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在边缘 GPU 节点上对指定的巡检视频执行缺陷检测推理并生成检测结果。",
+      "constraints": [
+        "推理应在边缘 GPU 节点上执行。",
+        "输入数据为刚才录制的巡检视频。",
+        "任务类型为缺陷检测推理，不包含视频采集或其他后处理要求。"
+      ],
+      "assumptions": [
+        "“刚才录制的巡检视频”指最近完成录制的那段巡检视频；若存在多段近期视频，需要进一步指定。",
+        "用户希望对视频执行完整的缺陷检测推理，并获得推理结果；未指定缺陷类型、模型或结果存储位置。"
+      ],
+      "open_questions": [
+        "要处理的具体视频是哪一个？请提供视频标识，或确认使用最近录制的巡检视频。",
+        "应使用哪个缺陷检测模型，或检测哪些缺陷类型？",
+        "推理结果需要以何种格式输出，以及保存或发送到哪里？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140831748,
+    "updated_at_ms": 1789140847161
+  }
+}
