@@ -53,3 +53,11 @@ files = [
     "evaluation/src",
     "evaluation/tests",
 ]
+
+[[tool.mypy.overrides]]
+module = "mission.*"
+# The mission package ships without a py.typed marker; the Eval Harness
+# consumes its runtime API but strict checking of its internals stays with
+# the mission package's own tooling.
+ignore_missing_imports = true
+follow_imports = "silent"

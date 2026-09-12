@@ -116,6 +116,30 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="NDJSON accounting log path (one record per LLM call)",
     )
+
+    mission_front = subparsers.add_parser(
+        "mission-front",
+        help="run Mission Front-half eval cases through the real Mission Intelligence pipeline",
+    )
+    mission_front.add_argument(
+        "--cases",
+        type=Path,
+        default=Path("evaluation/mission_front_cases/baseline.yaml"),
+        help="case definition YAML (default: the baseline set)",
+    )
+    mission_front.add_argument(
+        "--out",
+        type=Path,
+        default=Path("evaluation/results/mission-front"),
+        help="output directory receiving suite evidence",
+    )
+    mission_front.add_argument(
+        "--repository-root", type=Path, default=Path.cwd(), help="repository root"
+    )
+    mission_front.add_argument("--limit", type=int, default=0, help="run at most N cases (0 = all)")
+    mission_front.add_argument(
+        "--only", action="append", default=[], help="run only these case ids (repeatable)"
+    )
     return parser
 
 
@@ -495,4 +519,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run(arguments)
     if arguments.command == "proxy":
         return _proxy(arguments)
+    if arguments.command == "mission-front":
+        return _mission_front(arguments)
     return _summarize(arguments)
+
+
+def _mission_front(arguments: argparse.Namespace) -> int:
+    """Execute the mission-front subcommand.
+
+    Args:
+        arguments: Parsed CLI arguments.
+
+    Returns:
+        Process exit code: zero when every case passed its invariants, one
+        otherwise or when the suite could not start.
+    """
+    from roboguide_eval.mission_front import load_cases, run_suite
+
+    try:
+        cases = load_cases(arguments.cases)
+        summary = run_suite(
+            cases,
+            repository_root=arguments.repository_root.resolve(),
+            out_dir=arguments.out,
+            only=tuple(arguments.only),
+            limit=arguments.limit,
+        )
+    except Exception as error:  # noqa: BLE001 - CLI boundary reports cleanly
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"suite: {summary['suite_id']}  model: {summary['model']}")
+    print(
+        f"cases passed {summary['cases_passed']}/{summary['cases_executed']} "
+        f"(llm calls: {summary['llm_calls']}, tokens: {summary['token_totals']})"
+    )
+    failed_invariants = summary["failed_invariants"]
+    if isinstance(failed_invariants, dict):
+        for name, count in failed_invariants.items():
+            print(f"  failed invariant {name}: {count}")
+    return 0 if summary["cases_passed"] == summary["cases_executed"] else 1

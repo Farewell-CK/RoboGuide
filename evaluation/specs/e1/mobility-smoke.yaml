@@ -16,9 +16,9 @@ benchmark: habitat-mas
 task: mobility
 dataset:
   # Episode set of the spot+fetch mobility task; the digest pins the exact
-  # episodes file. NOTE: these episodes span 18 MP3D scenes while only the
-  # free sample scene is currently downloaded — running this task waits on
-  # the Matterport ToU approval and full scene download.
+  # episodes file. All 18 MP3D scenes referenced by these 99 episodes are
+  # downloaded and verified present (2026-09-09), so the task is fully
+  # runnable end to end.
   name: habitat-mas-mp3d-mobility
   revision: mobility_episodes_1
   digest: 5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca

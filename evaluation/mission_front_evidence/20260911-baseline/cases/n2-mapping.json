@@ -1,0 +1,272 @@
+{
+  "case_id": "n2-mapping",
+  "category": "normal",
+  "instruction": "让具备建图能力的机器狗在仓库区域建立地图并发布",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 27.6,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 目标仓库的具体身份和边界是什么？是否需要覆盖整个仓库区域？ | 地图应发布到哪里，或供哪些系统/人员使用？是否有指定格式或接口？ | 以什么条件判定建图完成，例如覆盖率、精度、分辨率或地图质量要求？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['spatial.map.build@v0']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 目标仓库的具体身份和边界是什么？是否需要覆盖整个仓库区域？ | 地图应发布到哪里，或供哪些系统/人员使用？是否有指定格式或接口？ | 以什么条件判定建图完成，例如覆盖率、精度、分辨率或地图质量要求？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['spatial.map.build@v0']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 27383.8,
+      "request_bytes": 1997,
+      "response_bytes": 17722,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0263cb22991ace00016aa41d1f0be887d19bb3879daae8e381": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 72,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 72,
+              "output_tokens": 0
+            },
+            "rs_0263cb22991ace00016aa41d1f977887d196c49b919170c3d7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0263cb22991ace00016aa41d28ecf487d18421876ea15a37e8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0263cb22991ace00016aa41d323e3087d18967224c897d84ef": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 163
+            },
+            "msg_0263cb22991ace00016aa41d354dd487d1bfbf3c4e9f9a1bb3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 233
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 233
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 363,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1430,
+        "output_tokens_details": {
+          "reasoning_tokens": 1197
+        },
+        "total_tokens": 1793
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 363,
+    "output_tokens": 1430,
+    "total_tokens": 1793
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-42311601171e48139c1b09f35c22b35e",
+    "mission_id": "mission-7eb7c428f6d14671b74e098c9d398202",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "让具备建图能力的机器狗在仓库区域建立地图并发布",
+        "created_at_ms": 1789140254137,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "目标仓库的具体身份和边界是什么？是否需要覆盖整个仓库区域？",
+        "created_at_ms": 1789140281654,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "地图应发布到哪里，或供哪些系统/人员使用？是否有指定格式或接口？",
+        "created_at_ms": 1789140281654,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "以什么条件判定建图完成，例如覆盖率、精度、分辨率或地图质量要求？",
+        "created_at_ms": 1789140281654,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果有多台符合条件的机器狗，应指定哪一台，还是允许系统从中选择？",
+        "created_at_ms": 1789140281654,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "仓库内是否存在禁入区域、人员或车辆作业限制，以及指定的运行时段或其他安全要求？",
+        "created_at_ms": 1789140281654,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在仓库区域建立地图，并将该地图发布出去。",
+      "constraints": [
+        "作业主体必须是具备建图能力的机器狗。",
+        "作业范围限定为仓库区域。"
+      ],
+      "assumptions": [
+        "将“机器狗”理解为单台设备。",
+        "将“建立地图”理解为对目标仓库区域进行地图采集与构建。",
+        "不假定具体地图类型、发布目标、通信协议或实现方式。"
+      ],
+      "open_questions": [
+        "目标仓库的具体身份和边界是什么？是否需要覆盖整个仓库区域？",
+        "地图应发布到哪里，或供哪些系统/人员使用？是否有指定格式或接口？",
+        "以什么条件判定建图完成，例如覆盖率、精度、分辨率或地图质量要求？",
+        "如果有多台符合条件的机器狗，应指定哪一台，还是允许系统从中选择？",
+        "仓库内是否存在禁入区域、人员或车辆作业限制，以及指定的运行时段或其他安全要求？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140254137,
+    "updated_at_ms": 1789140281654
+  }
+}

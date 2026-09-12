@@ -1,0 +1,266 @@
+{
+  "case_id": "m3-patrol-observe",
+  "category": "multi_role",
+  "instruction": "在 A 区到 B 区之间来回巡逻，发现遗留物就拍照上报",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 24.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 任务应持续多长时间、往返多少次，或以什么条件结束？ | A区和B区的具体边界、入口或地图标识是什么？ | 由一台机器人执行，还是需要多台机器人协同？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['mobility.navigate@v1', 'observation.verify@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 任务应持续多长时间、往返多少次，或以什么条件结束？ | A区和B区的具体边界、入口或地图标识是什么？ | 由一台机器人执行，还是需要多台机器人协同？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['mobility.navigate@v1', 'observation.verify@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 24705.1,
+      "request_bytes": 1997,
+      "response_bytes": 14707,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_02e7f6ce28f4714c016aa41fd0688487d18ed1be2123308ce7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 78,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 78,
+              "output_tokens": 0
+            },
+            "rs_02e7f6ce28f4714c016aa41fd0e4e887d19de9929a4abdaa18": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_02e7f6ce28f4714c016aa41fda395487d194b545553191f4fb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_02e7f6ce28f4714c016aa41fe3aa9087d1a981fe7afd2c179f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 262
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 262
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 369,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1296,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 1665
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 369,
+    "output_tokens": 1296,
+    "total_tokens": 1665
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-2297895e62ab4a678ba74c0069fcb15e",
+    "mission_id": "mission-fcb3dc261058492b87c1775c7ec0f269",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "在 A 区到 B 区之间来回巡逻，发现遗留物就拍照上报",
+        "created_at_ms": 1789140943715,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "任务应持续多长时间、往返多少次，或以什么条件结束？",
+        "created_at_ms": 1789140968520,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "A区和B区的具体边界、入口或地图标识是什么？",
+        "created_at_ms": 1789140968520,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "由一台机器人执行，还是需要多台机器人协同？",
+        "created_at_ms": 1789140968520,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "上报对象或上报渠道是什么？是否需要附带位置、时间等信息？",
+        "created_at_ms": 1789140968520,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如何判定“遗留物”，以及对疑似危险、无法安全接近或涉及人员隐私的物品，是否有拍摄距离和处置要求？",
+        "created_at_ms": 1789140968520,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在指定的A区与B区之间执行往返巡逻；发现遗留物后拍摄照片并上报。",
+      "constraints": [
+        "巡逻范围为A区与B区之间。",
+        "巡逻方式为在A区与B区之间往返。",
+        "发现遗留物时，需要拍摄照片并上报。"
+      ],
+      "assumptions": [
+        "“A区”和“B区”是用户指定的区域名称，具体地图区域或边界尚未确定。",
+        "“遗留物”指巡逻过程中由系统识别出的疑似遗留物，具体识别标准尚未确定。"
+      ],
+      "open_questions": [
+        "任务应持续多长时间、往返多少次，或以什么条件结束？",
+        "A区和B区的具体边界、入口或地图标识是什么？",
+        "由一台机器人执行，还是需要多台机器人协同？",
+        "上报对象或上报渠道是什么？是否需要附带位置、时间等信息？",
+        "如何判定“遗留物”，以及对疑似危险、无法安全接近或涉及人员隐私的物品，是否有拍摄距离和处置要求？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140943715,
+    "updated_at_ms": 1789140968520
+  }
+}

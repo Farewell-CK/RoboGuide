@@ -1,0 +1,260 @@
+{
+  "case_id": "t3-exclusive-corridor",
+  "category": "resource_timing",
+  "instruction": "两台机器人需要先后穿过同一条窄走廊去充电",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 15.8,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 两台机器人的物理标识分别是什么？ | 目标窄走廊和各自充电位置对应哪些已登记的空间节点？ | 两台机器人的通行顺序是什么？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": false,
+      "detail": "missing resource kinds ['space']; plan declared []"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 两台机器人的物理标识分别是什么？ | 目标窄走廊和各自充电位置对应哪些已登记的空间节点？ | 两台机器人的通行顺序是什么？",
+    "decomposition_sanity: plan carries no tasks",
+    "resource_kinds: missing resource kinds ['space']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 15682.7,
+      "request_bytes": 1988,
+      "response_bytes": 10005,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00bfa2763c220122016aa41f50fdb487d1a4ad7dc9a752f86b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 74,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 74,
+              "output_tokens": 0
+            },
+            "rs_00bfa2763c220122016aa41f51af0487d1adb3b0274485d08a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_00bfa2763c220122016aa41f5b1dac87d1a8719fb68938753f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 220
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 220
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 365,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 736,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1101
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 365,
+    "output_tokens": 736,
+    "total_tokens": 1101
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-d8b98c8f8be04870b390717beeb3594f",
+    "mission_id": "mission-8a8978ad52734d86ad8dd18848e9c7aa",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "两台机器人需要先后穿过同一条窄走廊去充电",
+        "created_at_ms": 1789140815917,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "两台机器人的物理标识分别是什么？",
+        "created_at_ms": 1789140831700,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "目标窄走廊和各自充电位置对应哪些已登记的空间节点？",
+        "created_at_ms": 1789140831700,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "两台机器人的通行顺序是什么？",
+        "created_at_ms": 1789140831700,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "任务完成条件是到达充电位置、开始充电，还是充电完成？",
+        "created_at_ms": 1789140831700,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否有额外的安全间隔、优先级或走廊占用规则？",
+        "created_at_ms": 1789140831700,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "协调两台机器人依次通过同一条窄走廊，并在通过后前往充电。",
+      "constraints": [
+        "参与者数量为两台机器人。",
+        "两台机器人必须经过同一条窄走廊。",
+        "两台机器人需要按顺序通过，不能同时穿越。"
+      ],
+      "assumptions": [
+        "两台机器人都需要在通过走廊后前往充电。",
+        "“先后穿过”表示同一时刻仅允许一台机器人占用该窄走廊。"
+      ],
+      "open_questions": [
+        "两台机器人的物理标识分别是什么？",
+        "目标窄走廊和各自充电位置对应哪些已登记的空间节点？",
+        "两台机器人的通行顺序是什么？",
+        "任务完成条件是到达充电位置、开始充电，还是充电完成？",
+        "是否有额外的安全间隔、优先级或走廊占用规则？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140815917,
+    "updated_at_ms": 1789140831700
+  }
+}

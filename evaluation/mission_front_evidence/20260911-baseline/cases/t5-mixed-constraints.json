@@ -1,0 +1,304 @@
+{
+  "case_id": "t5-mixed-constraints",
+  "category": "resource_timing",
+  "instruction": "下午三点前把备件送到二楼维修间，运输过程中不要占用主电梯超过十分钟",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 49.6,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 7 clarification question(s): 需要运送的具体备件是什么，数量、包装或物料标识是什么？ | 备件当前的取货地点在哪里？ | 二楼维修间和主电梯分别属于哪个楼宇或站点；现场是否存在多个同名目标？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": false,
+      "detail": "missing resource kinds ['space']; plan declared []"
+    },
+    {
+      "name": "timing_presence",
+      "passed": false,
+      "detail": "user declared timing constraints but 0/0 tasks carry a timing block"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 7 clarification question(s): 需要运送的具体备件是什么，数量、包装或物料标识是什么？ | 备件当前的取货地点在哪里？ | 二楼维修间和主电梯分别属于哪个楼宇或站点；现场是否存在多个同名目标？",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []",
+    "resource_kinds: missing resource kinds ['space']; plan declared []",
+    "timing_presence: user declared timing constraints but 0/0 tasks carry a timing block"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 49472.6,
+      "request_bytes": 2027,
+      "response_bytes": 27444,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00652c1b310f7154016aa41f700a0887d19bd0065aadb40272": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 80,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 80,
+              "output_tokens": 0
+            },
+            "rs_00652c1b310f7154016aa41f722b7887d19c65a4b7dc8912c2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_00652c1b310f7154016aa41f7b80c887d1a95e241e87fbd5ff": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_00652c1b310f7154016aa41f84d0e887d1bd96e943796b5fff": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_00652c1b310f7154016aa41f8e258887d193dfa97b6023d5ff": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_00652c1b310f7154016aa41f977a3c87d1a8441b153ec560ea": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 179
+            },
+            "msg_00652c1b310f7154016aa41f9acf7087d1ab7137a2f7ec5fdf": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 319
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 319
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 371,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2568,
+        "output_tokens_details": {
+          "reasoning_tokens": 2249
+        },
+        "total_tokens": 2939
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 371,
+    "output_tokens": 2568,
+    "total_tokens": 2939
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-1bc09cb232084f6d9eede654c40ba6fc",
+    "mission_id": "mission-d500e2e265e14a8ba74858bf71e17bb0",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "下午三点前把备件送到二楼维修间，运输过程中不要占用主电梯超过十分钟",
+        "created_at_ms": 1789140847211,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要运送的具体备件是什么，数量、包装或物料标识是什么？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "备件当前的取货地点在哪里？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "二楼维修间和主电梯分别属于哪个楼宇或站点；现场是否存在多个同名目标？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“下午三点前”对应哪一天、哪个时区？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "主电梯十分钟限制按每次连续占用还是运输全程累计占用计算？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "什么条件算完成交付：放入维修间即可，还是需要交给指定人员并确认收货？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "备件是否有重量、尺寸、易碎、危险品、温控或其他搬运安全限制？",
+        "created_at_ms": 1789140896784,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将用户所指的备件送达指定的二楼维修间并完成交付。",
+      "constraints": [
+        "交付必须在用户所称的“下午三点前”完成。",
+        "运输期间对主电梯的占用不得超过十分钟；该时长是单次连续占用还是全程累计占用尚未明确。"
+      ],
+      "assumptions": [
+        "“下午三点”暂按当地时间15:00理解，但具体日期和时区仍待确认。",
+        "未假定必须使用主电梯、特定运输路线、执行机器人或其他现场资源。",
+        "“送到”暂按将备件放置或交接至二楼维修间理解，最终交付判定仍待确认。"
+      ],
+      "open_questions": [
+        "需要运送的具体备件是什么，数量、包装或物料标识是什么？",
+        "备件当前的取货地点在哪里？",
+        "二楼维修间和主电梯分别属于哪个楼宇或站点；现场是否存在多个同名目标？",
+        "“下午三点前”对应哪一天、哪个时区？",
+        "主电梯十分钟限制按每次连续占用还是运输全程累计占用计算？",
+        "什么条件算完成交付：放入维修间即可，还是需要交给指定人员并确认收货？",
+        "备件是否有重量、尺寸、易碎、危险品、温控或其他搬运安全限制？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140847211,
+    "updated_at_ms": 1789140896784
+  }
+}

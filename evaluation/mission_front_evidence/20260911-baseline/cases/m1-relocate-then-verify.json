@@ -1,0 +1,268 @@
+{
+  "case_id": "m1-relocate-then-verify",
+  "category": "multi_role",
+  "instruction": "把贵重样品从实验室运到展示厅，送达后拍照确认状态",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 21.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 需要运输哪件样品？请提供样品名称、编号或数量。 | 具体是哪一个实验室和哪一个展示厅？请提供可区分的地点名称或位置标识。 | 是否有必须遵守的搬运、环境、安保、包装或交接要求？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": false,
+      "detail": "objective dropped terms ['拍照']; plan objective: ''"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['object.relocate@v1', 'observation.verify@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 需要运输哪件样品？请提供样品名称、编号或数量。 | 具体是哪一个实验室和哪一个展示厅？请提供可区分的地点名称或位置标识。 | 是否有必须遵守的搬运、环境、安保、包装或交接要求？",
+    "objective_fidelity: objective dropped terms ['拍照']; plan objective: ''",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['object.relocate@v1', 'observation.verify@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 21109.4,
+      "request_bytes": 2000,
+      "response_bytes": 13715,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0460c8874a63d145016aa41fa1a02c87d1a585847e1b211459": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 75,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 75,
+              "output_tokens": 0
+            },
+            "rs_0460c8874a63d145016aa41fa227f487d1ae2b2da6bcd86192": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0460c8874a63d145016aa41fab7a6087d195056ae3dcf41c89": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 276
+            },
+            "msg_0460c8874a63d145016aa41fb0938887d1a86fc418d3666bb1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 298
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 298
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 366,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1090,
+        "output_tokens_details": {
+          "reasoning_tokens": 792
+        },
+        "total_tokens": 1456
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 366,
+    "output_tokens": 1090,
+    "total_tokens": 1456
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-175510e1de0e44ed8a37976ee48c60aa",
+    "mission_id": "mission-2cf5f6880a1448a8894f49176bbd9b06",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贵重样品从实验室运到展示厅，送达后拍照确认状态",
+        "created_at_ms": 1789140896834,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要运输哪件样品？请提供样品名称、编号或数量。",
+        "created_at_ms": 1789140918043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "具体是哪一个实验室和哪一个展示厅？请提供可区分的地点名称或位置标识。",
+        "created_at_ms": 1789140918043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否有必须遵守的搬运、环境、安保、包装或交接要求？",
+        "created_at_ms": 1789140918043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“确认状态”需要检查哪些内容（例如外观、完整性或损坏情况），照片应保存或提交给谁？",
+        "created_at_ms": 1789140918043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "送达是否需要与指定接收人完成交接？",
+        "created_at_ms": 1789140918043,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将指定的贵重样品从指定实验室运送至指定展示厅，并在送达后拍摄照片确认样品状态。",
+      "constraints": [
+        "运输对象被用户描述为贵重样品。",
+        "运输起点为实验室，终点为展示厅。",
+        "样品送达后必须拍照，以确认其状态。"
+      ],
+      "assumptions": [
+        "用户指的是一件贵重样品；若有多件样品，需进一步明确数量和标识。",
+        "“实验室”和“展示厅”是用户所指的起点与终点类别，但具体位置或系统标识尚未确认。",
+        "将“拍照确认状态”理解为样品送达后拍摄状态照片；尚未假定具体检查项目、照片数量或存储位置。"
+      ],
+      "open_questions": [
+        "需要运输哪件样品？请提供样品名称、编号或数量。",
+        "具体是哪一个实验室和哪一个展示厅？请提供可区分的地点名称或位置标识。",
+        "是否有必须遵守的搬运、环境、安保、包装或交接要求？",
+        "“确认状态”需要检查哪些内容（例如外观、完整性或损坏情况），照片应保存或提交给谁？",
+        "送达是否需要与指定接收人完成交接？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140896834,
+    "updated_at_ms": 1789140918043
+  }
+}

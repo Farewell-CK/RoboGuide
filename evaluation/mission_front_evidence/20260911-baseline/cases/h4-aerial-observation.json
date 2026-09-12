@@ -1,0 +1,260 @@
+{
+  "case_id": "h4-aerial-observation",
+  "category": "heterogeneous",
+  "instruction": "让无人机在厂区上空巡查一圈并确认围栏完整",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 17.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): 需要巡查的是哪个厂区？请提供可用于确定厂区边界或围栏范围的信息；不能仅凭“厂区”确定实际空间范围。 | “一圈”应按哪条围栏路线或指定边界定义？是否要求覆盖围栏的全部可见区段？ | 围栏完整性的判定标准是什么，例如是否包括小范围破损、缺口、倾斜或遮挡区域？发现无法看清的区段时应如何处理？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['observation.verify@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): 需要巡查的是哪个厂区？请提供可用于确定厂区边界或围栏范围的信息；不能仅凭“厂区”确定实际空间范围。 | “一圈”应按哪条围栏路线或指定边界定义？是否要求覆盖围栏的全部可见区段？ | 围栏完整性的判定标准是什么，例如是否包括小范围破损、缺口、倾斜或遮挡区域？发现无法看清的区段时应如何处理？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['observation.verify@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 17014.5,
+      "request_bytes": 1988,
+      "response_bytes": 10529,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_000e4727c25e1ba6016aa41e6c927887d19f863441cde2b933": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 72,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 72,
+              "output_tokens": 0
+            },
+            "rs_000e4727c25e1ba6016aa41e6cf07087d18e08314ed7b9c2f4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_000e4727c25e1ba6016aa41e76c36487d1996a7d59026c170b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 320
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 320
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 363,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 836,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1199
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 363,
+    "output_tokens": 836,
+    "total_tokens": 1199
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-a46f09fc6571478bbd9564d7267481bb",
+    "mission_id": "mission-7bceca180c144c219a2cf98f0b917969",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "让无人机在厂区上空巡查一圈并确认围栏完整",
+        "created_at_ms": 1789140587158,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要巡查的是哪个厂区？请提供可用于确定厂区边界或围栏范围的信息；不能仅凭“厂区”确定实际空间范围。",
+        "created_at_ms": 1789140604272,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“一圈”应按哪条围栏路线或指定边界定义？是否要求覆盖围栏的全部可见区段？",
+        "created_at_ms": 1789140604272,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "围栏完整性的判定标准是什么，例如是否包括小范围破损、缺口、倾斜或遮挡区域？发现无法看清的区段时应如何处理？",
+        "created_at_ms": 1789140604272,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否有必须遵守的飞行高度、禁飞区域、人员避让或其他现场安全限制？",
+        "created_at_ms": 1789140604272,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成巡查后需要以何种形式输出确认结果，例如标记异常位置、提供图像证据或仅给出完整/不完整结论？",
+        "created_at_ms": 1789140604272,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "使用无人机对指定厂区的外围围栏完成一圈空中巡查，并确认围栏是否完整。",
+      "constraints": [
+        "使用无人机执行任务。",
+        "巡查范围与厂区围栏相关。",
+        "任务目标包含对围栏完整性的确认。"
+      ],
+      "assumptions": [
+        "“巡查一圈”暂理解为沿厂区围栏完成一次完整的空中巡检，而非覆盖厂区内部所有区域。",
+        "“确认围栏完整”暂理解为检查围栏是否存在缺口、倒塌或明显损坏，并形成检查结论；具体判定标准尚未给出。"
+      ],
+      "open_questions": [
+        "需要巡查的是哪个厂区？请提供可用于确定厂区边界或围栏范围的信息；不能仅凭“厂区”确定实际空间范围。",
+        "“一圈”应按哪条围栏路线或指定边界定义？是否要求覆盖围栏的全部可见区段？",
+        "围栏完整性的判定标准是什么，例如是否包括小范围破损、缺口、倾斜或遮挡区域？发现无法看清的区段时应如何处理？",
+        "是否有必须遵守的飞行高度、禁飞区域、人员避让或其他现场安全限制？",
+        "完成巡查后需要以何种形式输出确认结果，例如标记异常位置、提供图像证据或仅给出完整/不完整结论？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140587158,
+    "updated_at_ms": 1789140604272
+  }
+}

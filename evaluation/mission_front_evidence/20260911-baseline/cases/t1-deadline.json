@@ -1,0 +1,243 @@
+{
+  "case_id": "t1-deadline",
+  "category": "resource_timing",
+  "instruction": "一小时内把打印好的季度报表送到经理办公室",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 14.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 3 clarification question(s): “送达”是指将报表放在经理办公室内，还是必须当面交给经理或其他授权接收人？ | 如果存在多个经理或经理办公室，请明确具体的经理及办公室。 | 一小时的起算时间是否为本条指令发出时间？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": false,
+      "detail": "expected operation object.relocate@v1 not used; execution intents: []"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": false,
+      "detail": "user declared timing constraints but 0/0 tasks carry a timing block"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 3 clarification question(s): “送达”是指将报表放在经理办公室内，还是必须当面交给经理或其他授权接收人？ | 如果存在多个经理或经理办公室，请明确具体的经理及办公室。 | 一小时的起算时间是否为本条指令发出时间？",
+    "decomposition_sanity: plan carries no tasks",
+    "integrated_operation: expected operation object.relocate@v1 not used; execution intents: []",
+    "timing_presence: user declared timing constraints but 0/0 tasks carry a timing block"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13898.5,
+      "request_bytes": 1988,
+      "response_bytes": 10064,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00907471280467e3016aa41f21e33887d18d0fd9011b4ba18d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 68,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 68,
+              "output_tokens": 0
+            },
+            "rs_00907471280467e3016aa41f22607887d1aee11270b66278e5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_00907471280467e3016aa41f2bd1e487d1975ecb4f788ff64b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 167
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 167
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 359,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 683,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1042
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 359,
+    "output_tokens": 683,
+    "total_tokens": 1042
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-1e25ee8c421f42ba81746232ba745ad5",
+    "mission_id": "mission-969c14464daa4d9a8af0d551969f8df1",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "一小时内把打印好的季度报表送到经理办公室",
+        "created_at_ms": 1789140769027,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“送达”是指将报表放在经理办公室内，还是必须当面交给经理或其他授权接收人？",
+        "created_at_ms": 1789140783043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果存在多个经理或经理办公室，请明确具体的经理及办公室。",
+        "created_at_ms": 1789140783043,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "一小时的起算时间是否为本条指令发出时间？",
+        "created_at_ms": 1789140783043,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将打印好的季度报表送达经理办公室，并在一小时内完成。",
+      "constraints": [
+        "必须在一小时内完成送达。",
+        "交付物为打印好的季度报表。",
+        "目的地为经理办公室。"
+      ],
+      "assumptions": [
+        "打印好的季度报表已准备好并可供取用。",
+        "“经理办公室”对应唯一且可识别的目的地。"
+      ],
+      "open_questions": [
+        "“送达”是指将报表放在经理办公室内，还是必须当面交给经理或其他授权接收人？",
+        "如果存在多个经理或经理办公室，请明确具体的经理及办公室。",
+        "一小时的起算时间是否为本条指令发出时间？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140769027,
+    "updated_at_ms": 1789140783043
+  }
+}

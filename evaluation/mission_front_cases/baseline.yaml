@@ -1,0 +1,251 @@
+# Mission Front-half Eval — baseline case set (29 cases, 7 categories).
+#
+# Each case drives the real Mission Intelligence front half with a real model
+# and checks semantic invariants afterwards (never exact DAG matches).
+# Categories: normal / ambiguity / heterogeneous / integrated / cross_node /
+# resource_timing / multi_role.
+schema: roboguide-eval.mission-front-cases/v0.1
+cases:
+  # ---- normal: clear single-capability tasks -------------------------------
+  - id: n1-single-relocate
+    category: normal
+    instruction: "把客厅的杯子搬到卧室的床头柜上"
+    expect:
+      must_cover_objective: ["杯子", "卧室"]
+      integrated_operation: object.relocate@v1
+      min_roles: 1
+
+  - id: n2-mapping
+    category: normal
+    instruction: "让具备建图能力的机器狗在仓库区域建立地图并发布"
+    expect:
+      must_cover_objective: ["仓库", "地图"]
+      require_capabilities: ["spatial.map.build@v0"]
+      min_roles: 1
+
+  - id: n3-patrol-verify
+    category: normal
+    instruction: "沿走廊巡逻一遍并确认每个灭火器都在原位"
+    expect:
+      must_cover_objective: ["走廊", "灭火器"]
+      require_capabilities: ["observation.verify@v1"]
+      min_roles: 1
+
+  - id: n4-edge-inference
+    category: normal
+    instruction: "把边缘节点上录制的激光点云数据做一次推理分析"
+    expect:
+      must_cover_objective: ["点云", "推理"]
+      require_capabilities: ["compute.infer@v1"]
+      min_roles: 1
+
+  # ---- ambiguity: first pass must stop at NeedsClarification ---------------
+  - id: a1-missing-destination
+    category: ambiguity
+    instruction: "把桌子上的杯子搬走"
+    follow_ups: ["搬到卧室的床头柜上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["杯子"]
+      integrated_operation: object.relocate@v1
+
+  - id: a2-missing-object
+    category: ambiguity
+    instruction: "去厨房把东西拿过来"
+    follow_ups: ["拿红色的水壶，放到餐桌上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["水壶"]
+
+  - id: a3-pronoun-reference
+    category: ambiguity
+    instruction: "把它放到那儿"
+    follow_ups: ["把窗台上的绿植搬到阳台的架子上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["绿植", "阳台"]
+
+  - id: a4-undefined-criterion
+    category: ambiguity
+    instruction: "把贵重物品搬到安全的地方"
+    follow_ups: ["贵重物品是保险柜里的文件，安全的地方是二楼档案室"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["文件", "档案室"]
+
+  - id: a5-vague-scope
+    category: ambiguity
+    instruction: "把仓库整理一下"
+    follow_ups: ["把货架上的成品箱子搬运到出货区"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["箱子", "出货区"]
+      integrated_operation: object.relocate@v1
+
+  # ---- heterogeneous: embodiment-differentiated requirements ---------------
+  - id: h1-multifloor-assignment
+    category: heterogeneous
+    instruction: "让能爬楼梯的机器人去二楼会议室取回笔记本，同时让轮式机器人在一楼大厅值守"
+    expect:
+      must_cover_objective: ["二楼", "笔记本", "一楼"]
+      min_tasks: 2
+      min_roles: 2
+      min_actors: 2
+
+  - id: h2-mapper-then-transport
+    category: heterogeneous
+    instruction: "先用具备建图能力的机器狗给新仓库建模，然后把一批样品从门口运到检验台"
+    expect:
+      must_cover_objective: ["建图", "样品", "检验台"]
+      min_tasks: 2
+      require_capabilities: ["spatial.map.build@v0", "object.relocate@v1"]
+
+  - id: h3-requested-capability-outside-fleet
+    category: heterogeneous
+    instruction: "让轮式机器人飞到屋顶检查天线是否完好"
+    expect:
+      must_cover_objective: ["屋顶", "天线"]
+      # Provider absence is a Control scheduling condition, not a Mission
+      # semantic rejection; the plan must not fabricate capabilities or
+      # descend into Local How.
+      final_lifecycle: Accepted
+
+  - id: h4-aerial-observation
+    category: heterogeneous
+    instruction: "让无人机在厂区上空巡查一圈并确认围栏完整"
+    expect:
+      must_cover_objective: ["厂区", "围栏"]
+      require_capabilities: ["observation.verify@v1"]
+
+  # ---- integrated: object.relocate must survive as one semantic goal -------
+  - id: i1-relocate-canonical
+    category: integrated
+    instruction: "把厨房的易拉罐搬到储藏室的货架上"
+    expect:
+      must_cover_objective: ["易拉罐", "储藏室"]
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b", "抓取", "放置后"]
+
+  - id: i2-relocate-long-distance
+    category: integrated
+    instruction: "把实验楼的样品盒运送到对面办公楼一层的前台"
+    expect:
+      must_cover_objective: ["样品盒", "前台"]
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b"]
+
+  - id: i3-relocate-careful-handling
+    category: integrated
+    instruction: "把车间的精密零件箱搬运到质检工位，全程轻拿轻放"
+    expect:
+      must_cover_objective: ["零件箱", "质检"]
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b"]
+
+  - id: i4-relocate-two-objects
+    category: integrated
+    instruction: "先把工具箱搬到车库，再把备件盒搬上货架"
+    expect:
+      must_cover_objective: ["工具箱", "备件盒"]
+      min_tasks: 2
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b"]
+
+  # ---- cross_node: decomposition across participating robots ---------------
+  - id: c1-two-robots-parallel
+    category: cross_node
+    instruction: "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区"
+    expect:
+      must_cover_objective: ["A 区", "B 区", "D 区"]
+      min_roles: 2
+      min_actors: 2
+
+  - id: c2-map-publish-then-infer
+    category: cross_node
+    instruction: "机器狗把新仓库的地图发布出来，边缘节点基于这张地图做路径推理"
+    expect:
+      must_cover_objective: ["地图", "推理"]
+      min_tasks: 2
+      require_capabilities: ["spatial.map.publish@v0", "compute.infer@v1"]
+
+  - id: c3-sequential-handoff
+    category: cross_node
+    instruction: "先让一台机器人在入口做访客登记引导，等登记完成后另一台机器人把访客送到三楼会议室"
+    expect:
+      must_cover_objective: ["登记", "会议室"]
+      min_tasks: 2
+      min_roles: 2
+
+  # ---- resource_timing: constraints must survive into the plan -------------
+  - id: t1-deadline
+    category: resource_timing
+    instruction: "一小时内把打印好的季度报表送到经理办公室"
+    expect:
+      must_cover_objective: ["报表", "经理办公室"]
+      timing_required: true
+      integrated_operation: object.relocate@v1
+
+  - id: t2-start-window
+    category: resource_timing
+    instruction: "明天早上八点开始在园区大门执行迎宾巡逻"
+    expect:
+      must_cover_objective: ["园区大门", "巡逻"]
+      timing_required: true
+
+  - id: t3-exclusive-corridor
+    category: resource_timing
+    instruction: "两台机器人需要先后穿过同一条窄走廊去充电"
+    expect:
+      must_cover_objective: ["走廊", "充电"]
+      min_roles: 2
+      resource_kinds: ["space"]
+
+  - id: t4-compute-resource
+    category: resource_timing
+    instruction: "把刚才录制的巡检视频在边缘 GPU 节点上做缺陷检测推理"
+    expect:
+      must_cover_objective: ["视频", "缺陷"]
+      require_capabilities: ["compute.infer@v1"]
+      resource_kinds: ["compute"]
+
+  - id: t5-mixed-constraints
+    category: resource_timing
+    instruction: "下午三点前把备件送到二楼维修间，运输过程中不要占用主电梯超过十分钟"
+    expect:
+      must_cover_objective: ["备件", "维修间"]
+      timing_required: true
+      resource_kinds: ["space"]
+      integrated_operation: object.relocate@v1
+
+  # ---- multi_role: multi-role collaboration with dependencies --------------
+  - id: m1-relocate-then-verify
+    category: multi_role
+    instruction: "把贵重样品从实验室运到展示厅，送达后拍照确认状态"
+    expect:
+      must_cover_objective: ["样品", "展示厅", "拍照"]
+      min_tasks: 2
+      min_roles: 2
+      require_capabilities: ["object.relocate@v1", "observation.verify@v1"]
+
+  - id: m2-map-then-localize
+    category: multi_role
+    instruction: "先在新区建图，建图完成后在新地图上做定位验证"
+    expect:
+      must_cover_objective: ["建图", "定位"]
+      min_tasks: 2
+      require_capabilities: ["spatial.map.build@v0", "spatial.localization.verify@v0"]
+
+  - id: m3-patrol-observe
+    category: multi_role
+    instruction: "在 A 区到 B 区之间来回巡逻，发现遗留物就拍照上报"
+    expect:
+      must_cover_objective: ["巡逻", "遗留物"]
+      require_capabilities: ["mobility.navigate@v1", "observation.verify@v1"]
+
+  - id: m4-map-relocate-verify
+    category: multi_role
+    instruction: "先给新库房建图，然后把三箱样品搬入库房，最后拍照确认上架情况"
+    expect:
+      must_cover_objective: ["建图", "样品", "拍照"]
+      min_tasks: 3
+      require_capabilities: ["spatial.map.build@v0", "object.relocate@v1", "observation.verify@v1"]

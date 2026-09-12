@@ -1,0 +1,267 @@
+{
+  "case_id": "m2-map-then-localize",
+  "category": "multi_role",
+  "instruction": "先在新区建图，建图完成后在新地图上做定位验证",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 25.6,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 5 clarification question(s): “新区”对应的具体场地、边界或可识别名称是什么？ | 由哪一台或哪些机器人执行建图和定位验证？是否仅限单台机器人？ | 建图达到什么条件才算完成？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['spatial.map.build@v0', 'spatial.localization.verify@v0']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 5 clarification question(s): “新区”对应的具体场地、边界或可识别名称是什么？ | 由哪一台或哪些机器人执行建图和定位验证？是否仅限单台机器人？ | 建图达到什么条件才算完成？",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['spatial.map.build@v0', 'spatial.localization.verify@v0']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 25461.7,
+      "request_bytes": 1994,
+      "response_bytes": 15373,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_054323cec22c2e16016aa41fb6faa487d18d589430c57a93bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 72,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 72,
+              "output_tokens": 0
+            },
+            "rs_054323cec22c2e16016aa41fb77fc887d1b53114234ba2f594": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_054323cec22c2e16016aa41fc0d78487d18fa6d38df969f9be": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_054323cec22c2e16016aa41fca47fc87d198c92f331b9e3e3e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 286
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 286
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 363,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1320,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 1683
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 363,
+    "output_tokens": 1320,
+    "total_tokens": 1683
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-de116d579d924e83ae5fbe817d9d1c1f",
+    "mission_id": "mission-f507931d3d814a84959a633745fc53cd",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先在新区建图，建图完成后在新地图上做定位验证",
+        "created_at_ms": 1789140918095,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“新区”对应的具体场地、边界或可识别名称是什么？",
+        "created_at_ms": 1789140943657,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "由哪一台或哪些机器人执行建图和定位验证？是否仅限单台机器人？",
+        "created_at_ms": 1789140943657,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "建图达到什么条件才算完成？",
+        "created_at_ms": 1789140943657,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "定位验证的成功标准是什么，例如定位精度、持续时间、覆盖范围或需要验证的点位？",
+        "created_at_ms": 1789140943657,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否存在必须遵守的禁行区域、限速、人员避让或其他现场安全约束？",
+        "created_at_ms": 1789140943657,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在指定的“新区”范围内先完成新地图构建；确认建图完成后，使用该新地图执行定位验证，并达到用户指定的验证成功标准。",
+      "constraints": [
+        "必须先完成“新区”的建图，之后才能开始定位验证。",
+        "定位验证必须基于第一阶段新建的地图。",
+        "未指定其他路线、资源、实现方式或恢复策略。"
+      ],
+      "assumptions": [
+        "“新地图”指第一阶段在“新区”现场新建并产出的地图，而不是预先存在的地图。",
+        "当前未假定任何具体机器人、物理 NodeId、地图版本或执行资源。",
+        "“新区”应能在后续由用户或系统映射到具体场地，但此处不猜测其物理标识。"
+      ],
+      "open_questions": [
+        "“新区”对应的具体场地、边界或可识别名称是什么？",
+        "由哪一台或哪些机器人执行建图和定位验证？是否仅限单台机器人？",
+        "建图达到什么条件才算完成？",
+        "定位验证的成功标准是什么，例如定位精度、持续时间、覆盖范围或需要验证的点位？",
+        "是否存在必须遵守的禁行区域、限速、人员避让或其他现场安全约束？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140918095,
+    "updated_at_ms": 1789140943657
+  }
+}

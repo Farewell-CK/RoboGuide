@@ -1,0 +1,282 @@
+{
+  "case_id": "h2-mapper-then-transport",
+  "category": "heterogeneous",
+  "instruction": "先用具备建图能力的机器狗给新仓库建模，然后把一批样品从门口运到检验台",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 19.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 7 clarification question(s): 新仓库的具体位置或空间范围是什么？需要覆盖整个仓库，还是仅覆盖从门口到检验台的区域？ | 应由同一台机器狗完成建图和运输，还是可以由不同机器狗分别完成？需要几台机器狗参与？ | 样品共有多少件，单件及整批的重量、尺寸、包装和搬运要求是什么？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": false,
+      "detail": "objective dropped terms ['建图']; plan objective: ''"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": false,
+      "detail": "missing required capabilities ['spatial.map.build@v0', 'object.relocate@v1']; plan declared []"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 7 clarification question(s): 新仓库的具体位置或空间范围是什么？需要覆盖整个仓库，还是仅覆盖从门口到检验台的区域？ | 应由同一台机器狗完成建图和运输，还是可以由不同机器狗分别完成？需要几台机器狗参与？ | 样品共有多少件，单件及整批的重量、尺寸、包装和搬运要求是什么？",
+    "objective_fidelity: objective dropped terms ['建图']; plan objective: ''",
+    "decomposition_sanity: plan carries no tasks",
+    "capability_coverage: missing required capabilities ['spatial.map.build@v0', 'object.relocate@v1']; plan declared []"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 18909.6,
+      "request_bytes": 2030,
+      "response_bytes": 10574,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_005da4e44647680d016aa41e41e32887d193068166cbe5b1eb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 85,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 85,
+              "output_tokens": 0
+            },
+            "rs_005da4e44647680d016aa41e431d1087d182fa0021566602a8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_005da4e44647680d016aa41e4c869c87d18471375f1c88dc1b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 395
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 395
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 376,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 911,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1287
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 376,
+    "output_tokens": 911,
+    "total_tokens": 1287
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-d51a463ce790457f85f4bc533e2e0d19",
+    "mission_id": "mission-9ff5ba3252294c86b8d416d58d0f3e88",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先用具备建图能力的机器狗给新仓库建模，然后把一批样品从门口运到检验台",
+        "created_at_ms": 1789140544800,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "新仓库的具体位置或空间范围是什么？需要覆盖整个仓库，还是仅覆盖从门口到检验台的区域？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "应由同一台机器狗完成建图和运输，还是可以由不同机器狗分别完成？需要几台机器狗参与？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "样品共有多少件，单件及整批的重量、尺寸、包装和搬运要求是什么？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "仓库门口和检验台的具体位置标识是什么？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“建模完成”的判定标准是什么，例如覆盖范围、地图质量或可导航验证？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "样品运输的完成条件是什么，例如全部样品安全放置到检验台并确认数量？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0008",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "运输过程中是否有必须遵守的安全限制，例如避让人员、禁行区域、速度限制或人工接管要求？",
+        "created_at_ms": 1789140563810,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "为新仓库建立可用于导航的地图；地图建立完成后，将一批样品从仓库门口运送至检验台。",
+      "constraints": [
+        "执行顺序为：先完成新仓库建模，再进行样品运输。",
+        "建模阶段需要使用具备建图能力的机器狗。",
+        "运输任务的起点是仓库门口，终点是检验台。",
+        "运输对象是一批样品。",
+        "未指定具体机器狗、物理节点、资源、地图版本、路线或实现服务。"
+      ],
+      "assumptions": [
+        "将“建模”解释为为新仓库建立可用于后续导航的地图；未假设具体地图格式或建图实现。",
+        "“门口”和“检验台”均指新仓库内的起点与目的地，但尚无具体位置标识。",
+        "未假设建图和运输必须由同一台机器狗完成。"
+      ],
+      "open_questions": [
+        "新仓库的具体位置或空间范围是什么？需要覆盖整个仓库，还是仅覆盖从门口到检验台的区域？",
+        "应由同一台机器狗完成建图和运输，还是可以由不同机器狗分别完成？需要几台机器狗参与？",
+        "样品共有多少件，单件及整批的重量、尺寸、包装和搬运要求是什么？",
+        "仓库门口和检验台的具体位置标识是什么？",
+        "“建模完成”的判定标准是什么，例如覆盖范围、地图质量或可导航验证？",
+        "样品运输的完成条件是什么，例如全部样品安全放置到检验台并确认数量？",
+        "运输过程中是否有必须遵守的安全限制，例如避让人员、禁行区域、速度限制或人工接管要求？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140544800,
+    "updated_at_ms": 1789140563810
+  }
+}

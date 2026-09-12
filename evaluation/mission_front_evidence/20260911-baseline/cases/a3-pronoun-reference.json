@@ -1,0 +1,319 @@
+{
+  "case_id": "a3-pronoun-reference",
+  "category": "ambiguity",
+  "instruction": "把它放到那儿",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 24.2,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "3 clarification question(s) asked: “它”具体指哪个物体？ | “那儿”具体指哪个位置或区域？ | 如果现场有多个窗台上的绿植或多个阳台架子，请确认具体是哪一个；当前描述尚不足以唯一确定物体和目标位置。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9666.2,
+      "request_bytes": 1946,
+      "response_bytes": 7964,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_08d29403c4bffa1f016aa41da4cf7087d19dbd2e4d8fe03627": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 61,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 61,
+              "output_tokens": 0
+            },
+            "rs_08d29403c4bffa1f016aa41da56b6487d19ab7f7b28ac832f9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 325
+            },
+            "msg_08d29403c4bffa1f016aa41dab6ee887d1bf4e1df3e0bb3b4c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 92
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 92
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 352,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 417,
+        "output_tokens_details": {
+          "reasoning_tokens": 325
+        },
+        "total_tokens": 769
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 14231.8,
+      "request_bytes": 2604,
+      "response_bytes": 9720,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b25e17a4e9bab90016aa41dae44e087d1b8fd19af90ccf8f0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 247,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 247,
+              "output_tokens": 0
+            },
+            "rs_0b25e17a4e9bab90016aa41daea97887d197e63997cd2d75c5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0b25e17a4e9bab90016aa41db819bc87d1b5ce7b3ab5280fd9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 159
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 159
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 538,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 675,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1213
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 890,
+    "output_tokens": 1092,
+    "total_tokens": 1982
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-23af0918560b4101acad38d3484731ba",
+    "mission_id": "mission-27ab3e10daaa41a7be2b85128b822268",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把它放到那儿",
+        "created_at_ms": 1789140387508,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“它”具体指哪个物体？",
+        "created_at_ms": 1789140397274,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“那儿”具体指哪个位置或区域？",
+        "created_at_ms": 1789140397274,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "把窗台上的绿植搬到阳台的架子上",
+        "created_at_ms": 1789140397331,
+        "in_reply_to": "turn-0003"
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果现场有多个窗台上的绿植或多个阳台架子，请确认具体是哪一个；当前描述尚不足以唯一确定物体和目标位置。",
+        "created_at_ms": 1789140411663,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将窗台上的绿植搬到阳台的架子上，并以绿植最终放置在该架子上作为完成条件。",
+      "constraints": [
+        "移动对象为窗台上的绿植。",
+        "目标位置为阳台上的架子。"
+      ],
+      "assumptions": [
+        "“它”指窗台上的绿植。",
+        "“那儿”指阳台上的架子。",
+        "目前仅使用自然语言描述，未假定任何具体的物理对象或位置标识。"
+      ],
+      "open_questions": [
+        "如果现场有多个窗台上的绿植或多个阳台架子，请确认具体是哪一个；当前描述尚不足以唯一确定物体和目标位置。"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140387508,
+    "updated_at_ms": 1789140411663
+  }
+}

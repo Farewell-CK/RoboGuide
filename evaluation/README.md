@@ -246,10 +246,16 @@ episode 身份由 `EmosRunner` 从官方输出解析后写入 manifest 的
 回填，并在 `details.wall_time_source` 标注来源。metric 来源总表见上文
 "EMOS 官方输出与 metric 来源"。
 
-> ⚠️ 数据阻塞：mobility 任务的 99 个 episode 分布在 18 个 MP3D 场景，而当前
-> 只下载了免申请示例场景（且不在该 episode 集内）。此任务正式运行需等待
-> Matterport ToU 批复并下载全量 MP3D（约 130GB）；spec 的 dataset digest 已
-> 按 `mobility_episodes_1.json.gz` 固定。
+> ✅ 数据就绪（2026-09-09 验证）：MP3D ToU 已批复、90 栋全量场景在位
+> （21GB，habitat 仅需 glb 子集），mobility 99 集引用的 **18 个场景全部
+> 就绪**（目录 + glb 双确认），`mp3d.scene_dataset_config.json` 在位；
+> smoke 已实际跑通 episode 20。robot 配置说明：`robot_configs/mp3d/
+> mobility_episodes_1.json` 为手工补的 alias（作者包只有 9 集，alias 补至
+> 10 集，其余 89 集无条目）。已对源码确认其影响：mobility 配置
+> `randomize_agent_start: 1`，agent 每集由 simulator RNG（受
+> `habitat.seed` 驱动）随机放置——缺失条目**不会崩溃**（直接索引分支在
+> randomize 分支的 else 里，不会到达），配置条目仅影响 LLM 的场景文字
+> 描述；同 seed 可复现同一初始状态，两臂同 seed 对比不受影响。
 
 ## 当前状态与停止边界
 

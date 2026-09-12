@@ -1,0 +1,289 @@
+{
+  "case_id": "h1-multifloor-assignment",
+  "category": "heterogeneous",
+  "instruction": "让能爬楼梯的机器人去二楼会议室取回笔记本，同时让轮式机器人在一楼大厅值守",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 44.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 6 clarification question(s): 二楼具体是哪一间会议室？若有多间会议室，请提供可识别的名称或其他目标描述。 | 要取回的是哪一台笔记本电脑，如何识别它？是否需要开门、授权或与人员交接？ | 取回后应将笔记本带到哪里、交给谁？何时算取回任务完成？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 3 term(s) in: "
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": false,
+      "detail": "plan carries no tasks"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 0 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 6 clarification question(s): 二楼具体是哪一间会议室？若有多间会议室，请提供可识别的名称或其他目标描述。 | 要取回的是哪一台笔记本电脑，如何识别它？是否需要开门、授权或与人员交接？ | 取回后应将笔记本带到哪里、交给谁？何时算取回任务完成？",
+    "decomposition_sanity: plan carries no tasks"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 44125.0,
+      "request_bytes": 2036,
+      "response_bytes": 24445,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0fec84709503536a016aa41e15600887d1b9c6d8064fbac6c0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 84,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 84,
+              "output_tokens": 0
+            },
+            "rs_0fec84709503536a016aa41e15e1f087d1a8048cc8ed932883": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0fec84709503536a016aa41e1f575c87d1a6d7110471f4e577": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fec84709503536a016aa41e2889c487d1abe2f8467bd3f5df": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fec84709503536a016aa41e31db1887d1afdeda9fb71b4f6e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 352
+            },
+            "msg_0fec84709503536a016aa41e3854e887d1b8ad75fac5174151": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 459
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 459
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 219,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 375,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2363,
+        "output_tokens_details": {
+          "reasoning_tokens": 1904
+        },
+        "total_tokens": 2738
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 375,
+    "output_tokens": 2363,
+    "total_tokens": 2738
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.3",
+    "request_id": "request-6770a6b7af274894b5a8a3afc620269a",
+    "mission_id": "mission-de17ebe998f74128b9d304cf5e30d2b8",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "让能爬楼梯的机器人去二楼会议室取回笔记本，同时让轮式机器人在一楼大厅值守",
+        "created_at_ms": 1789140500518,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "二楼具体是哪一间会议室？若有多间会议室，请提供可识别的名称或其他目标描述。",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要取回的是哪一台笔记本电脑，如何识别它？是否需要开门、授权或与人员交接？",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "取回后应将笔记本带到哪里、交给谁？何时算取回任务完成？",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "一楼大厅的“值守”具体要求是什么：原地驻守、巡逻、监控，还是对特定事件作出响应？值守持续多久或以什么事件作为结束条件？",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否必须使用两台不同的机器人？请确认参与机器人数量及两种角色之间是否允许共享同一台机器人。",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0007",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否存在需要遵守的安全或区域限制，例如楼梯通行规则、人员避让、禁入区域、物品搬运或紧急处置要求？",
+        "created_at_ms": 1789140544744,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "并行完成两项任务：安排具备楼梯通行能力的机器人前往二楼指定会议室，找到并取回指定的笔记本并带至指定交付地点；同时安排轮式机器人在一楼大厅执行值守，直至指定的结束条件满足。",
+      "constraints": [
+        "取回任务与一楼大厅值守任务需要同时进行。",
+        "执行取回任务的机器人必须具备楼梯通行能力。",
+        "取回目标位于二楼会议室。",
+        "值守任务必须由轮式机器人在一楼大厅执行。"
+      ],
+      "assumptions": [
+        "将“笔记本”暂按“笔记本电脑”理解；若指纸质笔记本，目标物需更正。",
+        "将“能爬楼梯的机器人”和“轮式机器人”视为能力筛选条件，不绑定任何具体机器人实体、NodeId或ResourceId。",
+        "暂将“值守”理解为机器人在一楼大厅保持现场值守；是否需要巡逻、监控或响应事件尚未确定。",
+        "不假设任何机器人当前可用、健康或已具备执行条件。"
+      ],
+      "open_questions": [
+        "二楼具体是哪一间会议室？若有多间会议室，请提供可识别的名称或其他目标描述。",
+        "要取回的是哪一台笔记本电脑，如何识别它？是否需要开门、授权或与人员交接？",
+        "取回后应将笔记本带到哪里、交给谁？何时算取回任务完成？",
+        "一楼大厅的“值守”具体要求是什么：原地驻守、巡逻、监控，还是对特定事件作出响应？值守持续多久或以什么事件作为结束条件？",
+        "是否必须使用两台不同的机器人？请确认参与机器人数量及两种角色之间是否允许共享同一台机器人。",
+        "是否存在需要遵守的安全或区域限制，例如楼梯通行规则、人员避让、禁入区域、物品搬运或紧急处置要求？"
+      ]
+    },
+    "plan": null,
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789140500518,
+    "updated_at_ms": 1789140544744
+  }
+}
