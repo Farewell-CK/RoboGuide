@@ -1,0 +1,264 @@
+{
+  "case_id": "g4-no-evidence-free",
+  "category": "grounding",
+  "instruction": "把贴有红色标签的工具箱搬到装卸区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 21.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 4 clarification question(s) recorded: 现场是否只有一个贴有红色标签的工具箱？如果有多个，请指定要搬运的那个。 | 如果现场存在多个装卸区，请指定目标装卸区或具体泊位。 | 工具箱放入装卸区内任意位置即可，还是需要放到指定位置并满足特定朝向？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 20948.2,
+      "request_bytes": 3329,
+      "response_bytes": 14413,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0ea85d2e71b10282016aa66ad88d5087d19effc0d21e7d2f55": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 317,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 317,
+              "output_tokens": 0
+            },
+            "rs_0ea85d2e71b10282016aa66ad90e5887d1bd1f371bbe73187f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0ea85d2e71b10282016aa66ae262d487d18bc1c4a776ddc9c3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 273
+            },
+            "msg_0ea85d2e71b10282016aa66ae76ac487d197b6971672e9ccf2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 248
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 248
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 750,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1037,
+        "output_tokens_details": {
+          "reasoning_tokens": 789
+        },
+        "total_tokens": 1787
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 750,
+    "output_tokens": 1037,
+    "total_tokens": 1787
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 20949.1,
+      "avg_ms": 20949.1,
+      "max_ms": 20949.1
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-acbe7cc87c024963abb58a96ee8ccd25",
+    "mission_id": "mission-0b325fe37f0046adae34f7a96a56e317",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贴有红色标签的工具箱搬到装卸区",
+        "created_at_ms": 1789291222968,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "现场是否只有一个贴有红色标签的工具箱？如果有多个，请指定要搬运的那个。",
+        "created_at_ms": 1789291244067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果现场存在多个装卸区，请指定目标装卸区或具体泊位。",
+        "created_at_ms": 1789291244067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "工具箱放入装卸区内任意位置即可，还是需要放到指定位置并满足特定朝向？",
+        "created_at_ms": 1789291244067,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "工具箱是否有重量、易损、危险品或需要人员协助等搬运安全要求？",
+        "created_at_ms": 1789291244067,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将贴有红色标签的工具箱搬运并放置到装卸区。",
+      "constraints": [
+        "搬运对象必须是贴有红色标签的工具箱。",
+        "目标是装卸区，而不是其他存放区域。",
+        "未指定具体物理位置、路线、工具或搬运方式。"
+      ],
+      "assumptions": [
+        "用户指的是现场可通过红色标签识别的单个工具箱。",
+        "“装卸区”指现场指定的装货或卸货区域。",
+        "完成搬运意味着将工具箱放置在目标区域内；未假定具体泊位、位置或朝向。"
+      ],
+      "open_questions": [
+        "现场是否只有一个贴有红色标签的工具箱？如果有多个，请指定要搬运的那个。",
+        "如果现场存在多个装卸区，请指定目标装卸区或具体泊位。",
+        "工具箱放入装卸区内任意位置即可，还是需要放到指定位置并满足特定朝向？",
+        "工具箱是否有重量、易损、危险品或需要人员协助等搬运安全要求？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:d087273ed4158c127d3d867ddd7bcd210c51b327db1cefaa7aa692f31f1510c1",
+      "request_id": "request-acbe7cc87c024963abb58a96ee8ccd25",
+      "dialogue_digest": "sha256:da34f1cd0b42af4a4d8110175fb0f0c4e5f6a508e44a2a4b5f27105dbe83cfa5",
+      "captured_at_ms": 1789291223068,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291222968,
+    "updated_at_ms": 1789291244067
+  }
+}

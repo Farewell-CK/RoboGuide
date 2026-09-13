@@ -1,0 +1,239 @@
+{
+  "case_id": "g1-fresh-unique-place-free",
+  "category": "grounding",
+  "instruction": "把运单号为 A-1024 的包裹送到前台",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 16.7,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 2 clarification question(s) recorded: 如果现场有多个前台，请明确具体的楼栋、楼层或前台位置。 | “送到前台”是指交给前台工作人员，还是放置在指定的前台收件区域？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 16462.1,
+      "request_bytes": 3325,
+      "response_bytes": 10415,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00ae5c898d91cc58016aa66a64323887d1903086c86fd434bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 318,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 318,
+              "output_tokens": 0
+            },
+            "rs_00ae5c898d91cc58016aa66a657db487d1ade6b1a823b795a9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 507
+            },
+            "msg_00ae5c898d91cc58016aa66a6ecb3487d1ba51ed983e4fe144": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 188
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 188
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 751,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 695,
+        "output_tokens_details": {
+          "reasoning_tokens": 507
+        },
+        "total_tokens": 1446
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 751,
+    "output_tokens": 695,
+    "total_tokens": 1446
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 16462.8,
+      "avg_ms": 16462.8,
+      "max_ms": 16462.8
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-29573a8bbb6c4a48b2d7781173f7c806",
+    "mission_id": "mission-6e3c91cbb3e544558b2dc65068d449ca",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把运单号为 A-1024 的包裹送到前台",
+        "created_at_ms": 1789291107184,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "如果现场有多个前台，请明确具体的楼栋、楼层或前台位置。",
+        "created_at_ms": 1789291123822,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“送到前台”是指交给前台工作人员，还是放置在指定的前台收件区域？",
+        "created_at_ms": 1789291123822,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将运单号为 A-1024 的包裹送到指定的前台，并完成交付。",
+      "constraints": [
+        "仅处理运单号为 A-1024 的包裹。",
+        "目的地为前台。",
+        "未提供额外的时限、搬运方式或安全限制。"
+      ],
+      "assumptions": [
+        "“前台”指任务所在场所内的接待台或收发点；当前未确认是否存在多个前台。",
+        "包裹可通过运单号 A-1024 唯一识别。"
+      ],
+      "open_questions": [
+        "如果现场有多个前台，请明确具体的楼栋、楼层或前台位置。",
+        "“送到前台”是指交给前台工作人员，还是放置在指定的前台收件区域？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:674738f236aef0cb2f01250b1c6177c1473298a591e690611d7b5c8016fdc023",
+      "request_id": "request-29573a8bbb6c4a48b2d7781173f7c806",
+      "dialogue_digest": "sha256:7149773fc4debe906c37eded8d8eaa5ff017472c3faf2ca5c3c533387aa87c7d",
+      "captured_at_ms": 1789291107284,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291107184,
+    "updated_at_ms": 1789291123822
+  }
+}

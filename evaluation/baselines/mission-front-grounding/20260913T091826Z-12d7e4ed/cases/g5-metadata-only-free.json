@@ -1,0 +1,280 @@
+{
+  "case_id": "g5-metadata-only-free",
+  "category": "grounding",
+  "instruction": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 33.7,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 5 clarification question(s) recorded: 需要指定要推送的实体货架车，例如货架车标识或其当前位置；如果现场有多辆载货货架车，当前描述不足以区分目标。 | 需要指定要使用的已发布仓库地图名称或版本；不能据此推断具体地图修订版。 | 需要明确收货区的具体区域或停放点，以及什么条件算作“到达”（例如进入区域即可，还是必须停在指定位置）。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 33474.3,
+      "request_bytes": 3356,
+      "response_bytes": 20043,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d4aa65677760b11016aa66afbeb7087d1af87f83a5ef31d2c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 317,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 317,
+              "output_tokens": 0
+            },
+            "rs_0d4aa65677760b11016aa66afc735087d1a1e7704a6fcefc49": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0d4aa65677760b11016aa66b05ca4c87d18b5665a5a884b961": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0d4aa65677760b11016aa66b0f1b9c87d189ed1691dfb0e005": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 374
+            },
+            "msg_0d4aa65677760b11016aa66b15f59887d1a533f850f1a5c5bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 373
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 373
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 750,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1781,
+        "output_tokens_details": {
+          "reasoning_tokens": 1408
+        },
+        "total_tokens": 2531
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 750,
+    "output_tokens": 1781,
+    "total_tokens": 2531
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 33475.6,
+      "avg_ms": 33475.6,
+      "max_ms": 33475.6
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-d511966be99246f9ab6908a3ffa1046d",
+    "mission_id": "mission-a15efda2b07049239d3b6f7919778961",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+        "created_at_ms": 1789291259190,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要指定要推送的实体货架车，例如货架车标识或其当前位置；如果现场有多辆载货货架车，当前描述不足以区分目标。",
+        "created_at_ms": 1789291292850,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要指定要使用的已发布仓库地图名称或版本；不能据此推断具体地图修订版。",
+        "created_at_ms": 1789291292850,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "需要明确收货区的具体区域或停放点，以及什么条件算作“到达”（例如进入区域即可，还是必须停在指定位置）。",
+        "created_at_ms": 1789291292850,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请确认是否确实不需要卸货、交接或收货登记。",
+        "created_at_ms": 1789291292850,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请提供适用的安全和货物处理限制，例如货物是否易碎或危险、最大推送速度、人员安全距离，以及是否需要人工陪同或接管。",
+        "created_at_ms": 1789291292850,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在仓库内，将目标载货货架车从其当前位置推送到收货区，并在明确的收货区停放或到达条件满足后结束。",
+      "constraints": [
+        "必须使用已发布的仓库地图。",
+        "货架车在运输时必须载有货物。",
+        "目标动作是将货架车推送至收货区，而不是仅规划一条路线。"
+      ],
+      "assumptions": [
+        "任务对象为一辆货架车；“载有货物”表示货物在运输过程中继续留在车上。",
+        "当前目标是运输货架车，不包括卸货、清点货物或完成收货登记。",
+        "“收货区”是仓库内已定义的区域，但其具体位置、停放点和到达判定尚未确定。",
+        "未假定具体地图版本、节点、路线、货架车标识或本地执行方式。"
+      ],
+      "open_questions": [
+        "需要指定要推送的实体货架车，例如货架车标识或其当前位置；如果现场有多辆载货货架车，当前描述不足以区分目标。",
+        "需要指定要使用的已发布仓库地图名称或版本；不能据此推断具体地图修订版。",
+        "需要明确收货区的具体区域或停放点，以及什么条件算作“到达”（例如进入区域即可，还是必须停在指定位置）。",
+        "请确认是否确实不需要卸货、交接或收货登记。",
+        "请提供适用的安全和货物处理限制，例如货物是否易碎或危险、最大推送速度、人员安全距离，以及是否需要人工陪同或接管。"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:3eac33352f151c114d775c9a96aa106cc6b570d4d50a67413d304245a35291c8",
+      "request_id": "request-d511966be99246f9ab6908a3ffa1046d",
+      "dialogue_digest": "sha256:563892fc289919bf6c6ff936cdec3dd6b63b4340c214f8618ddfbe78dd864a7a",
+      "captured_at_ms": 1789291259307,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291259190,
+    "updated_at_ms": 1789291292850
+  }
+}

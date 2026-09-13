@@ -1,0 +1,281 @@
+{
+  "case_id": "g2-conflict-grounded",
+  "category": "grounding",
+  "instruction": "到会议室把白板擦拿过来",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 11.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 2 clarification question(s) recorded: 请确认目标会议室是3楼西侧会议室，还是2楼东侧会议室？ | “拿过来”的目的地是否为您当前所在位置？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 10989.6,
+      "request_bytes": 4391,
+      "response_bytes": 9530,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b2b7a07f34fc375016aa66a91b64087d183015cbc070202bd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 620,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 620,
+              "output_tokens": 0
+            },
+            "rs_0b2b7a07f34fc375016aa66a92441487d19eb975c3f2264d72": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 384
+            },
+            "msg_0b2b7a07f34fc375016aa66a9959d487d18a5a8e6c44c9d34c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 149
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 149
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1053,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 533,
+        "output_tokens_details": {
+          "reasoning_tokens": 384
+        },
+        "total_tokens": 1586
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1053,
+    "output_tokens": 533,
+    "total_tokens": 1586
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 10990.7,
+      "avg_ms": 10990.7,
+      "max_ms": 10990.7
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-e253f90b2d854abfab8cc5057a9c1105",
+    "mission_id": "mission-4f42341ece6846e2870c4b78d120783a",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "到会议室把白板擦拿过来",
+        "created_at_ms": 1789291153029,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请确认目标会议室是3楼西侧会议室，还是2楼东侧会议室？",
+        "created_at_ms": 1789291164153,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“拿过来”的目的地是否为您当前所在位置？",
+        "created_at_ms": 1789291164153,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "从指定的会议室取一只白板擦，并将其带到用户指定的目的地。",
+      "constraints": [
+        "在确认目标会议室前不应执行，因为现有信息对会议室位置存在冲突：可能是3楼西侧，也可能是2楼东侧。"
+      ],
+      "assumptions": [
+        "“拿过来”中的“这里”暂指用户当前所在位置，但该目的地尚未明确确认。"
+      ],
+      "open_questions": [
+        "请确认目标会议室是3楼西侧会议室，还是2楼东侧会议室？",
+        "“拿过来”的目的地是否为您当前所在位置？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:df4593d8911c1357b56182e88cbc1aa32d36a3c4a2a1acd600f28183b6d2ddff",
+      "request_id": "request-e253f90b2d854abfab8cc5057a9c1105",
+      "dialogue_digest": "sha256:42fe756d2027d07482b53aa3eb45a714c17ad76de8c630468af0f576bb4f589b",
+      "captured_at_ms": 1789291153112,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g2-conflict-grounded",
+      "state_evidence": [
+        {
+          "evidence_id": "state::9f3b4827f2705ee3c1c1539e264d4baa5ad16f191684b9021c2ad521cdb10ba2",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "meeting-room"
+          },
+          "semantic": "reported",
+          "source": "node:calendar-service",
+          "channel_id": "room-bookings",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "meeting room 3F west"
+          },
+          "source_observed_at_ms": 2100,
+          "received_at_ms": 2100,
+          "valid_for_ms": 3600000,
+          "freshness": "Fresh",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 4
+        },
+        {
+          "evidence_id": "state::dd0f5331f03966ffc01883ae21d01aa6ea38ebaec3ba703270dc438e63edd961",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "meeting-room"
+          },
+          "semantic": "observed",
+          "source": "node:camera-a/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "meeting room 2F east"
+          },
+          "source_observed_at_ms": 2000,
+          "received_at_ms": 2000,
+          "valid_for_ms": 3600000,
+          "freshness": "Fresh",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 3
+        }
+      ],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291153029,
+    "updated_at_ms": 1789291164153
+  }
+}

@@ -1,0 +1,314 @@
+{
+  "case_id": "g5-metadata-only-grounded",
+  "category": "grounding",
+  "instruction": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 49.5,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 5 clarification question(s) recorded: 要移动哪一辆货架车？请提供车辆标识或当前位置，不能仅凭“载有货物的货架车”选择目标。 | 应使用哪个具体的已发布仓库地图版本？当前信息不足以确认地图内容及其适用性。 | 收货区的精确空间范围或目标停放点是什么？如果存在多个收货区，请明确指定。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 49306.2,
+      "request_bytes": 3868,
+      "response_bytes": 28647,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0fd583500b20692e016aa66b1de36c87d19533cb35a5deb376": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 450,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 450,
+              "output_tokens": 0
+            },
+            "rs_0fd583500b20692e016aa66b1e66d887d1bedeb862e454feb6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0fd583500b20692e016aa66b27b7ac87d1873aa766402002bc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fd583500b20692e016aa66b310d4487d19fe5fd9abd5a92da": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fd583500b20692e016aa66b3a605887d1b9a6b750808ab514": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fd583500b20692e016aa66b43b32087d1a09529d38879c8dd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 234
+            },
+            "msg_0fd583500b20692e016aa66b48087c87d1bd5448037df1d6d3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 359
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 359
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 883,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2663,
+        "output_tokens_details": {
+          "reasoning_tokens": 2304
+        },
+        "total_tokens": 3546
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 883,
+    "output_tokens": 2663,
+    "total_tokens": 3546
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 49307.6,
+      "avg_ms": 49307.6,
+      "max_ms": 49307.6
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-da4f075972da4f22b129208af24fb112",
+    "mission_id": "mission-2f02cfa088a643cf8047cad14f83b44b",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+        "created_at_ms": 1789291293185,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要移动哪一辆货架车？请提供车辆标识或当前位置，不能仅凭“载有货物的货架车”选择目标。",
+        "created_at_ms": 1789291342659,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "应使用哪个具体的已发布仓库地图版本？当前信息不足以确认地图内容及其适用性。",
+        "created_at_ms": 1789291342659,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "收货区的精确空间范围或目标停放点是什么？如果存在多个收货区，请明确指定。",
+        "created_at_ms": 1789291342659,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0005",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "完成条件是什么：货架车进入收货区即算完成，还是还需要停放在指定位置、卸货或交接确认？",
+        "created_at_ms": 1789291342659,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0006",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否有必须遵守的安全或操作限制，例如禁行区、速度限制、人员避让、最大载荷或陪同要求？",
+        "created_at_ms": 1789291342659,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将一辆载有货物的货架车推送到收货区。",
+      "constraints": [
+        "规划时必须使用已发布的仓库地图。",
+        "被移动的对象必须是载有货物的货架车。",
+        "目标空间为收货区。"
+      ],
+      "assumptions": [
+        "按用户的单数表述，暂按任务涉及一辆载有货物的货架车理解，但尚未识别具体车辆。",
+        "“推到”暂理解为将货架车连同货物移动到收货区，不包含卸货、交接或改变货物状态；该理解尚未获用户确认。",
+        "假定存在一个可用于规划的已发布仓库地图及可定位的收货区；当前上下文仅能确认某个地图修订的元数据存在，不能确认其地图内容、当前适用性或可用于导航。"
+      ],
+      "open_questions": [
+        "要移动哪一辆货架车？请提供车辆标识或当前位置，不能仅凭“载有货物的货架车”选择目标。",
+        "应使用哪个具体的已发布仓库地图版本？当前信息不足以确认地图内容及其适用性。",
+        "收货区的精确空间范围或目标停放点是什么？如果存在多个收货区，请明确指定。",
+        "完成条件是什么：货架车进入收货区即算完成，还是还需要停放在指定位置、卸货或交接确认？",
+        "是否有必须遵守的安全或操作限制，例如禁行区、速度限制、人员避让、最大载荷或陪同要求？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:4f78cd8cf856ab4f47b401e645112fe80f1f33df9c10d8a0015eb4187e6f520e",
+      "request_id": "request-da4f075972da4f22b129208af24fb112",
+      "dialogue_digest": "sha256:5d15d4408908ec013744ac3ac82e6813e78df9da20a010524e66c51ab777d16e",
+      "captured_at_ms": 1789291293284,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g5-metadata-only-grounded",
+      "state_evidence": [],
+      "memory_evidence": [
+        {
+          "evidence_id": "memory::706b9c64a1a2e427ecddbdfe77a3a2296f93002da96ce6d3e33d7b0cad8c206d",
+          "selector": {
+            "memory_id": "warehouse-map",
+            "revision_id": "rev-2026-09"
+          },
+          "kind": "spatial",
+          "provider_id": "provider-mapping",
+          "owner": {
+            "team": "facilities"
+          },
+          "scope": "global",
+          "visibility": "discoverable",
+          "payload_schema": "roboguide.spatial-map/v0.1",
+          "media_type": "application/octet-stream",
+          "artifact": null,
+          "source_mission_id": null,
+          "source_execution_id": null,
+          "source_task_ref": null,
+          "created_at_ms": 1000,
+          "content_status": "MetadataOnly"
+        }
+      ],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291293185,
+    "updated_at_ms": 1789291342659
+  }
+}

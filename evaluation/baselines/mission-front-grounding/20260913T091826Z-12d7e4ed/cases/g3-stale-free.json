@@ -1,0 +1,258 @@
+{
+  "case_id": "g3-stale-free",
+  "category": "grounding",
+  "instruction": "去充电桩那里待命",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 32.8,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 3 clarification question(s) recorded: 具体要去哪个充电桩？如有多个，请提供名称、位置或其他可识别描述。 | 到达后是仅在充电桩旁待命，还是需要接入充电？ | 待命持续到何时或以什么事件作为结束条件，例如直到收到后续指令？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 32441.3,
+      "request_bytes": 3305,
+      "response_bytes": 19683,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_02df895be8f62b9f016aa66a9d2aec87d18a0ce9e9bfdd7337": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 306,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 306,
+              "output_tokens": 0
+            },
+            "rs_02df895be8f62b9f016aa66a9e16c087d195d8c7670d90e9bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_02df895be8f62b9f016aa66aa7677c87d1a7725d4c13c16e2a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_02df895be8f62b9f016aa66ab11a0487d1ac4889dfd4dd3b41": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 478
+            },
+            "msg_02df895be8f62b9f016aa66ab9768c87d1af4c7f20a6857d26": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 191
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 191
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 739,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1703,
+        "output_tokens_details": {
+          "reasoning_tokens": 1512
+        },
+        "total_tokens": 2442
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 739,
+    "output_tokens": 1703,
+    "total_tokens": 2442
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 32442.2,
+      "avg_ms": 32442.2,
+      "max_ms": 32442.2
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-eb9a451e04734017b07657906efc78f0",
+    "mission_id": "mission-c7a3c908ee2c4336a4fd90e5f976f2a4",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去充电桩那里待命",
+        "created_at_ms": 1789291164478,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "具体要去哪个充电桩？如有多个，请提供名称、位置或其他可识别描述。",
+        "created_at_ms": 1789291197078,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "到达后是仅在充电桩旁待命，还是需要接入充电？",
+        "created_at_ms": 1789291197078,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "待命持续到何时或以什么事件作为结束条件，例如直到收到后续指令？",
+        "created_at_ms": 1789291197078,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "让当前受控机器人前往用户所指的充电桩地点。",
+      "constraints": [
+        "机器人到达目标充电桩后应保持待命，不转入其他任务。"
+      ],
+      "assumptions": [
+        "任务针对当前会话所控制的单个机器人。",
+        "“充电桩那里”指某个充电桩所在的位置；“待命”暂理解为到达后停留并等待后续指令，而不是自动开始充电。"
+      ],
+      "open_questions": [
+        "具体要去哪个充电桩？如有多个，请提供名称、位置或其他可识别描述。",
+        "到达后是仅在充电桩旁待命，还是需要接入充电？",
+        "待命持续到何时或以什么事件作为结束条件，例如直到收到后续指令？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:556fb368f32694aa5e7be7daacdf04aeb9c0d65de8daa03b10466d4cfefbf2ef",
+      "request_id": "request-eb9a451e04734017b07657906efc78f0",
+      "dialogue_digest": "sha256:9a7de61d3dacf3548bd4366473d4a4fbfe9feb365816ba64a3edcf00eee6e980",
+      "captured_at_ms": 1789291164578,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291164478,
+    "updated_at_ms": 1789291197078
+  }
+}

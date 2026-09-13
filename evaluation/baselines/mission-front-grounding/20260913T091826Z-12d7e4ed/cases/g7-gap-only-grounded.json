@@ -1,0 +1,259 @@
+{
+  "case_id": "g7-gap-only-grounded",
+  "category": "grounding",
+  "instruction": "巡逻今天上午指定的三个检查点",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 13.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 3 clarification question(s) recorded: 请提供或确认这三个检查点的名称、位置或系统中的标识。 | “巡逻”是否仅要求到访三个检查点，还是还包括特定的检查项目或拍照、记录等完成条件？ | 是否需要现在执行巡逻，还是必须安排在今天上午完成？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12854.1,
+      "request_bytes": 3495,
+      "response_bytes": 10041,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09841a946b2d02ea016aa66b7df4f487d1a99e8b9b9a083d9c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 311,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 311,
+              "output_tokens": 0
+            },
+            "rs_09841a946b2d02ea016aa66b7f298087d19d7510b72823ceec": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 408
+            },
+            "msg_09841a946b2d02ea016aa66b86aad087d1a7a2c463be232145": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 196
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 196
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 70,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 361,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 744,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 604,
+        "output_tokens_details": {
+          "reasoning_tokens": 408
+        },
+        "total_tokens": 1348
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 744,
+    "output_tokens": 604,
+    "total_tokens": 1348
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12855.1,
+      "avg_ms": 12855.1,
+      "max_ms": 12855.1
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-e549e5da7f1045d1879658a160bd69ee",
+    "mission_id": "mission-bba46ebe50644caca0cc359e05e7ee03",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "巡逻今天上午指定的三个检查点",
+        "created_at_ms": 1789291389222,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请提供或确认这三个检查点的名称、位置或系统中的标识。",
+        "created_at_ms": 1789291402299,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "“巡逻”是否仅要求到访三个检查点，还是还包括特定的检查项目或拍照、记录等完成条件？",
+        "created_at_ms": 1789291402299,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "是否需要现在执行巡逻，还是必须安排在今天上午完成？",
+        "created_at_ms": 1789291402299,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "完成对今天上午指定的三个检查点的巡逻。",
+      "constraints": [
+        "目标数量为三个检查点。",
+        "检查点是在今天上午指定的。",
+        "当前无法从可用依据中确定这三个检查点的具体位置或标识。"
+      ],
+      "assumptions": [
+        "将“今天上午”理解为三个检查点的指定时间，而不是要求在今天上午执行巡逻。",
+        "将“巡逻”暂理解为依次到访并检查全部三个检查点；具体检查内容尚未确定。"
+      ],
+      "open_questions": [
+        "请提供或确认这三个检查点的名称、位置或系统中的标识。",
+        "“巡逻”是否仅要求到访三个检查点，还是还包括特定的检查项目或拍照、记录等完成条件？",
+        "是否需要现在执行巡逻，还是必须安排在今天上午完成？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:4802506c54c08a8b6b571916ede9414ac97c405cb387dd2cbd986393d3f508ca",
+      "request_id": "request-e549e5da7f1045d1879658a160bd69ee",
+      "dialogue_digest": "sha256:08424485d4ca5379fb33100f31f1b0b7ecea373250ccf81f8e9a92cd3d3ca772",
+      "captured_at_ms": 1789291389369,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g7-gap-only-grounded",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": [
+        {
+          "code": "source-unavailable",
+          "source": "controller-state",
+          "detail": "fixture: state source unreachable during capture"
+        },
+        {
+          "code": "source-unavailable",
+          "source": "memory-catalog",
+          "detail": "fixture: memory catalog unreachable during capture"
+        }
+      ]
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789291389222,
+    "updated_at_ms": 1789291402299
+  }
+}
