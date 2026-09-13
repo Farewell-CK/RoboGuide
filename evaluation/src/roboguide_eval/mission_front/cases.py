@@ -30,7 +30,7 @@ CASE_CATEGORIES: Final = frozenset(
     }
 )
 FINAL_LIFECYCLES: Final = frozenset(
-    {"Accepted", "NeedsClarification", "Failed", "AwaitingApproval"}
+    {"Accepted", "NeedsClarification", "Failed", "AwaitingApproval", "Any"}
 )
 
 

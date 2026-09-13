@@ -257,6 +257,27 @@ episode 身份由 `EmosRunner` 从官方输出解析后写入 manifest 的
 > randomize 分支的 else 里，不会到达），配置条目仅影响 LLM 的场景文字
 > 描述；同 seed 可复现同一初始状态，两臂同 seed 对比不受影响。
 
+## Mission Front-half Eval（前半链路真实模型评测）
+
+`roboguide-eval mission-front` 用生产适配器（真实模型 + Capability Catalog v0.3 +
+真实审批策略）驱动 Dialogue → Interpreter → Planner → Validator → Reviewer →
+Repair 链路，按 semantic invariants（非 exact DAG）评测并落盘完整证据
+（instruction / dialogue / assessment / plan / review-repair 历史 / token /
+延迟 / 失败原因）。两种运行模式：
+
+- **context-free**（默认）：engine 使用 Empty grounding reader——即
+  `mission-front --cases ...` 的原有行为；
+- **fixture-grounded**：`--grounding evaluation/mission_front_grounding/canaries.yaml`
+  运行 Grounding A/B canaries——每个场景按 `pair` 分为 context_free /
+  fixture_grounded 两臂；grounded 臂通过 `FixtureGroundingReader` 注入官方
+  `GroundingContextSnapshot` 契约对象（fresh/conflict/stale/no-evidence/
+  MetadataOnly/gap-only 七组场景），快照按当前 dialogue revision 动态绑定 digest，
+  不另造任何 grounding 语义。
+
+Plan-dependent invariants 在 Planner 阶段未实际执行时标记为 NOT_EVALUATED
+（不计 FAIL）；stage timing 按 case 差分统计。证据与 baseline 报告见
+`evaluation/baselines/` 与 `evaluation/mission_front_evidence/`。
+
 ## 当前状态与停止边界
 
 - 真实实现：进程管理（超时/终止/日志持久化/进程组清理）、spec 解析与校验、

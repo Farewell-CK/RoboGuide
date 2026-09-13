@@ -187,6 +187,33 @@ class StageTiming:
         """
         self.durations_ms.append(round(duration_ms, 1))
 
+    def snapshot(self) -> tuple[int, float]:
+        """Capture the current cumulative position of this stage timing.
+
+        Returns:
+            ``(call_count, total_ms)`` at this moment, for later differencing.
+        """
+        return (len(self.durations_ms), sum(self.durations_ms))
+
+    def delta_since(self, snapshot: tuple[int, float]) -> dict[str, object]:
+        """Summarize only the invocations recorded after a snapshot.
+
+        Args:
+            snapshot: A ``(call_count, total_ms)`` pair from :meth:`snapshot`.
+
+        Returns:
+            Call count and total/average/max durations over the slice.
+        """
+        sliced = self.durations_ms[snapshot[0] :]
+        if not sliced:
+            return {"calls": 0, "total_ms": 0.0, "avg_ms": None, "max_ms": None}
+        return {
+            "calls": len(sliced),
+            "total_ms": round(sum(sliced), 1),
+            "avg_ms": round(sum(sliced) / len(sliced), 1),
+            "max_ms": round(max(sliced), 1),
+        }
+
     def summary(self) -> dict[str, object]:
         """Summarize the stage's timing.
 

@@ -1,0 +1,222 @@
+# Mission Front-half Eval — Grounding A/B canaries (7 scenarios).
+#
+# Each canary runs one instruction in context_free and fixture_grounded mode
+# (pairs share `pair`). Grounding fixtures build the official
+# GroundingContextSnapshot contract objects -- no separate semantics.
+# Expectations stay light: canaries exist to OBSERVE grounding-sensitive
+# behavior before any protocol is frozen.
+schema: roboguide-eval.mission-front-grounding/v0.1
+scenarios:
+  # P1: fresh unique evidence answers the destination by itself.
+  - id: g1-fresh-unique-place-free
+    pair: fresh-unique-place
+    mode: context_free
+    instruction: "把包裹送到前台"
+    expect:
+      final_lifecycle: Any
+
+  - id: g1-fresh-unique-place-grounded
+    pair: fresh-unique-place
+    mode: fixture_grounded
+    instruction: "把包裹送到前台"
+    grounding:
+      state:
+        - object_type: place
+          object_id: front-desk
+          semantic: observed
+          source: node:camera-a/perception
+          channel_id: semantic-places
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: front desk
+          freshness: Fresh
+          received_at_ms: 1000
+          source_observed_at_ms: 900
+          valid_for_ms: 3600000
+          sequence: 2
+          confidence_millionths: 900000
+          source_epoch: session-a
+    expect:
+      final_lifecycle: Any
+
+  # P2: two Fresh sources conflict about the same object.
+  - id: g2-conflict-free
+    pair: conflict
+    mode: context_free
+    instruction: "到会议室把白板擦拿过来"
+    expect:
+      final_lifecycle: Any
+
+  - id: g2-conflict-grounded
+    pair: conflict
+    mode: fixture_grounded
+    instruction: "到会议室把白板擦拿过来"
+    grounding:
+      state:
+        - object_type: place
+          object_id: meeting-room
+          semantic: observed
+          source: node:camera-a/perception
+          channel_id: semantic-places
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: meeting room 2F east
+          freshness: Fresh
+          received_at_ms: 2000
+          valid_for_ms: 3600000
+          sequence: 3
+        - object_type: place
+          object_id: meeting-room
+          semantic: reported
+          source: node:calendar-service
+          channel_id: room-bookings
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: meeting room 3F west
+          freshness: Fresh
+          received_at_ms: 2100
+          valid_for_ms: 3600000
+          sequence: 4
+    expect:
+      final_lifecycle: Any
+
+  # P3: the only available evidence is stale.
+  - id: g3-stale-free
+    pair: stale
+    mode: context_free
+    instruction: "去充电桩那里待命"
+    expect:
+      final_lifecycle: Any
+
+  - id: g3-stale-grounded
+    pair: stale
+    mode: fixture_grounded
+    instruction: "去充电桩那里待命"
+    grounding:
+      state:
+        - object_type: place
+          object_id: charging-station
+          semantic: observed
+          source: node:dock-sensor
+          channel_id: dock-positions
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: charging station B1
+          freshness: Stale
+          received_at_ms: 1000
+          source_observed_at_ms: 500
+          valid_for_ms: 60000
+          sequence: 5
+    expect:
+      final_lifecycle: Any
+
+  # P4: grounded mode with explicitly empty evidence -- near-identical
+  # control pair for the context-free arm.
+  - id: g4-no-evidence-free
+    pair: no-evidence
+    mode: context_free
+    instruction: "把工具箱搬到装卸区"
+    expect:
+      final_lifecycle: Any
+
+  - id: g4-no-evidence-grounded
+    pair: no-evidence
+    mode: fixture_grounded
+    instruction: "把工具箱搬到装卸区"
+    grounding: {}
+    expect:
+      final_lifecycle: Any
+
+  # P5: memory evidence is MetadataOnly -- it proves the revision exists,
+  # never its content or world truth.
+  - id: g5-metadata-only-free
+    pair: metadata-only
+    mode: context_free
+    instruction: "使用已发布的仓库地图，把载有货物的货架车推到收货区"
+    expect:
+      final_lifecycle: Any
+
+  - id: g5-metadata-only-grounded
+    pair: metadata-only
+    mode: fixture_grounded
+    instruction: "使用已发布的仓库地图，把载有货物的货架车推到收货区"
+    grounding:
+      memory:
+        - memory_id: warehouse-map
+          revision_id: rev-2026-09
+          kind: spatial
+          provider_id: provider-mapping
+          payload_schema: roboguide.spatial-map/v0.1
+          media_type: application/octet-stream
+          visibility: discoverable
+          content_status: MetadataOnly
+          created_at_ms: 1000
+          owner:
+            team: facilities
+    expect:
+      final_lifecycle: Any
+      extra_forbidden_patterns: ["metadata.*proves|已验证地图内容|地图内容确认无误"]
+
+  # P6: fresh and stale evidence disagree -- fresh should win the tie.
+  - id: g6-fresh-beats-stale-free
+    pair: fresh-beats-stale
+    mode: context_free
+    instruction: "把托盘送到当前卸货区"
+    expect:
+      final_lifecycle: Any
+
+  - id: g6-fresh-beats-stale-grounded
+    pair: fresh-beats-stale
+    mode: fixture_grounded
+    instruction: "把托盘送到当前卸货区"
+    grounding:
+      state:
+        - object_type: place
+          object_id: unloading-zone
+          semantic: observed
+          source: node:gate-a/perception
+          channel_id: semantic-places
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: unloading zone A (gate A)
+          freshness: Fresh
+          received_at_ms: 5000
+          valid_for_ms: 3600000
+          sequence: 10
+        - object_type: place
+          object_id: unloading-zone
+          semantic: observed
+          source: node:gate-b/perception
+          channel_id: semantic-places
+          payload_schema: roboguide.semantic-place/v0.1
+          value:
+            label: unloading zone B (gate B)
+          freshness: Stale
+          received_at_ms: 1000
+          valid_for_ms: 3600000
+          sequence: 9
+    expect:
+      final_lifecycle: Any
+
+  # P7: both grounding sources are unavailable -- gaps only, no evidence.
+  - id: g7-gap-only-free
+    pair: gap-only
+    mode: context_free
+    instruction: "巡逻今天上午指定的三个检查点"
+    expect:
+      final_lifecycle: Any
+
+  - id: g7-gap-only-grounded
+    pair: gap-only
+    mode: fixture_grounded
+    instruction: "巡逻今天上午指定的三个检查点"
+    grounding:
+      gaps:
+        - code: source-unavailable
+          source: controller-state
+          detail: "fixture: state source unreachable during capture"
+        - code: source-unavailable
+          source: memory-catalog
+          detail: "fixture: memory catalog unreachable during capture"
+    expect:
+      final_lifecycle: Any

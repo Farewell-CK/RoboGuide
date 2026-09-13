@@ -387,6 +387,7 @@ def test_run_suite_produces_complete_evidence_on_stub_transport(
         repository_root: Path,
         transport: RecordingTransport,
         stages: StageScope,
+        grounding_reader: object | None = None,
     ) -> SuiteComponents:
         """Return components whose transport delegates always fail.
 
@@ -394,13 +395,14 @@ def test_run_suite_produces_complete_evidence_on_stub_transport(
             repository_root: Unused repository root from the runner.
             transport: Unused recording transport created by the runner.
             stages: The stage scope shared with the runner.
+            grounding_reader: Unused reader kwarg from the runner.
 
         Returns:
             Suite components built from the real configuration but a failing
             transport delegate, so every stage call degrades to FAILED
             evidence while call recording still works.
         """
-        del repository_root, transport
+        del repository_root, transport, grounding_reader
         return original_build(real_root, RecordingTransport(_FailingTransport(), stages), stages)
 
     monkeypatch.setattr(runner_module, "build_suite_components", fake_build)

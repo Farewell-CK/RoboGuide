@@ -54,6 +54,7 @@ from roboguide_eval.mission_front.recording import (
     RecordingTransport,
     StageScope,
     StageTimedPort,
+    StageTiming,
 )
 
 RESULTS_DIR_NAME: Final = "mission-front"
@@ -77,12 +78,17 @@ class SuiteComponents:
     transport: RecordingTransport
     stages: StageScope
     stage_timings: dict[str, object]
+    stage_timings_live: dict[str, StageTiming]
     model: str
     relay_base_url: str
+    grounding_label: str = "empty"
 
 
 def build_suite_components(
-    repository_root: Path, transport: RecordingTransport, stages: StageScope
+    repository_root: Path,
+    transport: RecordingTransport,
+    stages: StageScope,
+    grounding_reader: object | None = None,
 ) -> SuiteComponents:
     """Compose the production front-half engine with evaluation-only seams.
 
@@ -96,6 +102,10 @@ def build_suite_components(
             prompt/schema/catalog assets.
         transport: The recording transport wrapping the real HTTP delegate.
         stages: The shared stage attribution scope.
+        grounding_reader: Optional official ``MissionGroundingReader``
+            implementation injected into the engine (fixture-grounded mode);
+            ``None`` keeps the engine's empty-context default
+            (context-free mode).
 
     Returns:
         The assembled suite components.
@@ -153,19 +163,34 @@ def build_suite_components(
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=(mission_settings.max_repair_attempts if reviewer is not None else 0),
+        grounding_reader=grounding_reader,
+    )
+    stage_live: dict[str, StageTiming] = {
+        "interpreter": interpreter.timing,
+        "planner": planner.timing,
+    }
+    stage_summary: dict[str, object] = {
+        "interpreter": interpreter.timing.summary(),
+        "planner": planner.timing.summary(),
+    }
+    if reviewer is not None:
+        stage_live["reviewer"] = reviewer.timing
+        stage_summary["reviewer"] = reviewer.timing.summary()
+    if repairer is not None:
+        stage_live["repairer"] = repairer.timing
+        stage_summary["repairer"] = repairer.timing.summary()
+    grounding_label = (
+        getattr(grounding_reader, "label", "empty") if grounding_reader is not None else "empty"
     )
     return SuiteComponents(
         engine=engine,
         transport=transport,
         stages=stages,
-        stage_timings={
-            "interpreter": interpreter.timing.summary(),
-            "planner": planner.timing.summary(),
-            "reviewer": reviewer.timing.summary() if reviewer is not None else None,
-            "repairer": repairer.timing.summary() if repairer is not None else None,
-        },
+        stage_timings=stage_summary,
+        stage_timings_live=stage_live,
         model=mission_settings.llm.model,
         relay_base_url=mission_settings.provider.base_url,
+        grounding_label=str(grounding_label),
     )
 
 
@@ -199,7 +224,7 @@ class CaseResult:
     follow_ups_used: int
     invariants: list[InvariantOutcome]
     llm_calls: list[dict[str, object]]
-    stage_timings: dict[str, object]
+    stage_timings: dict[str, dict[str, object]]
     record: dict[str, object]
     harness_error: str | None = None
 
@@ -323,6 +348,9 @@ def run_case(
     """
     engine = suite.engine
     started = time.monotonic()
+    timing_snapshots = {
+        name: timing.snapshot() for name, timing in suite.stage_timings_live.items()
+    }
     follow_ups_used = 0
     record_json: dict[str, object] = {}
     harness_error: str | None = None
@@ -349,10 +377,14 @@ def run_case(
         for call in suite.transport.calls[call_offset:]
         if isinstance(call.__dict__, dict)
     ]
+    stage_timings = {
+        name: suite.stage_timings_live[name].delta_since(timing_snapshots[name])
+        for name in suite.stage_timings_live
+    }
     invariants = evaluate_case_invariants(case, record_json)
     expected = case.expectations.final_lifecycle
     final_lifecycle = str(record_json.get("lifecycle", "unknown"))
-    passed = harness_error is None and all(outcome.passed for outcome in invariants)
+    passed = harness_error is None and all(outcome.passed is not False for outcome in invariants)
     return CaseResult(
         case_id=case.case_id,
         category=case.category,
@@ -364,7 +396,7 @@ def run_case(
         follow_ups_used=follow_ups_used,
         invariants=invariants,
         llm_calls=calls,
-        stage_timings={},
+        stage_timings=stage_timings,
         record=record_json,
         harness_error=harness_error,
     )
@@ -377,6 +409,7 @@ def run_suite(
     out_dir: Path,
     only: tuple[str, ...] = (),
     limit: int = 0,
+    grounding_reader: object | None = None,
 ) -> dict[str, object]:
     """Run a suite of front-half cases and write the complete evidence set.
 
@@ -387,6 +420,8 @@ def run_suite(
             ``summary.json``.
         only: Optional case-id filter (repeatable).
         limit: Optional maximum number of cases to run (0 = all).
+        grounding_reader: Optional official reader injected into the engine
+            (fixture-grounded mode); ``None`` runs context-free.
 
     Returns:
         The summary document written to ``summary.json``.
@@ -401,7 +436,9 @@ def run_suite(
     suite_id = new_suite_id()
     stages = StageScope()
     transport = RecordingTransport(_default_transport_factory(), stages)
-    suite = build_suite_components(repository_root, transport, stages)
+    suite = build_suite_components(
+        repository_root, transport, stages, grounding_reader=grounding_reader
+    )
     run_dir = out_dir / suite_id
     cases_dir = run_dir / "cases"
     cases_dir.mkdir(parents=True, exist_ok=True)
@@ -410,7 +447,6 @@ def run_suite(
     for case in selected:
         result = run_case(case, suite, call_offset)
         call_offset = len(suite.transport.calls)
-        result.stage_timings = dict(suite.stage_timings)
         results.append(result)
         (cases_dir / f"{case.case_id}.json").write_text(
             json.dumps(result_summary_json(result), ensure_ascii=False, indent=2),
@@ -495,13 +531,14 @@ def build_summary(
         bucket["total"] += 1
         bucket["passed"] += int(result.passed)
         for outcome in result.invariants:
-            if not outcome.passed:
+            if outcome.passed is False:
                 failed_invariants[outcome.name] = failed_invariants.get(outcome.name, 0) + 1
     all_calls = [call for result in results for call in result.llm_calls]
     return {
         "suite_id": suite_id,
         "model": suite.model,
         "relay_base_url": suite.relay_base_url,
+        "grounding": suite.grounding_label,
         "cases_executed": len(results),
         "cases_passed": sum(1 for result in results if result.passed),
         "by_category": by_category,

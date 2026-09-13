@@ -30,11 +30,27 @@ GLOBAL_FORBIDDEN_PATTERNS: Final[tuple[str, ...]] = (
 
 @dataclass(frozen=True, slots=True)
 class InvariantOutcome:
-    """Report one named semantic invariant check."""
+    """Report one named semantic invariant check.
+
+    ``passed`` carries three states: ``True`` (invariant held), ``False``
+    (invariant violated and counted as a failure), and ``None``
+    (NOT_EVALUATED -- the pipeline stage this invariant depends on never
+    produced output, e.g. no plan exists because the run stopped at
+    clarification; the state is recorded but never counted as a failure).
+    """
 
     name: str
-    passed: bool
+    passed: bool | None
     detail: str
+
+    @property
+    def not_evaluated(self) -> bool:
+        """Report whether this outcome is a NOT_EVALUATED marker.
+
+        Returns:
+            ``True`` when the check did not run against real stage output.
+        """
+        return self.passed is None
 
 
 def _plan(record: dict[str, object]) -> dict[str, object]:
@@ -160,6 +176,30 @@ def harvest_strings(value: object) -> list[str]:
     return []
 
 
+def _not_evaluated_plan(name: str, record: dict[str, object]) -> InvariantOutcome | None:
+    """Return a NOT_EVALUATED outcome when the record carries no plan.
+
+    Plan-dependent invariants observe Planner output; when a run stops
+    before the Planner produced anything (clarification, upstream failure),
+    they are marked NOT_EVALUATED instead of FAIL.
+
+    Args:
+        name: The invariant name for the outcome.
+        record: The serialized MissionRequestRecord.
+
+    Returns:
+        The NOT_EVALUATED outcome when there is no plan, otherwise ``None``.
+    """
+    if not _plan(record).get("tasks"):
+        lifecycle = str(record.get("lifecycle", "unknown"))
+        return InvariantOutcome(
+            name,
+            None,
+            f"no plan in record (lifecycle {lifecycle}); planner stage not reached",
+        )
+    return None
+
+
 def check_final_lifecycle(
     case: object, record: dict[str, object], expected_lifecycle: str
 ) -> InvariantOutcome:
@@ -174,6 +214,10 @@ def check_final_lifecycle(
         The invariant outcome; details include recorded issues on mismatch.
     """
     lifecycle = str(record.get("lifecycle", "unknown"))
+    if expected_lifecycle == "Any":
+        return InvariantOutcome(
+            "final_lifecycle", True, f"any lifecycle accepted; reached {lifecycle}"
+        )
     if lifecycle == expected_lifecycle:
         return InvariantOutcome("final_lifecycle", True, f"reached {lifecycle}")
     issues = record.get("issues")
@@ -246,6 +290,9 @@ def check_objective_fidelity(
         The invariant outcome; coverage is checked against the plan objective
         first and the grounded-intent objective as fallback.
     """
+    blocked = _not_evaluated_plan("objective_fidelity", record)
+    if blocked is not None:
+        return blocked
     mission = _mission(record)
     plan_objective = str(mission.get("objective", ""))
     assessment = record.get("assessment")
@@ -287,6 +334,9 @@ def check_decomposition_sanity(
     Returns:
         The invariant outcome describing any structural defect found.
     """
+    blocked = _not_evaluated_plan("decomposition_sanity", record)
+    if blocked is not None:
+        return blocked
     plan = _plan(record)
     mission = _mission(record)
     tasks = plan.get("tasks")
@@ -341,6 +391,9 @@ def check_capability_coverage(
     Returns:
         The invariant outcome listing any missing capability identity.
     """
+    blocked = _not_evaluated_plan("capability_coverage", record)
+    if blocked is not None:
+        return blocked
     if not require_capabilities:
         return InvariantOutcome("capability_coverage", True, "no capability expectations")
     roles = collect_roles(record)
@@ -385,6 +438,9 @@ def check_integrated_operation(
         The invariant outcome describing the operation usage or the offending
         decomposition.
     """
+    blocked = _not_evaluated_plan("integrated_operation", record)
+    if blocked is not None:
+        return blocked
     if integrated_operation is None:
         return InvariantOutcome("integrated_operation", True, "no integrated expectation")
     roles = collect_roles(record)
@@ -437,6 +493,9 @@ def check_resource_kinds(
     Returns:
         The invariant outcome listing any missing resource kind.
     """
+    blocked = _not_evaluated_plan("resource_kinds", record)
+    if blocked is not None:
+        return blocked
     if not resource_kinds:
         return InvariantOutcome("resource_kinds", True, "no resource expectations")
     roles = collect_roles(record)
@@ -477,6 +536,9 @@ def check_timing_presence(
     Returns:
         The invariant outcome describing how many tasks carry timing.
     """
+    blocked = _not_evaluated_plan("timing_presence", record)
+    if blocked is not None:
+        return blocked
     if not timing_required:
         return InvariantOutcome("timing_presence", True, "no timing expectation")
     plan = _plan(record)
@@ -515,6 +577,9 @@ def check_local_how_leakage(
     Returns:
         The invariant outcome listing every leaking string and its pattern.
     """
+    blocked = _not_evaluated_plan("local_how_leakage", record)
+    if blocked is not None:
+        return blocked
     strings = harvest_strings(_plan(record))
     offenders: list[str] = []
     for pattern in GLOBAL_FORBIDDEN_PATTERNS + extra_patterns:
@@ -548,6 +613,9 @@ def check_review_repair_convergence(case: object, record: dict[str, object]) -> 
         The invariant outcome; a run that ends ``Failed`` after exhausting
         repair attempts is treated as a Reviewer/Repair effectiveness defect.
     """
+    blocked = _not_evaluated_plan("review_repair_convergence", record)
+    if blocked is not None:
+        return blocked
     attempts = record.get("repair_attempts")
     attempt_count = attempts if isinstance(attempts, int) and not isinstance(attempts, bool) else 0
     review_history = record.get("review_history")

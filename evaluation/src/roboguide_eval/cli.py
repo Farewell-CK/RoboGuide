@@ -140,6 +140,11 @@ def _parser() -> argparse.ArgumentParser:
     mission_front.add_argument(
         "--only", action="append", default=[], help="run only these case ids (repeatable)"
     )
+    mission_front.add_argument(
+        "--grounding",
+        type=Path,
+        help="run grounding A/B canaries from this scenario YAML instead of plain cases",
+    )
     return parser
 
 
@@ -537,6 +542,38 @@ def _mission_front(arguments: argparse.Namespace) -> int:
     from roboguide_eval.mission_front import load_cases, run_suite
 
     try:
+        if arguments.grounding is not None:
+            from roboguide_eval.mission_front.grounding import (
+                load_grounding_scenarios,
+                run_grounding_suite,
+            )
+
+            scenarios = load_grounding_scenarios(arguments.grounding)
+            summary = run_grounding_suite(
+                scenarios,
+                repository_root=arguments.repository_root.resolve(),
+                out_dir=arguments.out,
+            )
+            print(f"suite: {summary['suite_id']}  grounding canaries")
+            print(f"scenarios passed {summary['scenarios_passed']}/{summary['scenarios_executed']}")
+            pairs = summary["pairs"]
+            pair_items = pairs.items() if isinstance(pairs, dict) else []
+            for pair_id, pair_value in pair_items:
+                pair = pair_value if isinstance(pair_value, dict) else {}
+                modes = pair.get("modes")
+                if not isinstance(modes, dict):
+                    continue
+                free = modes.get("context_free")
+                grounded = modes.get("fixture_grounded")
+                free_map = free if isinstance(free, dict) else {}
+                grounded_map = grounded if isinstance(grounded, dict) else {}
+                print(
+                    f"  pair {pair_id}: context_free={free_map.get('final_lifecycle')} "
+                    f"(Q={free_map.get('clarification_questions')}) | "
+                    f"grounded={grounded_map.get('final_lifecycle')} "
+                    f"(Q={grounded_map.get('clarification_questions')})"
+                )
+            return 0
         cases = load_cases(arguments.cases)
         summary = run_suite(
             cases,
