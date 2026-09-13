@@ -38,7 +38,7 @@ class MainActivity : BaseBindActivity<ActivityMainBinding>() {
             TabNavBottomBean(getString(R.string.tab_home), R.drawable.ic_tab_home_sel, R.drawable.ic_tab_home_unsel, colorSelect, colorUnSelect),
             TabNavBottomBean(getString(R.string.tab_navigate), R.drawable.ic_tab_navigate_sel, R.drawable.ic_tab_navigate_unsel, colorSelect, colorUnSelect),
             TabNavBottomBean(getString(R.string.tab_agent), R.drawable.ic_tab_agent_sel, R.drawable.ic_tab_agent_unsel, colorSelect, colorUnSelect),
-            TabNavBottomBean(getString(R.string.tab_obstacle), R.drawable.ic_tab_obstacle_sel, R.drawable.ic_tab_obstacle_unsel, colorSelect, colorUnSelect),
+//            TabNavBottomBean(getString(R.string.tab_obstacle), R.drawable.ic_tab_obstacle_sel, R.drawable.ic_tab_obstacle_unsel, colorSelect, colorUnSelect),
             TabNavBottomBean(getString(R.string.tab_devices), R.drawable.ic_tab_devices_sel, R.drawable.ic_tab_devices_unsel, colorSelect, colorUnSelect),
         )
         val fragments = listOf(HomeFragment(), NavigateFragment(), AgentFragment(), ObstacleFragment(), DevicesFragment())

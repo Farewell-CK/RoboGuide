@@ -95,6 +95,7 @@
     <string name="nav_indoor_placeholder">室内导航模式开发中</string>
     <string name="nav_btn_start_outdoor">开始导航</string>
     <string name="nav_btn_end_outdoor">结束导航</string>
+    <string name="nav_btn_end_indoor">结束导航</string>
     <string name="nav_btn_calibrate_heading">朝向标定</string>
     <string name="nav_camera_waiting">等待深度相机</string>
     <string name="nav_suggestion_status_searching">正在搜索目的地…</string>
@@ -167,4 +168,5 @@
     <string name="robot_log_title">下发记录</string>
     <string name="robot_log_empty">暂无下发记录</string>
     <string name="robot_log_entry_fmt">[%1$s] %2$s → %3$s</string>
+    <string name="indoor_input_hint">输入指令…</string>
 </resources>

@@ -16,11 +16,14 @@ object NavigationPlanManager {
 
     sealed class PlanState {
         object Idle : PlanState()
-        data class InProgress(val plan: NavigationPlan, val phaseIndex: Int) : PlanState()
+        data class InProgress(val plan: NavigationPlan, val phaseIndex: Int, val planId: Int) : PlanState()
         object Completed : PlanState()
     }
 
     val state = MutableStateFlow<PlanState>(PlanState.Idle)
+
+    /** 每次 [startPlan] 重新下发都会自增，供 NavigateFragment 区分"新指令"与"同一计划内的阶段推进" */
+    private var nextPlanId = 0
 
     fun currentPhase(): NavigationPhase? =
         (state.value as? PlanState.InProgress)?.let { it.plan.phases[it.phaseIndex] }
@@ -29,7 +32,7 @@ object NavigationPlanManager {
     fun startPlan(intent: NavigationIntent) {
         if (intent.intent != "navigation" || intent.needClarification || intent.navigationPhases.isEmpty()) return
         val plan = NavigationPlan(intent.destination, intent.navigationPhases.sortedBy { it.phase })
-        state.value = PlanState.InProgress(plan, 0)
+        state.value = PlanState.InProgress(plan, 0, ++nextPlanId)
         Apollo.emit(ApolloEvents.SWITCH_TO_NAVIGATE_TAB)
     }
 

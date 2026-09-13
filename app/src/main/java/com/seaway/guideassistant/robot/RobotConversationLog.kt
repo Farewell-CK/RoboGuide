@@ -12,18 +12,19 @@ import java.util.Locale
  */
 object RobotConversationLog {
 
-    /** 流式事件中逐字返回的分片，text_chunk 会被后续的 final_text 覆盖，不适合单独播报 */
-    private const val KIND_TEXT_CHUNK = "text_chunk"
-
     data class Entry(val timestamp: String, val instruction: String, val resultSummary: String, val kind: String = "")
 
     val entries = MutableStateFlow<List<Entry>>(emptyList())
 
+    /** 调用方（NavigateFragment）只会为 final_text/error 调用这里，中间态流式事件不会进入本记录 */
     fun append(instruction: String, resultSummary: String, kind: String = "") {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         entries.value = entries.value + Entry(timestamp, instruction, resultSummary, kind)
-        if (kind != KIND_TEXT_CHUNK) {
-            TtsUtils.speak(resultSummary)
-        }
+        TtsUtils.speak(resultSummary)
+    }
+
+    /** 重新下发新指令前调用，清空上一阶段残留的记录 */
+    fun clear() {
+        entries.value = emptyList()
     }
 }

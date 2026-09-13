@@ -581,6 +581,12 @@ class OutdoorNavController(
         listener.onNavigationEnded()
     }
 
+    /** 有新的导航阶段/计划下发时调用：清空上一次路线与导航状态，不触发 onNavigationEnded 语义
+     * （该回调专用于"用户点击结束导航"并据此推进计划，与"重新下发指令需要重置状态"语义不同）。 */
+    fun resetForRestart() {
+        stopNavigationAndClearRoute()
+    }
+
     /**
      * 仅清空导航/路线内部状态，不回调 [Listener.onNavigationEnded]——该回调会被上层解读为
      * "用户点击了结束导航" 并据此推进多阶段计划，而这里也被 [planRoute] 在规划新路线前用来

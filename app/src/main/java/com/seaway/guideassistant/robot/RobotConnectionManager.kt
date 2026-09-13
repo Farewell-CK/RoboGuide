@@ -89,4 +89,16 @@ object RobotConnectionManager : KoinComponent {
             }
         }
     }
+
+    /** 中止机器狗当前会话下可能还未结束的任务，用于重新下发指令前的清理，或用户手动结束室内任务 */
+    fun cancelIndoorInstruction() {
+        val ep = endpoint() ?: return
+        scope.launch {
+            try {
+                chatRepository.submitAbortTask(ep, sessionId, userId = "guide-assistant").collect { }
+            } catch (_: Exception) {
+                // 静默失败：这是清理性调用，不需要向用户展示错误
+            }
+        }
+    }
 }

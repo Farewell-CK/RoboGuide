@@ -347,6 +347,57 @@
                 android:layout_marginTop="@dimen/dp_20"
                 android:visibility="gone">
 
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/dp_12"
+                    android:gravity="center_vertical">
+
+                    <EditText
+                        android:id="@+id/et_indoor_input"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/min_touch_target"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_input_field"
+                        android:hint="@string/indoor_input_hint"
+                        android:imeOptions="actionDone"
+                        android:paddingHorizontal="@dimen/dp_14"
+                        android:singleLine="true"
+                        android:textColor="@color/color_text"
+                        android:textColorHint="@color/color_text_muted"
+                        android:textSize="@dimen/sp_15" />
+
+                    <TextView
+                        android:id="@+id/btn_indoor_send"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/min_touch_target"
+                        android:layout_marginStart="@dimen/dp_8"
+                        android:minWidth="@dimen/min_touch_target"
+                        android:gravity="center"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_btn_primary"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:text="@string/agent_btn_send"
+                        android:textColor="@color/color_bg"
+                        android:textSize="@dimen/sp_15"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/btn_indoor_voice"
+                        android:layout_width="@dimen/min_touch_target"
+                        android:layout_height="@dimen/min_touch_target"
+                        android:layout_marginStart="@dimen/dp_8"
+                        android:gravity="center"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_btn_outline"
+                        android:contentDescription="@string/cd_agent_voice_btn"
+                        android:text="🎤"
+                        android:textSize="@dimen/sp_18" />
+                </LinearLayout>
+
                 <TextView
                     android:id="@+id/tv_robot_status"
                     android:layout_width="match_parent"
@@ -372,6 +423,20 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/dp_12" />
+
+                <TextView
+                    android:id="@+id/btn_end_indoor"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_16"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="@drawable/bg_btn_primary"
+                    android:text="@string/nav_btn_end_indoor"
+                    android:textColor="@color/color_bg"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
 
             </LinearLayout>
 

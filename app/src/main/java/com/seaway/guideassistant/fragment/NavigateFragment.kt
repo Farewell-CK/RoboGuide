@@ -23,13 +23,21 @@ import com.seaway.guideassistant.navigation.NavigationPlanManager
 import com.seaway.guideassistant.robot.RobotConnectionManager
 import com.seaway.guideassistant.robot.RobotConversationLog
 import com.seaway.guideassistant.utils.announceA11y
+import com.seaway.guideassistant.voice.VoiceErrorReason
+import com.seaway.guideassistant.voice.VoiceInputController
+import com.seaway.smallutils.ToastUtil
 import com.seaway.smallutils.TtsUtils
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import org.koin.android.ext.android.get
+import org.koin.core.qualifier.named
 
 class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
     private var outdoorController: OutdoorNavController? = null
+    private var voiceController: VoiceInputController? = null
     private var lastDispatchedPhaseIndex = -1
+    private var lastDispatchedPlanId = -1
     private var lastAnnouncedCompleted = false
     private var lastSpokenGuidance: String? = null
 
@@ -51,7 +59,15 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         bind.btnPlanRoute.setOnClickListener { outdoorController?.planRoute(bind.etEnd.text.toString()) }
         bind.btnStartStop.setOnClickListener { outdoorController?.endNavigation() }
         bind.btnCalibrateHeading.setOnClickListener { outdoorController?.calibrateHeading() }
+        bind.btnEndIndoor.setOnClickListener { finishIndoorPhase() }
         bind.etEnd.doOnTextChanged { text, _, _, _ -> outdoorController?.searchDestination(text?.toString().orEmpty()) }
+        bind.btnIndoorSend.setOnClickListener { sendIndoorManualInput() }
+        voiceController = VoiceInputController(requireActivity(), get<OkHttpClient>(named("webSocket")), object : VoiceInputController.Callbacks {
+            override fun onListeningStarted() = updateIndoorVoiceButton(recording = true)
+            override fun onTranscript(text: String) = handleIndoorTranscript(text)
+            override fun onError(reason: VoiceErrorReason) = handleIndoorVoiceError(reason)
+        })
+        bind.btnIndoorVoice.setOnClickListener { voiceController?.toggle() }
         observePlan()
         observeRobotStatus()
         observeRobotLog()
@@ -70,6 +86,8 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     override fun onDestroyView() {
         outdoorController?.onDestroy()
         outdoorController = null
+        voiceController?.release()
+        voiceController = null
         super.onDestroyView()
     }
 
@@ -145,7 +163,10 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         bind.groupIndoorMode.visibility = if (showIndoor) View.VISIBLE else View.GONE
         bind.groupOutdoorMode.visibility = if (showIndoor) View.GONE else View.VISIBLE
 
-        if (inProgress != null && inProgress.phaseIndex != lastDispatchedPhaseIndex) {
+        if (inProgress != null &&
+            (inProgress.planId != lastDispatchedPlanId || inProgress.phaseIndex != lastDispatchedPhaseIndex)
+        ) {
+            lastDispatchedPlanId = inProgress.planId
             lastDispatchedPhaseIndex = inProgress.phaseIndex
             if (showIndoor) {
                 dispatchIndoorInstruction(phase!!.description)
@@ -166,23 +187,80 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         if (state is NavigationPlanManager.PlanState.Idle) {
             lastDispatchedPhaseIndex = -1
+            lastDispatchedPlanId = -1
         }
     }
 
-    /** 把当前室内阶段的指令下发给机器狗，结果写入 RobotConversationLog 供上方列表展示 */
+    /** 把当前室内阶段的指令下发给机器狗：先中止上一轮可能未结束的任务、清空旧记录，再重新下发。
+     * 只把 final_text/error 写入 RobotConversationLog，text_chunk/plan/batch_result/node_state/
+     * task_state/status 等中间态事件不展示也不播报，避免刷屏（参考 robonix-client-android 的
+     * ChatViewModel.handlePilotEvent：只有最终结果和错误会进入可见的消息列表）。 */
     private fun dispatchIndoorInstruction(instruction: String) {
+        RobotConnectionManager.cancelIndoorInstruction()
+        RobotConversationLog.clear()
+        dispatchInstructionToRobot(instruction)
+    }
+
+    private fun dispatchInstructionToRobot(instruction: String) {
         RobotConnectionManager.sendIndoorInstruction(
             text = instruction,
             onEvent = { event ->
-                val summary = event.finalText.ifBlank { event.textChunk.ifBlank { event.status?.message.orEmpty() } }
-                RobotConversationLog.append(instruction, summary.ifBlank { event.kind }, event.kind)
+                if (event.kind == "final_text" && event.finalText.isNotBlank()) {
+                    RobotConversationLog.append(instruction, event.finalText, event.kind)
+                }
             },
             onError = { error -> RobotConversationLog.append(instruction, error, "error") },
         )
     }
 
-    /** 进入室外阶段：展示路线选择分组，用 LLM 解析出的目的地预填目的地框，并申请相机/定位权限 */
+    private fun sendIndoorManualInput() {
+        val text = bind.etIndoorInput.text.toString().trim()
+        if (text.isEmpty()) return
+        bind.etIndoorInput.setText("")
+        sendIndoorFreeformInstruction(text)
+    }
+
+    private fun handleIndoorTranscript(text: String) {
+        updateIndoorVoiceButton(recording = false)
+        sendIndoorFreeformInstruction(text)
+    }
+
+    /** 用户手动输入/语音下发的自由指令：中止上一轮未完成任务后发送，结果追加进现有下发记录（不清空历史） */
+    private fun sendIndoorFreeformInstruction(text: String) {
+        RobotConnectionManager.cancelIndoorInstruction()
+        dispatchInstructionToRobot(text)
+    }
+
+    private fun updateIndoorVoiceButton(recording: Boolean) {
+        bind.btnIndoorVoice.setBackgroundResource(if (recording) R.drawable.bg_btn_recording else R.drawable.bg_btn_outline)
+        bind.btnIndoorVoice.contentDescription = getString(if (recording) R.string.cd_agent_voice_btn_recording else R.string.cd_agent_voice_btn)
+        if (recording) bind.root.announceA11y(getString(R.string.agent_voice_listening))
+    }
+
+    private fun handleIndoorVoiceError(reason: VoiceErrorReason) {
+        updateIndoorVoiceButton(recording = false)
+        val message = when (reason) {
+            VoiceErrorReason.PERMISSION_DENIED -> getString(R.string.agent_voice_error_permission_denied)
+            VoiceErrorReason.NO_SPEECH -> getString(R.string.agent_voice_error_no_speech)
+            VoiceErrorReason.CONNECTION_FAILED -> getString(R.string.agent_voice_error_connection_failed)
+            VoiceErrorReason.RECORDING_FAILED -> getString(R.string.agent_voice_error_recording_failed)
+        }
+        bind.root.announceA11y(message)
+        ToastUtil.showShort(message)
+        TtsUtils.speak(message)
+    }
+
+    /** 仅在用户手动点击室内"结束导航"后调用：中止机器狗当前任务，推进到计划下一阶段 */
+    private fun finishIndoorPhase() {
+        RobotConnectionManager.cancelIndoorInstruction()
+        NavigationPlanManager.advanceToNextPhase()
+    }
+
+    /** 进入室外阶段：清空上一次残留的路线/导航状态，展示路线选择分组，用 LLM 解析出的目的地预填
+     * 目的地框，并申请相机/定位权限。resetForRestart() 不会触发 onNavigationEnded，因此不会被
+     * 误判为"用户点击了结束导航"而推进阶段。 */
     private fun enterOutdoorPhase(destination: String?) {
+        outdoorController?.resetForRestart()
         showOutdoorSelectGroup()
         bind.etEnd.setText(destination.orEmpty())
         bind.tvStatus.text = ""
