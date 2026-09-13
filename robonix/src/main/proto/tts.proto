@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package robonix.tts;
+
+option java_package = "com.robonix.proto.tts";
+option java_outer_classname = "TtsProto";
+option java_multiple_files = true;
+
+message Synthesize_Request {
+  string text = 1;
+  string language = 2;
+  string voice = 3;
+  float speed = 4;
+}
+message Synthesize_Response {
+  bytes audio_data = 1;
+  string encoding = 2;
+  uint32 sample_rate_hz = 3;
+  string error = 4;
+}

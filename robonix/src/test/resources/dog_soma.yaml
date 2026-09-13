@@ -1,0 +1,98 @@
+urdf:
+  # Deep Robotics Jueying Lite3 quadruped body (Lite3.urdf + meshes/, copied
+  # from the robot's own deployment). The dog URDF carries the synthetic sim
+  # sensor frames (base_footprint / hokuyo / head_front_camera_*) that the
+  # sim's /tf_static and the tiago_* drivers key on; see urdf/Lite3.urdf.
+  path: ./urdf/Lite3.urdf
+  root_link: base_link
+  model_name: Lite3
+
+robot:
+  id: simplebot
+  display_name: "SimpleBot synthetic mobile robot"
+  family: mobile_robot
+  root_part: base
+  # The served body is the Deep Robotics Jueying Lite3 quadruped (URDF visual),
+  # but the synthetic sim still moves it like the differential base it replaced.
+  # These dimensions/footprint describe that synthetic moving base — the widest
+  # clearance it needs — which navigation planners use to size obstacles.
+  dimensions: { length_m: 0.50, width_m: 0.50, height_m: 0.60 }
+  footprint:
+    base_frame: base_link
+    # 2D collision hull in base_frame, CCW, first point not repeated.
+    points:
+      - [0.25, 0.25]
+      - [0.25, -0.25]
+      - [-0.25, -0.25]
+      - [-0.25, 0.25]
+  mass_kg: 12.6
+  passable_door_width_m: 0.80
+  exports:
+    - provider_id: tiago_health
+      capabilities:
+        - { path: robonix/primitive/health/state, description: "Read the current simulated SimpleBot hardware health state." }
+        - { path: robonix/primitive/health/stream, description: "Stream simulated SimpleBot hardware health into Soma." }
+    # simple_nav is this deployment's navigation provider (webots runs Nav2;
+    # SimpleBot deliberately runs the lightweight pure-python navigator).
+    - provider_id: simple_nav
+      capabilities:
+        - { path: robonix/service/navigation/navigate, description: "Navigate to a 2D goal in the mapped scene." }
+        - { path: robonix/service/navigation/navigate/status, description: "Report the current navigation goal status." }
+        - { path: robonix/service/navigation/navigate/cancel, description: "Cancel the active navigation goal." }
+  components:
+    - id: base
+      type: mobile_base
+      urdf_link: base_link
+      exports:
+        - provider_id: tiago_chassis
+          capabilities:
+            - { path: robonix/primitive/chassis/move, description: "Command chassis motion through the sim velocity control." }
+            - { path: robonix/primitive/chassis/odom, description: "Read odometry from the simulated differential drive base." }
+            - { path: robonix/primitive/chassis/twist_in, description: "Accept velocity commands on the chassis command input." }
+      components:
+        - id: left_wheel
+          type: wheel
+          urdf_joint: wheel_left_joint
+          exports: []
+        - id: right_wheel
+          type: wheel
+          urdf_joint: wheel_right_joint
+          exports: []
+        - id: battery
+          type: battery
+          exports: []
+    - id: head_camera
+      type: rgbd_camera
+      urdf_link: head_front_camera_rgb_optical_frame
+      exports:
+        - provider_id: tiago_camera
+          capabilities:
+            - { path: robonix/primitive/camera/snapshot, description: "Capture an RGB image from the synthetic head camera." }
+            - { path: robonix/primitive/camera/depth_snapshot, description: "Capture a registered depth image from the synthetic head camera." }
+            - { path: robonix/primitive/camera/rgb, description: "Expose the RGB image stream for consumers such as mapping." }
+            - { path: robonix/primitive/camera/depth, description: "Expose the depth image stream for consumers such as mapping." }
+            - { path: robonix/primitive/camera/extrinsics, description: "Provide the camera transform relative to the robot base." }
+    - id: hokuyo_lidar
+      type: lidar_2d
+      urdf_link: hokuyo
+      exports:
+        - provider_id: tiago_lidar
+          capabilities:
+            - { path: robonix/primitive/lidar/snapshot, description: "Capture a planar laser scan from the simulated 2-D lidar." }
+
+description:
+  summary: "A lightweight synthetic robot deployment with 2-D lidar, an RGB-D head camera, simulated health, mapping (planar lidar + odom only), simple_nav navigation, and client-sourced audio — no Webots, no Nav2."
+  can_do:
+    - "Drive in a synthetic indoor room using velocity commands."
+    - "Navigate to 2D goals using the simple_nav service."
+    - "Capture RGB images, registered depth images, and planar lidar scans."
+    - "Build a 2-D occupancy map from lidar and chassis odometry."
+    - "Publish nominal simulated battery, wheel, and sensor health through Soma."
+    - "Hold a voice conversation routed through a connected robonix-client."
+  cannot_do:
+    - "Manipulate objects; this package does not deploy an arm or gripper."
+    - "Run full Nav2 or explore_rbnx frontier exploration."
+    - "Do RGB-D (depth-fused) SLAM; mapping is planar-lidar-only."
+  notes:
+    - "Soma v2 serves this file and the referenced URDF as raw text; primitive and service startup is driven by robonix_manifest.yaml."
+    - "The synthetic sim under sim/ must be started before packages that docker-exec into the sim container."

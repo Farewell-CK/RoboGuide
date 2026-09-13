@@ -1,0 +1,262 @@
+{
+  "description": {
+    "renderMode": "urdf",
+    "summary": "A lightweight synthetic robot deployment with 2-D lidar, an RGB-D head camera, simulated health, mapping (planar lidar + odom only), simple_nav navigation, and client-sourced audio \u2014 no Webots, no Nav2.",
+    "components": [
+      {
+        "model": "",
+        "urdfJoint": "",
+        "id": "body",
+        "label": "SimpleBot synthetic mobile robot",
+        "type": "robot",
+        "localId": "body",
+        "parentId": "",
+        "providers": [
+          "tiago_health",
+          "simple_nav"
+        ],
+        "urdfLink": "base_link"
+      },
+      {
+        "model": "",
+        "urdfJoint": "",
+        "id": "body/base",
+        "label": "Base",
+        "type": "mobile_base",
+        "localId": "base",
+        "parentId": "body",
+        "providers": ["tiago_chassis"],
+        "urdfLink": "base_link"
+      },
+      {
+        "model": "",
+        "urdfJoint": "wheel_left_joint",
+        "id": "body/base/left_wheel",
+        "label": "Left Wheel",
+        "type": "wheel",
+        "localId": "left_wheel",
+        "parentId": "body/base",
+        "providers": [],
+        "urdfLink": ""
+      },
+      {
+        "model": "",
+        "urdfJoint": "wheel_right_joint",
+        "id": "body/base/right_wheel",
+        "label": "Right Wheel",
+        "type": "wheel",
+        "localId": "right_wheel",
+        "parentId": "body/base",
+        "providers": [],
+        "urdfLink": ""
+      },
+      {
+        "model": "",
+        "urdfJoint": "",
+        "id": "body/base/battery",
+        "label": "Battery",
+        "type": "battery",
+        "localId": "battery",
+        "parentId": "body/base",
+        "providers": [],
+        "urdfLink": ""
+      },
+      {
+        "model": "",
+        "urdfJoint": "",
+        "id": "body/head_camera",
+        "label": "Head Camera",
+        "type": "rgbd_camera",
+        "localId": "head_camera",
+        "parentId": "body",
+        "providers": ["tiago_camera"],
+        "urdfLink": "head_front_camera_rgb_optical_frame"
+      },
+      {
+        "model": "",
+        "urdfJoint": "",
+        "id": "body/hokuyo_lidar",
+        "label": "Hokuyo Lidar",
+        "type": "lidar_2d",
+        "localId": "hokuyo_lidar",
+        "parentId": "body",
+        "providers": ["tiago_lidar"],
+        "urdfLink": "hokuyo"
+      }
+    ],
+    "displayName": "SimpleBot synthetic mobile robot",
+    "id": "simplebot",
+    "family": "mobile_robot",
+    "dimensions": {
+      "widthM": 0.5,
+      "lengthM": 0.5,
+      "heightM": 0.6
+    }
+  },
+  "snapshot": {
+    "signals": [
+      {
+        "visualState": "ok",
+        "observedValue": 41,
+        "health": "ok",
+        "key": "body/base/left_wheel/driver_temp",
+        "status": 0,
+        "referenceValue": -1
+      },
+      {
+        "visualState": "ok",
+        "observedValue": 41.5,
+        "health": "ok",
+        "key": "body/base/right_wheel/driver_temp",
+        "status": 0,
+        "referenceValue": -1
+      },
+      {
+        "visualState": "ok",
+        "observedValue": 82,
+        "health": "ok",
+        "key": "body/base/battery/soc_percent",
+        "status": 0,
+        "referenceValue": -1
+      },
+      {
+        "visualState": "ok",
+        "observedValue": 24.8,
+        "health": "ok",
+        "key": "body/base/battery/voltage",
+        "status": 0,
+        "referenceValue": -1
+      },
+      {
+        "visualState": "ok",
+        "observedValue": 42,
+        "health": "ok",
+        "key": "body/head_camera/temperature",
+        "status": 0,
+        "referenceValue": -1
+      },
+      {
+        "visualState": "ok",
+        "observedValue": 39,
+        "health": "ok",
+        "key": "body/hokuyo_lidar/temperature",
+        "status": 0,
+        "referenceValue": -1
+      }
+    ],
+    "componentHealth": [
+      {
+        "visualState": "ok",
+        "componentId": "body",
+        "signalCount": 0,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/base",
+        "signalCount": 0,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/base/left_wheel",
+        "signalCount": 1,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/base/right_wheel",
+        "signalCount": 1,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/base/battery",
+        "signalCount": 2,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/head_camera",
+        "signalCount": 1,
+        "health": "ok",
+        "detail": ""
+      },
+      {
+        "visualState": "ok",
+        "componentId": "body/hokuyo_lidar",
+        "signalCount": 1,
+        "health": "ok",
+        "detail": ""
+      }
+    ],
+    "bodies": [
+      {
+        "components": [
+          {
+            "kind": "wheel",
+            "name": "left_wheel",
+            "temperature": 38,
+            "errorCode": 0,
+            "model": "wheel",
+            "id": "body/base/left_wheel",
+            "parentId": "body/base",
+            "enabled": true
+          },
+          {
+            "kind": "wheel",
+            "name": "right_wheel",
+            "temperature": 38.5,
+            "errorCode": 0,
+            "model": "wheel",
+            "id": "body/base/right_wheel",
+            "parentId": "body/base",
+            "enabled": true
+          },
+          {
+            "kind": "battery",
+            "name": "battery",
+            "temperature": 32,
+            "errorCode": 0,
+            "model": "battery",
+            "id": "body/base/battery",
+            "parentId": "body/base",
+            "enabled": true
+          }
+        ],
+        "health": "ok",
+        "model": "mobile_base",
+        "message": "",
+        "key": "body/base",
+        "status": 0
+      },
+      {
+        "components": [],
+        "health": "ok",
+        "model": "rgbd_camera",
+        "message": "",
+        "key": "body/head_camera",
+        "status": 0
+      },
+      {
+        "components": [],
+        "health": "ok",
+        "model": "lidar_2d",
+        "message": "",
+        "key": "body/hokuyo_lidar",
+        "status": 0
+      }
+    ],
+    "power": {
+      "socPercent": 82,
+      "charging": false,
+      "remainingSeconds": 10800,
+      "voltage": 24.8
+    }
+  }
+}

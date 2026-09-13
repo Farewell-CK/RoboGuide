@@ -1,0 +1,170 @@
+<resources>
+    <string name="app_name">导盲助手</string>
+
+    <!-- 通用 -->
+    <string name="cd_back">返回上一页</string>
+    <string name="common_coming_soon">此功能将在后续版本提供</string>
+
+    <!-- 底部导航 -->
+    <string name="tab_home">首页</string>
+    <string name="tab_navigate">出行</string>
+    <string name="tab_agent">智能体</string>
+    <string name="tab_obstacle">避障</string>
+    <string name="tab_devices">设备</string>
+
+    <!-- 登录 / 注册 -->
+    <string name="login_app_title">导盲助手</string>
+    <string name="login_tagline">无障碍出行，一路守护</string>
+    <string name="tab_login">登录</string>
+    <string name="tab_register">注册</string>
+    <string name="label_phone">手机号</string>
+    <string name="hint_phone">请输入11位手机号</string>
+    <string name="label_code">验证码</string>
+    <string name="hint_code">请输入验证码</string>
+    <string name="label_name">姓名</string>
+    <string name="hint_name">请输入您的姓名</string>
+    <string name="btn_send_code">获取验证码</string>
+    <string name="send_code_countdown">%1$d 秒后重发</string>
+    <string name="btn_login">登录</string>
+    <string name="btn_register">注册并登录</string>
+    <string name="checkbox_bind_glasses">同时自动绑定导盲眼镜</string>
+    <string name="auth_switch_to_register">还没有账号？去注册</string>
+    <string name="auth_switch_to_login">已有账号？去登录</string>
+    <string name="error_phone_invalid">请输入正确的11位手机号</string>
+    <string name="error_code_invalid">请输入验证码</string>
+    <string name="error_name_required">请输入您的姓名</string>
+    <string name="toast_code_sent">验证码已发送，请查收短信</string>
+    <string name="login_success_fmt">登录成功，%1$s。</string>
+    <string name="register_success_fmt">注册成功，%1$s。</string>
+    <string name="register_success_bind_glasses">导盲眼镜已自动绑定。</string>
+    <string name="cd_voice_login_btn">语音登录，功能开发中</string>
+
+    <!-- 首页 -->
+    <string name="home_greeting_fmt">你好，%1$s</string>
+    <string name="home_btn_logout">退出登录</string>
+    <string name="home_section_devices">设备状态</string>
+    <string name="home_section_actions">快捷功能</string>
+    <string name="home_voice_fab">唤醒智能体</string>
+    <string name="cd_voice_fab">唤醒智能体，功能开发中</string>
+    <string name="action_navigate_title">出行导航</string>
+    <string name="action_navigate_desc">融合导航与避障，杖体震动指引</string>
+    <string name="action_obstacle_title">避障模式</string>
+    <string name="action_obstacle_desc">独立开启环境识别与避障反馈</string>
+    <string name="action_agent_title">智能体</string>
+    <string name="action_agent_desc">语音助手，随时为您解答</string>
+    <string name="action_devices_title">设备管理</string>
+    <string name="action_devices_desc">查看与绑定导盲硬件</string>
+    <string name="home_nav_summary_title">出行导航进行中</string>
+    <string name="home_obstacle_badge">避障已开启</string>
+    <string name="nav_dest_fmt">前往 %1$s</string>
+    <string name="cane_direction_fmt">%1$s · %2$s</string>
+    <string name="device_status_connected">已连接</string>
+    <string name="device_status_disconnected">未连接</string>
+    <string name="device_battery_fmt">电量 %1$d%%</string>
+    <string name="glasses_status_scanning">正在扫描导盲眼镜…</string>
+    <string name="glasses_status_connecting">正在连接导盲眼镜…</string>
+    <string name="glasses_status_connected">导盲眼镜已连接</string>
+    <string name="glasses_status_disconnected">导盲眼镜已断开连接</string>
+    <string name="glasses_status_permission_denied">需要蓝牙/定位权限才能连接导盲眼镜，点击重试</string>
+    <string name="glasses_status_reconnecting_fmt">正在重连导盲眼镜（第 %1$d/%2$d 次）…</string>
+    <string name="device_name_glasses">导盲眼镜 Pro</string>
+    <string name="device_name_cane">智能导盲杖</string>
+    <string name="device_name_dog">导盲机器狗</string>
+    <string name="cd_device_card_fmt">%1$s，%2$s，点击查看详情</string>
+
+    <!-- 出行导航 -->
+    <string name="nav_title">出行导航</string>
+    <string name="nav_field_start">出发地</string>
+    <string name="nav_field_end">目的地</string>
+    <string name="nav_hint_start">我的位置</string>
+    <string name="nav_hint_end">请输入目的地</string>
+    <string name="nav_default_dest">西单大悦城</string>
+    <string name="nav_btn_plan_route">规划路线</string>
+    <string name="nav_btn_start">开始出行</string>
+    <string name="nav_btn_stop">结束出行</string>
+    <string name="nav_instruction_label">当前指引</string>
+    <string name="nav_steps_title">行程步骤</string>
+    <string name="nav_cane_panel_title">导盲杖方向指引</string>
+    <string name="nav_voice_channel_nav">导航播报</string>
+    <string name="nav_voice_channel_obstacle">避障播报</string>
+    <string name="nav_voice_placeholder">—</string>
+    <string name="nav_plan_route_toast_fmt">路线已规划，前往%1$s。开始后将同步启动导航、避障与杖体方向指引。</string>
+    <string name="cd_locate_btn">定位当前位置，功能开发中</string>
+    <string name="nav_arrived_toast">您已到达目的地，导航结束。</string>
+    <string name="nav_phase_status_fmt">阶段 %1$d/%2$d · %3$s</string>
+    <string name="nav_indoor_placeholder">室内导航模式开发中</string>
+    <string name="nav_btn_start_outdoor">开始导航</string>
+    <string name="nav_btn_end_outdoor">结束导航</string>
+    <string name="nav_btn_calibrate_heading">朝向标定</string>
+    <string name="nav_camera_waiting">等待深度相机</string>
+    <string name="nav_suggestion_status_searching">正在搜索目的地…</string>
+    <string name="nav_all_phases_done">出行导航已全部完成。</string>
+    <string name="nav_permission_denied_toast">未获得相机/定位权限，无法开始导航</string>
+
+    <!-- 避障模式 -->
+    <string name="obstacle_title">避障模式</string>
+    <string name="obstacle_hint">避障模式可独立开启，无需开启导航。导盲眼镜识别环境，导盲杖震动反馈障碍方向。</string>
+    <string name="obstacle_btn_start">开启避障</string>
+    <string name="obstacle_btn_stop">关闭避障</string>
+    <string name="obstacle_status_running">运行中</string>
+    <string name="obstacle_status_off">未启动</string>
+    <string name="obstacle_vib_dir_label">震动方向</string>
+    <string name="obstacle_started_toast">避障模式已单独开启。导盲眼镜识别中，导盲杖震动反馈已启用。</string>
+    <string name="obstacle_stopped_toast">避障模式已关闭。</string>
+
+    <!-- 智能体 -->
+    <string name="agent_title">智能体</string>
+    <string name="agent_status_online">在线</string>
+    <string name="agent_hint">您可以点击下方常用指令，或语音输入，例如：从天安门到西单怎么走 / 帮我把导盲眼镜连上</string>
+    <string name="agent_voice_btn">按住说话</string>
+    <string name="cd_agent_voice_btn">语音输入</string>
+    <string name="cd_agent_voice_btn_recording">正在录音，再次点击结束</string>
+    <string name="agent_voice_listening">正在聆听…</string>
+    <string name="agent_voice_error_permission_denied">未获得录音权限，无法使用语音输入</string>
+    <string name="agent_voice_error_no_speech">未识别到有效语音，请再试一次</string>
+    <string name="agent_voice_error_connection_failed">语音识别服务连接失败，请检查网络后重试</string>
+    <string name="agent_voice_error_recording_failed">录音失败，请重试</string>
+    <string name="agent_default_reply_fmt">好的，我理解您说的是"%1$s"。正在为您处理…</string>
+    <string name="agent_wake_reply">您好，我已唤醒。您可以让我帮您导航、查设备、绑定硬件，或规划路线。</string>
+    <string name="cd_msg_avatar_agent">智能体</string>
+    <string name="cd_msg_avatar_user">我</string>
+    <string name="agent_input_hint">输入您的问题…</string>
+    <string name="agent_btn_send">发送</string>
+    <string name="agent_quick_phrases_title">常用指令</string>
+
+    <!-- 设备管理 -->
+    <string name="devices_title">设备管理</string>
+    <string name="devices_btn_scan">搜索附近设备</string>
+    <string name="devices_scan_hint">正在搜索附近设备…</string>
+    <string name="devices_scan_found">搜索完成，发现一台导盲机器狗。</string>
+    <string name="cd_device_chevron">查看详情</string>
+
+    <!-- 设备详情弹层 -->
+    <string name="sheet_label_connection">连接方式</string>
+    <string name="sheet_label_signal">信号</string>
+    <string name="sheet_label_firmware">固件</string>
+    <string name="sheet_label_sync">最近同步</string>
+    <string name="sheet_label_features">功能特性</string>
+    <string name="sheet_btn_disconnect">断开连接</string>
+    <string name="sheet_btn_test_vibration">测试震动</string>
+    <string name="sheet_btn_firmware_update">固件升级</string>
+    <string name="sheet_btn_bind_dog">绑定机器狗</string>
+    <string name="sheet_bind_dog_success">正在搜索机器狗设备… 发现一台导盲机器狗，正在配对绑定… 绑定成功！</string>
+    <string name="cd_sheet_close">关闭设备详情</string>
+    <string name="cd_sheet_icon">设备图标</string>
+
+    <!-- 机器狗连接与室内导航下发 -->
+    <string name="robot_host_label">机器狗 Host</string>
+    <string name="robot_host_hint">例如 192.168.2.26</string>
+    <string name="robot_port_label">Atlas 端口</string>
+    <string name="robot_port_hint">例如 50051</string>
+    <string name="robot_btn_connect">连接</string>
+    <string name="robot_status_invalid_input">请输入有效的 Host 和端口</string>
+    <string name="robot_status_connecting">机器狗连接中…</string>
+    <string name="robot_status_connected">机器狗已连接</string>
+    <string name="robot_status_disconnected">机器狗未连接</string>
+    <string name="robot_status_failed_fmt">机器狗连接失败：%1$s</string>
+    <string name="robot_log_title">下发记录</string>
+    <string name="robot_log_empty">暂无下发记录</string>
+    <string name="robot_log_entry_fmt">[%1$s] %2$s → %3$s</string>
+</resources>

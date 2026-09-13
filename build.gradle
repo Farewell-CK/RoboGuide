@@ -1,0 +1,49 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+buildscript {
+    ext.kotlin_version = "1.9.24"
+    ext.koin_version = '3.5.6'
+    ext.rxjava_version = "2.2.21"
+    ext.rxlifecycle_version = "2.2.2"
+
+    repositories {
+        maven{
+            allowInsecureProtocol = true
+            url = "http://maven.aliyun.com/nexus/content/groups/public/"
+        }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        jcenter()
+        maven { url "https://jitpack.io" }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.8.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+//        classpath "org.koin:koin-gradle-plugin:$koin_version"//依赖注入插件
+
+        // :robonix module toolchain (protobuf/gRPC codegen for the ported robonix-client-android sources)
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.9.4'
+    }
+}
+
+allprojects {
+    repositories {
+        maven{
+            allowInsecureProtocol = true
+            url = "http://maven.aliyun.com/nexus/content/groups/public/"
+        }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        jcenter()
+        maven { url "https://jitpack.io" }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

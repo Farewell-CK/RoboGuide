@@ -1,0 +1,6 @@
+include ':smallutils'
+include ':app'
+include ':robonix'
+include ':librealsense'
+include ':navoutdoor'
+rootProject.name = "GuideAssistant"

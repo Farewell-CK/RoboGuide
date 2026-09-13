@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package robonix.executor;
+
+option java_package = "com.robonix.proto.executor";
+option java_outer_classname = "ExecutorProto";
+option java_multiple_files = true;
+
+import "pilot.proto";
+
+message RtdlPlanStarted {
+  string plan_id = 1;
+}
+
+message RtdlPlanComplete {
+  string plan_id = 1;
+  bool any_failed = 2;
+}
+
+message RtdlEvent {
+  uint32 event_kind = 1;
+  RtdlPlanStarted plan_started = 2;
+  robonix.pilot.RtdlNodeState node_state = 3;
+  RtdlPlanComplete plan_complete = 4;
+}
+
+message ListActivePlans_Request {}
+message ListActivePlans_Response {
+  bool success = 1;
+  string plans_json = 2;
+  string error = 3;
+}
+
+service RobonixSystemExecutorListActivePlans {
+  rpc ListActivePlans(ListActivePlans_Request) returns (ListActivePlans_Response);
+}

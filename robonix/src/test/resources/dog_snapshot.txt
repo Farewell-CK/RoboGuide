@@ -1,0 +1,75 @@
+ts_ns: 1211932865258
+power {
+  battery_percent: 82.0
+  voltage: 24.8
+  remaining_s: 10800
+}
+components {
+  name: "body/base/left_wheel/driver_temp"
+  value: 41.0
+  threshold: -1.0
+}
+components {
+  name: "body/base/right_wheel/driver_temp"
+  value: 41.5
+  threshold: -1.0
+}
+components {
+  name: "body/base/battery/soc_percent"
+  value: 82.0
+  threshold: -1.0
+}
+components {
+  name: "body/base/battery/voltage"
+  value: 24.8
+  threshold: -1.0
+}
+components {
+  name: "body/head_camera/temperature"
+  value: 42.0
+  threshold: -1.0
+}
+components {
+  name: "body/hokuyo_lidar/temperature"
+  value: 39.0
+  threshold: -1.0
+}
+bodies {
+  body_type: "base"
+  model: "mobile_base"
+  components {
+    name: "left_wheel"
+    kind: "wheel"
+    temperature: 38.0
+    enabled: true
+    id: "body/base/left_wheel"
+    parent_id: "body/base"
+    model: "wheel"
+  }
+  components {
+    name: "right_wheel"
+    kind: "wheel"
+    temperature: 38.5
+    enabled: true
+    id: "body/base/right_wheel"
+    parent_id: "body/base"
+    model: "wheel"
+  }
+  components {
+    name: "battery"
+    kind: "battery"
+    temperature: 32.0
+    enabled: true
+    id: "body/base/battery"
+    parent_id: "body/base"
+    model: "battery"
+  }
+}
+bodies {
+  body_type: "head_camera"
+  model: "rgbd_camera"
+}
+bodies {
+  body_type: "hokuyo_lidar"
+  model: "lidar_2d"
+}

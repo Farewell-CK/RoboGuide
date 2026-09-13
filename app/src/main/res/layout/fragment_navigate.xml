@@ -1,0 +1,380 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/color_bg"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/dp_20">
+
+            <LinearLayout
+                android:id="@+id/group_outdoor_mode"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/nav_title"
+                android:textColor="@color/color_text"
+                android:textSize="@dimen/sp_22"
+                android:textStyle="bold" />
+
+            <!-- 路线选择：进入室外阶段时默认展示，对应 mobile-navigation MainActivity
+                 amapKeyInput/destinationInput 以下的下半部分 -->
+            <LinearLayout
+                android:id="@+id/group_outdoor_select"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:id="@+id/tv_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:accessibilityLiveRegion="polite"
+                    android:text=""
+                    android:textColor="@color/color_warning"
+                    android:textSize="@dimen/sp_14" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_16"
+                    android:text="@string/nav_field_start"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_14" />
+
+                <EditText
+                    android:id="@+id/et_start"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_input_field"
+                    android:enabled="false"
+                    android:hint="@string/nav_hint_start"
+                    android:paddingHorizontal="@dimen/dp_14"
+                    android:text="@string/nav_hint_start"
+                    android:textColor="@color/color_text"
+                    android:textColorHint="@color/color_text_muted"
+                    android:textSize="@dimen/sp_15" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:text="@string/nav_field_end"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_14" />
+
+                <EditText
+                    android:id="@+id/et_end"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_input_field"
+                    android:hint="@string/nav_hint_end"
+                    android:imeOptions="actionDone"
+                    android:paddingHorizontal="@dimen/dp_14"
+                    android:singleLine="true"
+                    android:textColor="@color/color_text"
+                    android:textColorHint="@color/color_text_muted"
+                    android:textSize="@dimen/sp_15" />
+
+                <TextView
+                    android:id="@+id/tv_suggestion_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:accessibilityLiveRegion="polite"
+                    android:text=""
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_13" />
+
+                <LinearLayout
+                    android:id="@+id/container_suggestions"
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_6" />
+
+                <TextView
+                    android:id="@+id/btn_plan_route"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_16"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="@drawable/bg_btn_primary"
+                    android:text="@string/nav_btn_start_outdoor"
+                    android:textColor="@color/color_bg"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <!-- 导航展示：开始导航后展示，对应 MainActivity amapKeyInput 以上的上半部分
+                 （相机/深度/VINS/语义分割/A*/避障 guidanceText 会做 TTS 播报） -->
+            <LinearLayout
+                android:id="@+id/group_outdoor_active"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_16"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_camera_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:text="@string/nav_camera_waiting"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_13" />
+
+                <ImageView
+                    android:id="@+id/iv_depth_preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/dp_200"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:background="@drawable/bg_card"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter" />
+
+                <TextView
+                    android:id="@+id/tv_vins_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <TextView
+                    android:id="@+id/tv_semantic_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <TextView
+                    android:id="@+id/tv_guidance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:accessibilityLiveRegion="assertive"
+                    android:background="@drawable/bg_card"
+                    android:padding="@dimen/dp_14"
+                    android:text="@string/nav_voice_placeholder"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_18"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_10">
+
+                    <TextView
+                        android:id="@+id/tv_distance_left"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:textColor="@color/color_text"
+                        android:textSize="@dimen/sp_13" />
+
+                    <TextView
+                        android:id="@+id/tv_distance_center"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:textColor="@color/color_text"
+                        android:textSize="@dimen/sp_13" />
+
+                    <TextView
+                        android:id="@+id/tv_distance_right"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:textColor="@color/color_text"
+                        android:textSize="@dimen/sp_13" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_frame_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <com.elabrador.mobilenavigation.LocalPlanView
+                    android:id="@+id/local_plan_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/dp_240"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:background="@color/color_surface_2"
+                    android:contentDescription="局部代价图和 A 星路径" />
+
+                <TextView
+                    android:id="@+id/tv_local_plan"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14">
+
+                    <TextView
+                        android:id="@+id/tv_heading"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="@color/color_text"
+                        android:textSize="@dimen/sp_13" />
+
+                    <TextView
+                        android:id="@+id/tv_location"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="@color/color_text"
+                        android:textSize="@dimen/sp_13" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_location_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tv_calibration_status"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="@color/color_text_muted"
+                        android:textSize="@dimen/sp_12" />
+
+                    <TextView
+                        android:id="@+id/btn_calibrate_heading"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/min_touch_target"
+                        android:layout_marginStart="@dimen/dp_8"
+                        android:gravity="center"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:paddingHorizontal="@dimen/dp_14"
+                        android:background="@drawable/bg_btn_outline"
+                        android:text="@string/nav_btn_calibrate_heading"
+                        android:textColor="@color/color_primary"
+                        android:textSize="@dimen/sp_13" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_nav_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:accessibilityLiveRegion="polite"
+                    android:background="@drawable/bg_card"
+                    android:padding="@dimen/dp_14"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_14"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/btn_start_stop"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_16"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="@drawable/bg_btn_primary"
+                    android:text="@string/nav_btn_end_outdoor"
+                    android:textColor="@color/color_bg"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_phase_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_12"
+                android:accessibilityLiveRegion="polite"
+                android:textColor="@color/color_text_muted"
+                android:textSize="@dimen/sp_13"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/group_indoor_mode"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_20"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_robot_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:background="@drawable/bg_card"
+                    android:padding="@dimen/dp_14"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_14" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_20"
+                    android:text="@string/robot_log_title"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_16"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/container_robot_log"
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_12" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</layout>

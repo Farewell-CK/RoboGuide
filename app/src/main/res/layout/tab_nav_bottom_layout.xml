@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.appcompat.widget.LinearLayoutCompat
+    android:gravity="center"
+    android:orientation="vertical"
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/min_touch_target"
+    android:paddingTop="@dimen/dp_4">
+    <ImageView
+        android:id="@+id/iv"
+        android:src="@mipmap/ic_launcher"
+        android:layout_width="24dp"
+        android:layout_height="24dp"/>
+    <TextView
+        android:padding="4dp"
+        android:textSize="@dimen/sp_12"
+        android:textColor="@color/color_text_muted"
+        android:gravity="center"
+        android:id="@+id/tv"
+        android:text="全部"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+</androidx.appcompat.widget.LinearLayoutCompat>

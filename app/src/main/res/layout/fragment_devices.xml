@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/color_bg"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/dp_20">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/devices_title"
+                android:textColor="@color/color_text"
+                android:textSize="@dimen/sp_22"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_10"
+                android:accessibilityLiveRegion="polite"
+                android:text=""
+                android:textColor="@color/color_warning"
+                android:textSize="@dimen/sp_14" />
+
+            <TextView
+                android:id="@+id/btn_scan"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/min_touch_target"
+                android:layout_marginTop="@dimen/dp_12"
+                android:layout_marginBottom="@dimen/dp_16"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_btn_primary"
+                android:text="@string/devices_btn_scan"
+                android:textColor="@color/color_bg"
+                android:textSize="@dimen/sp_16"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/container_devices"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+        </LinearLayout>
+    </ScrollView>
+</layout>

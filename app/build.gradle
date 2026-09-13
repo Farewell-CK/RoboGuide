@@ -1,0 +1,171 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "kotlin-kapt"
+    id "kotlin-parcelize"
+}
+
+static def releaseTime() {
+    return new Date().format("yyyyMMddHHmmss")
+}
+android {
+    namespace = "com.seaway.guideassistant"
+    signingConfigs {
+        release {
+            keyAlias 'xiao'
+            keyPassword '888888'
+            storeFile file('../smallcake.jks')
+            storePassword '888888'
+        }
+    }
+    compileSdkVersion 35
+    defaultConfig {
+        applicationId "com.seaway.guideassistant"
+        minSdkVersion 24
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // :navoutdoor 带有 semanticModel flavor 维度（完整搬运自 mobile-navigation），
+        // :app 本身不需要按该维度出多个包，缺省固定选用本机唯一有真实模型资产的 npu flavor。
+        missingDimensionStrategy 'semanticModel', 'npu'
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+
+    // :robonix 引入的 gRPC/protobuf 依赖与其他库在 META-INF 下有重名文件，合并时需要排除
+    packagingOptions {
+        exclude 'META-INF/INDEX.LIST'
+        exclude 'META-INF/DEPENDENCIES'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            signingConfig signingConfigs.release
+        }
+        debug {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+    kapt {
+        generateStubs = true
+    }
+    dataBinding{
+        enabled = true
+    }
+    viewBinding {
+        enabled = true
+    }
+    android.applicationVariants.all { variant ->
+        variant.outputs.all{
+            outputFileName  = "${applicationId.subSequence(applicationId.lastIndexOf(".")+1,applicationId.length())}_v${versionName}_${releaseTime()}_${baseName}.apk"
+        }
+    }
+}
+
+dependencies {
+    //内存泄漏检测
+//    debugImplementation "com.squareup.leakcanary:leakcanary-android:2.6"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation "androidx.viewpager2:viewpager2:1.0.0"
+    implementation "androidx.core:core-ktx:1.8.0"
+    implementation "androidx.activity:activity-ktx:1.2.3"
+    implementation "androidx.fragment:fragment-ktx:1.3.5"
+    implementation "androidx.appcompat:appcompat:1.4.1"
+    implementation "com.google.android.material:material:1.5.0"
+    implementation "androidx.constraintlayout:constraintlayout:2.1.3"
+    implementation "androidx.recyclerview:recyclerview:1.2.1"
+    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
+    //总方法数超过限制>65536支持
+    implementation "androidx.multidex:multidex:2.0.1"
+    //banner轮播图
+    implementation "com.youth.banner:banner:2.1.0"
+    //日志
+    implementation "com.orhanobut:logger:2.2.0"
+    //图片加载
+//    implementation "com.github.bumptech.glide:glide:4.11.0"
+    implementation "io.coil-kt:coil:2.2.1"
+    //ViewBinding基类
+    implementation "com.dylanc:viewbinding-ktx:1.0.1"
+    //权限管理
+    implementation "com.github.getActivity:XXPermissions:16.0"
+    // Koin for Android
+    implementation "io.insert-koin:koin-android:$koin_version"
+    //网络请求框架
+    implementation "com.squareup.retrofit2:retrofit:2.9.0"
+    implementation "com.squareup.okhttp3:okhttp:4.10.0"//okhttp
+    implementation "com.squareup.okhttp3:logging-interceptor:4.9.3"//拦截器
+    implementation "com.google.code.gson:gson:2.8.9"//gson转换
+    implementation "com.squareup.retrofit2:converter-gson:2.6.0"//对象转换
+    implementation "com.squareup.retrofit2:adapter-rxjava2:2.3.0"//Rxjava转换
+    //Rxjava2
+    implementation "io.reactivex.rxjava2:rxjava:$rxjava_version"
+    implementation "io.reactivex.rxjava2:rxandroid:2.1.1"
+    //pop弹框
+    implementation "com.lxj:xpopup:2.2.17"
+    //生命周期绑定
+    implementation "com.trello.rxlifecycle2:rxlifecycle-android-lifecycle:$rxlifecycle_version"
+    implementation "com.trello.rxlifecycle2:rxlifecycle-kotlin:$rxlifecycle_version"
+    //Apollo的核心库,事件通知
+    implementation 'com.github.lsxiao.Apollo:core:1.0.2'
+    implementation project(path: ':smallutils')
+    implementation project(path: ':robonix')
+    implementation project(path: ':navoutdoor')
+    kapt "com.github.lsxiao.Apollo:processor:1.0.2"//kotlin版本的
+    //RecyclerView适配器
+    implementation 'com.github.CymChad:BaseRecyclerViewAdapterHelper:3.0.7'
+    //mmkv用于替代SharedPreferences
+    implementation 'com.tencent:mmkv-static:1.2.12'
+    //可定制Tabs
+    implementation 'com.github.hackware1993:MagicIndicator:1.7.0'
+    //shape可以帮助你少写很多样式xml
+    implementation 'com.github.getActivity:ShapeView:8.3'
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+//    implementation("androidx.media3:media3-exoplayer:1.6.1")
+//    implementation("androidx.media3:media3-exoplayer-rtsp:1.6.1")
+//    implementation("androidx.media3:media3-ui:1.6.1")
+    implementation 'com.google.protobuf:protobuf-java:4.29.3'
+    implementation files('libs/my_galsses_sdk_0.0.7_20260403_release.aar')
+
+    /**
+     * ------------------------------------------下面为一些常用可选的第三方库---------------------------------------------------
+     */
+
+//    //沉浸式基础依赖包，必须要依赖
+//    implementation 'com.gyf.immersionbar:immersionbar:3.0.0'
+//    // kotlin扩展（可选）
+//    implementation 'com.gyf.immersionbar:immersionbar-ktx:3.0.0'
+//    //鲁班压缩，压缩图片
+//    implementation 'top.zibin:Luban:1.1.8'
+//    //日历控件
+//    implementation 'com.haibin:calendarview:3.6.9'
+//    //资源图片，视频选择器
+//    implementation 'com.github.LuckSiege.PictureSelector:picture_library:v2.6.0'
+//    implementation "androidx.camera:camera-view:1.0.0-alpha19"//解决在使用androidx的时候，可能会出现androidx.camera.view.CameraView找不到
+//    //悬浮球
+//    implementation 'com.github.princekin-f:EasyFloat:1.3.4'
+//    //一行进度监听器
+//    implementation 'me.jessyan:progressmanager:1.5.0'
+//    //zxing二维码生成扫描
+//    implementation 'com.google.zxing:core:3.3.3'
+//    implementation 'com.journeyapps:zxing-android-embedded:3.6.0'
+//    //漂亮的Toast
+//    implementation 'com.github.GrenderG:Toasty:1.5.0'
+
+
+}
