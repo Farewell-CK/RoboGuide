@@ -89,7 +89,10 @@ final class MapTransform {
         // Cityscapes alternates between road and sidewalk on visually identical plazas.
         // They are equally traversable for this pedestrian planner, so that label jitter
         // must not create an artificial cost gradient.
-        if (rgb == MAPILLARY_ROAD_RGB || rgb == MAPILLARY_SIDEWALK_RGB) return 0f;
+        // PIDNet has one road class. Keep observed road preferred to unknown (50),
+        // while retaining sidewalk as the lowest-cost walkable surface.
+        if (rgb == MAPILLARY_ROAD_RGB) return 0.2f;
+        if (rgb == MAPILLARY_SIDEWALK_RGB) return 0f;
         return configuredDegree;
     }
 

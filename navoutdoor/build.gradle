@@ -135,6 +135,7 @@ dependencies {
     npuImplementation 'com.google.ai.edge.litert:litert:1.4.1'
     npuImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
     implementation project(':librealsense')
+    testImplementation 'junit:junit:4.13.2'
 }
 
 // 与原 mobile-navigation 一致的原生库完整性校验：打包前检查三个 VINS/native .so 是否

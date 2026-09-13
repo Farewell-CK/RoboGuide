@@ -402,10 +402,14 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
             bind.tvFrameStatus.text = text
         }
 
-        override fun onCalibrationStatus(text: String, ready: Boolean) {
+        override fun onCalibrationStatus(text: String, calibrated: Boolean, recalibrationRequired: Boolean) {
             bind.tvCalibrationStatus.text = text
-            bind.btnCalibrateHeading.isEnabled = ready
-            bind.btnCalibrateHeading.alpha = if (ready) 1f else 0.5f
+            bind.tvCalibrationStatus.setTextColor(colorFor(
+                if (calibrated) GuidanceLevel.SAFE else GuidanceLevel.MUTED))
+            bind.btnCalibrateHeading.visibility =
+                if (recalibrationRequired) View.VISIBLE else View.GONE
+            bind.btnCalibrateHeading.isEnabled = recalibrationRequired
+            bind.btnCalibrateHeading.alpha = if (recalibrationRequired) 1f else 0.5f
         }
 
         override fun onNavigationStarted() {
@@ -426,6 +430,10 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         override fun onDepthPreview(bitmap: android.graphics.Bitmap?) {
             bind.ivDepthPreview.setImageBitmap(bitmap)
+        }
+
+        override fun onColorPreview(bitmap: android.graphics.Bitmap?) {
+            bind.ivColorPreview.setImageBitmap(bitmap)
         }
 
         override fun onVinsStatus(text: String, level: GuidanceLevel) {
