@@ -11,14 +11,15 @@ scenarios:
   - id: g1-fresh-unique-place-free
     pair: fresh-unique-place
     mode: context_free
-    instruction: "把包裹送到前台"
+    instruction: "把运单号为 A-1024 的包裹送到前台"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g1-fresh-unique-place-grounded
     pair: fresh-unique-place
     mode: fixture_grounded
-    instruction: "把包裹送到前台"
+    instruction: "把运单号为 A-1024 的包裹送到前台"
     grounding:
       state:
         - object_type: place
@@ -38,6 +39,7 @@ scenarios:
           source_epoch: session-a
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   # P2: two Fresh sources conflict about the same object.
   - id: g2-conflict-free
@@ -46,6 +48,7 @@ scenarios:
     instruction: "到会议室把白板擦拿过来"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g2-conflict-grounded
     pair: conflict
@@ -79,6 +82,7 @@ scenarios:
           sequence: 4
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   # P3: the only available evidence is stale.
   - id: g3-stale-free
@@ -87,6 +91,7 @@ scenarios:
     instruction: "去充电桩那里待命"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g3-stale-grounded
     pair: stale
@@ -109,23 +114,26 @@ scenarios:
           sequence: 5
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   # P4: grounded mode with explicitly empty evidence -- near-identical
   # control pair for the context-free arm.
   - id: g4-no-evidence-free
     pair: no-evidence
     mode: context_free
-    instruction: "把工具箱搬到装卸区"
+    instruction: "把贴有红色标签的工具箱搬到装卸区"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g4-no-evidence-grounded
     pair: no-evidence
     mode: fixture_grounded
-    instruction: "把工具箱搬到装卸区"
+    instruction: "把贴有红色标签的工具箱搬到装卸区"
     grounding: {}
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   # P5: memory evidence is MetadataOnly -- it proves the revision exists,
   # never its content or world truth.
@@ -135,6 +143,7 @@ scenarios:
     instruction: "使用已发布的仓库地图，把载有货物的货架车推到收货区"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g5-metadata-only-grounded
     pair: metadata-only
@@ -155,20 +164,23 @@ scenarios:
             team: facilities
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
       extra_forbidden_patterns: ["metadata.*proves|已验证地图内容|地图内容确认无误"]
 
-  # P6: fresh and stale evidence disagree -- fresh should win the tie.
-  - id: g6-fresh-beats-stale-free
-    pair: fresh-beats-stale
+  # P6: fresh and stale evidence disagree -- observe-only; this canary
+  # records behavior without freezing any State fusion policy.
+  - id: g6-fresh-vs-stale-free
+    pair: fresh-vs-stale
     mode: context_free
-    instruction: "把托盘送到当前卸货区"
+    instruction: "把载有发动机备件的托盘送到当前卸货区"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
-  - id: g6-fresh-beats-stale-grounded
-    pair: fresh-beats-stale
+  - id: g6-fresh-vs-stale-grounded
+    pair: fresh-vs-stale
     mode: fixture_grounded
-    instruction: "把托盘送到当前卸货区"
+    instruction: "把载有发动机备件的托盘送到当前卸货区"
     grounding:
       state:
         - object_type: place
@@ -197,6 +209,7 @@ scenarios:
           sequence: 9
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   # P7: both grounding sources are unavailable -- gaps only, no evidence.
   - id: g7-gap-only-free
@@ -205,6 +218,7 @@ scenarios:
     instruction: "巡逻今天上午指定的三个检查点"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null
 
   - id: g7-gap-only-grounded
     pair: gap-only
@@ -220,3 +234,4 @@ scenarios:
           detail: "fixture: memory catalog unreachable during capture"
     expect:
       final_lifecycle: Any
+      clarify_first_pass: null

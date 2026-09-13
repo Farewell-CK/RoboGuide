@@ -229,7 +229,7 @@ def check_final_lifecycle(
 
 
 def check_clarification_behavior(
-    case: object, record: dict[str, object], clarify_first_pass: bool
+    case: object, record: dict[str, object], clarify_first_pass: bool | None
 ) -> InvariantOutcome:
     """Check that clarification behavior matches the case expectation.
 
@@ -251,6 +251,13 @@ def check_clarification_behavior(
         and turn.get("kind") == "ClarificationQuestion"
         and turn.get("speaker") == "MissionIntelligence"
     ]
+    if clarify_first_pass is None:
+        return InvariantOutcome(
+            "clarification_behavior",
+            None,
+            f"observe-only: {len(questions)} clarification question(s) recorded"
+            + (f": {' | '.join(questions[:3])}" if questions else ""),
+        )
     if clarify_first_pass:
         if questions:
             return InvariantOutcome(

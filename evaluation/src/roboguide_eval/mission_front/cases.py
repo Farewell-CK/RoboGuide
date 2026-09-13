@@ -43,7 +43,10 @@ class CaseExpectations:
     """Declare the semantic expectations checked after one case finishes."""
 
     final_lifecycle: str = "Accepted"
-    clarify_first_pass: bool = False
+    # ``False`` asserts no clarification on the first pass, ``True`` asserts
+    # clarification is required; ``None`` is observe-only (the question
+    # count is recorded but never asserted) for observational canaries.
+    clarify_first_pass: bool | None = False
     must_cover_objective: tuple[str, ...] = ()
     min_tasks: int = 1
     min_roles: int = 1
@@ -232,8 +235,10 @@ def _parse_expectations(value: object, path: str) -> CaseExpectations:
             f"{path}.final_lifecycle must be one of {sorted(FINAL_LIFECYCLES)}"
         )
     clarify = value.get("clarify_first_pass", False)
-    if not isinstance(clarify, bool):
-        raise MissionFrontCaseError(f"{path}.clarify_first_pass must be a boolean")
+    if clarify is not None and not isinstance(clarify, bool):
+        raise MissionFrontCaseError(
+            f"{path}.clarify_first_pass must be a boolean or null (observe-only)"
+        )
     timing_required = value.get("timing_required", False)
     if not isinstance(timing_required, bool):
         raise MissionFrontCaseError(f"{path}.timing_required must be a boolean")

@@ -62,7 +62,7 @@ def test_canary_set_loads_with_expected_pair_coverage() -> None:
         "stale",
         "no-evidence",
         "metadata-only",
-        "fresh-beats-stale",
+        "fresh-vs-stale",
         "gap-only",
     }
     for pair in pairs:
@@ -383,3 +383,86 @@ def test_run_grounding_suite_ab_pairs_with_stub_transport(
     run_dirs = list((tmp_path / "out").iterdir())
     assert len(run_dirs) == 1
     assert len(list((run_dirs[0] / "cases").glob("*.json"))) == 14
+
+
+def test_canary_clarification_expectations_are_observe_only() -> None:
+    """All canaries record clarification counts without asserting them."""
+    scenarios = load_grounding_scenarios(CANARIES)
+    assert len(scenarios) == 14
+    for scenario in scenarios:
+        assert scenario.expectations.clarify_first_pass is None
+
+
+def test_fresh_vs_stale_pair_is_neutral_no_fusion_policy() -> None:
+    """The former fresh-beats-stale pair is renamed and keeps Any lifecycle."""
+    scenarios = load_grounding_scenarios(CANARIES)
+    pair_ids = {scenario.pair_id for scenario in scenarios}
+    assert "fresh-vs-stale" in pair_ids
+    assert "fresh-beats-stale" not in pair_ids
+    for scenario in scenarios:
+        if scenario.pair_id == "fresh-vs-stale":
+            assert scenario.expectations.final_lifecycle == "Any"
+    names = {scenario.scenario_id for scenario in scenarios}
+    assert "g6-fresh-vs-stale-free" in names
+    assert "g6-fresh-vs-stale-grounded" in names
+
+
+def test_none_clarification_outcome_is_observe_only() -> None:
+    """clarify_first_pass=None records the count and never fails."""
+    from roboguide_eval.mission_front.invariants import check_clarification_behavior
+
+    record: dict[str, object] = {
+        "lifecycle": "NeedsClarification",
+        "dialogue": [
+            {
+                "turn_id": "t1",
+                "speaker": "User",
+                "kind": "Instruction",
+                "content": "x",
+                "created_at_ms": 1,
+                "in_reply_to": None,
+            },
+            {
+                "turn_id": "t2",
+                "speaker": "MissionIntelligence",
+                "kind": "ClarificationQuestion",
+                "content": "which one?",
+                "created_at_ms": 2,
+                "in_reply_to": "t1",
+            },
+        ],
+    }
+    outcome = check_clarification_behavior(object(), record, None)
+    assert outcome.passed is None
+    assert outcome.not_evaluated
+    assert "observe-only" in outcome.detail
+    assert "which one?" in outcome.detail
+
+
+def test_summary_line_excludes_not_evaluated_from_failures() -> None:
+    """summary_line and failure_reasons never treat None as a failure."""
+    from roboguide_eval.mission_front.invariants import InvariantOutcome
+    from roboguide_eval.mission_front.runner import CaseResult
+
+    result = CaseResult(
+        case_id="c",
+        category="grounding",
+        instruction="i",
+        expected_lifecycle="Any",
+        final_lifecycle="NeedsClarification",
+        passed=True,
+        wall_seconds=1.0,
+        follow_ups_used=0,
+        invariants=[
+            InvariantOutcome("a", True, "ok"),
+            InvariantOutcome("b", False, "broken"),
+            InvariantOutcome("c", None, "not evaluated"),
+        ],
+        llm_calls=[],
+        stage_timings={},
+        record={},
+    )
+    assert result.failure_reasons() == ["b: broken"]
+    line = result.summary_line()
+    assert line["failed_invariants"] == ["b"]
+    assert line["not_evaluated_invariants"] == ["c"]

@@ -235,7 +235,9 @@ class CaseResult:
             One ``name: detail`` string per failed invariant.
         """
         return [
-            f"{outcome.name}: {outcome.detail}" for outcome in self.invariants if not outcome.passed
+            f"{outcome.name}: {outcome.detail}"
+            for outcome in self.invariants
+            if outcome.passed is False
         ]
 
     def summary_line(self) -> dict[str, object]:
@@ -252,7 +254,10 @@ class CaseResult:
             "final_lifecycle": self.final_lifecycle,
             "wall_seconds": round(self.wall_seconds, 1),
             "failed_invariants": [
-                outcome.name for outcome in self.invariants if not outcome.passed
+                outcome.name for outcome in self.invariants if outcome.passed is False
+            ],
+            "not_evaluated_invariants": [
+                outcome.name for outcome in self.invariants if outcome.passed is None
             ],
             "llm_calls": len(self.llm_calls),
         }
@@ -534,6 +539,9 @@ def build_summary(
             if outcome.passed is False:
                 failed_invariants[outcome.name] = failed_invariants.get(outcome.name, 0) + 1
     all_calls = [call for result in results for call in result.llm_calls]
+    suite_stage_timings = {
+        name: timing.summary() for name, timing in suite.stage_timings_live.items()
+    }
     return {
         "suite_id": suite_id,
         "model": suite.model,
@@ -545,5 +553,5 @@ def build_summary(
         "failed_invariants": dict(sorted(failed_invariants.items(), key=lambda item: -item[1])),
         "token_totals": _usage_totals(all_calls),
         "llm_calls": len(all_calls),
-        "stage_timings": suite.stage_timings,
+        "stage_timings": suite_stage_timings,
     }
