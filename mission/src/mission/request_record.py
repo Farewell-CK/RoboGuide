@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
-from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
@@ -206,12 +206,16 @@ class MissionRequestRecord:
     grounding_context: GroundingContextSnapshot | None = None
 
     def __post_init__(self) -> None:
-        """Reject a grounding snapshot detached from this Mission Request identity."""
+        """Reject a snapshot detached from the request or its captured dialogue revision."""
         context = self.grounding_context
         if context is None:
             return
         if context.request_id != self.request_id:
             raise MissionRequestError("grounding context belongs to another Mission Request")
+        if context.dialogue_digest not in _allowed_grounding_dialogue_digests(self.dialogue):
+            raise MissionRequestError(
+                "grounding context does not match the Mission Request dialogue"
+            )
 
     def to_json(self) -> JSONObject:
         """Serialize the versioned status projection returned by the Mission Request API."""
@@ -366,6 +370,26 @@ class MissionRequestRecord:
             for turn in self.dialogue
             if turn.kind is DialogueTurnKind.CLARIFICATION_ANSWER
         )
+
+
+def _allowed_grounding_dialogue_digests(
+    dialogue: tuple[DialogueTurn, ...],
+) -> frozenset[str]:
+    """Allow the captured input plus clarification questions appended after deliberation."""
+    full = dialogue_digest(tuple(turn.to_json() for turn in dialogue))
+    captured_length = len(dialogue)
+    while captured_length > 0:
+        turn = dialogue[captured_length - 1]
+        if (
+            turn.speaker is not DialogueSpeaker.MISSION_INTELLIGENCE
+            or turn.kind is not DialogueTurnKind.CLARIFICATION_QUESTION
+        ):
+            break
+        captured_length -= 1
+    if captured_length == len(dialogue):
+        return frozenset({full})
+    captured = dialogue_digest(tuple(turn.to_json() for turn in dialogue[:captured_length]))
+    return frozenset({full, captured})
 
 
 def _legacy_dialogue(

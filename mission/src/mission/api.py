@@ -66,6 +66,7 @@ def build_engine(
             service_settings.max_grounding_state_evidence,
             service_settings.max_grounding_memory_evidence,
             admitted_world_payload_schemas=(service_settings.grounding_world_payload_schemas),
+            max_gaps=service_settings.max_grounding_gaps,
         ),
     )
     return engine, service_settings
@@ -87,9 +88,17 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, {"status": "ok"})
             return
         prefix = "/v1/mission-requests/"
-        if path.startswith(prefix) and "/" not in path[len(prefix) :]:
-            self._run(lambda: self.server.engine.get(path[len(prefix) :]), HTTPStatus.OK)
-            return
+        if path.startswith(prefix):
+            parts = path[len(prefix) :].split("/")
+            if len(parts) == 1 and parts[0]:
+                self._run(lambda: self.server.engine.get(parts[0]), HTTPStatus.OK)
+                return
+            if len(parts) == 3 and all(parts) and parts[1] == "grounding-contexts":
+                self._run(
+                    lambda: self.server.engine.grounding_context(parts[0], parts[2]),
+                    HTTPStatus.OK,
+                )
+                return
         self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:

@@ -261,6 +261,26 @@ class BlockingFirstGroundingReader:
         return self._delegate.capture(request_id, dialogue, captured_at_ms)
 
 
+class ReusingGroundingReader:
+    """Return the first snapshot again to simulate a faulty cross-turn cache."""
+
+    def __init__(self) -> None:
+        """Initialize one empty delegate and no cached snapshot."""
+        self._delegate = EmptyMissionGroundingReader()
+        self._cached: GroundingContextSnapshot | None = None
+
+    def capture(
+        self,
+        request_id: str,
+        dialogue: tuple[DialogueTurn, ...],
+        captured_at_ms: int,
+    ) -> GroundingContextSnapshot:
+        """Capture once, then deliberately return stale dialogue-bound evidence."""
+        if self._cached is None:
+            self._cached = self._delegate.capture(request_id, dialogue, captured_at_ms)
+        return self._cached
+
+
 def _assessment(*questions: str) -> IntentAssessment:
     """Build one normalized objective with optional open questions."""
     return IntentAssessment(
@@ -367,6 +387,64 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
     assert first_context.context_digest != second_context.context_digest
     assert first_context.dialogue_digest != second_context.dialogue_digest
     assert accepted.grounding_context == second_context
+    assert engine.grounding_context(accepted.request_id, first_context.context_digest) == (
+        first_context
+    )
+    assert engine.grounding_context(accepted.request_id, second_context.context_digest) == (
+        second_context
+    )
+
+
+def test_stale_reader_context_is_rejected_before_the_next_model_call(tmp_path: Path) -> None:
+    """A cached context from an older Dialogue revision cannot reach Mission Intelligence."""
+    interpreter = FakeInterpreter([_assessment("Which destination?"), _assessment()])
+    reader = ReusingGroundingReader()
+    engine = MissionRequestEngine(
+        MissionRequestStore(tmp_path / "stale-grounding.sqlite3"),
+        interpreter,
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+        _catalog(),
+        frozenset(),
+        SequenceIds(),
+        SequenceClock(),
+        grounding_reader=reader,
+    )
+
+    waiting = engine.create("move the payload")
+    failed = engine.add_message(waiting.request_id, "to the front desk")
+
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert failed.grounding_context is None
+    assert failed.issues == ("grounding reader returned a stale dialogue context",)
+    assert len(interpreter.calls) == 1
+
+
+def test_persisted_context_must_match_the_current_dialogue_revision(tmp_path: Path) -> None:
+    """Restore rejects a snapshot that predates a user answer rather than trusting its digest."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment("Which destination?")]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    waiting = engine.create("move the payload")
+    persisted = waiting.to_json()
+    dialogue = cast(list[JSONObject], persisted["dialogue"])
+    question = cast(str, dialogue[-1]["turn_id"])
+    dialogue.append(
+        DialogueTurn(
+            "turn-0003",
+            DialogueSpeaker.USER,
+            DialogueTurnKind.CLARIFICATION_ANSWER,
+            "to the front desk",
+            200,
+            question,
+        ).to_json()
+    )
+
+    with pytest.raises(MissionRequestError, match="does not match.*dialogue"):
+        MissionRequestRecord.from_json(persisted)
 
 
 def test_slow_grounding_for_one_request_does_not_block_another_request(
@@ -697,6 +775,16 @@ def test_http_api_accepts_only_instruction_and_returns_durable_projection(tmp_pa
         ) as response:
             fetched = cast(JSONObject, json.loads(response.read()))
         assert fetched == created
+        context = cast(JSONObject, created["grounding_context"])
+        with urllib.request.urlopen(  # noqa: S310
+            (
+                f"{endpoint}/v1/mission-requests/{created['request_id']}"
+                f"/grounding-contexts/{context['context_digest']}"
+            ),
+            timeout=2,
+        ) as response:
+            historical = cast(JSONObject, json.loads(response.read()))
+        assert historical == context
     finally:
         server.shutdown()
         server.server_close()

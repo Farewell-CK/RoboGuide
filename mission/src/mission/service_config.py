@@ -14,6 +14,7 @@ _DEFAULT_ARTIFACT_ENDPOINT = "http://127.0.0.1:8090"
 _DEFAULT_GROUNDING_TIMEOUT_SECONDS = 5.0
 _DEFAULT_MAX_GROUNDING_STATE_EVIDENCE = 64
 _DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE = 32
+_DEFAULT_MAX_GROUNDING_GAPS = 32
 
 
 class MissionServiceConfigError(ValueError):
@@ -33,6 +34,7 @@ class MissionServiceSettings:
     grounding_timeout_seconds: float
     max_grounding_state_evidence: int
     max_grounding_memory_evidence: int
+    max_grounding_gaps: int
     grounding_world_payload_schemas: frozenset[str]
     max_request_bytes: int
     approval_policy: ApprovalPolicy
@@ -83,6 +85,9 @@ def load_service_settings(
         ),
         max_grounding_memory_evidence=_optional_positive_integer(
             service, "max_grounding_memory_evidence", _DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE
+        ),
+        max_grounding_gaps=_optional_positive_integer(
+            service, "max_grounding_gaps", _DEFAULT_MAX_GROUNDING_GAPS
         ),
         grounding_world_payload_schemas=_optional_text_set(
             service, "grounding_world_payload_schemas"

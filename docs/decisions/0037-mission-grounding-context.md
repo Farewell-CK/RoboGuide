@@ -70,6 +70,13 @@ reinterpretation. Repair does not refresh context mid-cycle. An explicit later d
 may capture a new snapshot and produce a new draft revision. User Dialogue remains separate from
 internal Draft/Review/Repair evidence.
 
+Every captured snapshot is stored once in a digest-addressed immutable table in the Mission Request
+store. Updating the current request projection never overwrites an older snapshot, and the read-only
+Mission Request API can retrieve a historical snapshot by owning Request identity and exact digest.
+The Engine verifies the captured `request_id` and exact input Dialogue digest before any model stage;
+durable restore accepts only that input revision or the same revision followed by clarification
+questions produced after capture.
+
 Mission Request projection advances to v0.4. v0.1-v0.3 remain readable compatibility inputs and do
 not receive fabricated historical grounding. Newly processed requests persist a non-null snapshot,
 including an attributed empty snapshot when no evidence is available.
@@ -77,9 +84,12 @@ including an attributed empty snapshot when no evidence is available.
 ### 4. Acquisition is bounded and fail-soft
 
 State and Memory reads have fixed configured origins, bounded response sizes, timeouts, evidence
-counts, no redirects, and deterministic ordering. One unavailable or malformed source produces a
-durable `GroundingGap`; it does not erase valid evidence from the other source or make an otherwise
-valid Mission semantically invalid. Empty context is a supported bootstrap outcome.
+counts, diagnostic counts, a final canonical snapshot byte limit, no redirects, and deterministic
+ordering. Stable-tail evidence trimming is explicit in a gap if the complete snapshot exceeds that
+limit. HTTP protocol interruptions are normalized as source failures. One unavailable or malformed
+source produces a durable `GroundingGap`; it does not erase valid evidence from the other source or
+make an otherwise valid Mission semantically invalid. Empty context is a supported bootstrap
+outcome.
 
 All model stages treat strings embedded in grounding evidence as untrusted data, not provider
 instructions. Snapshot construction and access detach nested JSON containers, restored arrays must
@@ -96,6 +106,8 @@ Controller calls for one Request do not hold a service-wide lock that blocks unr
   feasibility or placement authority.
 - Every model stage sees the same inspectable evidence, reducing Planner/Reviewer context drift.
 - Persistence can explain which context supported a draft and Review.
+- Databases created before immutable context history was introduced cannot reconstruct snapshots
+  that an older request upsert already overwrote; all snapshots saved after migration are retained.
 - State and Memory may change after capture. The snapshot is deliberation evidence, not a live lock,
   reservation, or guarantee that the physical world remains unchanged.
 - Global Memory metadata is discoverable context only. Useful content selection, authorization,

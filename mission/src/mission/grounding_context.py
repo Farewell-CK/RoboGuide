@@ -14,6 +14,7 @@ from mission.models import JSONObject, JSONValue
 
 GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.1"
 GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2"
+MAX_GROUNDING_CONTEXT_BYTES = 512 * 1024
 EMPTY_GROUNDING_SELECTION_POLICY_REF = (
     f"{GROUNDING_SELECTION_POLICY}#world-payload-schemas="
     "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
@@ -23,6 +24,10 @@ _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 
 class GroundingContextError(ValueError):
     """Report malformed or internally inconsistent Mission grounding evidence."""
+
+
+class GroundingContextSizeError(GroundingContextError):
+    """Report a snapshot whose canonical representation exceeds the local hard limit."""
 
 
 class GroundingFreshness(StrEnum):
@@ -432,6 +437,8 @@ class GroundingContextSnapshot:
         )
         if self.context_digest != expected:
             raise GroundingContextError("grounding context digest does not match its evidence")
+        if len(_canonical_json_bytes(self.to_json())) > MAX_GROUNDING_CONTEXT_BYTES:
+            raise GroundingContextSizeError("grounding context exceeds the local byte limit")
 
     def to_json(self) -> JSONObject:
         """Serialize the immutable snapshot for provider input and request persistence."""
@@ -521,8 +528,13 @@ def _snapshot_payload(
 
 def _digest(value: JSONValue) -> str:
     """Hash one JSON value in stable key and separator order."""
+    return f"sha256:{hashlib.sha256(_canonical_json_bytes(value)).hexdigest()}"
+
+
+def _canonical_json_bytes(value: JSONValue) -> bytes:
+    """Encode one finite JSON value with the ordering used for identity and size limits."""
     try:
-        encoded = json.dumps(
+        return json.dumps(
             value,
             ensure_ascii=False,
             sort_keys=True,
@@ -531,7 +543,6 @@ def _digest(value: JSONValue) -> str:
         ).encode()
     except (TypeError, ValueError) as error:
         raise GroundingContextError("grounding evidence must be canonical JSON") from error
-    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 def _clone_json(value: JSONValue, path: str) -> JSONValue:

@@ -147,8 +147,10 @@ State evidence，以及 Global Semantic/Experience/Spatial
 Memory manifest metadata；Memory bytes 尚未读取。Node health/liveness、capability/resource
 inventory、leases、reservations、calendar 和 Runtime attempts 不进入 LLM context。State source
 失败会成为可审计 gap，空 context 仍然合法；`World` object class 不等价于 visibility，schema
-admission 默认 fail-closed，嵌套 evidence 不能绕过 digest 原地修改。clarification answer 才触发
-下一份 snapshot；不同 Mission Request 的慢 Grounding/model 调用不再持有全局生命周期锁。边界见
+admission 默认 fail-closed，嵌套 evidence 不能绕过 digest 原地修改。evidence、diagnostic 与最终
+snapshot bytes 均有独立上限；HTTP body 中断不会阻止另一 source 的 capture。每份 context 按 digest
+不可变保存并可通过 Mission Request API 回查，且进入模型前必须匹配当前 Dialogue input。
+clarification answer 才触发下一份 snapshot；不同 Mission Request 的慢 Grounding/model 调用不再持有全局生命周期锁。边界见
 [`ADR-0037`](docs/decisions/0037-mission-grounding-context.md)。
 
 ### Control Plane

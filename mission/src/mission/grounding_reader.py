@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -12,6 +13,7 @@ from typing import Any, Protocol, cast
 
 from mission.grounding_context import (
     GroundingContextError,
+    GroundingContextSizeError,
     GroundingContextSnapshot,
     GroundingFreshness,
     GroundingGap,
@@ -142,7 +144,7 @@ class UrllibGroundingJsonTransport:
                 raw = response.read(MAX_GROUNDING_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as error:
             raise GroundingReadError(f"grounding endpoint returned HTTP {error.code}") from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
             raise GroundingReadError(f"grounding endpoint request failed: {error}") from error
         if len(raw) > MAX_GROUNDING_RESPONSE_BYTES:
             raise GroundingReadError("grounding endpoint response exceeds local limit")
@@ -168,17 +170,19 @@ class HttpMissionGroundingReader:
         transport: GroundingJsonTransport | None = None,
         *,
         admitted_world_payload_schemas: frozenset[str] = frozenset(),
+        max_gaps: int = 32,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
         self._artifact_endpoint = _endpoint(artifact_endpoint, "Artifact")
         if timeout_seconds <= 0:
             raise GroundingReadError("grounding timeout must be positive")
-        if max_state_evidence <= 0 or max_memory_evidence <= 0:
+        if max_state_evidence <= 0 or max_memory_evidence <= 0 or max_gaps <= 0:
             raise GroundingReadError("grounding evidence budgets must be positive")
         self._timeout_seconds = timeout_seconds
         self._max_state_evidence = max_state_evidence
         self._max_memory_evidence = max_memory_evidence
+        self._max_gaps = max_gaps
         self._transport = transport or UrllibGroundingJsonTransport()
         if any(not schema.strip() for schema in admitted_world_payload_schemas):
             raise GroundingReadError("admitted World payload schemas must be nonblank")
@@ -192,19 +196,19 @@ class HttpMissionGroundingReader:
         captured_at_ms: int,
     ) -> GroundingContextSnapshot:
         """Capture independent State and Memory reads while retaining partial-failure gaps."""
-        state, state_gaps = self._read_state()
-        memory, memory_gaps = self._read_memory()
-        return GroundingContextSnapshot.create(
+        gaps = _GroundingGapCollector(self._max_gaps)
+        state = self._read_state(gaps)
+        memory = self._read_memory(gaps)
+        return self._bounded_snapshot(
             request_id=request_id,
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
             captured_at_ms=captured_at_ms,
             state_evidence=state,
             memory_evidence=memory,
-            gaps=(*state_gaps, *memory_gaps),
-            selection_policy_ref=self._selection_policy_ref,
+            gaps=gaps.finish(),
         )
 
-    def _read_state(self) -> tuple[tuple[StateGroundingEvidence, ...], tuple[GroundingGap, ...]]:
+    def _read_state(self, gaps: _GroundingGapCollector) -> tuple[StateGroundingEvidence, ...]:
         """Read only World records and preserve the Controller's freshness assessment."""
         path = "/v1/state/records?" + urllib.parse.urlencode({"object_class": "world"})
         try:
@@ -215,17 +219,17 @@ class HttpMissionGroundingReader:
                 raise GroundingReadError("unsupported State query schema")
             records = _array(response, "records")
         except (GroundingReadError, GroundingContextError, KeyError) as error:
-            return (), (GroundingGap("state_unavailable", "controller-state", str(error)),)
+            gaps.add("state_unavailable", "controller-state", str(error))
+            return ()
         evidence: list[StateGroundingEvidence] = []
-        gaps: list[GroundingGap] = []
         for index, raw in enumerate(records):
             try:
                 item = _state_evidence(raw, self._admitted_world_payload_schemas)
             except (GroundingContextError, KeyError) as error:
-                gaps.append(
-                    GroundingGap(
-                        "state_record_rejected", "controller-state", f"record {index}: {error}"
-                    )
+                gaps.add(
+                    "state_record_rejected",
+                    "controller-state",
+                    f"record {index}: {error}",
                 )
                 continue
             if item is not None:
@@ -233,18 +237,14 @@ class HttpMissionGroundingReader:
         evidence.sort(key=lambda item: item.evidence_id)
         if len(evidence) > self._max_state_evidence:
             evidence = evidence[: self._max_state_evidence]
-            gaps.append(
-                GroundingGap(
-                    "state_results_truncated",
-                    "controller-state",
-                    f"retained at most {self._max_state_evidence} World State records",
-                )
+            gaps.add(
+                "state_results_truncated",
+                "controller-state",
+                f"retained at most {self._max_state_evidence} World State records",
             )
-        return tuple(evidence), tuple(gaps)
+        return tuple(evidence)
 
-    def _read_memory(
-        self,
-    ) -> tuple[tuple[MemoryGroundingEvidence, ...], tuple[GroundingGap, ...]]:
+    def _read_memory(self, gaps: _GroundingGapCollector) -> tuple[MemoryGroundingEvidence, ...]:
         """Read only admissible Global manifest metadata and never fetch artifact bytes."""
         try:
             response = self._transport.get_json(
@@ -254,17 +254,17 @@ class HttpMissionGroundingReader:
                 raise GroundingReadError("unsupported Memory catalog schema")
             manifests = _array(response, "memories")
         except (GroundingReadError, GroundingContextError, KeyError) as error:
-            return (), (GroundingGap("memory_unavailable", "memory-catalog", str(error)),)
+            gaps.add("memory_unavailable", "memory-catalog", str(error))
+            return ()
         evidence: list[MemoryGroundingEvidence] = []
-        gaps: list[GroundingGap] = []
         for index, raw in enumerate(manifests):
             try:
                 item = _memory_evidence(raw)
             except (GroundingContextError, KeyError) as error:
-                gaps.append(
-                    GroundingGap(
-                        "memory_manifest_rejected", "memory-catalog", f"manifest {index}: {error}"
-                    )
+                gaps.add(
+                    "memory_manifest_rejected",
+                    "memory-catalog",
+                    f"manifest {index}: {error}",
                 )
                 continue
             if item is not None:
@@ -272,14 +272,114 @@ class HttpMissionGroundingReader:
         evidence.sort(key=lambda item: item.evidence_id)
         if len(evidence) > self._max_memory_evidence:
             evidence = evidence[: self._max_memory_evidence]
-            gaps.append(
-                GroundingGap(
-                    "memory_results_truncated",
-                    "memory-catalog",
-                    f"retained at most {self._max_memory_evidence} Global Memory manifests",
-                )
+            gaps.add(
+                "memory_results_truncated",
+                "memory-catalog",
+                f"retained at most {self._max_memory_evidence} Global Memory manifests",
             )
-        return tuple(evidence), tuple(gaps)
+        return tuple(evidence)
+
+    def _bounded_snapshot(
+        self,
+        *,
+        request_id: str,
+        dialogue_digest: str,
+        captured_at_ms: int,
+        state_evidence: tuple[StateGroundingEvidence, ...],
+        memory_evidence: tuple[MemoryGroundingEvidence, ...],
+        gaps: tuple[GroundingGap, ...],
+    ) -> GroundingContextSnapshot:
+        """Drop deterministic stable tails until the complete snapshot fits its hard limit."""
+        retained_state = list(state_evidence)
+        retained_memory = list(memory_evidence)
+        retained_gaps = list(gaps)
+        removed_state = 0
+        removed_memory = 0
+        while True:
+            current_gaps = _snapshot_gaps(
+                tuple(retained_gaps),
+                self._max_gaps,
+                removed_state,
+                removed_memory,
+            )
+            try:
+                return GroundingContextSnapshot.create(
+                    request_id=request_id,
+                    dialogue_digest=dialogue_digest,
+                    captured_at_ms=captured_at_ms,
+                    state_evidence=tuple(retained_state),
+                    memory_evidence=tuple(retained_memory),
+                    gaps=current_gaps,
+                    selection_policy_ref=self._selection_policy_ref,
+                )
+            except GroundingContextSizeError:
+                if retained_memory:
+                    retained_memory.pop()
+                    removed_memory += 1
+                elif retained_state:
+                    retained_state.pop()
+                    removed_state += 1
+                elif retained_gaps:
+                    retained_gaps.pop()
+                else:
+                    raise
+
+
+class _GroundingGapCollector:
+    """Bound retained diagnostics while counting evidence that was deliberately omitted."""
+
+    def __init__(self, maximum: int) -> None:
+        """Initialize one capture-local collector with a strictly positive result bound."""
+        self._maximum = maximum
+        self._gaps: list[GroundingGap] = []
+        self._omitted = 0
+
+    def add(self, code: str, source: str, detail: str) -> None:
+        """Retain one bounded diagnostic or count it when the configured limit is full."""
+        gap = GroundingGap(code, source, _bounded_gap_detail(detail))
+        if len(self._gaps) < self._maximum:
+            self._gaps.append(gap)
+        else:
+            self._omitted += 1
+
+    def finish(self) -> tuple[GroundingGap, ...]:
+        """Return retained diagnostics and one explicit omission summary when required."""
+        if self._omitted == 0:
+            return tuple(self._gaps)
+        summary = GroundingGap(
+            "grounding_diagnostics_truncated",
+            "mission-grounding",
+            f"omitted {self._omitted + 1} additional grounding diagnostics",
+        )
+        if self._maximum == 1:
+            return (summary,)
+        return (*self._gaps[: self._maximum - 1], summary)
+
+
+def _snapshot_gaps(
+    gaps: tuple[GroundingGap, ...],
+    maximum: int,
+    removed_state: int,
+    removed_memory: int,
+) -> tuple[GroundingGap, ...]:
+    """Add one mandatory summary when evidence was removed to meet the byte budget."""
+    if removed_state == 0 and removed_memory == 0:
+        return gaps
+    summary = GroundingGap(
+        "grounding_snapshot_truncated",
+        "mission-grounding",
+        f"byte limit omitted {removed_state} State and {removed_memory} Memory evidence records",
+    )
+    if maximum == 1:
+        return (summary,)
+    ordered = sorted(gaps, key=lambda item: (item.source, item.code, item.detail))
+    return (*ordered[: maximum - 1], summary)
+
+
+def _bounded_gap_detail(detail: str) -> str:
+    """Limit untrusted source diagnostics before they enter durable model-visible evidence."""
+    maximum = 512
+    return detail if len(detail) <= maximum else f"{detail[: maximum - 3]}..."
 
 
 def _state_evidence(

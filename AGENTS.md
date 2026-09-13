@@ -175,7 +175,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   attributed World State payload schemas and Global Semantic/Experience/Spatial Memory metadata.
   `World` classification is not visibility: schema admission fails closed, its identity is retained,
   and native per-record consumer scope remains deferred. Nested evidence uses defensive-copy access,
-  canonical restore ordering, and shared Rust/Python facade fixtures. It excludes live Node/Resource,
+  canonical restore ordering, bounded diagnostics/final bytes, and shared Rust/Python facade fixtures.
+  Each captured context is immutable digest-addressed history, is retrievable by Request/digest, and
+  must match the exact model-input Dialogue revision before use. HTTP protocol interruption remains a
+  fail-soft source gap. It excludes live Node/Resource,
   lease, reservation, calendar, and Runtime-attempt facts; Memory metadata never claims content was
   read. Interpreter, Planner, Reviewer, and Repairer share the same snapshot, while Controller
   freshness and source provenance remain intact. Mission Request v0.3 introduced the separate

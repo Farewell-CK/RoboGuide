@@ -130,10 +130,14 @@ Service 不用自己的 Unix time 重新推导。State 和 Memory 两个 source 
 admission set digest 保存在 selection policy identity。嵌套 JSON 使用 defensive copy，restore
 要求 canonical order，Rust/Python 共享 facade fixtures。不同 Mission Request 使用 request-scoped
 serialization，不因一个慢 HTTP/model 调用阻塞全部请求。同一 Snapshot 传给 Interpreter、Planner、Reviewer、Repairer，并连同
-review context digest 持久化在 Mission Request v0.4。Clarification answer 会 capture 新 snapshot；
+review context digest 持久化在 Mission Request v0.4。每份 snapshot 还按 digest 不可变保存，可通过
+`GET /v1/mission-requests/{request_id}/grounding-contexts/{context_digest}` 回查；Engine 在进入模型前
+验证 request 和 exact Dialogue input identity。Clarification answer 会 capture 新 snapshot；
 一次 repair cycle 不刷新 Context。当前没有 schema-aware relevance ranking、Memory content
 retrieval/prefetch、cross-process clock synchronization、belief fusion 或 grounding-driven Control
-decision，也没有 State-native per-record consumer scope/visibility。完整 authority 见 ADR-0037。
+decision，也没有 State-native per-record consumer scope/visibility。Reader 对 evidence、diagnostic
+数量和最终 canonical snapshot bytes 分别设限；HTTP body 中断仅使对应 source 形成 gap，不阻止另一
+source capture。完整 authority 见 ADR-0037。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。

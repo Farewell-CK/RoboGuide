@@ -15,7 +15,7 @@ from typing import Protocol
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionPlanSubmitter
-from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan
@@ -170,6 +170,15 @@ class MissionRequestEngine:
             raise MissionRequestError(f"unknown Mission Request {request_id}")
         return record
 
+    def grounding_context(self, request_id: str, context_digest: str) -> GroundingContextSnapshot:
+        """Return one historical deliberation snapshot without refreshing its evidence."""
+        context = self._store.grounding_context(request_id, context_digest)
+        if context is None:
+            raise MissionRequestError(
+                f"unknown Mission Request grounding context {context_digest} for {request_id}"
+            )
+        return context
+
     def add_message(self, request_id: str, text: str) -> MissionRequestRecord:
         """Append user clarification and invalidate any older draft before reinterpretation."""
         text = text.strip()
@@ -257,6 +266,7 @@ class MissionRequestEngine:
             grounding_context = self._grounding_reader.capture(
                 record.request_id, record.dialogue, self._clock()
             )
+            self._validate_grounding_context(record, grounding_context)
             record = self._update(record, grounding_context=grounding_context)
             assessment = self._interpreter.interpret(record.dialogue, grounding_context)
             if assessment.open_questions:
@@ -548,6 +558,18 @@ class MissionRequestEngine:
         if record.grounding_context is None:
             raise MissionRequestError("Mission deliberation has no grounding context snapshot")
         return record.grounding_context
+
+    def _validate_grounding_context(
+        self,
+        record: MissionRequestRecord,
+        context: GroundingContextSnapshot,
+    ) -> None:
+        """Reject a reader result not bound to the exact request and current model input."""
+        expected_dialogue = dialogue_digest(tuple(turn.to_json() for turn in record.dialogue))
+        if context.request_id != record.request_id:
+            raise MissionRequestError("grounding reader returned another Mission Request context")
+        if context.dialogue_digest != expected_dialogue:
+            raise MissionRequestError("grounding reader returned a stale dialogue context")
 
     def _clarification_questions(
         self, record: MissionRequestRecord, questions: tuple[str, ...]

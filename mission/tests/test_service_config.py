@@ -17,6 +17,7 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     assert settings.artifact_endpoint == "http://127.0.0.1:8090"
     assert settings.max_grounding_state_evidence == 64
     assert settings.max_grounding_memory_evidence == 32
+    assert settings.max_grounding_gaps == 32
     assert settings.grounding_world_payload_schemas == frozenset()
     assert "spatial.map.import@v0" in settings.approval_required_contracts
     assert [rule.rule_id for rule in settings.approval_policy.rules] == [

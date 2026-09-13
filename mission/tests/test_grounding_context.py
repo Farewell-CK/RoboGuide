@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -9,13 +10,21 @@ from typing import cast
 
 import pytest
 from mission.grounding_context import (
+    MAX_GROUNDING_CONTEXT_BYTES,
     GroundingContextError,
+    GroundingContextSizeError,
     GroundingContextSnapshot,
     GroundingFreshness,
+    GroundingGap,
     MemoryContentStatus,
+    dialogue_digest,
 )
-from mission.grounding_reader import GroundingReadError, HttpMissionGroundingReader
-from mission.models import JSONObject
+from mission.grounding_reader import (
+    GroundingReadError,
+    HttpMissionGroundingReader,
+    UrllibGroundingJsonTransport,
+)
+from mission.models import JSONObject, JSONValue
 from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 
 
@@ -437,3 +446,102 @@ def test_malformed_source_items_are_rejected_instead_of_silently_normalized() ->
         "state_record_rejected",
         "memory_manifest_rejected",
     }
+
+
+def test_http_protocol_interruption_is_normalized_as_a_grounding_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupted response body cannot escape the fail-soft transport boundary."""
+
+    def interrupted_open(
+        opener: object,
+        request: object,
+        data: object = None,
+        timeout: float = 0,
+    ) -> object:
+        """Simulate a peer closing a response before its declared body is complete."""
+        del opener, request, data, timeout
+        raise http.client.IncompleteRead(b'{"schema":', 20)
+
+    monkeypatch.setattr("urllib.request.OpenerDirector.open", interrupted_open)
+    transport = UrllibGroundingJsonTransport()
+
+    with pytest.raises(GroundingReadError, match="request failed"):
+        transport.get_json("http://controller.test/v1/state/records", 1.0)
+
+
+def test_malformed_item_diagnostics_are_count_bounded() -> None:
+    """A large malformed source produces a bounded trace with an omission count."""
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "records": [None] * 5_000,
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+    reader = HttpMissionGroundingReader(
+        "http://controller.test",
+        "http://artifact.test",
+        2.0,
+        1,
+        1,
+        transport,
+        admitted_world_payload_schemas=frozenset({"roboguide.test-place/v0.1"}),
+        max_gaps=4,
+    )
+
+    snapshot = reader.capture("request-test", _dialogue(), 30)
+
+    assert len(snapshot.gaps) == 4
+    summary = next(gap for gap in snapshot.gaps if gap.code == "grounding_diagnostics_truncated")
+    assert "4997" in summary.detail
+    encoded = json.dumps(snapshot.to_json(), separators=(",", ":")).encode()
+    assert len(encoded) <= MAX_GROUNDING_CONTEXT_BYTES
+
+
+def test_reader_trims_evidence_to_the_complete_snapshot_byte_limit() -> None:
+    """Stable-tail trimming bounds model input even when admitted records are individually large."""
+    records: list[JSONValue] = [_world_record(f"place-{index:02d}") for index in range(8)]
+    for raw in records:
+        record = cast(JSONObject, raw)
+        value = cast(JSONObject, record["value"])
+        value["value"] = {"label": "x" * 100_000}
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "records": records,
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+
+    snapshot = _reader(transport).capture("request-test", _dialogue(), 30)
+
+    assert 0 < len(snapshot.state_evidence) < len(records)
+    assert any(gap.code == "grounding_snapshot_truncated" for gap in snapshot.gaps)
+    encoded = json.dumps(
+        snapshot.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    assert len(encoded) <= MAX_GROUNDING_CONTEXT_BYTES
+
+
+def test_snapshot_constructor_rejects_an_oversized_serialized_context() -> None:
+    """Direct and restored snapshots share the same final serialized-size invariant."""
+    digest = dialogue_digest(tuple(turn.to_json() for turn in _dialogue()))
+
+    with pytest.raises(GroundingContextSizeError, match="byte limit"):
+        GroundingContextSnapshot.create(
+            request_id="request-test",
+            dialogue_digest=digest,
+            captured_at_ms=30,
+            gaps=(GroundingGap("oversized", "test", "x" * MAX_GROUNDING_CONTEXT_BYTES),),
+        )
