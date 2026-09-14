@@ -147,6 +147,22 @@ class FakePlanner:
         return plan
 
 
+class FailingPlanner(FakePlanner):
+    """Fail after receiving a complete grounded intent to test audit persistence."""
+
+    def plan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Record the call and simulate a provider rejection before a draft exists."""
+        del capability_catalog
+        self.calls.append((mission_id, grounded_intent, grounding_context))
+        raise RuntimeError("provider returned HTTP 400: invalid_json_schema")
+
+
 class UnknownContractPlanner(FakePlanner):
     """Return a structurally valid plan outside the Catalog to test admission defense."""
 
@@ -652,6 +668,28 @@ def test_unknown_contract_fails_admission_without_controller_submission(tmp_path
     assert record.lifecycle is MissionRequestLifecycle.FAILED
     assert "delivery.magic_move@v1" in record.issues[0]
     assert controller.submissions == []
+
+
+def test_planner_failure_retains_the_persisted_interpreter_assessment(tmp_path: Path) -> None:
+    """A provider failure keeps the completed Interpreter decision available for audit."""
+    assessment = _assessment()
+    planner = FailingPlanner()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([assessment]),
+        planner,
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+
+    failed = engine.create("执行明确的运输任务")
+    restored = engine.get(failed.request_id)
+
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert failed.assessment == assessment
+    assert restored.assessment == assessment
+    assert failed.plan is None
+    assert failed.issues == ("provider returned HTTP 400: invalid_json_schema",)
+    assert len(planner.calls) == 1
 
 
 def test_controller_rejection_remains_blocked_instead_of_fabricating_acceptance(

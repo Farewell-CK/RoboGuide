@@ -14,6 +14,10 @@ from mission.config import MissionSettings
 from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.provider_mission_plan import (
+    adapt_mission_plan_schema_for_provider,
+    normalize_mission_plan_provider_output,
+)
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 
@@ -152,6 +156,11 @@ class _ResponsesClient:
             raise MissionProviderError("Mission Plan schema must be a JSON object")
         return cast(JSONObject, decoded)
 
+    def _mission_plan_provider_schema(self) -> JSONObject:
+        """Return the current MissionPlan schema adapted to the strict provider DTO."""
+        adapted = adapt_mission_plan_schema_for_provider(self._load_schema())
+        return cast(JSONObject, self._provider_schema(adapted))
+
     def _load_prompt(self, path: Path) -> str:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
         prompt = path.read_text(encoding="utf-8").strip()
@@ -287,7 +296,6 @@ class ResponsesMissionPlanner:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate a strict MissionPlan from the complete resolved Mission intent."""
-        schema = self._client._load_schema()
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
@@ -302,10 +310,10 @@ class ResponsesMissionPlanner:
                 sort_keys=True,
             ),
             schema_name="mission_plan_v0",
-            schema=cast(JSONObject, self._client._provider_schema(schema)),
+            schema=self._client._mission_plan_provider_schema(),
         )
         return _validate_plan_output(
-            self._client._extract_output_json(response),
+            normalize_mission_plan_provider_output(self._client._extract_output_json(response)),
             mission_id,
             grounded_intent,
             capability_catalog,
@@ -375,7 +383,6 @@ class ResponsesMissionRepairer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate and validate one complete replacement draft from structured findings."""
-        schema = self._client._load_schema()
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
@@ -392,10 +399,10 @@ class ResponsesMissionRepairer:
                 sort_keys=True,
             ),
             schema_name="mission_plan_repair_v0",
-            schema=cast(JSONObject, self._client._provider_schema(schema)),
+            schema=self._client._mission_plan_provider_schema(),
         )
         return _validate_plan_output(
-            self._client._extract_output_json(response),
+            normalize_mission_plan_provider_output(self._client._extract_output_json(response)),
             mission_id,
             grounded_intent,
             capability_catalog,

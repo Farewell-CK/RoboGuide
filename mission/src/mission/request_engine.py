@@ -290,6 +290,7 @@ class MissionRequestEngine:
                     approval_required=False,
                     issues=(),
                 )
+            record = self._update(record, assessment=assessment)
             grounded_intent = assessment.grounded_intent()
             plan = self._planner.plan(
                 mission_id=record.mission_id,

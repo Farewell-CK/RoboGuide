@@ -142,7 +142,12 @@ Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最�
 不能补写 GroundedIntent 中不存在的用户事实，见
 [`ADR-0032`](docs/decisions/0032-mission-review-and-repair-loop.md)。Mission Request v0.3 使用带
 speaker、kind、turn identity、reply identity 和 receive time 的 `DialogueTurn`；Planner draft、
-Reviewer issue 与 Repair attempt 保留在独立、revision-bound 的内部 deliberation trace。
+Reviewer issue 与 Repair attempt 保留在独立、revision-bound 的内部 deliberation trace。成功的
+Interpreter assessment 会在调用 Planner 前持久化，因此后续 provider failure 不会抹掉已完成的
+objective、assumptions 或 open-questions evidence。Responses Planner/Repairer 使用内部
+provider-only key/value entry DTO 满足 strict structured output；返回值先确定性还原为 canonical
+parameter map，再通过原始 MissionPlan v0.7、implementation 和 Catalog 校验。该 DTO 不是新的
+Mission wire contract。
 
 Mission Grounding v0.1 从既有只读 State/Memory facade capture 一份 digest-bound snapshot，供
 Interpreter、Planner、Reviewer 与 Repairer 在同一 deliberation cycle 共同使用。它只包含部署

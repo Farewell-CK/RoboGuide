@@ -113,6 +113,12 @@ bounded Repair；Reviewer
 `NeedsClarification`。用户 DialogueTurn 与 revision-bound review history 分开保存；
 `request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py` 分别承担 orchestration、
 versioned projection、SQLite persistence 与 review contracts。
+Interpreter 成功且无需 clarification 时，Engine 在进入 Planner provider 调用前先持久化 assessment，
+使 provider failure 后仍可审计已完成的语义判断。Planner 与 Repairer 的 Responses adapter 共用一个
+provider-only MissionPlan DTO：canonical `ExecutionIntent.parameters` map 在 strict output schema 中
+表示为 closed key/value entries，接收后拒绝重复或 malformed entry，并还原为 canonical map；随后
+仍由原始 MissionPlan v0.7 parser、implementation validation 与 Capability Catalog 执行最终准入。
+该适配不会改变 `contracts/mission/v0.7/`。
 Interpreter 的 `open_questions` 是 blocking-only semantic contract；Defaultable interpretation
 进入 `assumptions`，Control-owned deployment feasibility 和 Local-EAIOS-owned How 不进入用户
 问答。单一待答问题可以自动建立 `in_reply_to`，多问题必须由调用者提供当前 question turn ID，

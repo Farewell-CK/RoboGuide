@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -14,8 +15,12 @@ from mission.config import MissionSettings, load_settings
 from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
-from mission.models import JSONObject, MissionPlan
+from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planners import FixturePlanner
+from mission.provider_mission_plan import (
+    ProviderMissionPlanError,
+    normalize_mission_plan_provider_output,
+)
 from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 from mission.responses import (
     ResponsesMissionInterpreter,
@@ -27,6 +32,8 @@ from mission.review import MissionPlanReview, ReviewIssueAction
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
+CURRENT_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
+CURRENT_CATALOG = Path("contracts/capability/v0.3/catalog.json")
 
 
 def _response(output: JSONObject) -> JSONObject:
@@ -85,6 +92,54 @@ def _catalog() -> CanonicalCapabilityCatalog:
     return CanonicalCapabilityCatalog.load(CATALOG)
 
 
+def _current_catalog() -> CanonicalCapabilityCatalog:
+    """Load the current split capability and operation Catalog."""
+    return CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+
+
+def _provider_plan(plan: JSONObject) -> JSONObject:
+    """Encode current canonical parameter maps as provider DTO entries for fake responses."""
+    encoded = deepcopy(plan)
+    if encoded.get("schema_version") != "roboguide.mission-plan/v0.7":
+        return encoded
+    tasks = cast(list[JSONObject], encoded["tasks"])
+    for task in tasks:
+        roles = cast(list[JSONObject], task["roles"])
+        for role in roles:
+            intent = cast(JSONObject, role["execution_intent"])
+            parameters = cast(JSONObject, intent["parameters"])
+            intent["parameters"] = [
+                {"key": key, "value": parameters[key]} for key in sorted(parameters)
+            ]
+    return encoded
+
+
+def _first_role(plan: JSONObject) -> JSONObject:
+    """Return the first role from a mutable deterministic MissionPlan fixture."""
+    tasks = cast(list[JSONObject], plan["tasks"])
+    roles = cast(list[JSONObject], tasks[0]["roles"])
+    return roles[0]
+
+
+def _assert_strict_provider_objects(value: object, path: str = "schema") -> None:
+    """Assert every object schema has the provider-required closed field contract."""
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _assert_strict_provider_objects(item, f"{path}[{index}]")
+        return
+    if not isinstance(value, dict):
+        return
+    if value.get("type") == "object":
+        properties = value.get("properties")
+        assert isinstance(properties, dict), path
+        assert value.get("additionalProperties") is False, path
+        required = value.get("required")
+        assert isinstance(required, list), path
+        assert set(required) == set(properties), path
+    for key, item in value.items():
+        _assert_strict_provider_objects(item, f"{path}.{key}")
+
+
 def _grounding(
     dialogue: tuple[DialogueTurn, ...] = (),
 ) -> GroundingContextSnapshot:
@@ -132,24 +187,26 @@ def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
 
 def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     """The Planner returns one validated draft without invoking semantic Review internally."""
-    plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    transport = FakeTransport([_response(plan_json)])
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
     settings = _local_settings()
     planner = ResponsesMissionPlanner(
         settings,
         {"OPENAI_API_KEY": "test-only-key"},
         transport,
     )
-    mission = plan_json["mission"]
+    mission = cast(JSONObject, plan_json["mission"])
+    mission_id = cast(str, mission["id"])
+    mission_objective = cast(str, mission["objective"])
     grounded_intent = GroundedIntent(
-        mission["objective"],
+        mission_objective,
         ("keep the marked aisle clear",),
         ("the payload remains available at the pickup point",),
     )
 
-    capability_catalog = _catalog()
+    capability_catalog = _current_catalog()
     grounding = _grounding()
-    plan = planner.plan(mission["id"], grounded_intent, capability_catalog, grounding)
+    plan = planner.plan(mission_id, grounded_intent, capability_catalog, grounding)
 
     assert plan.to_json() == plan_json
     assert len(transport.requests) == 1
@@ -162,7 +219,7 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     assert planning_payload["store"] is False
     planning_input = json.loads(cast(str, planning_payload["input"]))
     assert planning_input == {
-        "mission_id": mission["id"],
+        "mission_id": mission_id,
         "grounded_intent": grounded_intent.to_json(),
         "capability_catalog": capability_catalog.to_json(),
         "grounding_context": grounding.to_json(),
@@ -175,6 +232,7 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     provider_schema = output_format["schema"]
     assert isinstance(provider_schema, dict)
     assert "$schema" not in provider_schema
+    _assert_strict_provider_objects(provider_schema)
     definitions = cast(JSONObject, provider_schema["$defs"])
     tasks_schema = cast(JSONObject, definitions["task"])
     task_properties = cast(JSONObject, tasks_schema["properties"])
@@ -191,6 +249,15 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     assert set(cast(list[str], relation_schema["required"])) == set(relation_properties)
     state_key_schema = cast(JSONObject, relation_properties["state_key"])
     assert {"type": "null"} in cast(list[JSONObject], state_key_schema["anyOf"])
+    role_schema = cast(JSONObject, definitions["role"])
+    role_properties = cast(JSONObject, role_schema["properties"])
+    intent_schema = cast(JSONObject, role_properties["execution_intent"])
+    intent_properties = cast(JSONObject, intent_schema["properties"])
+    parameters_schema = cast(JSONObject, intent_properties["parameters"])
+    assert parameters_schema["type"] == "array"
+    parameter_entry = cast(JSONObject, parameters_schema["items"])
+    assert parameter_entry["additionalProperties"] is False
+    assert set(cast(list[str], parameter_entry["required"])) == {"key", "value"}
 
 
 def test_responses_reviewer_returns_structured_findings_with_independent_model() -> None:
@@ -229,20 +296,28 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
 
 def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan() -> None:
     """Repair input preserves rejected evidence and output passes the normal draft gates."""
-    plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    transport = FakeTransport([_response(plan_json)])
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
     repairer = ResponsesMissionRepairer(
         _local_settings(),
         {"OPENAI_API_KEY": "test-only-key"},
         transport,
     )
     plan = MissionPlan.from_json(plan_json)
-    mission = plan_json["mission"]
-    grounded_intent = GroundedIntent(mission["objective"], (), ())
+    mission = cast(JSONObject, plan_json["mission"])
+    mission_id = cast(str, mission["id"])
+    grounded_intent = GroundedIntent(cast(str, mission["objective"]), (), ())
     review = MissionPlanReview.from_json(_review_output())
 
     grounding = _grounding()
-    repaired = repairer.repair(mission["id"], grounded_intent, plan, review, _catalog(), grounding)
+    repaired = repairer.repair(
+        mission_id,
+        grounded_intent,
+        plan,
+        review,
+        _current_catalog(),
+        grounding,
+    )
 
     assert repaired == plan
     payload = transport.requests[0][2]
@@ -251,34 +326,125 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
         == Path("mission/prompts/v0/repairer.md").read_text(encoding="utf-8").strip()
     )
     assert json.loads(cast(str, payload["input"])) == {
-        "mission_id": mission["id"],
+        "mission_id": mission_id,
         "grounded_intent": grounded_intent.to_json(),
         "rejected_plan": plan_json,
         "review": review.to_json(),
-        "capability_catalog": _catalog().to_json(),
+        "capability_catalog": _current_catalog().to_json(),
         "grounding_context": grounding.to_json(),
     }
 
 
+def test_provider_parameter_entries_preserve_all_canonical_scalar_types() -> None:
+    """Provider DTO normalization preserves bool, integer, float, and string values."""
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    role = _first_role(plan_json)
+    intent = cast(JSONObject, role["execution_intent"])
+    expected: JSONObject = {
+        "enabled": True,
+        "attempts": 2,
+        "threshold": 1.25,
+        "destination": "reception-1f",
+    }
+    intent["parameters"] = expected
+
+    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    plan = MissionPlan.from_json(normalized)
+
+    assert dict(plan.tasks[0].roles[0].execution.parameters) == expected
+
+
+def test_provider_parameter_entries_allow_an_empty_canonical_map() -> None:
+    """An empty provider entry list normalizes to a valid empty canonical parameter map."""
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    role = _first_role(plan_json)
+    intent = cast(JSONObject, role["execution_intent"])
+    intent["parameters"] = {}
+
+    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    plan = MissionPlan.from_json(normalized)
+
+    assert plan.tasks[0].roles[0].execution.parameters == ()
+
+
+def test_provider_output_normalizes_before_canonical_and_catalog_validation() -> None:
+    """Current DTO output becomes canonical v0.7 before all existing validation gates."""
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+
+    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    plan = MissionPlan.from_json(normalized)
+    plan.validate_implementation_support()
+    _current_catalog().validate_plan(plan)
+
+    assert plan.to_json() == plan_json
+
+
+def test_provider_output_with_unknown_catalog_parameter_fails_closed() -> None:
+    """DTO normalization cannot bypass the Catalog's closed operation parameter set."""
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    role = _first_role(plan_json)
+    intent = cast(JSONObject, role["execution_intent"])
+    parameters = cast(JSONObject, intent["parameters"])
+    parameters["unsupported"] = "must-fail"
+
+    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    plan = MissionPlan.from_json(normalized)
+
+    with pytest.raises(CapabilityCatalogError, match="unsupported"):
+        _current_catalog().validate_plan(plan)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        [{"key": "destination"}],
+        [{"key": "destination", "value": "reception-1f", "extra": True}],
+        [{"key": "destination", "value": ["reception-1f"]}],
+        [
+            {"key": "destination", "value": "reception-1f"},
+            {"key": "destination", "value": "other"},
+        ],
+    ],
+)
+def test_malformed_provider_parameter_entry_fails_closed(malformed: list[JSONValue]) -> None:
+    """Malformed, structured, and duplicate parameter entries never reach canonical parsing."""
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    provider_plan = _provider_plan(plan_json)
+    role = _first_role(provider_plan)
+    intent = cast(JSONObject, role["execution_intent"])
+    intent["parameters"] = malformed
+
+    with pytest.raises(ProviderMissionPlanError):
+        normalize_mission_plan_provider_output(provider_plan)
+
+
 def test_responses_planner_rejects_unknown_contract_before_review() -> None:
     """Deterministic Catalog admission prevents an invented contract reaching Reviewer."""
-    plan_json = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    role = plan_json["tasks"][0]["roles"][0]
-    invented = {"namespace": "delivery", "name": "magic_move", "version": "v1"}
-    role["contract"] = invented
-    role["execution"]["capability_contract"] = invented
-    transport = FakeTransport([_response(plan_json)])
+    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    role = _first_role(plan_json)
+    invented: JSONObject = {
+        "namespace": "delivery",
+        "name": "magic_move",
+        "version": "v1",
+    }
+    requirements = cast(JSONObject, role["requirements"])
+    capabilities = cast(list[JSONObject], requirements["capabilities"])
+    capabilities[0]["contract"] = invented
+    intent = cast(JSONObject, role["execution_intent"])
+    intent["operation"] = invented
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
     planner = ResponsesMissionPlanner(
         _local_settings(),
         {"OPENAI_API_KEY": "test-only-key"},
         transport,
     )
 
+    mission = cast(JSONObject, plan_json["mission"])
     with pytest.raises(CapabilityCatalogError, match="delivery.magic_move@v1"):
         planner.plan(
-            plan_json["mission"]["id"],
-            GroundedIntent(plan_json["mission"]["objective"], (), ()),
-            _catalog(),
+            cast(str, mission["id"]),
+            GroundedIntent(cast(str, mission["objective"]), (), ()),
+            _current_catalog(),
             _grounding(),
         )
 
