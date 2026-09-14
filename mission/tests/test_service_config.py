@@ -103,7 +103,7 @@ approval_required_contracts = []
         load_service_settings(path, repository_root=tmp_path)
 
 
-def test_service_configuration_rejects_unbounded_grounding_attempts(tmp_path: Path) -> None:
+def test_service_configuration_rejects_zero_grounding_attempts(tmp_path: Path) -> None:
     """Grounding acquisition must retain at least one strictly bounded read attempt."""
     path = tmp_path / "mission-service.toml"
     path.write_text(
