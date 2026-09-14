@@ -1,0 +1,718 @@
+{
+  "case_id": "g3-stale-free",
+  "category": "grounding",
+  "instruction": "去充电桩那里待命",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 325.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=2 roles=2 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 133 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": false,
+      "detail": "failed after 1 repair attempt(s), 1 review(s)"
+    }
+  ],
+  "failure_reasons": [
+    "review_repair_convergence: failed after 1 repair attempt(s), 1 review(s)"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12306.1,
+      "request_bytes": 6122,
+      "response_bytes": 12613,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e3de7b2a46f62de016aa76648a77087d1bfda13cd8960fd9a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 313,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 313,
+              "output_tokens": 0
+            },
+            "rs_0e3de7b2a46f62de016aa766498f0087d1828cebdecea244c3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0e3de7b2a46f62de016aa7665301e087d18b98403c71f011a8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 74
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 74
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1274,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 590,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1864
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 59295.8,
+      "request_bytes": 22974,
+      "response_bytes": 44458,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0a9fe5307d7b982f016aa766554e4087d1a989018803320265": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1807,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 1807,
+                  "input_tokens": 2606,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2606,
+              "output_tokens": 0
+            },
+            "rs_0a9fe5307d7b982f016aa7665623f487d18795376b94802219": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0a9fe5307d7b982f016aa7665f755087d18fdcfa26476e31d5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a9fe5307d7b982f016aa76668c52487d1950dcb35f43c4596": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a9fe5307d7b982f016aa766721ad887d190447df34e2dd9e7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a9fe5307d7b982f016aa7667b6b6087d1b82855b5fa1154c1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a9fe5307d7b982f016aa76684c27087d19184b1882be448d5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 214
+            },
+            "msg_0a9fe5307d7b982f016aa76688b8d887d1a31cb8cb1f9f9f4b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 383
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 383
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1282,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 751,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4641,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 3840
+        },
+        "output_tokens": 3185,
+        "output_tokens_details": {
+          "reasoning_tokens": 2802
+        },
+        "total_tokens": 7826
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 89240.1,
+      "request_bytes": 16648,
+      "response_bytes": 55408,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_03cd699411a5c64d016aa76690a43487d1a436bab47df110bc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3001,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3001,
+              "output_tokens": 0
+            },
+            "rs_03cd699411a5c64d016aa7669167d487d1a78bf2d45fa1a00d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_03cd699411a5c64d016aa7669abcbc87d1a85f7fa7fcac5f86": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766a411d087d1b9481b59eafe3da8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766ad63f487d181e7eb3a73977dcd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766b6baec87d18c729e667b861da1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766c00b2c87d1ac56d66f953d4832": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766c95a5487d1b1cd55a5e96b145b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766d2b0e887d1a58ea852eb3a4b8c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_03cd699411a5c64d016aa766dc006887d1811aac949e56dde0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_03cd699411a5c64d016aa766e5726887d18b468f4b110d5849": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 195
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 195
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 611,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3696,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4855,
+        "output_tokens_details": {
+          "reasoning_tokens": 4660
+        },
+        "total_tokens": 8551
+      }
+    },
+    {
+      "stage": "repairer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 73948.2,
+      "request_bytes": 23195,
+      "response_bytes": 49443,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0677bc739abe1734016aa766ea36ac87d19159f8d0799e583b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3230,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3230,
+              "output_tokens": 0
+            },
+            "rs_0677bc739abe1734016aa766eae37487d1927ccc775426b9e2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0677bc739abe1734016aa766f432f087d1858d014a5aab4d6b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0677bc739abe1734016aa766fd86e487d1aa06fd6321ee65c1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0677bc739abe1734016aa76706db6887d1b54518e47c2a96ed": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0677bc739abe1734016aa767102c5487d1a826486625d72d7a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0677bc739abe1734016aa767197f2c87d18ae4e7229a3dfbdf": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0677bc739abe1734016aa76722d63887d1919c6f80ce933ccd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 205
+            },
+            "msg_0677bc739abe1734016aa76726a79887d1848c60b28111ff51": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 691
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 691
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1284,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 331,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4847,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4002,
+        "output_tokens_details": {
+          "reasoning_tokens": 3311
+        },
+        "total_tokens": 8849
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90091.4,
+      "request_bytes": 18056,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 14458,
+    "output_tokens": 12632,
+    "total_tokens": 27090
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12307.1,
+      "avg_ms": 12307.1,
+      "max_ms": 12307.1
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 59302.3,
+      "avg_ms": 59302.3,
+      "max_ms": 59302.3
+    },
+    "reviewer": {
+      "calls": 2,
+      "total_ms": 179335.6,
+      "avg_ms": 89667.8,
+      "max_ms": 90093.0
+    },
+    "repairer": {
+      "calls": 1,
+      "total_ms": 73954.0,
+      "avg_ms": 73954.0,
+      "max_ms": 73954.0
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-2f5b758fa14147dc88ee00493a824701",
+    "mission_id": "mission-51cc792b1b2c4a16bd3a65dc4622fbc6",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去充电桩那里待命",
+        "created_at_ms": 1789355591853,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "前往充电桩处，并在那里待命。",
+      "constraints": [],
+      "assumptions": [
+        "将“待命”理解为抵达充电桩处后保持就绪并等待后续指令，未指定待命时长。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-51cc792b1b2c4a16bd3a65dc4622fbc6",
+        "objective": "前往充电桩处，并在那里待命。",
+        "actors": [
+          {
+            "id": "actor-mobile-system"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-charge-station",
+          "roles": [
+            {
+              "id": "context-role-mobile-system",
+              "actor": "actor-mobile-system"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-arrive-and-standby-charge-station",
+          "description": "移动系统执行前往充电桩处的移动操作。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-arrive-and-standby-charge-station",
+              "context_role": "context-role-mobile-system",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "执行前往充电桩处的移动操作。",
+                "parameters": {
+                  "destination": "充电桩处"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-charge-station",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "移动系统的移动操作工作流已完成。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "task-verify-charge-station-standby",
+          "description": "验证移动系统已抵达充电桩处并保持就绪待命状态。",
+          "depends_on": [
+            "task-arrive-and-standby-charge-station"
+          ],
+          "roles": [
+            {
+              "id": "role-verify-charge-station-standby",
+              "context_role": "context-role-mobile-system",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "observation",
+                      "name": "verify",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "observation",
+                  "name": "verify",
+                  "version": "v1"
+                },
+                "objective": "验证移动系统已位于充电桩处，并保持就绪待命状态，等待后续指令。",
+                "parameters": {
+                  "expected": "移动系统已位于充电桩处，并保持就绪待命状态，等待后续指令。"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-charge-station",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "已获得关于移动系统已位于充电桩处并保持就绪待命状态、等待后续指令的独立观察证据。",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "移动系统已位于充电桩处，并保持就绪待命状态，等待后续指令。",
+              "max_evidence_age_ms": 60000
+            }
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:58bd041c6e376857cfb51a8c0cac1df9619a34adb9f6db3063238c84a6f2535c",
+      "request_id": "request-2f5b758fa14147dc88ee00493a824701",
+      "dialogue_digest": "sha256:93829a1f833c2b74f4a85cd3c69429c2be3d6f954e8cc25a9e9fb2bd861273f7",
+      "captured_at_ms": 1789355592020,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 2,
+    "draft_digest": "sha256:be36fa01676f3099df927495c43710f7b8738464dd14a0ba650da88fd7594d66",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 1,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:9d9436a9e7e5971f578ae86d8860018d9ea7916e5121ee8ff4b41f86817adf5a",
+        "grounding_context_digest": "sha256:58bd041c6e376857cfb51a8c0cac1df9619a34adb9f6db3063238c84a6f2535c",
+        "review": {
+          "approved": false,
+          "issues": [
+            {
+              "code": "unverified-physical-effect",
+              "path": "/tasks/0/satisfaction",
+              "message": "The task's expected effect asserts physical arrival at the charging station and continued ready standby, but its satisfaction basis is `execution-report`, which establishes only local workflow completion. No explicit Mission policy makes that sufficient, and `verifier` is null. Add independent verifier evidence, such as a separate observation task using the catalog's observation/verify contract, or narrow the expected effect to what execution-report can establish.",
+              "required_action": "RepairPlan"
+            },
+            {
+              "code": "ungrounded-timing",
+              "path": "/tasks/0/timing/earliest_start_offset_ms",
+              "message": "`earliest_start_offset_ms` is set to 0 even though GroundedIntent contains no timing constraint. Remove the model-invented timing value or replace it with a grounded constraint.",
+              "required_action": "RepairPlan"
+            }
+          ]
+        },
+        "reviewed_at_ms": 1789355753259
+      }
+    ],
+    "created_at_ms": 1789355591853,
+    "updated_at_ms": 1789355917688
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "suite_id": "mission-front-20260914T033718Z-9b0d9189",
+  "model": "gpt-5.6-luna",
+  "relay_base_url": "http://101.43.45.215:8080",
+  "grounding": "empty",
+  "cases_executed": 3,
+  "cases_passed": 0,
+  "by_category": {
+    "normal": {
+      "total": 1,
+      "passed": 0
+    },
+    "ambiguity": {
+      "total": 1,
+      "passed": 0
+    },
+    "heterogeneous": {
+      "total": 1,
+      "passed": 0
+    }
+  },
+  "failed_invariants": {
+    "final_lifecycle": 3,
+    "clarification_behavior": 1,
+    "integrated_operation": 1
+  },
+  "token_totals": {
+    "input_tokens": 13163,
+    "output_tokens": 10008,
+    "total_tokens": 23171
+  },
+  "llm_calls": 8,
+  "stage_timings": {
+    "interpreter": {
+      "calls": 3,
+      "total_ms": 44834.1,
+      "avg_ms": 14944.7,
+      "max_ms": 21002.8
+    },
+    "planner": {
+      "calls": 3,
+      "total_ms": 235134.4,
+      "avg_ms": 78378.1,
+      "max_ms": 90095.4
+    },
+    "reviewer": {
+      "calls": 2,
+      "total_ms": 180183.3,
+      "avg_ms": 90091.6,
+      "max_ms": 90093.3
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  }
+}

@@ -1,0 +1,410 @@
+{
+  "case_id": "g3-stale-grounded",
+  "category": "grounding",
+  "instruction": "去充电桩那里待命",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 140.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12789.6,
+      "request_bytes": 6601,
+      "response_bytes": 12848,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0022a39e9d3bf66f016aa7678f2c9c87d188edce1e695017d2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 433,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 433,
+              "output_tokens": 0
+            },
+            "rs_0022a39e9d3bf66f016aa7678fc0ec87d194a24a73fe8ec372": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0022a39e9d3bf66f016aa76799344887d1a2a422a5a876ff3a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 105
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 105
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1394,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 621,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2015
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 36645.3,
+      "request_bytes": 23579,
+      "response_bytes": 31242,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0a33eef17ad988fc016aa7679c790c87d18429e9fd6e03d907": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2753,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2753,
+              "output_tokens": 0
+            },
+            "rs_0a33eef17ad988fc016aa7679d00ac87d198fc85d94b382f04": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0a33eef17ad988fc016aa767a6538c87d19648e4c5dc9a4a6d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a33eef17ad988fc016aa767afa59087d1b9c79f37c06cef64": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0a33eef17ad988fc016aa767b9144887d1b3daee75a98886ca": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 374
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 374
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4788,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1926,
+        "output_tokens_details": {
+          "reasoning_tokens": 1552
+        },
+        "total_tokens": 6714
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90034.1,
+      "request_bytes": 17197,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 6182,
+    "output_tokens": 2547,
+    "total_tokens": 8729
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12790.9,
+      "avg_ms": 12790.9,
+      "max_ms": 12790.9
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 36651.2,
+      "avg_ms": 36651.2,
+      "max_ms": 36651.2
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 90035.9,
+      "avg_ms": 90035.9,
+      "max_ms": 90035.9
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-a838915757f94656af22a3525d232922",
+    "mission_id": "mission-37b6013bae6a48edb5a12631176727ed",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去充电桩那里待命",
+        "created_at_ms": 1789355918244,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "前往充电桩，并在到达后留在那里待命。",
+      "constraints": [],
+      "assumptions": [
+        "将“充电桩那里”解释为充电桩所在位置；具体物理目标和到达路径由系统确定。",
+        "将“待命”解释为到达后留在该处等待后续指令，不额外执行充电或其他任务。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-37b6013bae6a48edb5a12631176727ed",
+        "objective": "前往充电桩，并在到达后留在那里待命。",
+        "actors": [
+          {
+            "id": "actor-robot"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-charge-station-standby",
+          "roles": [
+            {
+              "id": "context-role-robot",
+              "actor": "actor-robot"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-go-charge-station-standby",
+          "description": "机器人到达充电桩所在位置，并在该处保持待命，等待后续指令。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "task-role-robot",
+              "context_role": "context-role-robot",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "前往充电桩，并在到达后留在那里待命。",
+                "parameters": {
+                  "destination": "充电桩所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-charge-station-standby",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "机器人已到达充电桩所在位置，并在该处保持待命，等待后续指令。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:65d916372f9a70fb13e196ccb84b02cbee3c71dd5c4a4761678add75f3bacca3",
+      "request_id": "request-a838915757f94656af22a3525d232922",
+      "dialogue_digest": "sha256:5c43d9e03aa325a007514f524904a4059a9800f74f4b66923e3fa96e97630d61",
+      "captured_at_ms": 1789355918411,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g3-stale-grounded",
+      "state_evidence": [
+        {
+          "evidence_id": "state::ad631deaa781d077baff6fd1c78722e5454c5e76b354081a5fbd2fe7bd3b7379",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "charging-station"
+          },
+          "semantic": "observed",
+          "source": "node:dock-sensor",
+          "channel_id": "dock-positions",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "charging station B1"
+          },
+          "source_observed_at_ms": 500,
+          "received_at_ms": 1000,
+          "valid_for_ms": 60000,
+          "freshness": "Stale",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 5
+        }
+      ],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:0ea0383f2f38e808dc92b7fd39f8e89d1c4611d108603740b75777ea6e0584d0",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789355918244,
+    "updated_at_ms": 1789356058244
+  }
+}

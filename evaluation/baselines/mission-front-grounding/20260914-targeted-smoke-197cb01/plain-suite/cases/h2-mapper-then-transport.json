@@ -1,0 +1,241 @@
+{
+  "case_id": "h2-mapper-then-transport",
+  "category": "heterogeneous",
+  "instruction": "先用具备建图能力的机器狗给新仓库建模，然后把一批样品从门口运到检验台",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 111.4,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: timed out"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: timed out"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 21001.7,
+      "request_bytes": 6200,
+      "response_bytes": 17118,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09f1566d8e1c7807016aa76d4dc3d487d180484e3e451c8ff8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 334,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 334,
+              "output_tokens": 0
+            },
+            "rs_09f1566d8e1c7807016aa76d4e6b1487d1804808262a364804": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_09f1566d8e1c7807016aa76d57d0d887d1b637a24bd2b61f44": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 370
+            },
+            "msg_09f1566d8e1c7807016aa76d5eb1a087d1b25cd7aa8daec429": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 187
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 187
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1295,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1073,
+        "output_tokens_details": {
+          "reasoning_tokens": 886
+        },
+        "total_tokens": 2368
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90091.9,
+      "request_bytes": 23426,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1295,
+    "output_tokens": 1073,
+    "total_tokens": 2368
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 21002.8,
+      "avg_ms": 21002.8,
+      "max_ms": 21002.8
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 90095.4,
+      "avg_ms": 90095.4,
+      "max_ms": 90095.4
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-cb5a018de18a40eeae31b86e0629c285",
+    "mission_id": "mission-304b8963cdf447e1b0fd43a33f394c64",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先用具备建图能力的机器狗给新仓库建模，然后把一批样品从门口运到检验台",
+        "created_at_ms": 1789357388884,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "先使用具备建图能力的机器狗完成新仓库的环境建模，再将一批样品从门口运送至检验台。",
+      "constraints": [
+        "建模阶段必须使用具备建图能力的机器狗。",
+        "必须先完成新仓库建模，再开始样品运输。",
+        "样品运输路线为从仓库门口到检验台。"
+      ],
+      "assumptions": [
+        "将“建模”按对新仓库进行环境建图并形成可用于后续任务的地图/模型理解，不额外指定格式或精度。",
+        "将“一批样品”理解为用户所指的待运输批次，不扩展为运输其他样品。",
+        "不额外要求签收、拍照或其他交接服务。"
+      ],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:881bd7e7a14b9098be87327f63a13147d1788bc3bbe49b4fdbf0f532af97f80a",
+      "request_id": "request-cb5a018de18a40eeae31b86e0629c285",
+      "dialogue_digest": "sha256:5e667c5ab25f23f8d59abfc60e1eeee9ae0b3b114fe0d253d05ab994c02a1758",
+      "captured_at_ms": 1789357388991,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789357388884,
+    "updated_at_ms": 1789357500198
+  }
+}

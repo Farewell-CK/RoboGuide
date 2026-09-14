@@ -1,0 +1,395 @@
+{
+  "case_id": "g4-no-evidence-grounded",
+  "category": "grounding",
+  "instruction": "把贴有红色标签的工具箱搬到装卸区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 141.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9907.6,
+      "request_bytes": 6051,
+      "response_bytes": 11626,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_058431b4a005d10f016aa769253c7487d1937c8bf7033ffe1f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 267,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 267,
+              "output_tokens": 0
+            },
+            "rs_058431b4a005d10f016aa76925c2e887d1acdae9b575e67549": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 355
+            },
+            "msg_058431b4a005d10f016aa7692c4ff087d18787841c575825b2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 92
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 92
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1228,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 447,
+        "output_tokens_details": {
+          "reasoning_tokens": 355
+        },
+        "total_tokens": 1675
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 40631.2,
+      "request_bytes": 22957,
+      "response_bytes": 34061,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d9d9b81a2310ac7016aa7692f71d487d19e50810f8deb8d2a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1807,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 1807,
+                  "input_tokens": 2569,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2569,
+              "output_tokens": 0
+            },
+            "rs_0d9d9b81a2310ac7016aa76930373887d18eced2b13c25473f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0d9d9b81a2310ac7016aa769398dcc87d1ac485f9ff323fbe8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0d9d9b81a2310ac7016aa76942e1fc87d18c528844e65f4b40": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0d9d9b81a2310ac7016aa7694c304887d1af7119c33d78216f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 117
+            },
+            "msg_0d9d9b81a2310ac7016aa7694e678887d187c391be69af9ad6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 443
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 443
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1282,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 751,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4604,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 3840
+        },
+        "output_tokens": 2112,
+        "output_tokens_details": {
+          "reasoning_tokens": 1669
+        },
+        "total_tokens": 6716
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90091.1,
+      "request_bytes": 16866,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 5832,
+    "output_tokens": 2559,
+    "total_tokens": 8391
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 9908.6,
+      "avg_ms": 9908.6,
+      "max_ms": 9908.6
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 40636.9,
+      "avg_ms": 40636.9,
+      "max_ms": 40636.9
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 90092.6,
+      "avg_ms": 90092.6,
+      "max_ms": 90092.6
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-f2bf446a121b4dfca2ec08d310b9ac2d",
+    "mission_id": "mission-2659227690044bd0ad6e3b5682cbb247",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贴有红色标签的工具箱搬到装卸区",
+        "created_at_ms": 1789356323969,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+      "constraints": [],
+      "assumptions": [
+        "将“装卸区”理解为目标场地指定的装卸区域。",
+        "“搬到”仅表示将该工具箱移至装卸区，不包含拍照、签收或其他额外操作。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-2659227690044bd0ad6e3b5682cbb247",
+        "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+        "actors": [
+          {
+            "id": "actor-toolbox-handler"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-toolbox-relocation",
+          "roles": [
+            {
+              "id": "context-role-relocator",
+              "actor": "actor-toolbox-handler"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-red-labeled-toolbox",
+          "description": "贴有红色标签的工具箱位于目标场地指定的装卸区域（“装卸区”）；任务结果不包括拍照、签收或其他额外操作。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-relocate-red-labeled-toolbox",
+              "context_role": "context-role-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+                "parameters": {
+                  "destination": "目标场地指定的装卸区域",
+                  "object": "贴有红色标签的工具箱",
+                  "source": "贴有红色标签的工具箱当前所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-toolbox-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "贴有红色标签的工具箱已位于目标场地指定的装卸区域（“装卸区”）；不要求拍照、签收或其他额外结果。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:be6b439ed8fc7cac813872ad02b0fa3de5072ba0d3b6d54f51be4fc2e06ce3d7",
+      "request_id": "request-f2bf446a121b4dfca2ec08d310b9ac2d",
+      "dialogue_digest": "sha256:6244a00a2964b0d7229201b23ad60945e044606543a7b877102f595d4e339f46",
+      "captured_at_ms": 1789356324069,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g4-no-evidence-grounded",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:8f2ab450c51841cefdb9ab5021f9b461e54234ca38098cb66040231fcc62e7a0",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789356323969,
+    "updated_at_ms": 1789356464966
+  }
+}

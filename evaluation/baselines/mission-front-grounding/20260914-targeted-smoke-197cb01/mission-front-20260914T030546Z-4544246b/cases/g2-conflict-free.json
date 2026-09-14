@@ -1,0 +1,401 @@
+{
+  "case_id": "g2-conflict-free",
+  "category": "grounding",
+  "instruction": "到会议室把白板擦拿过来",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 146.7,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=2"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 82 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9669.4,
+      "request_bytes": 6131,
+      "response_bytes": 11766,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0026c922c1f14941016aa765a9548c87d193e772de97fca9d8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 314,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 314,
+              "output_tokens": 0
+            },
+            "rs_0026c922c1f14941016aa765a9f08c87d18e564df005858a62": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 390
+            },
+            "msg_0026c922c1f14941016aa765b1205887d1842276903521d1b2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 65
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 65
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1275,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 455,
+        "output_tokens_details": {
+          "reasoning_tokens": 390
+        },
+        "total_tokens": 1730
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 46436.4,
+      "request_bytes": 22959,
+      "response_bytes": 36665,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0614904de11ad7f5016aa765b40a5887d194570a1fe98947f8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2593,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2593,
+              "output_tokens": 0
+            },
+            "rs_0614904de11ad7f5016aa765b4c14487d19f779fad12486822": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0614904de11ad7f5016aa765be419087d19079ba03ef827ee9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0614904de11ad7f5016aa765c769fc87d180aebd72b8e17c0a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0614904de11ad7f5016aa765d0b95087d1ad2d263733b1e352": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 490
+            },
+            "msg_0614904de11ad7f5016aa765d9a88087d196c2b821e1bdf012": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 389
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 389
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4628,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2431,
+        "output_tokens_details": {
+          "reasoning_tokens": 2042
+        },
+        "total_tokens": 7059
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90089.3,
+      "request_bytes": 16676,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 5903,
+    "output_tokens": 2886,
+    "total_tokens": 8789
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 9670.3,
+      "avg_ms": 9670.3,
+      "max_ms": 9670.3
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 46441.7,
+      "avg_ms": 46441.7,
+      "max_ms": 46441.7
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 90091.2,
+      "avg_ms": 90091.2,
+      "max_ms": 90091.2
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-303af7c35c2b4692949f0938cf9bb811",
+    "mission_id": "mission-0c23045585244e69b85f1dd14b10bd23",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "到会议室把白板擦拿过来",
+        "created_at_ms": 1789355432468,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "前往会议室，取白板擦并带回用户所在位置。",
+      "constraints": [],
+      "assumptions": [
+        "将“拿过来”解释为把白板擦带到用户当前所在位置。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-0c23045585244e69b85f1dd14b10bd23",
+        "objective": "前往会议室，取白板擦并带回用户所在位置。",
+        "actors": [
+          {
+            "id": "actor-robot"
+          },
+          {
+            "id": "actor-user"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-whiteboard-eraser-relocation",
+          "roles": [
+            {
+              "id": "role-relocator",
+              "actor": "actor-robot"
+            },
+            {
+              "id": "role-user-recipient",
+              "actor": "actor-user"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-whiteboard-eraser",
+          "description": "白板擦已从会议室被带到用户当前所在位置。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "task-role-relocator",
+              "context_role": "role-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将白板擦从会议室带到用户当前所在位置。",
+                "parameters": {
+                  "destination": "用户当前所在位置",
+                  "object": "白板擦",
+                  "source": "会议室"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-whiteboard-eraser-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "白板擦已从会议室到达用户当前所在位置。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:7aadf2676f6c451e4ab927845fbaa6458177047462e39ddeef51b6bfe7f155c6",
+      "request_id": "request-303af7c35c2b4692949f0938cf9bb811",
+      "dialogue_digest": "sha256:fc5a96cb97f5a8f2e3d21eb3dddeb4a47155cc53eb5a8612c7c9b5f689e01bbe",
+      "captured_at_ms": 1789355432651,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:d376267b244042a85cb3053a5d670848913cd5f8d5c1ed54758a9708b532557b",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789355432468,
+    "updated_at_ms": 1789355579121
+  }
+}

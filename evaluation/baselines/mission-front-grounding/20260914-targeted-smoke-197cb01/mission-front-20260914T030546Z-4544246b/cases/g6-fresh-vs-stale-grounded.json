@@ -1,0 +1,453 @@
+{
+  "case_id": "g6-fresh-vs-stale-grounded",
+  "category": "grounding",
+  "instruction": "把载有发动机备件的托盘送到当前卸货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 165.8,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 19017.0,
+      "request_bytes": 7251,
+      "response_bytes": 16503,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0472d610ed877c2b016aa76ae5cd2887d1b16445c107696481": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 646,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 646,
+              "output_tokens": 0
+            },
+            "rs_0472d610ed877c2b016aa76ae67c7887d18c14ed773d3d9372": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0472d610ed877c2b016aa76aefd0b887d19e56d8e0e32bd20b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 330
+            },
+            "msg_0472d610ed877c2b016aa76af5e13c87d1b1a7ef164a4bc304": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 107
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 107
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1607,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 953,
+        "output_tokens_details": {
+          "reasoning_tokens": 846
+        },
+        "total_tokens": 2560
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 56266.3,
+      "request_bytes": 24207,
+      "response_bytes": 42617,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0841261e93338f6b016aa76af982b487d1806e5ee9a0ac1223": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2959,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2959,
+              "output_tokens": 0
+            },
+            "rs_0841261e93338f6b016aa76afa8d8487d1bb6f1491cd4e5a5b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0841261e93338f6b016aa76b03ee3c87d1bb7d8dcc785a145f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0841261e93338f6b016aa76b0d349c87d1b83bd98348cce388": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0841261e93338f6b016aa76b16885c87d1a57961f7afbe26c9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0841261e93338f6b016aa76b1fd8c087d182b9bfa936dba37d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 490
+            },
+            "msg_0841261e93338f6b016aa76b28c97c87d1bc382ae038d95cb1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 406
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 406
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4994,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2966,
+        "output_tokens_details": {
+          "reasoning_tokens": 2560
+        },
+        "total_tokens": 7960
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90083.3,
+      "request_bytes": 17920,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 6601,
+    "output_tokens": 3919,
+    "total_tokens": 10520
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 19018.3,
+      "avg_ms": 19018.3,
+      "max_ms": 19018.3
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 56271.7,
+      "avg_ms": 56271.7,
+      "max_ms": 56271.7
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 90085.1,
+      "avg_ms": 90085.1,
+      "max_ms": 90085.1
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-87b1ac44a4104bf69ab7003c2e6ac0ba",
+    "mission_id": "mission-809da7af4ec3478788a5cd91f283746f",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把载有发动机备件的托盘送到当前卸货区",
+        "created_at_ms": 1789356772777,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "将载有发动机备件的托盘送至当前卸货区（卸货区 A，Gate A）。",
+      "constraints": [
+        "运输对象限定为载有发动机备件的托盘。"
+      ],
+      "assumptions": [
+        "将“当前卸货区”按最新有效的场所状态解析为卸货区 A（Gate A）；较旧的卸货区 B 信息不作为当前目标。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-809da7af4ec3478788a5cd91f283746f",
+        "objective": "将载有发动机备件的托盘送至当前卸货区（卸货区 A，Gate A）。",
+        "actors": [
+          {
+            "id": "transport-actor"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "delivery-context",
+          "roles": [
+            {
+              "id": "carrier",
+              "actor": "transport-actor"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "deliver-engine-parts-pallet",
+          "description": "将载有发动机备件的托盘送至当前卸货区（卸货区 A，Gate A）。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocator",
+              "context_role": "carrier",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将载有发动机备件的托盘送至当前卸货区（卸货区 A，Gate A）。",
+                "parameters": {
+                  "destination": "卸货区 A（Gate A）",
+                  "object": "载有发动机备件的托盘",
+                  "source": "该托盘当前所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "delivery-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "载有发动机备件的托盘已位于当前卸货区（卸货区 A，Gate A）。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:06586fe567604ae71aa29817eb2c6baf222008994d8f5e49a5fffb9072d378a8",
+      "request_id": "request-87b1ac44a4104bf69ab7003c2e6ac0ba",
+      "dialogue_digest": "sha256:895cc1caf566c19ac2a9b0d34c45f7396056b613dd64986a09b22440ce7ef2a7",
+      "captured_at_ms": 1789356772915,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g6-fresh-vs-stale-grounded",
+      "state_evidence": [
+        {
+          "evidence_id": "state::1d2c37553a97a3343bceeb74f2fd6e21fa2ddf1d683b42da8767a571fa80baf5",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "unloading-zone"
+          },
+          "semantic": "observed",
+          "source": "node:gate-a/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "unloading zone A (gate A)"
+          },
+          "source_observed_at_ms": 5000,
+          "received_at_ms": 5000,
+          "valid_for_ms": 3600000,
+          "freshness": "Fresh",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 10
+        },
+        {
+          "evidence_id": "state::765aca9a305711fa4267d4a978c60c424ea6b56a1adb1d4bc10da0430ef37df0",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "unloading-zone"
+          },
+          "semantic": "observed",
+          "source": "node:gate-b/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "unloading zone B (gate B)"
+          },
+          "source_observed_at_ms": 1000,
+          "received_at_ms": 1000,
+          "valid_for_ms": 3600000,
+          "freshness": "Stale",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 9
+        }
+      ],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:db108fc9324a30d2bcdcc87fe11b755735276e0633abcf1697b1e8e3ca8fdb01",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789356772777,
+    "updated_at_ms": 1789356938521
+  }
+}

@@ -1,0 +1,250 @@
+{
+  "case_id": "g5-metadata-only-grounded",
+  "category": "grounding",
+  "instruction": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 102.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11882.6,
+      "request_bytes": 6685,
+      "response_bytes": 12866,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0dcc04681a7738c7016aa76a19c9d487d183db6c2cd4b597a9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 448,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 448,
+              "output_tokens": 0
+            },
+            "rs_0dcc04681a7738c7016aa76a1a628c87d1866a5b026a5f638a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0dcc04681a7738c7016aa76a23d6e887d1be233b3864258642": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 62
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 62
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1409,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 578,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1987
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90026.3,
+      "request_bytes": 23459,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1409,
+    "output_tokens": 578,
+    "total_tokens": 1987
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 11883.7,
+      "avg_ms": 11883.7,
+      "max_ms": 11883.7
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 90030.1,
+      "avg_ms": 90030.1,
+      "max_ms": 90030.1
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-813584b44a4a483482b4b64def05b73a",
+    "mission_id": "mission-5e209ae464d14891af46878d1191d87f",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+        "created_at_ms": 1789356569051,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "使用已发布的仓库地图，将载有货物的货架车推送至收货区。",
+      "constraints": [
+        "必须使用已发布的仓库地图。"
+      ],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:2f2824fb042e21fa270b56dd98d444083831a5d0018771a3f552253f49310b5f",
+      "request_id": "request-813584b44a4a483482b4b64def05b73a",
+      "dialogue_digest": "sha256:e8aa47a45813c30503aa9179283200a40d4f75cbe628e60ebe32f71322fa77b2",
+      "captured_at_ms": 1789356569167,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g5-metadata-only-grounded",
+      "state_evidence": [],
+      "memory_evidence": [
+        {
+          "evidence_id": "memory::706b9c64a1a2e427ecddbdfe77a3a2296f93002da96ce6d3e33d7b0cad8c206d",
+          "selector": {
+            "memory_id": "warehouse-map",
+            "revision_id": "rev-2026-09"
+          },
+          "kind": "spatial",
+          "provider_id": "provider-mapping",
+          "owner": {
+            "team": "facilities"
+          },
+          "scope": "global",
+          "visibility": "discoverable",
+          "payload_schema": "roboguide.spatial-map/v0.1",
+          "media_type": "application/octet-stream",
+          "artifact": null,
+          "source_mission_id": null,
+          "source_execution_id": null,
+          "source_task_ref": null,
+          "created_at_ms": 1000,
+          "content_status": "MetadataOnly"
+        }
+      ],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789356569051,
+    "updated_at_ms": 1789356671195
+  }
+}

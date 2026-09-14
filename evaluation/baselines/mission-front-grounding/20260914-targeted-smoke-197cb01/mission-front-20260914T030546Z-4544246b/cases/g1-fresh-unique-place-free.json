@@ -1,0 +1,474 @@
+{
+  "case_id": "g1-fresh-unique-place-free",
+  "category": "grounding",
+  "instruction": "把运单号为 A-1024 的包裹送到前台",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 185.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=2 roles=2 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 133 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8931.9,
+      "request_bytes": 6142,
+      "response_bytes": 11141,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0c5fa94f56c5e6db016aa7648c455887d1a82736f2f0b88c6e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 316,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 316,
+              "output_tokens": 0
+            },
+            "rs_0c5fa94f56c5e6db016aa7648cc02c87d183a2e316e5fcfe38": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 283
+            },
+            "msg_0c5fa94f56c5e6db016aa7649204c087d1b0ddb843ceaf8535": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 78
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 78
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1277,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 361,
+        "output_tokens_details": {
+          "reasoning_tokens": 283
+        },
+        "total_tokens": 1638
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 85882.6,
+      "request_bytes": 22994,
+      "response_bytes": 56920,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_01b9d473fb3e0864016aa7649557a887d18cb08d457e4d4019": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2598,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2598,
+              "output_tokens": 0
+            },
+            "rs_01b9d473fb3e0864016aa76496211087d184767888b68f3ace": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_01b9d473fb3e0864016aa7649f77d487d195d972b5c4cb1591": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764a8ca0487d1a223421a52550654": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764b21a4487d19b0cdbef56456ab9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764bb6c9c87d1b66b9fbcf70b04d6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764c4c00087d1aa971d9717e3c78f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764ce157087d18d938d4651a49032": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_01b9d473fb3e0864016aa764d769bc87d1b56dc95f07c717c8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 358
+            },
+            "msg_01b9d473fb3e0864016aa764ddf4a487d196dee11a017219a1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 679
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 679
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1282,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 751,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4633,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4661,
+        "output_tokens_details": {
+          "reasoning_tokens": 3982
+        },
+        "total_tokens": 9294
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 90039.0,
+      "request_bytes": 17828,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "timed out",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 5910,
+    "output_tokens": 5022,
+    "total_tokens": 10932
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 8932.9,
+      "avg_ms": 8932.9,
+      "max_ms": 8932.9
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 85889.8,
+      "avg_ms": 85889.8,
+      "max_ms": 85889.8
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 90040.7,
+      "avg_ms": 90040.7,
+      "max_ms": 90040.7
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-4555b935dc4f491998cc18276d180b67",
+    "mission_id": "mission-f2db50ee260045cf87a74bb87c408ead",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把运单号为 A-1024 的包裹送到前台",
+        "created_at_ms": 1789355147352,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "将运单号为 A-1024 的包裹送到前台。",
+      "constraints": [],
+      "assumptions": [
+        "将“前台”理解为用户指定的交付地点，不额外添加指定人员签收、拍照或其他交接要求。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-f2db50ee260045cf87a74bb87c408ead",
+        "objective": "将运单号为 A-1024 的包裹送到前台。",
+        "actors": [
+          {
+            "id": "delivery_actor"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "delivery_context",
+          "roles": [
+            {
+              "id": "delivery_agent",
+              "actor": "delivery_actor"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "deliver_package",
+          "description": "运单号为 A-1024 的包裹在物理世界中位于前台，形成交付结果。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocator_role",
+              "context_role": "delivery_agent",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将运单号为 A-1024 的包裹送到前台。",
+                "parameters": {
+                  "destination": "前台",
+                  "object": "运单号为 A-1024 的包裹",
+                  "source": "运单号为 A-1024 的包裹当前位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "delivery_context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "运单号为 A-1024 的包裹位于前台。",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "观察结果表明运单号为 A-1024 的包裹位于前台。",
+              "max_evidence_age_ms": 1
+            }
+          }
+        },
+        {
+          "id": "verify_delivery",
+          "description": "获得并记录表明运单号为 A-1024 的包裹位于前台的观察证据。",
+          "depends_on": [
+            "deliver_package"
+          ],
+          "roles": [
+            {
+              "id": "verifier_role",
+              "context_role": "delivery_agent",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "observation",
+                      "name": "verify",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "observation",
+                  "name": "verify",
+                  "version": "v1"
+                },
+                "objective": "确认运单号为 A-1024 的包裹位于前台。",
+                "parameters": {
+                  "expected": "运单号为 A-1024 的包裹位于前台。"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "delivery_context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "已获得并记录表明运单号为 A-1024 的包裹位于前台的观察证据。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:a2f4fc1a7a0dc7d68ef1809ab85b9a3148c2c4c14d311005f53522f2c05d319c",
+      "request_id": "request-4555b935dc4f491998cc18276d180b67",
+      "dialogue_digest": "sha256:a36a26f677dcb4966124e41121779094908bf658505481ddc93991dba5f2c17f",
+      "captured_at_ms": 1789355147493,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:182d467d8dfdfcb66b073667135849c56a7487396c713301c4c651c947e223e6",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: timed out"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789355147352,
+    "updated_at_ms": 1789355332588
+  }
+}
