@@ -1,0 +1,243 @@
+{
+  "case_id": "g1-fresh-unique-place-grounded",
+  "category": "grounding",
+  "instruction": "把运单号为 A-1024 的包裹送到前台",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 9.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 7968.0,
+      "request_bytes": 6641,
+      "response_bytes": 11030,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_06566fe171c050a1016aa7585a9db487d1ab02f12cba3b0b49": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 452,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 452,
+              "output_tokens": 0
+            },
+            "rs_06566fe171c050a1016aa7585b488487d1bde2ed977e0d6b4b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 249
+            },
+            "msg_06566fe171c050a1016aa75860374887d1a123c5bb8ab32d77": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 89
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 89
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1413,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 338,
+        "output_tokens_details": {
+          "reasoning_tokens": 249
+        },
+        "total_tokens": 1751
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 932.8,
+      "request_bytes": 23259,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1413,
+    "output_tokens": 338,
+    "total_tokens": 1751
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 7969.0,
+      "avg_ms": 7969.0,
+      "max_ms": 7969.0
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 935.5,
+      "avg_ms": 935.5,
+      "max_ms": 935.5
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-e15ec1f9305f4d7facc9abb868a34902",
+    "mission_id": "mission-20295f27950b4c8a9aa1767d0389584c",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把运单号为 A-1024 的包裹送到前台",
+        "created_at_ms": 1789352025601,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": null,
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:5af8edc1ad6ee06fa862637146d168c1ccd928df9a1ef851f6e0fbd01d3b2292",
+      "request_id": "request-e15ec1f9305f4d7facc9abb868a34902",
+      "dialogue_digest": "sha256:7273a7865596951f6bb04b9e1970cb0823516d223d0a73018f5ccae165f5632b",
+      "captured_at_ms": 1789352025734,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g1-fresh-unique-place-grounded",
+      "state_evidence": [
+        {
+          "evidence_id": "state::5ebec11f9b243fd11e24971f7ddccb1f2e330ad42d94126516298367d9172c9a",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "front-desk"
+          },
+          "semantic": "observed",
+          "source": "node:camera-a/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "front desk"
+          },
+          "source_observed_at_ms": 900,
+          "received_at_ms": 1000,
+          "valid_for_ms": 3600000,
+          "freshness": "Fresh",
+          "confidence_millionths": 900000,
+          "source_epoch": "session-a",
+          "sequence": 2
+        }
+      ],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789352025601,
+    "updated_at_ms": 1789352034739
+  }
+}

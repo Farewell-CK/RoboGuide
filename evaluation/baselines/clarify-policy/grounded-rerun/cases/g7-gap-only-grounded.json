@@ -1,0 +1,231 @@
+{
+  "case_id": "g7-gap-only-grounded",
+  "category": "grounding",
+  "instruction": "巡逻今天上午指定的三个检查点",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 14.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12492.3,
+      "request_bytes": 6312,
+      "response_bytes": 13303,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f12d7308d0d57c8016aa7590558fc87d18ff4663045e71ddb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 320,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 320,
+              "output_tokens": 0
+            },
+            "rs_0f12d7308d0d57c8016aa75905d61c87d1b6decf8fe8fe2b0f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0f12d7308d0d57c8016aa7590f46ac87d1be0ae5776242344c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 102
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 102
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1281,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 618,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1899
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 1954.7,
+      "request_bytes": 23048,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1281,
+    "output_tokens": 618,
+    "total_tokens": 1899
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12493.6,
+      "avg_ms": 12493.6,
+      "max_ms": 12493.6
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 1957.1,
+      "avg_ms": 1957.1,
+      "max_ms": 1957.1
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-6a41f261c82b4dc18498e7f485b98dd4",
+    "mission_id": "mission-4656d79a7aad4df5bf5090759f8ce2e6",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "巡逻今天上午指定的三个检查点",
+        "created_at_ms": 1789352196486,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": null,
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:d2e21a4a62e6eb1cd70df5b0be0a90aa0f3990e98c6257b53d1f434028d448cb",
+      "request_id": "request-6a41f261c82b4dc18498e7f485b98dd4",
+      "dialogue_digest": "sha256:f9463fbdb520994d4d56ec18b274d9a2b0a20bb4905b97ba5747ba193d5656b4",
+      "captured_at_ms": 1789352196627,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g7-gap-only-grounded",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": [
+        {
+          "code": "source-unavailable",
+          "source": "controller-state",
+          "detail": "fixture: state source unreachable during capture"
+        },
+        {
+          "code": "source-unavailable",
+          "source": "memory-catalog",
+          "detail": "fixture: memory catalog unreachable during capture"
+        }
+      ]
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789352196486,
+    "updated_at_ms": 1789352211220
+  }
+}

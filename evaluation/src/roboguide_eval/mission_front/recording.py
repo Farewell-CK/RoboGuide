@@ -248,12 +248,15 @@ class StageTimedPort:
         self._stages = stages
         self.timing = StageTiming(stage=stage)
 
-    def _invoke(self, method_name: str, *args: object) -> object:
+    def _invoke(
+        self, method_name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
         """Delegate one port method with stage tagging and timing.
 
         Args:
             method_name: The port method to call.
-            *args: Forwarded positional arguments.
+            args: Forwarded positional arguments.
+            kwargs: Forwarded keyword arguments.
 
         Returns:
             The delegate's return value.
@@ -261,55 +264,59 @@ class StageTimedPort:
         self._stages.enter(self._stage)
         started = time.monotonic()
         try:
-            return getattr(self._delegate, method_name)(*args)
+            return getattr(self._delegate, method_name)(*args, **kwargs)
         finally:
             self.timing.record((time.monotonic() - started) * 1000.0)
             self._stages.leave()
 
-    def interpret(self, *args: object) -> object:
+    def interpret(self, *args: object, **kwargs: object) -> object:
         """Delegate the Interpreter call.
 
         Args:
             *args: Forwarded arguments (dialogue turns).
+            **kwargs: Forwarded keyword arguments.
 
         Returns:
             The delegate's assessment.
         """
-        return self._invoke("interpret", *args)
+        return self._invoke("interpret", args, kwargs)
 
-    def plan(self, *args: object) -> object:
+    def plan(self, *args: object, **kwargs: object) -> object:
         """Delegate the Planner call.
 
         Args:
             *args: Forwarded arguments (mission id, grounded intent, catalog).
+            **kwargs: Forwarded keyword arguments.
 
         Returns:
             The delegate's MissionPlan.
         """
-        return self._invoke("plan", *args)
+        return self._invoke("plan", args, kwargs)
 
-    def review(self, *args: object) -> object:
+    def review(self, *args: object, **kwargs: object) -> object:
         """Delegate the Reviewer call.
 
         Args:
             *args: Forwarded arguments (intent, plan, catalog).
+            **kwargs: Forwarded keyword arguments.
 
         Returns:
             The delegate's review.
         """
-        return self._invoke("review", *args)
+        return self._invoke("review", args, kwargs)
 
-    def repair(self, *args: object) -> object:
+    def repair(self, *args: object, **kwargs: object) -> object:
         """Delegate the Repairer call.
 
         Args:
             *args: Forwarded arguments (mission id, intent, plan, review,
                 catalog).
+            **kwargs: Forwarded keyword arguments.
 
         Returns:
             The delegate's repaired MissionPlan.
         """
-        return self._invoke("repair", *args)
+        return self._invoke("repair", args, kwargs)
 
 
 class RecordingSubmitter:

@@ -435,7 +435,12 @@ def run_suite(
         Exception: Configuration/provider assembly errors propagate — the
             suite cannot start without a usable pipeline.
     """
-    selected = [case for case in cases if not only or case.case_id in only]
+    selected = [
+        case
+        for case in cases
+        if not only
+        or any(case.case_id == value or case.case_id.startswith(value + "-") for value in only)
+    ]
     if limit > 0:
         selected = selected[:limit]
     suite_id = new_suite_id()

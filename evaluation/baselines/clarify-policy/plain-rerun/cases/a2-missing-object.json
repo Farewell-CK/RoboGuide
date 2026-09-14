@@ -1,0 +1,311 @@
+{
+  "case_id": "a2-missing-object",
+  "category": "ambiguity",
+  "instruction": "去厨房把东西拿过来",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 18.4,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "1 clarification question(s) asked: 要从厨房拿哪一样物品？请提供名称或可识别特征。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8422.1,
+      "request_bytes": 6125,
+      "response_bytes": 11243,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_05e01eb28d666350016aa75a78324887d19a4291358b19885b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 302,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 302,
+              "output_tokens": 0
+            },
+            "rs_05e01eb28d666350016aa75a78e91487d198759d719add6e91": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 281
+            },
+            "msg_05e01eb28d666350016aa75a7e237087d1a340a2065b8ecd76": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 84
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 84
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1263,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 365,
+        "output_tokens_details": {
+          "reasoning_tokens": 281
+        },
+        "total_tokens": 1628
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8017.2,
+      "request_bytes": 6584,
+      "response_bytes": 10580,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_04a3c7bf972cae00016aa75a80f85887d1be576126e5a5ca74": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 439,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 439,
+              "output_tokens": 0
+            },
+            "rs_04a3c7bf972cae00016aa75a829e5487d19429a522a4b0ad4a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 213
+            },
+            "msg_04a3c7bf972cae00016aa75a869ec087d18040a0d503de6275": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 60
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 60
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1400,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 273,
+        "output_tokens_details": {
+          "reasoning_tokens": 213
+        },
+        "total_tokens": 1673
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 1227.2,
+      "request_bytes": 22674,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 2663,
+    "output_tokens": 638,
+    "total_tokens": 3301
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 16441.1,
+      "avg_ms": 8220.5,
+      "max_ms": 8423.0
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 1229.6,
+      "avg_ms": 1229.6,
+      "max_ms": 1229.6
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-66818d53a49947349623b3638409c008",
+    "mission_id": "mission-d7dd2df6eaf640b8be99b5a49751be92",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去厨房把东西拿过来",
+        "created_at_ms": 1789352567297,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要从厨房拿哪一样物品？请提供名称或可识别特征。",
+        "created_at_ms": 1789352575994,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "拿红色的水壶，放到餐桌上",
+        "created_at_ms": 1789352576088,
+        "in_reply_to": "turn-0002"
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": null,
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:9c1eafc4e67879cf4fb24950b5f911ea73894851c5a07f7dcb9590bb9a730913",
+      "request_id": "request-66818d53a49947349623b3638409c008",
+      "dialogue_digest": "sha256:a04dcc763dca01c9f35569bbcc5e7fbd709bc0bded5405e170da12fcd8b9bbbf",
+      "captured_at_ms": 1789352576312,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789352567297,
+    "updated_at_ms": 1789352585635
+  }
+}

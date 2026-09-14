@@ -1,0 +1,243 @@
+{
+  "case_id": "g5-metadata-only-grounded",
+  "category": "grounding",
+  "instruction": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Failed",
+  "passed": true,
+  "wall_seconds": 15.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Failed"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13228.6,
+      "request_bytes": 6685,
+      "response_bytes": 12968,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0ee2355b2b06c665016aa758cc11b087d198a6c38b7713d0f7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 457,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 457,
+              "output_tokens": 0
+            },
+            "rs_0ee2355b2b06c665016aa758cca94887d1b7694c7993913c70": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0ee2355b2b06c665016aa758d61b0887d1af2a578e6e5e8235": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 132
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 132
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1418,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 648,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2066
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 1594.1,
+      "request_bytes": 23460,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1418,
+    "output_tokens": 648,
+    "total_tokens": 2066
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13229.8,
+      "avg_ms": 13229.8,
+      "max_ms": 13229.8
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 1596.6,
+      "avg_ms": 1596.6,
+      "max_ms": 1596.6
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-f07d82d37d6a4f6d842e9b6da217ac0a",
+    "mission_id": "mission-6160249873c54ba88e7e35dc786a24f1",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+        "created_at_ms": 1789352139256,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": null,
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:68b80b98a0548ac9162ec9889795bb51dabfb68469e6a1604b4d10686f59b0e2",
+      "request_id": "request-f07d82d37d6a4f6d842e9b6da217ac0a",
+      "dialogue_digest": "sha256:ba27b3596e8dcf7d8e215c478ecf6ed73223279aaa097ab7b87a7c908f12b667",
+      "captured_at_ms": 1789352139414,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g5-metadata-only-grounded",
+      "state_evidence": [],
+      "memory_evidence": [
+        {
+          "evidence_id": "memory::706b9c64a1a2e427ecddbdfe77a3a2296f93002da96ce6d3e33d7b0cad8c206d",
+          "selector": {
+            "memory_id": "warehouse-map",
+            "revision_id": "rev-2026-09"
+          },
+          "kind": "spatial",
+          "provider_id": "provider-mapping",
+          "owner": {
+            "team": "facilities"
+          },
+          "scope": "global",
+          "visibility": "discoverable",
+          "payload_schema": "roboguide.spatial-map/v0.1",
+          "media_type": "application/octet-stream",
+          "artifact": null,
+          "source_mission_id": null,
+          "source_execution_id": null,
+          "source_task_ref": null,
+          "created_at_ms": 1000,
+          "content_status": "MetadataOnly"
+        }
+      ],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 400: {\"error\":{\"code\":\"invalid_json_schema\",\"message\":\"Invalid schema for response_format 'mission_plan_v0': In context=('properties', 'execution_intent'), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'parameters' supplied.\",\"param\":\"text.format.schema\",\"type\":\"invalid_request_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789352139256,
+    "updated_at_ms": 1789352154307
+  }
+}

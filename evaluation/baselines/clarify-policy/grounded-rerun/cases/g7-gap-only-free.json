@@ -1,0 +1,225 @@
+{
+  "case_id": "g7-gap-only-free",
+  "category": "grounding",
+  "instruction": "巡逻今天上午指定的三个检查点",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 12.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 1 clarification question(s) recorded: 请提供这三个检查点的名称、位置或其他可识别信息，以明确巡逻目标。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12596.6,
+      "request_bytes": 6140,
+      "response_bytes": 13154,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_084800f90aad11e8016aa758f8123c87d1ad403b168d267801": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 301,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 301,
+              "output_tokens": 0
+            },
+            "rs_084800f90aad11e8016aa758f8ad3487d19d004886c10d0ccd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_084800f90aad11e8016aa75902203c87d18cbf5ae79310c9a0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 98
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 98
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 835,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1262,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 614,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 1876
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1262,
+    "output_tokens": 614,
+    "total_tokens": 1876
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12597.7,
+      "avg_ms": 12597.7,
+      "max_ms": 12597.7
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-7965cf639c3d41afba2ad54233123c9e",
+    "mission_id": "mission-6c2e54cf4a00463c98aa4611422a2e13",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "巡逻今天上午指定的三个检查点",
+        "created_at_ms": 1789352183187,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请提供这三个检查点的名称、位置或其他可识别信息，以明确巡逻目标。",
+        "created_at_ms": 1789352196026,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "巡逻今天上午指定的三个检查点。",
+      "constraints": [],
+      "assumptions": [
+        "将“今天上午指定的”理解为修饰“三个检查点”，即这些检查点是在今天上午指定的，而非要求在今天上午完成巡逻。"
+      ],
+      "open_questions": [
+        "请提供这三个检查点的名称、位置或其他可识别信息，以明确巡逻目标。"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:92bbcf07835e7be01963e685ff3f5531c67ec9b36313045cd56357eb915dbce9",
+      "request_id": "request-7965cf639c3d41afba2ad54233123c9e",
+      "dialogue_digest": "sha256:312baddda727dcf49f88c986c4cbf75788182fffcc174fefbb308c8ebce08acc",
+      "captured_at_ms": 1789352183361,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789352183187,
+    "updated_at_ms": 1789352196026
+  }
+}

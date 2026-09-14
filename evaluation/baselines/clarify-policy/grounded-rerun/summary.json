@@ -1,0 +1,520 @@
+{
+  "suite_id": "mission-front-20260914T021336Z-1e157e15",
+  "scenarios_executed": 14,
+  "scenarios_passed": 14,
+  "pairs": {
+    "conflict": {
+      "instruction": "到会议室把白板擦拿过来",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1266,
+            "output_tokens": 448,
+            "total_tokens": 1714
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "NeedsClarification",
+          "clarification_questions": 1,
+          "llm_calls": 1,
+          "token_totals": {
+            "input_tokens": 1579,
+            "output_tokens": 611,
+            "total_tokens": 2190
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "fresh-unique-place": {
+      "instruction": "把运单号为 A-1024 的包裹送到前台",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1271,
+            "output_tokens": 263,
+            "total_tokens": 1534
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1413,
+            "output_tokens": 338,
+            "total_tokens": 1751
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "fresh-vs-stale": {
+      "instruction": "把载有发动机备件的托盘送到当前卸货区",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1283,
+            "output_tokens": 429,
+            "total_tokens": 1712
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1604,
+            "output_tokens": 598,
+            "total_tokens": 2202
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "gap-only": {
+      "instruction": "巡逻今天上午指定的三个检查点",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "NeedsClarification",
+          "clarification_questions": 1,
+          "llm_calls": 1,
+          "token_totals": {
+            "input_tokens": 1262,
+            "output_tokens": 614,
+            "total_tokens": 1876
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1281,
+            "output_tokens": 618,
+            "total_tokens": 1899
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "metadata-only": {
+      "instruction": "使用已发布的仓库地图，把载有货物的货架车推到收货区",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1282,
+            "output_tokens": 934,
+            "total_tokens": 2216
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1418,
+            "output_tokens": 648,
+            "total_tokens": 2066
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "no-evidence": {
+      "instruction": "把贴有红色标签的工具箱搬到装卸区",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1271,
+            "output_tokens": 284,
+            "total_tokens": 1555
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1226,
+            "output_tokens": 482,
+            "total_tokens": 1708
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "stale": {
+      "instruction": "去充电桩那里待命",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1272,
+            "output_tokens": 608,
+            "total_tokens": 1880
+          },
+          "failed_invariants": []
+        },
+        "fixture_grounded": {
+          "final_lifecycle": "Failed",
+          "clarification_questions": 0,
+          "llm_calls": 2,
+          "token_totals": {
+            "input_tokens": 1397,
+            "output_tokens": 636,
+            "total_tokens": 2033
+          },
+          "failed_invariants": []
+        }
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "case_id": "g1-fresh-unique-place-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 8.4,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "fresh-unique-place"
+    },
+    {
+      "case_id": "g1-fresh-unique-place-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 9.2,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "fresh-unique-place"
+    },
+    {
+      "case_id": "g2-conflict-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 12.0,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "conflict"
+    },
+    {
+      "case_id": "g2-conflict-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "NeedsClarification",
+      "wall_seconds": 14.5,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 1,
+      "mode": "fixture_grounded",
+      "pair": "conflict"
+    },
+    {
+      "case_id": "g3-stale-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 16.4,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "stale"
+    },
+    {
+      "case_id": "g3-stale-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 15.4,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "stale"
+    },
+    {
+      "case_id": "g4-no-evidence-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 9.0,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "no-evidence"
+    },
+    {
+      "case_id": "g4-no-evidence-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 11.8,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "no-evidence"
+    },
+    {
+      "case_id": "g5-metadata-only-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 21.6,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "metadata-only"
+    },
+    {
+      "case_id": "g5-metadata-only-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 15.1,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "metadata-only"
+    },
+    {
+      "case_id": "g6-fresh-vs-stale-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 11.7,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "context_free",
+      "pair": "fresh-vs-stale"
+    },
+    {
+      "case_id": "g6-fresh-vs-stale-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 15.6,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "fresh-vs-stale"
+    },
+    {
+      "case_id": "g7-gap-only-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "NeedsClarification",
+      "wall_seconds": 12.9,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 1,
+      "mode": "context_free",
+      "pair": "gap-only"
+    },
+    {
+      "case_id": "g7-gap-only-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Failed",
+      "wall_seconds": 14.9,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 2,
+      "mode": "fixture_grounded",
+      "pair": "gap-only"
+    }
+  ]
+}

@@ -542,6 +542,7 @@ def run_grounding_suite(
     *,
     repository_root: Path,
     out_dir: Path,
+    only: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Run grounding A/B canaries: one fresh engine per scenario.
 
@@ -554,6 +555,8 @@ def run_grounding_suite(
         scenarios: The loaded grounding scenarios.
         repository_root: Repository root for configuration resolution.
         out_dir: Output directory receiving suite evidence.
+        only: Optional filter matching scenario ids or pair ids (repeatable);
+            both arms of a matched pair run so A/B comparison stays intact.
 
     Returns:
         The summary document with per-pair comparison written to
@@ -563,6 +566,14 @@ def run_grounding_suite(
         Exception: Configuration/provider assembly errors propagate — the
             suite cannot start without a usable pipeline.
     """
+    if only:
+        selected = tuple(
+            scenario
+            for scenario in scenarios
+            if scenario.scenario_id in only or scenario.pair_id in only
+        )
+    else:
+        selected = scenarios
     from roboguide_eval.mission_front.recording import RecordingTransport, StageScope
     from roboguide_eval.mission_front.runner import (
         _usage_totals,
@@ -577,7 +588,7 @@ def run_grounding_suite(
     cases_dir.mkdir(parents=True, exist_ok=True)
     summaries: list[dict[str, object]] = []
     pairs: dict[str, dict[str, object]] = {}
-    for scenario in scenarios:
+    for scenario in selected:
         stages = StageScope()
         transport = RecordingTransport(UrllibJsonTransport(), stages)
         suite = build_suite_components(
@@ -620,7 +631,7 @@ def run_grounding_suite(
         pair["modes"] = modes
     summary = {
         "suite_id": suite_id,
-        "scenarios_executed": len(scenarios),
+        "scenarios_executed": len(selected),
         "scenarios_passed": sum(1 for entry in summaries if entry["passed"]),
         "pairs": dict(sorted(pairs.items())),
         "scenarios": summaries,
