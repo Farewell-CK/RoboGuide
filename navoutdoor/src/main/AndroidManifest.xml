@@ -5,4 +5,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <application>
+        <!-- MediaTek Neuron/NeuroPilot TFLite 运行时是厂商在 /system_ext 下提供的可选库，
+             Android 12+ 需要显式声明才会被授予链接命名空间访问权限，否则
+             dlopen 会以 "is not accessible for the namespace" 失败。required=false
+             保证在不提供该库的设备上仍能正常安装运行（现有的加载失败兜底逻辑不变）。 -->
+        <uses-native-library
+            android:name="libtflite_mtk.mtk.so"
+            android:required="false" />
+    </application>
+
 </manifest>

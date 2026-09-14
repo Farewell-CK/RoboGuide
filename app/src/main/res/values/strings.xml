@@ -96,7 +96,7 @@
     <string name="nav_btn_start_outdoor">开始导航</string>
     <string name="nav_btn_end_outdoor">结束导航</string>
     <string name="nav_btn_end_indoor">结束导航</string>
-    <string name="nav_btn_calibrate_heading">朝向标定</string>
+    <string name="nav_btn_calibrate_heading">重新标定</string>
     <string name="nav_camera_waiting">等待深度相机</string>
     <string name="nav_suggestion_status_searching">正在搜索目的地…</string>
     <string name="nav_all_phases_done">出行导航已全部完成。</string>

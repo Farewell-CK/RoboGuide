@@ -142,6 +142,31 @@
                     android:textColor="@color/color_text_muted"
                     android:textSize="@dimen/sp_13" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:text="D455F 彩色画面（实时）"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_13" />
+
+                <ImageView
+                    android:id="@+id/iv_color_preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/dp_200"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_card"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:text="D455F 深度画面"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_13" />
+
                 <ImageView
                     android:id="@+id/iv_depth_preview"
                     android:layout_width="match_parent"
@@ -296,7 +321,8 @@
                         android:background="@drawable/bg_btn_outline"
                         android:text="@string/nav_btn_calibrate_heading"
                         android:textColor="@color/color_primary"
-                        android:textSize="@dimen/sp_13" />
+                        android:textSize="@dimen/sp_13"
+                        android:visibility="gone" />
                 </LinearLayout>
 
                 <TextView

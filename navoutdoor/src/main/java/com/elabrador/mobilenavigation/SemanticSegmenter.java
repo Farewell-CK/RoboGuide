@@ -58,11 +58,22 @@ final class SemanticSegmenter implements AutoCloseable {
         final float groundHeight;
         final int groundClearedCells;
         final int[] localCostGrid;
+        final VinsMono.Pose mapPose;
 
         Result(boolean isNotWalkable, String label, float areaRatio, long inferenceMillis,
                String backend, float leftCost, float centerCost, float rightCost,
                float obstacleDistance, int semanticPointCount, int octomapLeafCount, int costGridKnownCount,
                float groundHeight, int groundClearedCells, int[] localCostGrid) {
+            this(isNotWalkable, label, areaRatio, inferenceMillis, backend, leftCost,
+                    centerCost, rightCost, obstacleDistance, semanticPointCount,
+                    octomapLeafCount, costGridKnownCount, groundHeight, groundClearedCells,
+                    localCostGrid, null);
+        }
+
+        Result(boolean isNotWalkable, String label, float areaRatio, long inferenceMillis,
+               String backend, float leftCost, float centerCost, float rightCost,
+               float obstacleDistance, int semanticPointCount, int octomapLeafCount, int costGridKnownCount,
+               float groundHeight, int groundClearedCells, int[] localCostGrid, VinsMono.Pose mapPose) {
             this.isNotWalkable = isNotWalkable;
             this.label = label;
             this.areaRatio = areaRatio;
@@ -78,6 +89,14 @@ final class SemanticSegmenter implements AutoCloseable {
             this.groundHeight = groundHeight;
             this.groundClearedCells = groundClearedCells;
             this.localCostGrid = localCostGrid;
+            this.mapPose = mapPose;
+        }
+
+        Result withMapPose(VinsMono.Pose pose) {
+            return new Result(isNotWalkable, label, areaRatio, inferenceMillis, backend,
+                    leftCost, centerCost, rightCost, obstacleDistance, semanticPointCount,
+                    octomapLeafCount, costGridKnownCount, groundHeight, groundClearedCells,
+                    localCostGrid, pose);
         }
 
         static Result waiting() {
@@ -161,7 +180,16 @@ final class SemanticSegmenter implements AutoCloseable {
     private volatile boolean closed;
     private volatile long octomapHandle;
     private volatile VinsMono.Pose vinsPose;
-    private volatile float[] latestOctomapLeaves;
+    private static final class OctomapSnapshot {
+        final float[] leaves;
+        final LocalMapStabilizer.Snapshot stable;
+        OctomapSnapshot(float[] leaves, LocalMapStabilizer.Snapshot stable) {
+            this.leaves = leaves;
+            this.stable = stable;
+        }
+    }
+    private final LocalMapStabilizer localMapStabilizer = new LocalMapStabilizer();
+    private volatile OctomapSnapshot latestOctomap;
     private volatile Result latestResult;
     private volatile long vinsPoseStampNanos;
     private volatile long localMapStampNanos;
@@ -191,13 +219,14 @@ final class SemanticSegmenter implements AutoCloseable {
         vinsPose = null;
         vinsPoseStampNanos = 0L;
         localMapStampNanos = 0L;
-        latestOctomapLeaves = null;
+        latestOctomap = null;
         latestResult = null;
         if (!closed) {
             try {
                 mapExecutor.execute(() -> {
                     if (octomapHandle != 0L) NativeOctomap.nativeClear(octomapHandle);
-                    latestOctomapLeaves = null;
+                    localMapStabilizer.clear();
+                    latestOctomap = null;
                     latestResult = null;
                 });
             } catch (RejectedExecutionException ignored) {
@@ -249,6 +278,7 @@ final class SemanticSegmenter implements AutoCloseable {
                 listener.onStatus(BuildConfig.SEMANTIC_MODEL_NAME + " 已加载（"
                         + backend + "），等待彩色帧");
             } catch (Exception error) {
+                Log.e(TAG, "model init failed", error);
                 listener.onError(errorMessage(error));
             }
         });
@@ -276,6 +306,7 @@ final class SemanticSegmenter implements AutoCloseable {
                         listener.onResult(result);
                     }
                 } catch (Exception error) {
+                    Log.e(TAG, "inference failed", error);
                     if (generation == vinsGeneration.get() && !closed) {
                         listener.onError(errorMessage(error));
                     }
@@ -589,10 +620,10 @@ final class SemanticSegmenter implements AutoCloseable {
         int groundSupportCells = 0;
         int groundPositiveCostCells = 0;
         int groundCandidateCells = 0;
+        int mapHeldCells = 0;
         int[] localCostGrid = null;
         if (octomapHandle != 0L && leafCount > 0) {
             float[] leaves = NativeOctomap.nativeExportLeafs(octomapHandle);
-            latestOctomapLeaves = leaves;
             VinsMono.Pose projectionPose = framePose != null ? framePose : currentPose;
             float locationX = projectionPose == null ? 0f : (float) projectionPose.x;
             float locationY = projectionPose == null ? 0f : (float) projectionPose.y;
@@ -606,8 +637,18 @@ final class SemanticSegmenter implements AutoCloseable {
             groundSupportCells = grid.groundSupportCells;
             groundPositiveCostCells = grid.groundPositiveCostCells;
             groundCandidateCells = grid.groundCandidateCells;
-            localCostGrid = grid.cost;
-            localMapStampNanos = System.nanoTime();
+            long observedAt = System.nanoTime();
+            LocalMapStabilizer.Snapshot stable = localMapStabilizer.update(
+                    grid.cost, projectionPose, observedAt, frameTimestampSeconds);
+            localCostGrid = stable.costs;
+            for (int i = 0; i < localCostGrid.length; i++) {
+                if (localCostGrid[i] != grid.cost[i]) mapHeldCells++;
+            }
+            if (generation != vinsGeneration.get() || closed) return null;
+            // Publish leaves and their filtered costs together. Pose-only refreshes
+            // must not bypass the filter or count the same observation again.
+            latestOctomap = new OctomapSnapshot(leaves, stable);
+            localMapStampNanos = observedAt;
         }
         long gridBuilt = SystemClock.elapsedRealtimeNanos();
         if (mapRateStarted == 0L) mapRateStarted = gridBuilt;
@@ -631,7 +672,7 @@ final class SemanticSegmenter implements AutoCloseable {
             Log.i(TAG, String.format(Locale.US,
                     "stages total=%dms prep=%d model=%d decode=%d cloud=%d octomap=%d grid=%d pose_wait=%d "
                             + "frame_pose_delta=%.3fm yaw_delta=%.2fdeg points=%d leaves=%d known=%d "
-                            + "frame_ground=%.3fm/%d/%d ground=%.3fm support=%d positive=%d candidates=%d cleared=%d",
+                            + "frame_ground=%.3fm/%d/%d ground=%.3fm support=%d positive=%d candidates=%d cleared=%d map_held=%d",
                     millis(gridBuilt - started), millis(prepared - started),
                     millis(inferred - prepared), millis(decoded - inferred),
                     millis(cloudBuilt - decoded), millis(mapInserted - poseReady),
@@ -639,10 +680,11 @@ final class SemanticSegmenter implements AutoCloseable {
                     inserted, leafCount, gridKnown, frameGround.groundHeight,
                     frameGround.supportCells, frameGround.correctedPoints, groundHeight,
                     groundSupportCells, groundPositiveCostCells, groundCandidateCells,
-                    groundClearedCells));
+                    groundClearedCells, mapHeldCells));
         }
         return summarize(mask, maskWidth, maskHeight, inserted, leafCount, gridKnown,
-                localCostGrid, groundHeight, groundClearedCells, millis(gridBuilt - started));
+                localCostGrid, groundHeight, groundClearedCells, millis(gridBuilt - started))
+                .withMapPose(framePose != null ? framePose : currentPose);
     }
 
     private static long millis(long nanos) {
@@ -658,7 +700,8 @@ final class SemanticSegmenter implements AutoCloseable {
     /** Reprojects the latest immutable OctoMap snapshot around the current VINS pose. */
     Result reprojectLatestLocalMap() throws Exception {
         Result base = latestResult;
-        float[] leaves = latestOctomapLeaves;
+        OctomapSnapshot snapshot = latestOctomap;
+        float[] leaves = snapshot == null ? null : snapshot.leaves;
         VinsMono.Pose pose = vinsPose;
         long now = System.nanoTime();
         if (base == null || leaves == null || leaves.length == 0 || pose == null
@@ -669,11 +712,12 @@ final class SemanticSegmenter implements AutoCloseable {
         MapTransform.Grid grid = MapTransform.octree2localprmapHeightEgo(
                 context, leaves, (float) pose.x, (float) pose.y, (float) pose.z,
                 pose.egoRightAxisYawRadians(), USE_PIDNET);
+        int[] stableCosts = snapshot.stable.reproject(grid.cost, pose, now);
         return new Result(base.isNotWalkable, base.label, base.areaRatio,
                 base.inferenceMillis, base.backend, base.leftCost, base.centerCost,
                 base.rightCost, base.obstacleDistance, base.semanticPointCount,
                 base.octomapLeafCount, grid.known, grid.groundHeight,
-                grid.groundClearedCells, grid.cost);
+                grid.groundClearedCells, stableCosts, pose);
     }
 
     String localMapWaitingReason() {
@@ -682,7 +726,8 @@ final class SemanticSegmenter implements AutoCloseable {
         if (vinsPoseStampNanos == 0L || now - vinsPoseStampNanos > POSE_LIFE_NANOS) {
             return "VINS 位姿已超过 10 秒未更新";
         }
-        if (latestOctomapLeaves == null || latestOctomapLeaves.length == 0) {
+        OctomapSnapshot snapshot = latestOctomap;
+        if (snapshot == null || snapshot.leaves.length == 0) {
             return "等待语义点云/OctoMap局部代价图";
         }
         if (localMapStampNanos == 0L || now - localMapStampNanos > MAP_LIFE_NANOS) {

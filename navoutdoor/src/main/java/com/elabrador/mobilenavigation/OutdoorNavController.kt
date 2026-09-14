@@ -118,12 +118,14 @@ class OutdoorNavController(
         fun onRouteStatus(text: String)
         fun onNavigationStatus(text: String, visible: Boolean)
         fun onFrameStatus(text: String)
-        fun onCalibrationStatus(text: String, ready: Boolean)
+        fun onCalibrationStatus(text: String, calibrated: Boolean, recalibrationRequired: Boolean)
         fun onNavigationStarted()
         fun onNavigationEnded()
         fun onArrived()
         /** Justified addition (not in the directive's literal list): the depth preview bitmap MainActivity rendered into `depthPreview`. */
         fun onDepthPreview(bitmap: Bitmap?)
+        /** Reuses the existing RGB8 stream and is available before VINS initialization. */
+        fun onColorPreview(bitmap: Bitmap?)
         /** Justified addition: the VINS status panel MainActivity rendered into `vinsStatusPanel`. */
         fun onVinsStatus(text: String, level: GuidanceLevel)
     }
@@ -147,6 +149,9 @@ class OutdoorNavController(
         private val COLOR_FRAME_INTERVAL = BuildConfig.SEMANTIC_FRAME_INTERVAL
         private const val COLOR_AUTO_EXPOSURE_LIMIT_US = 16_000f
         private const val COLOR_METADATA_LOG_INTERVAL = 30
+        private val AUTO_CALIBRATE_POSE_SETTLE_NANOS = TimeUnit.SECONDS.toNanos(2)
+        private val AUTO_CALIBRATE_HEADING_STABLE_NANOS = TimeUnit.SECONDS.toNanos(1)
+        private const val AUTO_CALIBRATE_HEADING_JITTER_DEGREES = 3f
         // One second of source frames prevents UI/GC pauses from becoming VINS image
         // timestamp discontinuities. The upstream ROS subscribers use deeper queues.
         private const val VIDEO_FRAME_QUEUE_CAPACITY = VIDEO_FPS + 2
@@ -182,6 +187,8 @@ class OutdoorNavController(
     private val diagnosticRgbWritten = AtomicBoolean(false)
     private val diagnosticRgbFrames = AtomicLong()
     private val previewUpdatePending = AtomicBoolean(false)
+    private val colorPreviewPending = AtomicBoolean(false)
+    @Volatile private var colorPreviewGeneration = 0L
     private val uiUpdatePending = AtomicBoolean(false)
     private var previewDepthBuffer: ByteArray? = null
     private var previewAlternateDepthBuffer: ByteArray? = null
@@ -244,8 +251,20 @@ class OutdoorNavController(
     @Volatile private var vinsResetCount = 0
     private var consecutiveUninitializedPoses = 0
     @Volatile private var latestVinsPoseNanos = 0L
+    private var vinsReadySinceNanos = 0L
+    private var headingStableSinceNanos = 0L
+    private var previousStabilityHeading = Float.NaN
+    private val autoCalibrateLock = Object()
+    // The entry-time aligned posture can be calibrated automatically. After a
+    // mid-session VINS restart the phone and camera may be held separately, so
+    // only an explicit tap after re-alignment may establish the new offset.
+    @Volatile private var manualCalibrationAfterRestart = false
 
     private val guidanceStabilizer = GuidanceStabilizer()
+    // Advance cue state once per immutable planning result, not per UI redraw.
+    private var lastCuePlan: LocalPlanner.PathResult? = null
+    private var lastPlanCue = ""
+    private val navigationCueTracker = NavigationCue.Tracker()
     private var destinationGeneration = 0L
     private var pendingDestinationSearch: Runnable? = null
     private var selectedDestination: AmapRouteClient.PlaceSuggestion? = null
@@ -278,6 +297,7 @@ class OutdoorNavController(
             }
 
             override fun onError(message: String) {
+                Log.e(TAG, "semantic segmenter error: $message")
                 runOnUiThread {
                     listener.onSemanticOverlay(
                         "${BuildConfig.SEMANTIC_MODEL_NAME} 错误：$message", GuidanceLevel.DANGER)
@@ -295,6 +315,7 @@ class OutdoorNavController(
                 listener.onHeading(
                     headingDegrees,
                     String.format(Locale.CHINA, "朝向\n%.0f° %s", headingDegrees, cardinalDirection(headingDegrees)))
+                autoCalibrateHeadingIfNeeded()
                 updateNavigationGuidance()
             }
 
@@ -330,9 +351,11 @@ class OutdoorNavController(
             }
 
             override fun onDeviceDetach() {
+                colorPreviewGeneration++
                 stopStreaming()
                 runOnUiThread {
                     listener.onDepthPreview(null)
+                    listener.onColorPreview(null)
                     listener.onCameraStatus("深度相机已断开")
                     listener.onGuidanceChanged("", GuidanceLevel.MUTED)
                     renderVinsStatus(vinsInput.status())
@@ -394,6 +417,8 @@ class OutdoorNavController(
     }
 
     fun onPause() {
+        colorPreviewGeneration++
+        listener.onColorPreview(null)
         synchronized(this) {
             activityResumed = false
         }
@@ -409,6 +434,8 @@ class OutdoorNavController(
     }
 
     fun onDestroy() {
+        colorPreviewGeneration++
+        listener.onColorPreview(null)
         released = true
         releaseNavigationWakeLock()
         stopStreaming()
@@ -619,7 +646,7 @@ class OutdoorNavController(
             location.latitude,
             location.longitude,
             if (location.hasAccuracy()) location.accuracy else 0f,
-            Float.NaN
+            currentTrueNorthHeading()
         ) ?: return
 
         val pose = latestVinsPose
@@ -640,9 +667,10 @@ class OutdoorNavController(
         listener.onNavigationStatus(
             String.format(
                 Locale.CHINA,
-                "剩余 %s · 距下一步 %s\n目标方位 %.0f° · %s%s%s",
+                "剩余 %s · 距下一步 %s\n%s\n目标方位 %.0f° · %s%s%s",
                 formatNavigationDistance(guidance.remainingMeters),
                 formatNavigationDistance(guidance.distanceToInstructionMeters),
+                guidance.instruction,
                 guidance.targetBearingDegrees,
                 cameraTarget,
                 deviation,
@@ -660,6 +688,22 @@ class OutdoorNavController(
         }
     }
 
+    /** Returns the fresh phone compass heading corrected from magnetic to true north. */
+    private fun currentTrueNorthHeading(): Float {
+        if (!currentHeading.isFinite() || latestHeadingNanos == 0L ||
+            SystemClock.elapsedRealtimeNanos() - latestHeadingNanos > TimeUnit.SECONDS.toNanos(2)) {
+            return Float.NaN
+        }
+        val location = lastLocation ?: return currentHeading
+        val field = GeomagneticField(
+            location.latitude.toFloat(),
+            location.longitude.toFloat(),
+            if (location.hasAltitude()) location.altitude.toFloat() else 0f,
+            System.currentTimeMillis())
+        return DynamicHeadingCalibrator.normalizeDegrees(
+            (currentHeading + field.declination).toDouble()).toFloat()
+    }
+
     private fun formatNavigationDistance(meters: Int): String {
         if (meters < 1000) {
             return String.format(Locale.CHINA, "%d 米", meters)
@@ -672,31 +716,85 @@ class OutdoorNavController(
     // ---------------------------------------------------------------------
 
     fun calibrateHeading() {
-        var trueHeading = currentHeading
+        val trueHeading = currentTrueNorthHeading()
         val nowNanos = SystemClock.elapsedRealtimeNanos()
-        if (latestHeadingNanos == 0L || nowNanos - latestHeadingNanos > TimeUnit.SECONDS.toNanos(2)) {
-            trueHeading = Float.NaN
-        }
         var pose = latestVinsPose
         if (latestVinsPoseNanos == 0L || nowNanos - latestVinsPoseNanos > TimeUnit.SECONDS.toNanos(2)) {
             pose = null
         }
-        val location = lastLocation
-        if (trueHeading.isFinite() && location != null) {
-            val magneticField = GeomagneticField(
-                location.latitude.toFloat(),
-                location.longitude.toFloat(),
-                if (location.hasAltitude()) location.altitude.toFloat() else 0f,
-                System.currentTimeMillis())
-            trueHeading = DynamicHeadingCalibrator.normalizeDegrees(
-                (trueHeading + magneticField.declination).toDouble()).toFloat()
-        }
-        if (dynamicHeadingCalibrator.calibrateAligned(trueHeading, pose)) {
+        if (dynamicHeadingCalibrator.calibrateAligned(trueHeading, pose, "重新标定")) {
             dynamicHeadingCalibrator.save(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
         }
         renderDynamicHeadingCalibration()
         resetLocalPlanning()
         requestLocalPlanRefresh()
+    }
+
+    /**
+     * Snapshots the aligned phone compass against the settled VINS world frame once at entry.
+     * A mid-session VINS restart permanently switches this controller session to manual mode.
+     */
+    private fun autoCalibrateHeadingIfNeeded() {
+        var calibrated = false
+        synchronized(autoCalibrateLock) {
+            if (manualCalibrationAfterRestart || dynamicHeadingCalibrator.isReady()) return
+            val nowNanos = SystemClock.elapsedRealtimeNanos()
+            val pose = latestVinsPose
+            if (pose == null || !pose.initialized || latestVinsPoseNanos == 0L ||
+                nowNanos - latestVinsPoseNanos > AUTO_CALIBRATE_POSE_SETTLE_NANOS) {
+                vinsReadySinceNanos = 0L
+                return
+            }
+            if (vinsReadySinceNanos == 0L) {
+                vinsReadySinceNanos = nowNanos
+                return
+            }
+            if (nowNanos - vinsReadySinceNanos < AUTO_CALIBRATE_POSE_SETTLE_NANOS) return
+            if (!currentHeading.isFinite() || latestHeadingNanos == 0L ||
+                nowNanos - latestHeadingNanos > AUTO_CALIBRATE_HEADING_STABLE_NANOS) {
+                headingStableSinceNanos = 0L
+                previousStabilityHeading = Float.NaN
+                return
+            }
+            if (previousStabilityHeading.isFinite() &&
+                Math.abs(DynamicHeadingCalibrator.normalizeDegrees(
+                    (currentHeading - previousStabilityHeading).toDouble())) >
+                    AUTO_CALIBRATE_HEADING_JITTER_DEGREES) {
+                headingStableSinceNanos = 0L
+            }
+            if (headingStableSinceNanos == 0L) {
+                headingStableSinceNanos = nowNanos
+                previousStabilityHeading = currentHeading
+                return
+            }
+            previousStabilityHeading = currentHeading
+            if (nowNanos - headingStableSinceNanos < AUTO_CALIBRATE_HEADING_STABLE_NANOS) return
+
+            calibrated = dynamicHeadingCalibrator.calibrateAligned(
+                currentTrueNorthHeading(), pose, "自动标定")
+            if (calibrated) {
+                dynamicHeadingCalibrator.save(
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
+                vinsReadySinceNanos = 0L
+                headingStableSinceNanos = 0L
+                previousStabilityHeading = Float.NaN
+            }
+        }
+        if (calibrated) {
+            runOnUiThread {
+                renderDynamicHeadingCalibration()
+                resetLocalPlanning()
+                requestLocalPlanRefresh()
+            }
+        }
+    }
+
+    private fun resetAutoCalibrationState() {
+        synchronized(autoCalibrateLock) {
+            vinsReadySinceNanos = 0L
+            headingStableSinceNanos = 0L
+            previousStabilityHeading = Float.NaN
+        }
     }
 
     private fun updateDynamicHeadingCalibration(location: Location) {
@@ -725,7 +823,10 @@ class OutdoorNavController(
 
     private fun renderDynamicHeadingCalibration() {
         val ready = dynamicHeadingCalibrator.isReady()
-        listener.onCalibrationStatus(dynamicHeadingCalibrator.status(), ready)
+        listener.onCalibrationStatus(
+            dynamicHeadingCalibrator.status(),
+            ready,
+            manualCalibrationAfterRestart && !ready)
     }
 
     // ---------------------------------------------------------------------
@@ -839,6 +940,7 @@ class OutdoorNavController(
                                             colorStride = color.stride
                                             val frameRgb = ByteArray(color.dataSize)
                                             color.getData(frameRgb)
+                                            updateColorPreview(frameRgb, colorWidth, colorHeight, colorStride, frameCount)
                                             rgb = frameRgb
                                             if (BuildConfig.DEBUG) {
                                                 writeDiagnosticRgbOnce(frameRgb, colorWidth, colorHeight, colorStride)
@@ -940,6 +1042,28 @@ class OutdoorNavController(
                 restartStreamingWhenStopped = false
             }
             if (restart) runOnUiThread { startStreaming() }
+        }
+    }
+
+    /** Uses the existing RGB stream before VINS is ready and keeps at most one UI frame queued. */
+    private fun updateColorPreview(rgb: ByteArray, width: Int, height: Int, stride: Int, frame: Long) {
+        if (!activityResumed || frame % PREVIEW_FRAME_INTERVAL != 0L ||
+            !colorPreviewPending.compareAndSet(false, true)) return
+        val generation = colorPreviewGeneration
+        runOnUiThread {
+            try {
+                if (!activityResumed || released || generation != colorPreviewGeneration) return@runOnUiThread
+                val step = 2
+                val pixels = RgbPreviewPixels.convert(rgb, width, height, stride, step)
+                val bitmap = Bitmap.createBitmap(
+                    pixels,
+                    (width + step - 1) / step,
+                    (height + step - 1) / step,
+                    Bitmap.Config.ARGB_8888)
+                listener.onColorPreview(bitmap)
+            } finally {
+                colorPreviewPending.set(false)
+            }
         }
     }
 
@@ -1210,6 +1334,7 @@ class OutdoorNavController(
             if (!wasInitialized) vinsInitialized = pose.initialized
             latestVinsPose = pose
             latestVinsPoseNanos = SystemClock.elapsedRealtimeNanos()
+            autoCalibrateHeadingIfNeeded()
             calibrationVinsPoseHistory.add(pose)
             semanticSegmenter?.updateVinsPose(pose)
         }
@@ -1226,12 +1351,16 @@ class OutdoorNavController(
         vinsInitialized = false
         latestVinsPose = null
         latestVinsPoseNanos = 0L
+        // Never reuse the entry-time automatic snapshot after the devices may
+        // have moved independently during a mid-session estimator restart.
+        manualCalibrationAfterRestart = true
         resetVinsDependents()
     }
 
     private fun resetVinsDependents() {
         calibrationVinsPoseHistory.clear()
         dynamicHeadingCalibrator.resetForVinsRestart()
+        resetAutoCalibrationState()
         latestSemanticResult = SemanticSegmenter.Result.waiting()
         latestSemanticResultNanos = 0L
         semanticSegmenter?.resetVinsState()
@@ -1441,31 +1570,22 @@ class OutdoorNavController(
 
         var guidance: String
         var level: GuidanceLevel
-        val plan = latestLocalPlan
         if (!navigationActive) {
             guidance = ""
             level = GuidanceLevel.MUTED
-        } else if (plan.planned) {
-            guidance = NavigationCue.fromPlan(plan.planned, plan.success, plan.blocked, plan.steeringDegrees)
-            level = when {
-                guidance == "停止" -> GuidanceLevel.DANGER
-                guidance == "直走" -> GuidanceLevel.SAFE
-                else -> GuidanceLevel.WARNING
+        } else if (latestLocalPlan.planned) {
+            val cuePlan = latestLocalPlan
+            if (cuePlan !== lastCuePlan) {
+                lastPlanCue = navigationCueTracker.update(
+                    true, cuePlan.success, cuePlan.blocked, cuePlan.steeringDegrees)
+                lastCuePlan = cuePlan
             }
-        } else if (isCloserThan(distances.center, STOP_METERS) &&
-            isCloserThan(distances.left, STOP_METERS) &&
-            isCloserThan(distances.right, STOP_METERS)) {
+            guidance = lastPlanCue
+            level = if (guidance == "停止") GuidanceLevel.DANGER
+                else if (guidance == "直走") GuidanceLevel.SAFE else GuidanceLevel.WARNING
+        } else {
             guidance = "停止"
             level = GuidanceLevel.DANGER
-        } else if (!isCloserThan(distances.center, OBSTACLE_METERS)) {
-            guidance = "直走"
-            level = GuidanceLevel.SAFE
-        } else if (clearance(distances.left) >= clearance(distances.right)) {
-            guidance = "左转"
-            level = GuidanceLevel.WARNING
-        } else {
-            guidance = "右转"
-            level = GuidanceLevel.WARNING
         }
 
         guidance = guidanceStabilizer.update(guidance, navigationActive, SystemClock.elapsedRealtime())
@@ -1496,16 +1616,24 @@ class OutdoorNavController(
         val guidance = routeFollower.update(
             location.latitude, location.longitude,
             if (location.hasAccuracy()) location.accuracy else 0f,
-            Float.NaN
+            currentTrueNorthHeading()
         ) ?: return LocalPlanner.PathResult.waiting("等待全局路线目标")
-        val relativeTarget = dynamicHeadingCalibrator.relativeTargetDegrees(guidance.targetBearingDegrees, latestVinsPose)
+        val mapPose = semantic.mapPose
+        if (mapPose == null || !mapPose.initialized) {
+            return LocalPlanner.PathResult.waiting("等待与地图同步的 VINS 位姿")
+        }
+        if (!dynamicHeadingCalibrator.isReady()) {
+            return LocalPlanner.PathResult.waiting("等待地理方向对齐")
+        }
+        val relativeTarget = dynamicHeadingCalibrator.relativeTargetDegrees(guidance.targetBearingDegrees, mapPose)
         if (!relativeTarget.isFinite()) {
             return LocalPlanner.PathResult.waiting("等待有效 VINS 位姿")
         }
         val radians = Math.toRadians(relativeTarget.toDouble())
         val targetRow = cos(radians).toFloat()
         val targetCol = sin(radians).toFloat()
-        return localPlanner.plan(grid, MapTransform.RESOLUTION, -7.9f, -7.9f, 0f, 0f, targetCol, targetRow)
+        return localPlanner.plan(grid, MapTransform.RESOLUTION, -7.9f, -7.9f,
+            0f, 0f, targetCol, targetRow, mapPose)
     }
 
     private fun requestLocalPlanRefresh() {
@@ -1733,6 +1861,9 @@ class OutdoorNavController(
         latestLocalPlanCompletedNanos = 0L
         latestLocalPlanInputAgeNanos = -1L
         hasValidLocalPlanDisplay = false
+        navigationCueTracker.reset()
+        lastCuePlan = null
+        lastPlanCue = ""
         listener.onLocalPlan(latestLocalPlan.toSnapshot())
         renderLocalPlanMetrics()
     }

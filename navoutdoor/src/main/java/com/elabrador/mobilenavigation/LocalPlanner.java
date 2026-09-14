@@ -47,6 +47,7 @@ final class LocalPlanner {
     private final LongSupplier nanoTime;
     private long previousPathStampNanos;
     private long stateGeneration;
+    private VinsMono.Pose previousMapPose;
     private final Object stateLock = new Object();
 
     LocalPlanner() { this(System::nanoTime); }
@@ -58,11 +59,17 @@ final class LocalPlanner {
 
     PathResult plan(int[][] sourceMap, float resolution, float originX, float originY,
                     float locationX, float locationY, float dirX, float dirY) {
+        return plan(sourceMap, resolution, originX, originY, locationX, locationY, dirX, dirY, null);
+    }
+
+    PathResult plan(int[][] sourceMap, float resolution, float originX, float originY,
+                    float locationX, float locationY, float dirX, float dirY,
+                    VinsMono.Pose mapPose) {
         final List<float[]> retainedPath;
         final long planGeneration;
         synchronized (stateLock) {
             expirePreviousPathLocked();
-            retainedPath = new ArrayList<>(previousPath);
+            retainedPath = reprojectPath(previousPath, previousMapPose, mapPose);
             planGeneration = stateGeneration;
         }
         int[][] map = LocalPlannerGrid.preprocess(sourceMap);
@@ -75,8 +82,10 @@ final class LocalPlanner {
         int startCol=Math.max(0,Math.min(map[0].length-1,LocalPlannerGrid.pythonRound(locCol)));
         // Port of local_planner's previous target_path distance-transform penalty.
         // It preserves the source planner's route stability term before A*.
-        applyPreviousPathCost(map, resolution, originX, originY, retainedPath);
         Env env=new Env(); env.obsMapSet(map.length,map[0].length,map);
+        int[][] collisionMap = new int[map.length][];
+        for (int r=0; r<map.length; r++) collisionMap[r] = map[r].clone();
+        applyPreviousPathCost(map, resolution, originX, originY, retainedPath);
         int startCost=map[startRow][startCol], targetCost=map[target.row][target.col];
         AStar astar=new AStar(new int[]{target.row,target.col},new int[]{startRow,startCol},map,env.obstacles,AStar.Heuristic.EUCLIDEAN,3f);
         List<int[]> path=astar.searching(); if(path.isEmpty()){
@@ -93,7 +102,7 @@ final class LocalPlanner {
         // handling. The cyan overlay otherwise hides the underlying cell color and can
         // make a rendering issue indistinguishable from a real unsafe route.
         for (int[] cell : path) {
-            if (Env.isObstacleCost(map[cell[0]][cell[1]])) {
+            if (Env.isObstacleCost(collisionMap[cell[0]][cell[1]])) {
                 synchronized (stateLock) {
                     if (planGeneration == stateGeneration) previousPath.clear();
                 }
@@ -104,13 +113,24 @@ final class LocalPlanner {
                                 resolution, originX, originY), null);
             }
         }
+        // Prefer a straight, fully collision-checked corridor when its soft cost is
+        // essentially equivalent. Never cross a hard cell to straighten the path.
+        List<int[]> straight = straightCells(startRow, startCol, target.row, target.col);
+        if (safeCells(straight, collisionMap) && hasClearance(straight, collisionMap)
+                && (lowCostCorridor(straight, collisionMap)
+                || pathCost(straight, map) <= pathCost(path, map) * 1.10 + 3.0)) {
+            path = straight;
+        }
         List<float[]> world=new ArrayList<>();
-        for(int i=0;i<path.size()-1;i++){int[] p=path.get(i);world.add(new float[]{p[1]*resolution+originX,p[0]*resolution+originY});}
+        for(int i=0;i<path.size();i++){int[] p=path.get(i);world.add(new float[]{p[1]*resolution+originX,p[0]*resolution+originY});}
         Steering steering = purePursuitWithObstacleAvoidance(
-                world, sourceMap, resolution, originX, originY,
+                world, collisionMap, resolution, originX, originY,
                 locationX, locationY, 0f, 1f, 2f);
         synchronized (stateLock) {
-            if (planGeneration == stateGeneration) previousPath=world;
+            if (planGeneration == stateGeneration) {
+                previousPath=world;
+                previousMapPose=mapPose;
+            }
         }
         return new PathResult(world, true, true, steering.degrees, steering.blocked,
                 startCost,targetCost,env.obstacles.size(),
@@ -121,9 +141,59 @@ final class LocalPlanner {
             return Collections.unmodifiableList(new ArrayList<>(previousPath));
         }
     }
+
+    private static List<int[]> straightCells(int row, int col, int endRow, int endCol) {
+        List<int[]> cells = new ArrayList<>();
+        int dr=Math.abs(endRow-row), dc=Math.abs(endCol-col);
+        int sr=Integer.signum(endRow-row), sc=Integer.signum(endCol-col), error=dc-dr;
+        while (true) {
+            cells.add(new int[]{row,col});
+            if (row==endRow && col==endCol) return cells;
+            int twice=2*error;
+            if (twice > -dr) { error-=dr; col+=sc; }
+            if (twice < dc) { error+=dc; row+=sr; }
+        }
+    }
+
+    private static boolean safeCells(List<int[]> cells, int[][] map) {
+        int[] previous=null;
+        for (int[] cell:cells) {
+            if (hardOrOutside(map,cell[0],cell[1])) return false;
+            if (previous!=null && previous[0]!=cell[0] && previous[1]!=cell[1]
+                    && (hardOrOutside(map,previous[0],cell[1])
+                    || hardOrOutside(map,cell[0],previous[1]))) return false;
+            previous=cell;
+        }
+        return true;
+    }
+
+    private static double pathCost(List<int[]> path, int[][] map) {
+        double cost=0;
+        for (int i=1;i<path.size();i++) {
+            int[] a=path.get(i-1), b=path.get(i);
+            cost+=3*Math.hypot(a[0]-b[0],a[1]-b[1])
+                    + (Math.abs(map[a[0]][a[1]])+Math.abs(map[b[0]][b[1]]))*0.5;
+        }
+        return cost;
+    }
+
+    private static boolean lowCostCorridor(List<int[]> path, int[][] map) {
+        for (int[] cell:path) if (map[cell[0]][cell[1]] > LocalPlannerGrid.SAFETY_COST) return false;
+        return true;
+    }
+
+    private static boolean hasClearance(List<int[]> path, int[][] map) {
+        for(int[] cell:path) for(int dr=-1;dr<=1;dr++) for(int dc=-1;dc<=1;dc++) {
+            int row=cell[0]+dr, col=cell[1]+dc;
+            if(row>=0 && row<map.length && col>=0 && col<map[0].length
+                    && Env.isObstacleCost(map[row][col])) return false;
+        }
+        return true;
+    }
     void clearTargetPath() {
         synchronized (stateLock) {
             stateGeneration++;
+            previousMapPose = null;
             previousPath.clear();
             previousPathStampNanos = nanoTime.getAsLong();
         }
@@ -183,33 +253,23 @@ final class LocalPlanner {
             pathDistance[i] = distance;
             if (distance < nearestDistance) { nearestDistance = distance; nearest = i; }
         }
-        int target = nearest;
-        float currentAhead = aheadDistance;
-        int previousTarget = -1;
-        float previousAhead = Float.POSITIVE_INFINITY;
-        for (int attempts = 0; attempts <= path.size(); attempts++) {
-            target = nearest;
-            int rasterAhead = (int)(currentAhead / resolution);
-            if (path.size() - target > rasterAhead) target += rasterAhead;
-            while (target + 1 < path.size()) {
-                if (pathDistance[target + 1] >= currentAhead) break;
-                target++;
+        // Select by metric arc length, not waypoint count or squared/radial
+        // distance. Check the actual line of travel using the same grid as A*.
+        int target = -1;
+        float along = 0f;
+        for (int i = nearest; i < path.size(); i++) {
+            if (i > nearest) along += (float)Math.hypot(
+                    path.get(i)[0]-path.get(i-1)[0], path.get(i)[1]-path.get(i-1)[1]);
+            float distance = (float)Math.sqrt(pathDistance[i]);
+            if (distance >= 0.5f || i == path.size()-1) {
+                Collision hit = checkCollision(map, resolution, originX, originY,
+                        locationX, locationY, path.get(i)[0], path.get(i)[1]);
+                if (hit.hit) break;
+                target = i;
             }
-            if (target >= path.size()) target = path.size() - 1;
-            Collision collision = checkCollision(
-                    map, resolution, originX, originY,
-                    locationX, locationY, path.get(target)[0], path.get(target)[1]);
-            if (!collision.hit) break;
-            if (collision.distanceMeters < 0.5f) return new Steering(Float.NaN, true);
-            if (target == previousTarget
-                    || collision.distanceMeters >= previousAhead - resolution * 0.25f) {
-                return new Steering(Float.NaN, true);
-            }
-            previousTarget = target;
-            previousAhead = collision.distanceMeters;
-            currentAhead = collision.distanceMeters;
-            if (attempts == path.size()) return new Steering(Float.NaN, true);
+            if (along >= aheadDistance) break;
         }
+        if (target < 0) return new Steering(Float.NaN, true);
         float nextX = path.get(target)[0] - locationX;
         float nextY = path.get(target)[1] - locationY;
         float directionLength = (float)Math.hypot(directionX, directionY);
@@ -225,23 +285,47 @@ final class LocalPlanner {
     /** Direct port of map_draw.py bresenham_line_search/check_collision. */
     private Collision checkCollision(int[][] map, float resolution, float originX, float originY,
                                      float startX, float startY, float endX, float endY) {
-        int x1=(int)((startX-originX)/resolution), y1=(int)((startY-originY)/resolution);
-        int x2=(int)((endX-originX)/resolution), y2=(int)((endY-originY)/resolution);
-        int dx=Math.abs(x2-x1), dy=Math.abs(y2-y1);
-        int sx=x2-x1>0?1:-1, sy=y2-y1>0?1:-1;
-        boolean interchange=dy>dx;
-        if(interchange){int t=dx;dx=dy;dy=t;}
-        int e=2*dy-dx, x=x1, y=y1;
-        for(int i=0;i<dx+1;i++){
-            if(y<0||y>=map.length||x<0||x>=map[0].length)return new Collision(false,-1f);
-            int value=map[y][x];
-            if(Env.isObstacleCost(value)){
+        int x1=LocalPlannerGrid.pythonRound((startX-originX)/resolution);
+        int y1=LocalPlannerGrid.pythonRound((startY-originY)/resolution);
+        int x2=LocalPlannerGrid.pythonRound((endX-originX)/resolution);
+        int y2=LocalPlannerGrid.pythonRound((endY-originY)/resolution);
+        int nx=Math.abs(x2-x1), ny=Math.abs(y2-y1);
+        int sx=Integer.signum(x2-x1), sy=Integer.signum(y2-y1);
+        int x=x1, y=y1, ix=0, iy=0;
+        while (true) {
+            if (hardOrOutside(map,y,x))
                 return new Collision(true,(float)Math.hypot(x-x1,y-y1)*resolution);
-            }
-            if(e>=0){if(interchange)x+=sx;else y+=sy;e-=2*dx;}
-            if(interchange)y+=sy;else x+=sx;e+=2*dy;
+            if (ix==nx && iy==ny) break;
+            long decision=(1L+2L*ix)*ny-(1L+2L*iy)*nx;
+            if (decision==0) {
+                if (hardOrOutside(map,y,x+sx) || hardOrOutside(map,y+sy,x))
+                    return new Collision(true,(float)Math.hypot(x-x1,y-y1)*resolution);
+                x+=sx; y+=sy; ix++; iy++;
+            } else if (decision<0) { x+=sx; ix++; }
+            else { y+=sy; iy++; }
         }
         return new Collision(false,-1f);
+    }
+
+    private static boolean hardOrOutside(int[][] map, int row, int col) {
+        return row<0 || row>=map.length || col<0 || col>=map[0].length
+                || Env.isObstacleCost(map[row][col]);
+    }
+
+    /** Transform retained path from its original ego frame through VINS world to the new ego frame. */
+    static List<float[]> reprojectPath(List<float[]> path, VinsMono.Pose oldPose, VinsMono.Pose newPose) {
+        if (oldPose == null && newPose == null) return new ArrayList<>(path);
+        if (oldPose == null || newPose == null || !oldPose.initialized || !newPose.initialized)
+            return Collections.emptyList();
+        double a=oldPose.egoRightAxisYawRadians(), b=newPose.egoRightAxisYawRadians();
+        double ca=Math.cos(a), sa=Math.sin(a), cb=Math.cos(b), sb=Math.sin(b);
+        List<float[]> result=new ArrayList<>();
+        for (float[] point:path) {
+            double dx=ca*point[0]-sa*point[1]+oldPose.x-newPose.x;
+            double dy=sa*point[0]+ca*point[1]+oldPose.y-newPose.y;
+            result.add(new float[]{(float)(cb*dx+sb*dy),(float)(-sb*dx+cb*dy)});
+        }
+        return result;
     }
 
     private static final class Steering { final float degrees; final boolean blocked; Steering(float d,boolean b){degrees=d;blocked=b;} }
