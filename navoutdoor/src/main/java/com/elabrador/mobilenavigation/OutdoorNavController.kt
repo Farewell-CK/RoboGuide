@@ -297,6 +297,7 @@ class OutdoorNavController(
             }
 
             override fun onError(message: String) {
+                Log.e(TAG, "semantic segmenter error: $message")
                 runOnUiThread {
                     listener.onSemanticOverlay(
                         "${BuildConfig.SEMANTIC_MODEL_NAME} 错误：$message", GuidanceLevel.DANGER)

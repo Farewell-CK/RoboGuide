@@ -278,6 +278,7 @@ final class SemanticSegmenter implements AutoCloseable {
                 listener.onStatus(BuildConfig.SEMANTIC_MODEL_NAME + " 已加载（"
                         + backend + "），等待彩色帧");
             } catch (Exception error) {
+                Log.e(TAG, "model init failed", error);
                 listener.onError(errorMessage(error));
             }
         });
@@ -305,6 +306,7 @@ final class SemanticSegmenter implements AutoCloseable {
                         listener.onResult(result);
                     }
                 } catch (Exception error) {
+                    Log.e(TAG, "inference failed", error);
                     if (generation == vinsGeneration.get() && !closed) {
                         listener.onError(errorMessage(error));
                     }
