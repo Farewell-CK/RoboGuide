@@ -426,10 +426,30 @@ class ResponsesMissionInterpreter:
             "additionalProperties": False,
             "required": ["objective", "constraints", "assumptions", "open_questions"],
             "properties": {
-                "objective": {"type": "string"},
-                "constraints": {"type": "array", "items": {"type": "string"}},
-                "assumptions": {"type": "array", "items": {"type": "string"}},
-                "open_questions": {"type": "array", "items": {"type": "string"}},
+                "objective": {
+                    "type": "string",
+                    "description": "The resolved user goal without optional added work.",
+                },
+                "constraints": {
+                    "type": "array",
+                    "description": "Confirmed user limitations, not inferred deployment facts.",
+                    "items": {"type": "string"},
+                },
+                "assumptions": {
+                    "type": "array",
+                    "description": (
+                        "Visible non-blocking interpretations that preserve the core goal."
+                    ),
+                    "items": {"type": "string"},
+                },
+                "open_questions": {
+                    "type": "array",
+                    "description": (
+                        "Only blocking unresolved questions for Mission semantic commitment; "
+                        "return an empty array when none remain."
+                    ),
+                    "items": {"type": "string"},
+                },
             },
         }
         response = self._client._request(

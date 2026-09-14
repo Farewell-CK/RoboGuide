@@ -72,6 +72,10 @@ class GroundingReadError(RuntimeError):
     """Report an invalid endpoint, transport failure, or malformed grounding projection."""
 
 
+class GroundingAcquisitionError(GroundingReadError):
+    """Report a transient source acquisition failure that may succeed on bounded retry."""
+
+
 class MissionGroundingReader(Protocol):
     """Capture one immutable context without granting Mission Intelligence State authority."""
 
@@ -135,7 +139,7 @@ class UrllibGroundingJsonTransport:
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
 
     def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
-        """Fetch one JSON document without retries or credential forwarding."""
+        """Fetch one JSON document and distinguish retryable acquisition failures."""
         request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         try:
             with self._opener.open(request, timeout=timeout_seconds) as response:
@@ -143,9 +147,16 @@ class UrllibGroundingJsonTransport:
                     raise GroundingReadError(f"grounding endpoint returned HTTP {response.status}")
                 raw = response.read(MAX_GROUNDING_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as error:
-            raise GroundingReadError(f"grounding endpoint returned HTTP {error.code}") from error
+            failure = (
+                GroundingAcquisitionError
+                if error.code in {408, 425, 429, 500, 502, 503, 504}
+                else GroundingReadError
+            )
+            raise failure(f"grounding endpoint returned HTTP {error.code}") from error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
-            raise GroundingReadError(f"grounding endpoint request failed: {error}") from error
+            raise GroundingAcquisitionError(
+                f"grounding endpoint request failed: {error}"
+            ) from error
         if len(raw) > MAX_GROUNDING_RESPONSE_BYTES:
             raise GroundingReadError("grounding endpoint response exceeds local limit")
         try:
@@ -171,18 +182,25 @@ class HttpMissionGroundingReader:
         *,
         admitted_world_payload_schemas: frozenset[str] = frozenset(),
         max_gaps: int = 32,
+        max_acquisition_attempts: int = 2,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
         self._artifact_endpoint = _endpoint(artifact_endpoint, "Artifact")
         if timeout_seconds <= 0:
             raise GroundingReadError("grounding timeout must be positive")
-        if max_state_evidence <= 0 or max_memory_evidence <= 0 or max_gaps <= 0:
+        if (
+            max_state_evidence <= 0
+            or max_memory_evidence <= 0
+            or max_gaps <= 0
+            or max_acquisition_attempts <= 0
+        ):
             raise GroundingReadError("grounding evidence budgets must be positive")
         self._timeout_seconds = timeout_seconds
         self._max_state_evidence = max_state_evidence
         self._max_memory_evidence = max_memory_evidence
         self._max_gaps = max_gaps
+        self._max_acquisition_attempts = max_acquisition_attempts
         self._transport = transport or UrllibGroundingJsonTransport()
         if any(not schema.strip() for schema in admitted_world_payload_schemas):
             raise GroundingReadError("admitted World payload schemas must be nonblank")
@@ -212,9 +230,7 @@ class HttpMissionGroundingReader:
         """Read only World records and preserve the Controller's freshness assessment."""
         path = "/v1/state/records?" + urllib.parse.urlencode({"object_class": "world"})
         try:
-            response = self._transport.get_json(
-                f"{self._controller_endpoint}{path}", self._timeout_seconds
-            )
+            response = self._get_json(f"{self._controller_endpoint}{path}")
             if response.get("schema") != "roboguide.state-query/v0.1":
                 raise GroundingReadError("unsupported State query schema")
             records = _array(response, "records")
@@ -247,9 +263,7 @@ class HttpMissionGroundingReader:
     def _read_memory(self, gaps: _GroundingGapCollector) -> tuple[MemoryGroundingEvidence, ...]:
         """Read only admissible Global manifest metadata and never fetch artifact bytes."""
         try:
-            response = self._transport.get_json(
-                f"{self._artifact_endpoint}/v1/memories", self._timeout_seconds
-            )
+            response = self._get_json(f"{self._artifact_endpoint}/v1/memories")
             if response.get("schema") != "roboguide.memory-catalog/v0.1":
                 raise GroundingReadError("unsupported Memory catalog schema")
             manifests = _array(response, "memories")
@@ -278,6 +292,20 @@ class HttpMissionGroundingReader:
                 f"retained at most {self._max_memory_evidence} Global Memory manifests",
             )
         return tuple(evidence)
+
+    def _get_json(self, url: str) -> JSONObject:
+        """Retry only transient acquisition failures before preserving one final source gap."""
+        failure: GroundingAcquisitionError | None = None
+        for _attempt in range(self._max_acquisition_attempts):
+            try:
+                return self._transport.get_json(url, self._timeout_seconds)
+            except GroundingAcquisitionError as error:
+                failure = error
+        if failure is None:  # pragma: no cover - constructor guarantees one or more attempts
+            raise AssertionError("grounding acquisition attempts must be positive")
+        raise GroundingAcquisitionError(
+            f"acquisition failed after {self._max_acquisition_attempts} attempts: {failure}"
+        ) from failure
 
     def _bounded_snapshot(
         self,

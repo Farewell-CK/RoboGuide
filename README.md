@@ -113,15 +113,19 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 ### Mission Intelligence
 
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
-Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；存在
-open questions 时停在 `NeedsClarification`，不会创建 Execution Group。无歧义并通过
+Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在
+阻止 Mission semantic commitment 的 open questions 时停在 `NeedsClarification`，不会创建
+Execution Group。合理且不改变核心目标或 Task Graph 的解释进入 `assumptions`；provider、Node、
+Resource、placement/readiness 属于 Control，路径、姿态、速度和硬件动作属于 Local EAIOS，均不
+成为用户 clarification。无 blocking 歧义并通过
 计划审查与部署风险策略后，Mission Intelligence 把完整 MissionPlan 交给 Orchestration。
 Interpreter 不消费 live Node/Resource inventory；Plan Accepted 只表示语义和合同可进入系统
 生命周期，不表示当前部署一定可调度。当前 provider、health、readiness 与资源证据只由
 Control Matching/Scheduling/Commit 使用。实现可以使用 LLM、VLM、符号规划器或混合方法，
 但不能直接进行跨节点资源绑定。该边界见
-[`ADR-0018`](docs/decisions/0018-mission-intent-loop.md) 与
-[`ADR-0030`](docs/decisions/0030-mission-semantic-admission-and-deployability.md)。
+[`ADR-0018`](docs/decisions/0018-mission-intent-loop.md)、
+[`ADR-0030`](docs/decisions/0030-mission-semantic-admission-and-deployability.md) 与
+[`ADR-0038`](docs/decisions/0038-blocking-clarification-and-grounding-acquisition.md)。
 
 Canonical Capability Catalog 回答“这个 contract 是否属于 RoboGuide 当前语义语言”；live
 Inventory 与 Capability Matching 回答“当前谁能执行”。Mission Intelligence 在 Reviewer 前
@@ -145,13 +149,16 @@ Interpreter、Planner、Reviewer 与 Repairer 在同一 deliberation cycle 共�
 明确批准为全 Mission 可消费 payload schema 的、带完整 source/freshness/provenance 的 World
 State evidence，以及 Global Semantic/Experience/Spatial
 Memory manifest metadata；Memory bytes 尚未读取。Node health/liveness、capability/resource
-inventory、leases、reservations、calendar 和 Runtime attempts 不进入 LLM context。State source
-失败会成为可审计 gap，空 context 仍然合法；`World` object class 不等价于 visibility，schema
+inventory、leases、reservations、calendar 和 Runtime attempts 不进入 LLM context。State/Memory
+的可恢复 transport failure 会先经过配置有界 acquisition retry，最终失败才成为可审计 gap；gap
+本身不是用户语义歧义，空 context 仍然合法。`World` object class 不等价于 visibility，schema
 admission 默认 fail-closed，嵌套 evidence 不能绕过 digest 原地修改。evidence、diagnostic 与最终
 snapshot bytes 均有独立上限；HTTP body 中断不会阻止另一 source 的 capture。每份 context 按 digest
 不可变保存并可通过 Mission Request API 回查，且进入模型前必须匹配当前 Dialogue input。
-clarification answer 才触发下一份 snapshot；不同 Mission Request 的慢 Grounding/model 调用不再持有全局生命周期锁。边界见
-[`ADR-0037`](docs/decisions/0037-mission-grounding-context.md)。
+clarification answer 才触发下一份 snapshot；多问题 answer 不携带 `question_id` 时保持未定向，
+不会被错误绑定到最后一个问题。不同 Mission Request 的慢 Grounding/model 调用不再持有全局
+生命周期锁。边界见 [`ADR-0037`](docs/decisions/0037-mission-grounding-context.md) 与
+[`ADR-0038`](docs/decisions/0038-blocking-clarification-and-grounding-acquisition.md)。
 
 ### Control Plane
 

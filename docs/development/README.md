@@ -113,6 +113,11 @@ bounded Repair；Reviewer
 `NeedsClarification`。用户 DialogueTurn 与 revision-bound review history 分开保存；
 `request_engine.py`、`request_record.py`、`request_store.py` 与 `review.py` 分别承担 orchestration、
 versioned projection、SQLite persistence 与 review contracts。
+Interpreter 的 `open_questions` 是 blocking-only semantic contract；Defaultable interpretation
+进入 `assumptions`，Control-owned deployment feasibility 和 Local-EAIOS-owned How 不进入用户
+问答。单一待答问题可以自动建立 `in_reply_to`，多问题必须由调用者提供当前 question turn ID，
+否则回答作为未定向 Dialogue evidence 保存。状态门禁仍是非空 questions 才进入
+`NeedsClarification`。
 
 ### Mission Grounding Context v0.1
 
@@ -125,8 +130,11 @@ manifest metadata；Node inventory、lease、resource availability、Control com
 因此 `MetadataOnly` 不能被 Planner 当作已经获得的语义内容。
 
 State freshness 由 Controller 在 RoboGuide receive-time domain 中计算并原样保存；Mission
-Service 不用自己的 Unix time 重新推导。State 和 Memory 两个 source 独立 fail-soft，缺失形成
-可审计 `GroundingGap`。`World` 不是 visibility；未配置 schema 时 State evidence fail-closed 为空，
+Service 不用自己的 Unix time 重新推导。State 和 Memory 两个 source 独立 fail-soft；可恢复
+transport failure 在 capture 内配置有界重试，最终缺失才形成可审计 `GroundingGap`。Gap 是
+acquisition evidence，不是用户语义歧义；只有最终缺失造成用户可回答的 blocking semantic fact
+时才 fallback 到 clarification。`World` 不是 visibility；未配置 schema 时 State evidence
+fail-closed 为空，
 admission set digest 保存在 selection policy identity。嵌套 JSON 使用 defensive copy，restore
 要求 canonical order，Rust/Python 共享 facade fixtures。不同 Mission Request 使用 request-scoped
 serialization，不因一个慢 HTTP/model 调用阻塞全部请求。同一 Snapshot 传给 Interpreter、Planner、Reviewer、Repairer，并连同
@@ -137,7 +145,7 @@ review context digest 持久化在 Mission Request v0.4。每份 snapshot 还按
 retrieval/prefetch、cross-process clock synchronization、belief fusion 或 grounding-driven Control
 decision，也没有 State-native per-record consumer scope/visibility。Reader 对 evidence、diagnostic
 数量和最终 canonical snapshot bytes 分别设限；HTTP body 中断仅使对应 source 形成 gap，不阻止另一
-source capture。完整 authority 见 ADR-0037。
+source capture。完整 authority 见 ADR-0037 与 ADR-0038。
 
 `domain` 不依赖其他内部项目。禁止循环依赖。MVP 阶段禁止在 Rust 核心中嵌入
 Python；节点侧 Local How 仅通过配置固定的 HTTP、gRPC 或 MCP endpoint 通信。

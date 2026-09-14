@@ -3,6 +3,10 @@
 - Status: Accepted for Mission Grounding v0.1
 - Date: 2026-09-12
 
+> Follow-up: ADR-0038 retries recoverable source acquisition failures before snapshot creation,
+> treats a final Grounding gap as system evidence rather than user ambiguity, and uses user
+> clarification only as fallback for a still-missing blocking semantic fact.
+
 ## Context
 
 ADR-0030 correctly removed live Node inventory from Mission semantic admission, while ADR-0024

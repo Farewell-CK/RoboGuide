@@ -32,14 +32,17 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 
 逻辑组件可以共址，也可以分布部署。部署拓扑不得改变组件的职责和权威语义。
 
-外部用户入口是 Mission Request，而不是完整 MissionPlan。Mission Intelligence 在 instruction
-仍有 open questions 时停留在 `NeedsClarification`，不得创建 Group；只有无歧义并通过计划
+外部用户入口是 Mission Request，而不是完整 MissionPlan。`open_questions` 只承载不回答就
+无法安全、正确完成 Mission semantic commitment 的 blocking uncertainty；合理且不改变核心
+目标或 Task Graph 的解释进入 `assumptions`，Control-owned deployment feasibility 与
+Local-EAIOS-owned How 不得变成用户问题。Mission Intelligence 在 instruction
+仍有 open questions 时停留在 `NeedsClarification`，不得创建 Group；只有无 blocking 歧义并通过计划
 审查与部署风险策略后，才把内部 MissionPlan 提交给 Orchestration。Interpreter 不读取实时
 Node/Resource inventory；当前部署是否有 provider 由 Control Capability Matching 判断，不是
 Mission 语义有效性的组成部分。Plan Accepted 不等于 immediately schedulable，零 Candidate 的
 Ready Task 可以保留并等待后续部署事实变化。Request/dialogue 的持久化属于 Mission
 Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见 ADR-0018 与
-ADR-0030。
+ADR-0030 与 ADR-0038。
 
 Canonical Capability Catalog 是 Mission Intelligence 的稳定系统语言：Planner/Reviewer 只能
 引用 Catalog 中已知的 exact contract 与参数，未知 contract 使草案无效；Catalog 不包含实时
@@ -61,9 +64,12 @@ attempts 全部继续隔离在 live deployment / Control 边界。Controller 计
 freshness 原样进入 Snapshot，Mission Service 不比较不同进程的 clock。Interpreter、Planner、
 Reviewer 与 Repairer 在一次 deliberation 内使用同一 digest-bound context；新的 clarification
 answer 或显式重新 deliberation 才重新 capture。`World` object class 本身不授予可见性；schema
-admission 默认空且其 digest 进入 selection policy identity。Context source 失败以 gap 保留，空
-Context 合法。
-详见 ADR-0037。
+admission 默认空且其 digest 进入 selection policy identity。可恢复的 source acquisition failure
+在 snapshot 建立前进行配置有界的 retry；最终失败才以 gap 保留。Gap 不是用户歧义，只有它
+最终造成用户可回答的 blocking semantic fact 缺失时，clarification 才作为 fallback。空 Context
+合法。多问题 clarification answer 只有显式携带当前 `question_id` 才精确绑定；无 ID 时仅在
+唯一待答问题下自动绑定。
+详见 ADR-0037 与 ADR-0038。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability

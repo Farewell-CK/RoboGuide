@@ -316,3 +316,7 @@ def test_responses_interpreter_preserves_open_questions_before_planning() -> Non
         "dialogue": [dialogue[0].to_json()],
         "grounding_context": grounding.to_json(),
     }
+    response_format = cast(JSONObject, cast(JSONObject, transport.requests[0][2]["text"])["format"])
+    schema = cast(JSONObject, response_format["schema"])
+    properties = cast(JSONObject, schema["properties"])
+    assert "blocking" in cast(str, cast(JSONObject, properties["open_questions"])["description"])

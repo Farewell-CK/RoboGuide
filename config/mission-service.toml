@@ -6,6 +6,8 @@ controller_endpoint = "http://127.0.0.1:8080"
 controller_timeout_seconds = 30
 artifact_endpoint = "http://127.0.0.1:8090"
 grounding_timeout_seconds = 5
+# Retry transient State/Memory transport failures before exposing one final GroundingGap.
+grounding_acquisition_attempts = 2
 max_grounding_state_evidence = 64
 max_grounding_memory_evidence = 32
 max_grounding_gaps = 32

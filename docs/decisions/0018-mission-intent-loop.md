@@ -13,6 +13,10 @@
 > ADR-0034 and Mission Request v0.3 replace `instruction + messages` persistence with structured
 > DialogueTurn history and replace contract-name-only approval with context-aware, revision-bound
 > policy reasons.
+>
+> ADR-0038 restricts `open_questions` to blocking Mission semantic uncertainty, adds bounded
+> acquisition retry before a final Grounding gap, and prevents implicit latest-question binding
+> when one answer faces multiple current questions.
 
 ## Context
 

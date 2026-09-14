@@ -67,6 +67,7 @@ def build_engine(
             service_settings.max_grounding_memory_evidence,
             admitted_world_payload_schemas=(service_settings.grounding_world_payload_schemas),
             max_gaps=service_settings.max_grounding_gaps,
+            max_acquisition_attempts=service_settings.grounding_acquisition_attempts,
         ),
     )
     return engine, service_settings
@@ -131,11 +132,27 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         if command == "messages":
-            if set(body) != {"text"} or not isinstance(body["text"], str):
-                self._send(HTTPStatus.BAD_REQUEST, {"error": "message body requires text"})
+            if set(body) not in ({"text"}, {"text", "question_id"}) or not isinstance(
+                body.get("text"), str
+            ):
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "message body requires text and optional question_id"},
+                )
+                return
+            question_id = body.get("question_id")
+            if question_id is not None and (
+                not isinstance(question_id, str) or not question_id.strip()
+            ):
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "question_id must be nonblank text when supplied"},
+                )
                 return
             self._run(
-                lambda: self.server.engine.add_message(request_id, body["text"]),
+                lambda: self.server.engine.add_message(
+                    request_id, cast(str, body["text"]), question_id
+                ),
                 HTTPStatus.OK,
             )
         elif command == "approve":

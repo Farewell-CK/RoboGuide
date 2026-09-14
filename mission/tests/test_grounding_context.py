@@ -20,6 +20,7 @@ from mission.grounding_context import (
     dialogue_digest,
 )
 from mission.grounding_reader import (
+    GroundingAcquisitionError,
     GroundingReadError,
     HttpMissionGroundingReader,
     UrllibGroundingJsonTransport,
@@ -40,6 +41,23 @@ class FakeGroundingTransport:
         """Return one scripted object or raise its scripted transport failure."""
         self.calls.append((url, timeout_seconds))
         response = self._responses[url]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class SequenceGroundingTransport:
+    """Return per-source response sequences for bounded acquisition retry tests."""
+
+    def __init__(self, responses: Mapping[str, list[JSONObject | Exception]]) -> None:
+        """Retain finite response queues and an inspectable request trace."""
+        self._responses = {url: list(items) for url, items in responses.items()}
+        self.calls: list[tuple[str, float]] = []
+
+    def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
+        """Return the next response or raise the next scripted failure for one source."""
+        self.calls.append((url, timeout_seconds))
+        response = self._responses[url].pop(0)
         if isinstance(response, Exception):
             raise response
         return response
@@ -417,6 +435,77 @@ def test_independent_source_failure_is_recorded_as_a_fail_soft_gap() -> None:
     assert [(gap.code, gap.source) for gap in snapshot.gaps] == [
         ("state_unavailable", "controller-state")
     ]
+    assert [url for url, _timeout in transport.calls].count(
+        "http://controller.test/v1/state/records?object_class=world"
+    ) == 1
+
+
+def test_transient_acquisition_failure_is_retried_before_snapshot_capture() -> None:
+    """A recovered source read contributes evidence without leaving a misleading final gap."""
+    state_url = "http://controller.test/v1/state/records?object_class=world"
+    memory_url = "http://artifact.test/v1/memories"
+    transport = SequenceGroundingTransport(
+        {
+            state_url: [
+                GroundingAcquisitionError("controller temporarily unavailable"),
+                {
+                    "schema": "roboguide.state-query/v0.1",
+                    "records": [_world_record("front-desk")],
+                },
+            ],
+            memory_url: [{"schema": "roboguide.memory-catalog/v0.1", "memories": []}],
+        }
+    )
+    reader = HttpMissionGroundingReader(
+        "http://controller.test",
+        "http://artifact.test",
+        2.0,
+        16,
+        16,
+        transport,
+        admitted_world_payload_schemas=frozenset({"roboguide.test-place/v0.1"}),
+        max_acquisition_attempts=2,
+    )
+
+    snapshot = reader.capture("request-test", _dialogue(), 30)
+
+    assert [item.object_id for item in snapshot.state_evidence] == ["front-desk"]
+    assert snapshot.gaps == ()
+    assert [url for url, _timeout in transport.calls].count(state_url) == 2
+    assert [url for url, _timeout in transport.calls].count(memory_url) == 1
+
+
+def test_exhausted_acquisition_retry_becomes_one_fail_soft_gap() -> None:
+    """Repeated transient failure stays bounded and reaches the snapshot as one source gap."""
+    state_url = "http://controller.test/v1/state/records?object_class=world"
+    transport = SequenceGroundingTransport(
+        {
+            state_url: [
+                GroundingAcquisitionError("temporary failure one"),
+                GroundingAcquisitionError("temporary failure two"),
+            ],
+            "http://artifact.test/v1/memories": [
+                {"schema": "roboguide.memory-catalog/v0.1", "memories": []}
+            ],
+        }
+    )
+    reader = HttpMissionGroundingReader(
+        "http://controller.test",
+        "http://artifact.test",
+        2.0,
+        16,
+        16,
+        transport,
+        max_acquisition_attempts=2,
+    )
+
+    snapshot = reader.capture("request-test", _dialogue(), 30)
+
+    assert [url for url, _timeout in transport.calls].count(state_url) == 2
+    assert [(gap.code, gap.source) for gap in snapshot.gaps] == [
+        ("state_unavailable", "controller-state")
+    ]
+    assert "after 2 attempts" in snapshot.gaps[0].detail
 
 
 def test_malformed_source_items_are_rejected_instead_of_silently_normalized() -> None:

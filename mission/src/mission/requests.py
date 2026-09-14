@@ -10,6 +10,7 @@ from mission.grounding_context import (
 )
 from mission.grounding_reader import (
     EmptyMissionGroundingReader,
+    GroundingAcquisitionError,
     HttpMissionGroundingReader,
     MissionGroundingReader,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "DialogueTurn",
     "DialogueTurnKind",
     "EmptyMissionGroundingReader",
+    "GroundingAcquisitionError",
     "GroundingContextSnapshot",
     "GroundingFreshness",
     "GroundingGap",

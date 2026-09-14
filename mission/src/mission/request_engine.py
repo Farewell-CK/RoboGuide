@@ -179,11 +179,15 @@ class MissionRequestEngine:
             )
         return context
 
-    def add_message(self, request_id: str, text: str) -> MissionRequestRecord:
-        """Append user clarification and invalidate any older draft before reinterpretation."""
+    def add_message(
+        self, request_id: str, text: str, question_id: str | None = None
+    ) -> MissionRequestRecord:
+        """Append one optionally targeted answer without fabricating ambiguous reply identity."""
         text = text.strip()
         if not text:
             raise MissionRequestError("message text must be nonblank")
+        if question_id is not None and not question_id.strip():
+            raise MissionRequestError("question_id must be nonblank text when supplied")
         with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle in {
@@ -196,7 +200,10 @@ class MissionRequestEngine:
                 )
             updated = self._update(
                 record,
-                dialogue=(*record.dialogue, self._clarification_answer(record, text)),
+                dialogue=(
+                    *record.dialogue,
+                    self._clarification_answer(record, text, question_id),
+                ),
                 lifecycle=MissionRequestLifecycle.RECEIVED,
                 assessment=None,
                 plan=None,
@@ -588,18 +595,29 @@ class MissionRequestEngine:
             for index, question in enumerate(questions)
         )
 
-    def _clarification_answer(self, record: MissionRequestRecord, text: str) -> DialogueTurn:
-        """Link one user answer to the latest unanswered clarification question when available."""
+    def _clarification_answer(
+        self, record: MissionRequestRecord, text: str, question_id: str | None
+    ) -> DialogueTurn:
+        """Bind an answer only when its target is explicit or uniquely inferable."""
         answered = {turn.in_reply_to for turn in record.dialogue if turn.in_reply_to is not None}
-        question = next(
-            (
-                turn
-                for turn in reversed(record.dialogue)
-                if turn.kind is DialogueTurnKind.CLARIFICATION_QUESTION
-                and turn.turn_id not in answered
-            ),
-            None,
-        )
+        current_questions: list[DialogueTurn] = []
+        for turn in reversed(record.dialogue):
+            if turn.kind is not DialogueTurnKind.CLARIFICATION_QUESTION:
+                break
+            if turn.turn_id not in answered:
+                current_questions.append(turn)
+        current_questions.reverse()
+        if question_id is not None:
+            question = next(
+                (turn for turn in current_questions if turn.turn_id == question_id),
+                None,
+            )
+            if question is None:
+                raise MissionRequestError(
+                    "question_id must identify a current unanswered clarification question"
+                )
+        else:
+            question = current_questions[0] if len(current_questions) == 1 else None
         return DialogueTurn(
             turn_id=f"turn-{len(record.dialogue) + 1:04d}",
             speaker=DialogueSpeaker.USER,

@@ -12,6 +12,7 @@ from mission.approval import ApprovalPolicy, ApprovalRule, ApprovalScalar
 
 _DEFAULT_ARTIFACT_ENDPOINT = "http://127.0.0.1:8090"
 _DEFAULT_GROUNDING_TIMEOUT_SECONDS = 5.0
+_DEFAULT_GROUNDING_ACQUISITION_ATTEMPTS = 2
 _DEFAULT_MAX_GROUNDING_STATE_EVIDENCE = 64
 _DEFAULT_MAX_GROUNDING_MEMORY_EVIDENCE = 32
 _DEFAULT_MAX_GROUNDING_GAPS = 32
@@ -32,6 +33,7 @@ class MissionServiceSettings:
     controller_timeout_seconds: float
     artifact_endpoint: str
     grounding_timeout_seconds: float
+    grounding_acquisition_attempts: int
     max_grounding_state_evidence: int
     max_grounding_memory_evidence: int
     max_grounding_gaps: int
@@ -79,6 +81,11 @@ def load_service_settings(
         artifact_endpoint=artifact_endpoint,
         grounding_timeout_seconds=_optional_positive_number(
             service, "grounding_timeout_seconds", _DEFAULT_GROUNDING_TIMEOUT_SECONDS
+        ),
+        grounding_acquisition_attempts=_optional_positive_integer(
+            service,
+            "grounding_acquisition_attempts",
+            _DEFAULT_GROUNDING_ACQUISITION_ATTEMPTS,
         ),
         max_grounding_state_evidence=_optional_positive_integer(
             service, "max_grounding_state_evidence", _DEFAULT_MAX_GROUNDING_STATE_EVIDENCE

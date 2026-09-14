@@ -395,6 +395,62 @@ def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path:
     )
 
 
+def test_multi_question_answer_without_identity_remains_unbound(tmp_path: Path) -> None:
+    """Free text cannot be fabricated as a reply to the latest of several open questions."""
+    interpreter = FakeInterpreter(
+        [_assessment("Which object?", "Which destination?"), _assessment()]
+    )
+    engine = _engine(
+        tmp_path,
+        interpreter,
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    waiting = engine.create("move it there")
+
+    accepted = engine.add_message(waiting.request_id, "move the red kettle to the dining table")
+
+    assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    assert accepted.dialogue[-1].kind is DialogueTurnKind.CLARIFICATION_ANSWER
+    assert accepted.dialogue[-1].in_reply_to is None
+
+
+def test_explicit_question_identity_binds_one_of_multiple_questions(tmp_path: Path) -> None:
+    """A caller can preserve exact answer provenance by naming a current question turn."""
+    interpreter = FakeInterpreter(
+        [_assessment("Which object?", "Which destination?"), _assessment()]
+    )
+    engine = _engine(
+        tmp_path,
+        interpreter,
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    waiting = engine.create("move it there")
+    target = waiting.dialogue[-2]
+
+    accepted = engine.add_message(waiting.request_id, "the red kettle", target.turn_id)
+
+    assert accepted.dialogue[-1].in_reply_to == target.turn_id
+
+
+def test_stale_or_unknown_question_identity_is_rejected_without_mutation(tmp_path: Path) -> None:
+    """Explicit answer provenance must identify a current unanswered question in this Request."""
+    interpreter = FakeInterpreter([_assessment("Which object?", "Which destination?")])
+    engine = _engine(
+        tmp_path,
+        interpreter,
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    waiting = engine.create("move it there")
+
+    with pytest.raises(MissionRequestError, match="current unanswered"):
+        engine.add_message(waiting.request_id, "the red kettle", "turn-9999")
+
+    assert engine.get(waiting.request_id) == waiting
+
+
 def test_stale_reader_context_is_rejected_before_the_next_model_call(tmp_path: Path) -> None:
     """A cached context from an older Dialogue revision cannot reach Mission Intelligence."""
     interpreter = FakeInterpreter([_assessment("Which destination?"), _assessment()])
@@ -785,6 +841,47 @@ def test_http_api_accepts_only_instruction_and_returns_durable_projection(tmp_pa
         ) as response:
             historical = cast(JSONObject, json.loads(response.read()))
         assert historical == context
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_message_accepts_explicit_clarification_question_identity(tmp_path: Path) -> None:
+    """The public message command preserves caller-selected answer provenance."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment("Which object?", "Which destination?"), _assessment()]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    server = MissionRequestHttpServer(("127.0.0.1", 0), engine, 1024 * 1024)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_port}"
+        create_request = urllib.request.Request(
+            f"{endpoint}/v1/mission-requests",
+            data=json.dumps({"instruction": "move it there"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(create_request, timeout=2) as response:  # noqa: S310
+            waiting = cast(JSONObject, json.loads(response.read()))
+        dialogue = cast(list[JSONObject], waiting["dialogue"])
+        question_id = cast(str, dialogue[-2]["turn_id"])
+        answer_request = urllib.request.Request(
+            f"{endpoint}/v1/mission-requests/{waiting['request_id']}/messages",
+            data=json.dumps({"text": "the red kettle", "question_id": question_id}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(answer_request, timeout=2) as response:  # noqa: S310
+            accepted = cast(JSONObject, json.loads(response.read()))
+
+        accepted_dialogue = cast(list[JSONObject], accepted["dialogue"])
+        assert accepted_dialogue[-1]["in_reply_to"] == question_id
     finally:
         server.shutdown()
         server.server_close()

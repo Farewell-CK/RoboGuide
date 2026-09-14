@@ -178,7 +178,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   canonical restore ordering, bounded diagnostics/final bytes, and shared Rust/Python facade fixtures.
   Each captured context is immutable digest-addressed history, is retrievable by Request/digest, and
   must match the exact model-input Dialogue revision before use. HTTP protocol interruption remains a
-  fail-soft source gap. It excludes live Node/Resource,
+  bounded-retry, fail-soft source gap. A Grounding gap is acquisition evidence rather than user
+  ambiguity. `open_questions` contains only blocking Mission semantic uncertainty; reasonable
+  defaults enter assumptions, Control/Local-How questions are excluded, and multi-question answers
+  require an explicit current question identity for exact reply binding. It excludes live Node/Resource,
   lease, reservation, calendar, and Runtime-attempt facts; Memory metadata never claims content was
   read. Interpreter, Planner, Reviewer, and Repairer share the same snapshot, while Controller
   freshness and source provenance remain intact. Mission Request v0.3 introduced the separate

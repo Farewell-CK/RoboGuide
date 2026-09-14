@@ -15,6 +15,7 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     assert settings.listen_port == 8070
     assert settings.controller_endpoint == "http://127.0.0.1:8080"
     assert settings.artifact_endpoint == "http://127.0.0.1:8090"
+    assert settings.grounding_acquisition_attempts == 2
     assert settings.max_grounding_state_evidence == 64
     assert settings.max_grounding_memory_evidence == 32
     assert settings.max_grounding_gaps == 32
@@ -99,4 +100,26 @@ approval_required_contracts = []
     )
 
     with pytest.raises(MissionServiceConfigError, match="duplicates"):
+        load_service_settings(path, repository_root=tmp_path)
+
+
+def test_service_configuration_rejects_unbounded_grounding_attempts(tmp_path: Path) -> None:
+    """Grounding acquisition must retain at least one strictly bounded read attempt."""
+    path = tmp_path / "mission-service.toml"
+    path.write_text(
+        """
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+grounding_acquisition_attempts = 0
+max_request_bytes = 1024
+approval_required_contracts = []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MissionServiceConfigError, match="positive integer"):
         load_service_settings(path, repository_root=tmp_path)

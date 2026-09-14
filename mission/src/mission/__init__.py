@@ -16,6 +16,7 @@ from mission.grounding_context import (
 )
 from mission.grounding_reader import (
     EmptyMissionGroundingReader,
+    GroundingAcquisitionError,
     HttpMissionGroundingReader,
     MissionGroundingReader,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "ResponsesMissionReviewer",
     "ReviewIssueAction",
     "EmptyMissionGroundingReader",
+    "GroundingAcquisitionError",
     "HttpMissionGroundingReader",
     "MemoryContentStatus",
     "MemoryGroundingEvidence",
