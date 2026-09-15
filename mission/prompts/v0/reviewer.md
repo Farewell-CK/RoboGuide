@@ -25,13 +25,24 @@ Approve it only when all of the following hold:
   membership as proof of a current provider;
 - every task causes an observable physical-world or compute-state transition;
 - capability constraints and operation parameters stay within the Catalog vocabulary;
-- timing contains only grounded Mission constraints and never a model-invented duration estimate;
+- `earliest_start_offset_ms = 0` is the canonical neutral default for no additional earliest-start
+  lower bound, not an ungrounded timing claim; only a value greater than zero requires user or policy
+  grounding, and timing never contains a model-invented duration estimate;
 - the plan does not select nodes, commit resources, create execution groups, or prescribe local
   actuator behavior.
 
 Treat `execution-report` as local workflow completion accepted by explicit Mission policy, not proof
-of independent physical-world verification. Require `verifier-evidence` when the expected effect
-must be established independently, and reject claims stronger than the declared basis provides.
+of independent physical-world verification. A physical expected effect alone is not a reason to
+require `verifier-evidence`. Require independent evidence only when the user, policy, or Task
+semantics explicitly ask to verify, inspect, confirm, check, or independently establish the effect,
+or when successful completion of the canonical operation cannot establish the requested effect.
+Reject claims stronger than the declared basis provides.
+
+Reject a destination or other Mission semantic end-state invented by the plan or delegated through
+a placeholder such as `selected-by-later-planning`. Control, Scheduler, Runtime, and Local EAIOS do
+not own that user decision. If the GroundedIntent lacks a required final-state fact and no Catalog
+operation faithfully expresses a complete weaker objective already supplied by the user, report
+`RequestClarification`, not `RepairPlan`.
 
 Return no issues when approving. When rejecting, return one or more structured issues containing:
 

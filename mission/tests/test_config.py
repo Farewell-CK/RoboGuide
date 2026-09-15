@@ -67,3 +67,25 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     assert "Local EAIOS workflow steps are not over-decomposed" in reviewer_prompt
     assert "Operation is what to execute" in planner_prompt
     assert "do not consult or infer live Node inventory" in planner_prompt
+
+
+def test_prompts_share_mission_semantic_consistency_rules() -> None:
+    """Interpreter, Planner, Reviewer, and Repairer retain the four corrected boundaries."""
+    settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
+    planner_prompt = settings.prompts.planner_path.read_text(encoding="utf-8")
+    interpreter_prompt = settings.prompts.interpreter_path.read_text(encoding="utf-8")
+    reviewer_prompt = settings.prompts.reviewer_path.read_text(encoding="utf-8")
+    repairer_prompt = settings.prompts.repairer_path.read_text(encoding="utf-8")
+
+    assert "earliest_start_offset_ms = 0" in planner_prompt
+    assert "earliest_start_offset_ms = 0" in reviewer_prompt
+    assert "earliest_start_offset_ms = 0" in repairer_prompt
+    assert "physical expected effect alone does not require" in planner_prompt
+    assert "physical expected effect alone is not a reason" in reviewer_prompt
+    assert "physical expected effect alone does not require" in repairer_prompt
+    assert "Freshness is evidence, not an automatic truth" in interpreter_prompt
+    assert "do not\n  select one claim merely because it is `Fresh`" in interpreter_prompt
+    assert "Never say that later planning" in interpreter_prompt
+    assert "selected-by-later-planning" in planner_prompt
+    assert "selected-by-later-planning" in reviewer_prompt
+    assert "selected-by-later-planning" in repairer_prompt

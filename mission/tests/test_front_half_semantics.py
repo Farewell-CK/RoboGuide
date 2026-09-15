@@ -77,3 +77,22 @@ def test_front_half_fixture_separates_constraints_estimates_and_satisfaction() -
     assert task.satisfaction.basis is TaskSatisfactionBasis.VERIFIER_EVIDENCE
     assert task.satisfaction.verifier is not None
     assert task.satisfaction.expected_effect != task.roles[0].execution.objective
+
+
+def test_physical_relocate_may_use_execution_report_as_its_acceptance_basis() -> None:
+    """A physical effect does not structurally force independent verifier evidence."""
+    raw = _raw_plan()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    satisfaction = cast(JSONObject, tasks[0]["satisfaction"])
+    satisfaction["basis"] = "execution-report"
+    satisfaction["verifier"] = None
+
+    plan = MissionPlan.from_json(raw)
+    catalog = CanonicalCapabilityCatalog.load(CATALOG_FIXTURE)
+    plan.validate_implementation_support()
+    catalog.validate_plan(plan)
+
+    task = plan.tasks[0]
+    assert task.satisfaction.basis is TaskSatisfactionBasis.EXECUTION_REPORT
+    assert task.satisfaction.verifier is None
+    assert "急救包" in task.satisfaction.expected_effect

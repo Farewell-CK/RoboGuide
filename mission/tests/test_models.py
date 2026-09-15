@@ -210,6 +210,26 @@ def test_v0_7_normalizes_actor_role_operation_timing_and_satisfaction() -> None:
     assert plan.tasks[0].satisfaction.verifier is not None
 
 
+def test_v0_7_zero_earliest_start_is_the_documented_neutral_default() -> None:
+    """Required zero timing round-trips as no extra lower bound rather than invented timing."""
+    raw = _v0_7_fixture_json()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    timing = cast(JSONObject, tasks[0]["timing"])
+    timing["earliest_start_offset_ms"] = 0
+
+    plan = MissionPlan.from_json(raw)
+    assert plan.tasks[0].timing is not None
+    assert plan.tasks[0].timing.earliest_start_offset_ms == 0
+    assert plan.to_json() == raw
+
+    schema = json.loads(
+        Path("contracts/mission/v0.7/mission-plan.schema.json").read_text(encoding="utf-8")
+    )
+    description = schema["$defs"]["timing"]["properties"]["earliest_start_offset_ms"]["description"]
+    assert "canonical neutral default" in description
+    assert "positive values are grounded Mission constraints" in description
+
+
 def test_v0_7_rejects_duplicated_role_actor_and_planner_duration() -> None:
     """Current Role and timing fields cannot reintroduce legacy duplication or guessed estimates."""
     duplicated_actor = _v0_7_fixture_json()
