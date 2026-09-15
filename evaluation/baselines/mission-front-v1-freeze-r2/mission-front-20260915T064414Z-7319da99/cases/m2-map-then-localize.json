@@ -1,0 +1,232 @@
+{
+  "case_id": "m2-map-then-localize",
+  "category": "multi_role",
+  "instruction": "先在新区建图，建图完成后在新地图上做定位验证",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 79.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13153.9,
+      "request_bytes": 7305,
+      "response_bytes": 14082,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d07be935028dadd016aa8ef502b7887d1b4777ba1c04d50b0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 313,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 313,
+              "output_tokens": 0
+            },
+            "rs_0d07be935028dadd016aa8ef50a3d087d1a719cbe53dc53b40": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0d07be935028dadd016aa8ef5a19fc87d1a423544c54dd1021": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 89
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 89
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1498,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 605,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2103
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 66506.0,
+      "request_bytes": 26279,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1498,
+    "output_tokens": 605,
+    "total_tokens": 2103
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13155.0,
+      "avg_ms": 13155.0,
+      "max_ms": 13155.0
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 66509.7,
+      "avg_ms": 66509.7,
+      "max_ms": 66509.7
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-75b4146987ee46f8ae4ca44c2b52283b",
+    "mission_id": "mission-b7422b0cf62042538a3b26fc9bed02d7",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先在新区建图，建图完成后在新地图上做定位验证",
+        "created_at_ms": 1789456207415,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "在新区完成建图，并在新建成的地图上进行定位验证。",
+      "constraints": [
+        "必须先完成新区建图，再进行定位验证。",
+        "定位验证必须使用此次新建成的地图。"
+      ],
+      "assumptions": [
+        "将“新区”理解为用户当前语境中指定的待建图区域。"
+      ],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:e299debf7229795b16bd116aca264ceb9039842ed0268209be84b459bcd58677",
+      "request_id": "request-75b4146987ee46f8ae4ca44c2b52283b",
+      "dialogue_digest": "sha256:3e9e55736027ca9a07e75daed8879e08574b694f663b3fe7e4cc6e5e888b03e0",
+      "captured_at_ms": 1789456207514,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789456207415,
+    "updated_at_ms": 1789456287280
+  }
+}

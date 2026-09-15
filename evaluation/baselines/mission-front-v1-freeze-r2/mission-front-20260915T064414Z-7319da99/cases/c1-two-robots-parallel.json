@@ -1,0 +1,322 @@
+{
+  "case_id": "c1-two-robots-parallel",
+  "category": "cross_node",
+  "instruction": "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 70.0,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: contexts[0] mode concurrent-cooperation requires a Group shared view"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: contexts[0] mode concurrent-cooperation requires a Group shared view"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 14684.4,
+      "request_bytes": 7344,
+      "response_bytes": 14145,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e90705812a62f54016aa8ed98af7487d1afaf853a46b0f5a7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 331,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 331,
+              "output_tokens": 0
+            },
+            "rs_0e90705812a62f54016aa8ed99218887d19c9dad3bba8ddd81": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0e90705812a62f54016aa8eda2986c87d1aedeaee6963fce50": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 202
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 202
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1516,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 718,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2234
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 55045.1,
+      "request_bytes": 26643,
+      "response_bytes": 42616,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0cce603d2d6f3107016aa8eda8da5887d19d443d42c7aa4f96": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2823,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2823,
+              "output_tokens": 0
+            },
+            "rs_0cce603d2d6f3107016aa8eda95d2087d1ad2abe39a5540b7b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0cce603d2d6f3107016aa8edb2afb087d1baafba952a01da58": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cce603d2d6f3107016aa8edbc057887d199392c042d69b5d7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cce603d2d6f3107016aa8edc55ad487d1a5c78d5e0b29efa4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cce603d2d6f3107016aa8edceaa0087d1affb044957432169": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 115
+            },
+            "msg_0cce603d2d6f3107016aa8edd0d7bc87d1b6bf6b2b8c1ba402": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 644
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 644
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5410,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2829,
+        "output_tokens_details": {
+          "reasoning_tokens": 2185
+        },
+        "total_tokens": 8239
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 6926,
+    "output_tokens": 3547,
+    "total_tokens": 10473
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 14685.5,
+      "avg_ms": 14685.5,
+      "max_ms": 14685.5
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 55051.1,
+      "avg_ms": 55051.1,
+      "max_ms": 55051.1
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-d8a3313793f1451889bc489d4ad80d24",
+    "mission_id": "mission-d963d777cc5e40b499d44eca1322c995",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区",
+        "created_at_ms": 1789455767585,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "同时完成两项搬运任务：由机器人甲将A区的货物运送至B区卸货点，并由机器人乙将C区的货架推至D区。",
+      "constraints": [
+        "第一项任务必须由机器人甲执行。",
+        "第二项任务必须由机器人乙执行。",
+        "两项任务应同时进行。"
+      ],
+      "assumptions": [
+        "“A区的货物”指位于A区、需要被运送的货物集合。",
+        "“C区的货架”指位于C区、需要被移动的一台或一组货架；将其移动至D区即视为达到目标，不额外推断具体停放位置。",
+        "“送到B区卸货点”表示将货物运送至该卸货点，不额外增加卸货、签收或拍照等动作。"
+      ],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:3a2d16a873666368320fafa19c630bd1fd082c95579c21828290c4a7bf763a8f",
+      "request_id": "request-d8a3313793f1451889bc489d4ad80d24",
+      "dialogue_digest": "sha256:bfb7adc08a89c5e73704ec7d1f43c084aea9bb16c37c5edc2781de786ca95b53",
+      "captured_at_ms": 1789455767692,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "contexts[0] mode concurrent-cooperation requires a Group shared view"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789455767585,
+    "updated_at_ms": 1789455837540
+  }
+}

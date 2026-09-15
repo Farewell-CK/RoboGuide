@@ -1,0 +1,471 @@
+{
+  "case_id": "n3-patrol-verify",
+  "category": "normal",
+  "instruction": "确认走廊内每个灭火器都在原位",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 74.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 确认走廊内的每个灭火器是否都处于各自原位。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "required capabilities covered: ['observation.verify@v1']"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13027.8,
+      "request_bytes": 7281,
+      "response_bytes": 13847,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0246275878df334d016aa8ea1cbf4087d1b5a6c311ea5b47f3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 319,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 319,
+              "output_tokens": 0
+            },
+            "rs_0246275878df334d016aa8ea1d4f3887d18379b30025d312b0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0246275878df334d016aa8ea26bf7487d1b8aff00a9dc69d1b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 104
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 104
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1504,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 620,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2124
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 43009.9,
+      "request_bytes": 26278,
+      "response_bytes": 37267,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_015ba65cb85d13ef016aa8ea2b1d0087d187cb648d34f15107": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2733,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2733,
+              "output_tokens": 0
+            },
+            "rs_015ba65cb85d13ef016aa8ea2b970087d18c2c93c61a3d79c8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_015ba65cb85d13ef016aa8ea34e9e087d1a1be50690669eb28": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_015ba65cb85d13ef016aa8ea3e3e7c87d1936aee677cc61b99": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_015ba65cb85d13ef016aa8ea47917087d1909e5c026df67ac8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 218
+            },
+            "msg_015ba65cb85d13ef016aa8ea4b9c0887d1a954618661f20255": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 475
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 475
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5320,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2245,
+        "output_tokens_details": {
+          "reasoning_tokens": 1770
+        },
+        "total_tokens": 7565
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 17697.4,
+      "request_bytes": 19588,
+      "response_bytes": 18350,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_000ed18fe8848e5e016aa8ea5503d087d191867e6bd71cf74c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3220,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3220,
+              "output_tokens": 0
+            },
+            "rs_000ed18fe8848e5e016aa8ea555b9087d191fc7d3171cb3c88": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_000ed18fe8848e5e016aa8ea5eb0b487d19b465fc8f5d74b14": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 362
+            },
+            "msg_000ed18fe8848e5e016aa8ea654f7c87d1a9a6c6ad71b52f0a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4356,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 898,
+        "output_tokens_details": {
+          "reasoning_tokens": 878
+        },
+        "total_tokens": 5254
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11180,
+    "output_tokens": 3763,
+    "total_tokens": 14943
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13029.0,
+      "avg_ms": 13029.0,
+      "max_ms": 13029.0
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 43015.8,
+      "avg_ms": 43015.8,
+      "max_ms": 43015.8
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 17699.3,
+      "avg_ms": 17699.3,
+      "max_ms": 17699.3
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-566dd49c23ba453eaf8ff41bc59c6582",
+    "mission_id": "mission-74a27f6409f34969a0d36b5f83f83817",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "确认走廊内每个灭火器都在原位",
+        "created_at_ms": 1789454876083,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "确认走廊内的每个灭火器是否都处于各自原位。",
+      "constraints": [],
+      "assumptions": [
+        "将“原位”理解为每个灭火器各自既定的安装或放置位置。",
+        "将“确认”理解为核查每个灭火器是否在原位并给出核查结论，不包含移动或整改。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-74a27f6409f34969a0d36b5f83f83817",
+        "objective": "确认走廊内的每个灭火器是否都处于各自原位。",
+        "actors": [
+          {
+            "id": "inspector-actor"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "corridor-extinguisher-check-context",
+          "roles": [
+            {
+              "id": "inspector",
+              "actor": "inspector-actor"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "check-corridor-extinguishers",
+          "description": "在将“原位”理解为每个灭火器各自既定安装或放置位置的前提下，形成并提交走廊内每个灭火器是否处于该位置的核查结论；不包含移动或整改。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "inspector-role",
+              "context_role": "inspector",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "observation",
+                      "name": "verify",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "observation",
+                  "name": "verify",
+                  "version": "v1"
+                },
+                "objective": "获取并报告走廊内每个灭火器是否处于各自既定安装或放置位置的核查结论。",
+                "parameters": {
+                  "expected": "走廊内的每个灭火器都处于各自既定的安装或放置位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "corridor-extinguisher-check-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "获得并提交走廊内每个灭火器是否处于各自既定安装或放置位置的核查结论；核查结果可以表明该条件成立或不成立，不将核查完成解释为该条件必然成立。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:81d4e82cf282f27276f6de7177f16bc2a8d0da41bcd2eb79659bd1fedb321a1d",
+      "request_id": "request-566dd49c23ba453eaf8ff41bc59c6582",
+      "dialogue_digest": "sha256:8dc7e84015906f97b281d8cb4b57ef6a01bab3891f39ca7f5d3f4c2b64400567",
+      "captured_at_ms": 1789454876180,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:93605a841c812a563c282c42c78424b89bac17cc8619d197352cc88143c56b7c",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:93605a841c812a563c282c42c78424b89bac17cc8619d197352cc88143c56b7c",
+        "grounding_context_digest": "sha256:81d4e82cf282f27276f6de7177f16bc2a8d0da41bcd2eb79659bd1fedb321a1d",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789454950126
+      }
+    ],
+    "created_at_ms": 1789454876083,
+    "updated_at_ms": 1789454950231
+  }
+}

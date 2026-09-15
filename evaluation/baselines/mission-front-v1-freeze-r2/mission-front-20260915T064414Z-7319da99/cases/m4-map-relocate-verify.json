@@ -1,0 +1,239 @@
+{
+  "case_id": "m4-map-relocate-verify",
+  "category": "multi_role",
+  "instruction": "先给新库房建图，然后把三箱样品搬入库房，最后确认上架情况",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 161.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 22921.0,
+      "request_bytes": 7323,
+      "response_bytes": 19120,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_001aa5aa22fd82af016aa8efa0261087d187c3e2f238651536": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 322,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 322,
+              "output_tokens": 0
+            },
+            "rs_001aa5aa22fd82af016aa8efa08b2087d196194aec0936259d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_001aa5aa22fd82af016aa8efa9dfe887d18d2c5c4426631fe1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 513
+            },
+            "msg_001aa5aa22fd82af016aa8efb3392087d18e4c6aac71aeb73c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 166
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 166
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1507,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1195,
+        "output_tokens_details": {
+          "reasoning_tokens": 1029
+        },
+        "total_tokens": 2702
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 138002.5,
+      "request_bytes": 26516,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1507,
+    "output_tokens": 1195,
+    "total_tokens": 2702
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 22922.0,
+      "avg_ms": 22922.0,
+      "max_ms": 22922.0
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 138006.8,
+      "avg_ms": 138006.8,
+      "max_ms": 138006.8
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-f9f3223f2d97446b962c87389b95711c",
+    "mission_id": "mission-346d59dc28954eeeaf402ad889a26990",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先给新库房建图，然后把三箱样品搬入库房，最后确认上架情况",
+        "created_at_ms": 1789456287330,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "先完成新库房建图；随后将三箱样品搬入该库房；最后检查并确认这三箱样品的上架情况。",
+      "constraints": [
+        "任务范围限定为三箱样品。",
+        "遵循用户指定顺序：先为新库房建图，再将三箱样品搬入该库房，最后确认上架情况。"
+      ],
+      "assumptions": [
+        "将“新库房”视为建图、搬运和上架情况确认所针对的同一库房。",
+        "将“确认上架情况”理解为检查并反馈三箱样品是否已上架及其状态，不额外执行上架作业。"
+      ],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:f2a89d9a52ff48f088572077076b3f49d03390f8b696374ef47608e9175f4ad6",
+      "request_id": "request-f9f3223f2d97446b962c87389b95711c",
+      "dialogue_digest": "sha256:be1ab9951eebb335e29ee0b2ed2e6be254b5e5cd2ef9816b627259ca90241263",
+      "captured_at_ms": 1789456287513,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789456287330,
+    "updated_at_ms": 1789456448557
+  }
+}

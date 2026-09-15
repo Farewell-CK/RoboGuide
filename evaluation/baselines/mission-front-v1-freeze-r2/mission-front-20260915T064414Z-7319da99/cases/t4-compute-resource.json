@@ -1,0 +1,502 @@
+{
+  "case_id": "t4-compute-resource",
+  "category": "resource_timing",
+  "instruction": "把刚才录制的巡检视频使用 defect-detection-v1 模型做缺陷检测推理，并要求占用 1 单位通用计算资源",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 118.1,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 对刚才录制的巡检视频使用 defect-detection-v1 模型执行缺陷检测推理。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "required capabilities covered: ['compute.infer@v1']"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "required resource kinds covered: ['compute']"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 75 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 16163.1,
+      "request_bytes": 7368,
+      "response_bytes": 14136,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0fd919a1bba1aa2e016aa8ee80da7c87d194930b5c99efdecd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 339,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 339,
+              "output_tokens": 0
+            },
+            "rs_0fd919a1bba1aa2e016aa8ee814cfc87d18b3fc98772fc2e15": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0fd919a1bba1aa2e016aa8ee8ac25087d19424ad44a36ad681": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 102
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 102
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1524,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 618,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2142
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 40873.3,
+      "request_bytes": 26291,
+      "response_bytes": 37377,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_067976d75874a981016aa8ee8e87ec87d1b5c2c96981ba7c4f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2733,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2733,
+              "output_tokens": 0
+            },
+            "rs_067976d75874a981016aa8ee8f100087d1ab6f4f0a0b8be917": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_067976d75874a981016aa8ee98637887d188f6b3be6cd34bd5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_067976d75874a981016aa8eea1b87887d19545b9c355d53918": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_067976d75874a981016aa8eeab07f887d18552082d84d7db3e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 174
+            },
+            "msg_067976d75874a981016aa8eeae485887d1ae37704da0a93b0a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 418
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 418
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5320,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2144,
+        "output_tokens_details": {
+          "reasoning_tokens": 1726
+        },
+        "total_tokens": 7464
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 60474.2,
+      "request_bytes": 19458,
+      "response_bytes": 40712,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f9c1dcfdb729978016aa8eeb8788087d195786b865d32c6e9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3162,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3162,
+              "output_tokens": 0
+            },
+            "rs_0f9c1dcfdb729978016aa8eeb8db3487d1b205411aed08e552": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f9c1dcfdb729978016aa8eec22afc87d1ba8d02c1927ae69a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f9c1dcfdb729978016aa8eecb805487d1a4e93b72e3ccaae2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f9c1dcfdb729978016aa8eed4d1d487d1b29fc4f7e9880143": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f9c1dcfdb729978016aa8eede405087d1bb7fa5912b1f339e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f9c1dcfdb729978016aa8eee7792087d1bab83805f40baae9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0f9c1dcfdb729978016aa8eef10a0887d1aedae554992beda0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4298,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 3126,
+        "output_tokens_details": {
+          "reasoning_tokens": 3106
+        },
+        "total_tokens": 7424
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11142,
+    "output_tokens": 5888,
+    "total_tokens": 17030
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 16163.9,
+      "avg_ms": 16163.9,
+      "max_ms": 16163.9
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 40951.5,
+      "avg_ms": 40951.5,
+      "max_ms": 40951.5
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 60476.4,
+      "avg_ms": 60476.4,
+      "max_ms": 60476.4
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-d5f492946d6c44cdb1b4bcd764c35bb7",
+    "mission_id": "mission-08a0a5bb48e94080b6b5b4b4f26b82db",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把刚才录制的巡检视频使用 defect-detection-v1 模型做缺陷检测推理，并要求占用 1 单位通用计算资源",
+        "created_at_ms": 1789455996855,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "对刚才录制的巡检视频使用 defect-detection-v1 模型执行缺陷检测推理。",
+      "constraints": [
+        "必须使用 defect-detection-v1 模型。",
+        "要求占用 1 单位通用计算资源。"
+      ],
+      "assumptions": [
+        "将“刚才录制的巡检视频”解释为最近录制完成的那段巡检视频。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-08a0a5bb48e94080b6b5b4b4f26b82db",
+        "objective": "对刚才录制的巡检视频使用 defect-detection-v1 模型执行缺陷检测推理。",
+        "actors": [
+          {
+            "id": "actor-inference"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-inference",
+          "roles": [
+            {
+              "id": "context-role-inference",
+              "actor": "actor-inference"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-inference",
+          "description": "在“刚才录制的巡检视频”解释为最近录制完成的那段巡检视频这一已给定规划前提下，生成针对该视频的 defect-detection-v1 缺陷检测推理结果。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-inference",
+              "context_role": "context-role-inference",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "compute",
+                      "name": "infer",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "compute",
+                    "units": 1
+                  }
+                ]
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "compute",
+                  "name": "infer",
+                  "version": "v1"
+                },
+                "objective": "针对最近录制完成的那段巡检视频生成 defect-detection-v1 缺陷检测推理结果。",
+                "parameters": {
+                  "model": "defect-detection-v1"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-inference",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "针对最近录制完成的那段巡检视频生成 defect-detection-v1 缺陷检测推理结果。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:eda2b3e08828060609b7148daad28f456475e2e9b6ef4dc760ab38854320b0e3",
+      "request_id": "request-d5f492946d6c44cdb1b4bcd764c35bb7",
+      "dialogue_digest": "sha256:ad24d4c331dc3519cad4c10a5f3f7db0cf526a3f2dda220f9bb5418f4f93ad16",
+      "captured_at_ms": 1789455996953,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:a6bf59edfc1d623b324607f6b65d71a0bfd2a78c6c0d7341adf9ad97e58c2755",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:a6bf59edfc1d623b324607f6b65d71a0bfd2a78c6c0d7341adf9ad97e58c2755",
+        "grounding_context_digest": "sha256:eda2b3e08828060609b7148daad28f456475e2e9b6ef4dc760ab38854320b0e3",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789456114776
+      }
+    ],
+    "created_at_ms": 1789455996855,
+    "updated_at_ms": 1789456114874
+  }
+}

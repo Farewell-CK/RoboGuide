@@ -1,0 +1,487 @@
+{
+  "case_id": "t2-start-window",
+  "category": "resource_timing",
+  "instruction": "任务接受后 1 小时移动到园区大门",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 95.0,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 1 term(s) in: 在任务接受后1小时，移动至园区大门。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "1/1 task(s) carry timing constraints"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13645.2,
+      "request_bytes": 7284,
+      "response_bytes": 13976,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_002249efe0e965d2016aa8ee1ee95487d1abd542f8851b7562": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 319,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 319,
+              "output_tokens": 0
+            },
+            "rs_002249efe0e965d2016aa8ee1f50e887d1a7b07835578d9161": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_002249efe0e965d2016aa8ee28c8a087d18095cf0a14bb874c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 129
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 129
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1504,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 645,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2149
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 45620.8,
+      "request_bytes": 26407,
+      "response_bytes": 38681,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_08a3dc59903498d4016aa8ee2d535887d1bcb999d5ca9793eb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2757,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2757,
+              "output_tokens": 0
+            },
+            "rs_08a3dc59903498d4016aa8ee2dd0dc87d1ad657f2fdb145c25": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_08a3dc59903498d4016aa8ee3723d887d18752834606cbe939": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_08a3dc59903498d4016aa8ee407b5c87d1bfee30269debf0a7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_08a3dc59903498d4016aa8ee49cad887d1a278925f89dec7c2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_08a3dc59903498d4016aa8ee5339b487d1866f18eb9c02b559": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 328
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 328
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5344,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2398,
+        "output_tokens_details": {
+          "reasoning_tokens": 2070
+        },
+        "total_tokens": 7742
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 35206.5,
+      "request_bytes": 19211,
+      "response_bytes": 27248,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b7dd517815a2c18016aa8ee5a555887d1afb25e4125a2505d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3100,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3100,
+              "output_tokens": 0
+            },
+            "rs_0b7dd517815a2c18016aa8ee5b8b9487d19b8785092844062a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0b7dd517815a2c18016aa8ee64203c87d19855e89f7a470e84": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0b7dd517815a2c18016aa8ee6d741c87d1be380a6616b685c8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0b7dd517815a2c18016aa8ee76cac087d1be407cf1e53e5023": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 291
+            },
+            "msg_0b7dd517815a2c18016aa8ee7c220887d1b691c333aa261c08": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4236,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1863,
+        "output_tokens_details": {
+          "reasoning_tokens": 1843
+        },
+        "total_tokens": 6099
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11084,
+    "output_tokens": 4906,
+    "total_tokens": 15990
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13646.2,
+      "avg_ms": 13646.2,
+      "max_ms": 13646.2
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 45626.6,
+      "avg_ms": 45626.6,
+      "max_ms": 45626.6
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 35208.2,
+      "avg_ms": 35208.2,
+      "max_ms": 35208.2
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-fa4ba70c008c4708a41aa73942a0e347",
+    "mission_id": "mission-b89d5944dfca47fdb378f153d6855d2a",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "任务接受后 1 小时移动到园区大门",
+        "created_at_ms": 1789455901857,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "在任务接受后1小时，移动至园区大门。",
+      "constraints": [
+        "移动动作的时间基准为任务接受时刻后的1小时。"
+      ],
+      "assumptions": [
+        "将“任务接受后1小时移动到”理解为：以任务接受时刻为基准，延迟1小时后开始前往园区大门，而不是要求在1小时内到达。",
+        "“园区大门”作为目标地点，具体路线、位姿和行驶参数由执行层确定。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-b89d5944dfca47fdb378f153d6855d2a",
+        "objective": "在任务接受后1小时，移动至园区大门。",
+        "actors": [
+          {
+            "id": "mobile-system"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-main",
+          "roles": [
+            {
+              "id": "mobile-role",
+              "actor": "mobile-system"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-move-gate",
+          "description": "在任务接受后1小时开始移动，并到达园区大门。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "move-role",
+              "context_role": "mobile-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "在任务接受后1小时，移动至园区大门。",
+                "parameters": {
+                  "destination": "园区大门"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-main",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 3600000,
+            "latest_start_offset_ms": 3600000,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "移动至园区大门。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:ebb6e0d2650919b6a2fa4695c9e9b0612a1ca7d83a4d5ca588432cc1433a1f05",
+      "request_id": "request-fa4ba70c008c4708a41aa73942a0e347",
+      "dialogue_digest": "sha256:a263e3d2ee54e0efda779b820f03f71b3bb7be10a402ef823e901e16c7ba27c2",
+      "captured_at_ms": 1789455901956,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:d1b0ad097c5926df6e40f9dc349c3aa81e594eee96d40575157e61afa1794b66",
+    "approval_required": false,
+    "approval_reasons": [
+      "mobility-move"
+    ],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:d1b0ad097c5926df6e40f9dc349c3aa81e594eee96d40575157e61afa1794b66",
+        "grounding_context_digest": "sha256:ebb6e0d2650919b6a2fa4695c9e9b0612a1ca7d83a4d5ca588432cc1433a1f05",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455996651
+      }
+    ],
+    "created_at_ms": 1789455901857,
+    "updated_at_ms": 1789455996803
+  }
+}

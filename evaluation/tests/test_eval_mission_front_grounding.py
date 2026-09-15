@@ -466,3 +466,73 @@ def test_summary_line_excludes_not_evaluated_from_failures() -> None:
     line = result.summary_line()
     assert line["failed_invariants"] == ["b"]
     assert line["not_evaluated_invariants"] == ["c"]
+
+
+def test_clarification_invariant_separates_review_triggered() -> None:
+    """Review-triggered questions never count as first-pass over-asking.
+
+    Regression guard from the R1 freeze regression: t1/t2 produced
+    RequestClarification questions after Planner/Reviewer already ran, and
+    the old invariant counted them as first-pass over-ask failures.
+    """
+    from roboguide_eval.mission_front.invariants import check_clarification_behavior
+
+    record: dict[str, object] = {
+        "lifecycle": "NeedsClarification",
+        "dialogue": [
+            {
+                "turn_id": "t1",
+                "speaker": "User",
+                "kind": "Instruction",
+                "content": "x",
+                "created_at_ms": 1,
+                "in_reply_to": None,
+            },
+            {
+                "turn_id": "t2",
+                "speaker": "MissionIntelligence",
+                "kind": "ClarificationQuestion",
+                "content": "review says source is placeholder",
+                "created_at_ms": 2,
+                "in_reply_to": "t1",
+            },
+        ],
+        "stage_timings": {
+            "interpreter": {"calls": 1},
+            "planner": {"calls": 1},
+            "reviewer": {"calls": 1},
+        },
+    }
+    outcome = check_clarification_behavior(object(), record, False)
+    assert outcome.passed is True
+    assert "review-triggered" in outcome.detail
+
+    record_no_downstream: dict[str, object] = {
+        "lifecycle": "NeedsClarification",
+        "dialogue": [
+            {
+                "turn_id": "t1",
+                "speaker": "User",
+                "kind": "Instruction",
+                "content": "x",
+                "created_at_ms": 1,
+                "in_reply_to": None,
+            },
+            {
+                "turn_id": "t2",
+                "speaker": "MissionIntelligence",
+                "kind": "ClarificationQuestion",
+                "content": "where should the cup go?",
+                "created_at_ms": 2,
+                "in_reply_to": "t1",
+            },
+        ],
+        "stage_timings": {
+            "interpreter": {"calls": 1},
+            "planner": {"calls": 0},
+            "reviewer": {"calls": 0},
+        },
+    }
+    first_pass_outcome = check_clarification_behavior(object(), record_no_downstream, False)
+    assert first_pass_outcome.passed is False
+    assert "first-pass question(s)" in first_pass_outcome.detail

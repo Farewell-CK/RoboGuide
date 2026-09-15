@@ -1,0 +1,458 @@
+{
+  "case_id": "i1-relocate-canonical",
+  "category": "integrated",
+  "instruction": "把厨房的易拉罐搬到储藏室的货架上",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 53.7,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 将厨房里的易拉罐搬运并放置到储藏室的货架上。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "operation object.relocate@v1 preserved as one semantic goal"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9374.3,
+      "request_bytes": 7287,
+      "response_bytes": 12754,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0ede0f92e94b4cf7016aa8ecc4cd4087d1bf2c7c868e196518": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 314,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 314,
+              "output_tokens": 0
+            },
+            "rs_0ede0f92e94b4cf7016aa8ecc522dc87d195f820a654c0df37": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 383
+            },
+            "msg_0ede0f92e94b4cf7016aa8eccc31c887d1bed3f41737216987": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 50
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 50
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1499,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 433,
+        "output_tokens_details": {
+          "reasoning_tokens": 383
+        },
+        "total_tokens": 1932
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 28537.7,
+      "request_bytes": 26082,
+      "response_bytes": 28994,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_01f2fb4b4bc2f6a5016aa8eccf7e4c87d1a96f151933ef4edd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2668,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2668,
+              "output_tokens": 0
+            },
+            "rs_01f2fb4b4bc2f6a5016aa8eccffc5887d1ad70949334bea569": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_01f2fb4b4bc2f6a5016aa8ecd9518487d187b778a9bc2eae87": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_01f2fb4b4bc2f6a5016aa8ece2c0b087d1b39c0a82bcba35b0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 386
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 386
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5255,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1420,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 6675
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 15319.1,
+      "request_bytes": 19043,
+      "response_bytes": 17346,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e83260106536b62016aa8ecead21487d19ebe224a065bac0a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3065,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3065,
+              "output_tokens": 0
+            },
+            "rs_0e83260106536b62016aa8eceb496087d18f3d8d2bb4c4d6c3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0e83260106536b62016aa8ecf49ec087d19585a10bcdf24ab3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 226
+            },
+            "msg_0e83260106536b62016aa8ecf8c9b487d1a85b47192ce2b7ff": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4201,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 762,
+        "output_tokens_details": {
+          "reasoning_tokens": 742
+        },
+        "total_tokens": 4963
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 10955,
+    "output_tokens": 2615,
+    "total_tokens": 13570
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 9375.4,
+      "avg_ms": 9375.4,
+      "max_ms": 9375.4
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 28544.2,
+      "avg_ms": 28544.2,
+      "max_ms": 28544.2
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 15321.5,
+      "avg_ms": 15321.5,
+      "max_ms": 15321.5
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-86160b16b70e46be81b71e390a3cd77e",
+    "mission_id": "mission-8380c3544cea426ab4ed0df295139a1e",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把厨房的易拉罐搬到储藏室的货架上",
+        "created_at_ms": 1789455555821,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将厨房里的易拉罐搬运并放置到储藏室的货架上。",
+      "constraints": [],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-8380c3544cea426ab4ed0df295139a1e",
+        "objective": "将厨房里的易拉罐搬运并放置到储藏室的货架上。",
+        "actors": [
+          {
+            "id": "mission-actor-1"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "relocation-context",
+          "roles": [
+            {
+              "id": "object-relocator",
+              "actor": "mission-actor-1"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "relocate-can",
+          "description": "将厨房里的易拉罐搬运并放置到储藏室的货架上。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocate-role",
+              "context_role": "object-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将厨房里的易拉罐搬运并放置到储藏室的货架上。",
+                "parameters": {
+                  "destination": "储藏室的货架",
+                  "object": "易拉罐",
+                  "source": "厨房"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "relocation-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "易拉罐已从厨房搬运并放置到储藏室的货架上。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:31dfa76587ae1baac417c2ec524a9ddc53f1fe28b81849e841857648400a7d9e",
+      "request_id": "request-86160b16b70e46be81b71e390a3cd77e",
+      "dialogue_digest": "sha256:c0a6721302d37bdbbf49524d2c047fcaefad3ca90a5fa89898086a12c941d412",
+      "captured_at_ms": 1789455555919,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:3d400ad0fd01b1b89c80c4e457d060fa67346224244146d3408d5b5bbd04d8dd",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:3d400ad0fd01b1b89c80c4e457d060fa67346224244146d3408d5b5bbd04d8dd",
+        "grounding_context_digest": "sha256:31dfa76587ae1baac417c2ec524a9ddc53f1fe28b81849e841857648400a7d9e",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455609357
+      }
+    ],
+    "created_at_ms": 1789455555821,
+    "updated_at_ms": 1789455609457
+  }
+}

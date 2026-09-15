@@ -1,0 +1,516 @@
+{
+  "case_id": "n4-edge-inference",
+  "category": "normal",
+  "instruction": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 做一次推理分析",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": false,
+  "wall_seconds": 144.6,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": false,
+      "detail": "objective dropped terms ['点云']; plan objective: '使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析。'"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "required capabilities covered: ['compute.infer@v1']"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [
+    "objective_fidelity: objective dropped terms ['点云']; plan objective: '使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析。'"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12832.7,
+      "request_bytes": 7326,
+      "response_bytes": 14076,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0640eced9a89d3e9016aa8ea675a5487d1b700c76297c99d36": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 319,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 319,
+              "output_tokens": 0
+            },
+            "rs_0640eced9a89d3e9016aa8ea6800dc87d1b938e00fd15984f1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0640eced9a89d3e9016aa8ea7174c887d18f7aa6bf0cfa65e0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 87
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 87
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1504,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 603,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2107
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 38955.7,
+      "request_bytes": 26252,
+      "response_bytes": 34964,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_006ff55e8f480a38016aa8ea746cf887d19358b637e01ac957": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2705,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2705,
+              "output_tokens": 0
+            },
+            "rs_006ff55e8f480a38016aa8ea7601c487d198c5cfa73353f504": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_006ff55e8f480a38016aa8ea7f4db487d1bd667076f4d14644": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_006ff55e8f480a38016aa8ea88a0b087d1ae7ffc02eca06523": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_006ff55e8f480a38016aa8ea92123c87d198d2ad059852b9f4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 410
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 410
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5292,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1962,
+        "output_tokens_details": {
+          "reasoning_tokens": 1552
+        },
+        "total_tokens": 7254
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 92223.8,
+      "request_bytes": 19437,
+      "response_bytes": 59676,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_058c34eecc86fddb016aa8ea9ea1c087d19e70e0fd0f39f53c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3130,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3130,
+              "output_tokens": 0
+            },
+            "rs_058c34eecc86fddb016aa8ea9f491087d1a8e1d5871cc0b258": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_058c34eecc86fddb016aa8eaa890e887d1b92d753897aad822": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eab1e48087d1b80e4c752cb51076": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eabb3a2487d19b4259abd6b5858b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eac492a887d18869e34ca32d31cc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eacde16887d18694197fafb46f4b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8ead72fdc87d19b580706e48ada81": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eae086e887d1a1bba3c879625395": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eae9dd1487d1a0bad4a56014b669": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_058c34eecc86fddb016aa8eaf32b9c87d19a24344a824c1895": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 152
+            },
+            "msg_058c34eecc86fddb016aa8eaf600e087d1ad64fb92f5225b95": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4266,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4832,
+        "output_tokens_details": {
+          "reasoning_tokens": 4812
+        },
+        "total_tokens": 9098
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11062,
+    "output_tokens": 7397,
+    "total_tokens": 18459
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 12833.7,
+      "avg_ms": 12833.7,
+      "max_ms": 12833.7
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 39034.4,
+      "avg_ms": 39034.4,
+      "max_ms": 39034.4
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 92226.2,
+      "avg_ms": 92226.2,
+      "max_ms": 92226.2
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-716895b215b6403d9e839045e4562f05",
+    "mission_id": "mission-0ad889942e7d4a81b71903900fc13104",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 做一次推理分析",
+        "created_at_ms": 1789454950283,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析。",
+      "constraints": [
+        "仅对该录制文件执行一次推理分析。"
+      ],
+      "assumptions": [
+        "未指定录制文件内的子区间，因此按整个录制文件作为分析范围。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-0ad889942e7d4a81b71903900fc13104",
+        "objective": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析。",
+        "actors": [
+          {
+            "id": "actor-inference"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-inference",
+          "roles": [
+            {
+              "id": "ctx-role-inference",
+              "actor": "actor-inference"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-infer-recording",
+          "description": "规划前提：未指定录制文件内的子区间，因此按整个录制文件作为分析范围。完成后，录制文件 lidar-run-017 已使用 pointcloud-analysis-v1 模型产生一次推理分析结果。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-infer",
+              "context_role": "ctx-role-inference",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "compute",
+                      "name": "infer",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "compute",
+                  "name": "infer",
+                  "version": "v1"
+                },
+                "objective": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析，并按整个录制文件作为分析范围。",
+                "parameters": {
+                  "model": "pointcloud-analysis-v1"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-inference",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "录制文件 lidar-run-017 已使用 pointcloud-analysis-v1 模型产生一次推理分析结果。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:c3a4ede527ddc3fe67271561726800bd88f11b3fddff609672bc1a71cbd1a603",
+      "request_id": "request-716895b215b6403d9e839045e4562f05",
+      "dialogue_digest": "sha256:89f56b076799c4a3210ad2dd596eaeb355c2481e7da5ca0a8b7498894e6552b7",
+      "captured_at_ms": 1789454950399,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:5e703cd10cd6c1781f4b0e04892457f6a0550561f6342fdce12ca896f81c64ef",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:5e703cd10cd6c1781f4b0e04892457f6a0550561f6342fdce12ca896f81c64ef",
+        "grounding_context_digest": "sha256:c3a4ede527ddc3fe67271561726800bd88f11b3fddff609672bc1a71cbd1a603",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455094773
+      }
+    ],
+    "created_at_ms": 1789454950283,
+    "updated_at_ms": 1789455094876
+  }
+}

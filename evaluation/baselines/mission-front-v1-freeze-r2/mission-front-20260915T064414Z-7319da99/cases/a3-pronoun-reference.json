@@ -1,0 +1,541 @@
+{
+  "case_id": "a3-pronoun-reference",
+  "category": "ambiguity",
+  "instruction": "把它放到那儿",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 55.3,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "1 first-pass question(s) asked: 请明确“它”指哪个物体，以及“那儿”指哪个目标位置。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 将窗台上的绿植搬到阳台的架子上。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8234.2,
+      "request_bytes": 7257,
+      "response_bytes": 12493,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0dcdae22fdde7ec6016aa8eb6a829887d19a698e15acda3b80": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 307,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 307,
+              "output_tokens": 0
+            },
+            "rs_0dcdae22fdde7ec6016aa8eb6ad84487d1beac801db5fd2233": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 309
+            },
+            "msg_0dcdae22fdde7ec6016aa8eb70946887d1ad965c4552239c0b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 66
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 66
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1492,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 375,
+        "output_tokens_details": {
+          "reasoning_tokens": 309
+        },
+        "total_tokens": 1867
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 6707.7,
+      "request_bytes": 7734,
+      "response_bytes": 11628,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_02d5223c21c141bb016aa8eb72be8487d1b09b0ff6403eefcb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 450,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 450,
+              "output_tokens": 0
+            },
+            "rs_02d5223c21c141bb016aa8eb731b8487d1b1e9de12fa204e17": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 196
+            },
+            "msg_02d5223c21c141bb016aa8eb76ccb887d19059649300daa967": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 44
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 44
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1635,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 240,
+        "output_tokens_details": {
+          "reasoning_tokens": 196
+        },
+        "total_tokens": 1875
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 27991.5,
+      "request_bytes": 26064,
+      "response_bytes": 29112,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00cbb4c3ca40eef3016aa8eb7a335887d1a443a2df16556448": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2677,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2677,
+              "output_tokens": 0
+            },
+            "rs_00cbb4c3ca40eef3016aa8eb7b410487d1861e3b6523894892": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_00cbb4c3ca40eef3016aa8eb84942887d1b54f200fb1180621": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 516
+            },
+            "msg_00cbb4c3ca40eef3016aa8eb8e5be487d19c3f40d96cfae54b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 370
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 370
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5264,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1402,
+        "output_tokens_details": {
+          "reasoning_tokens": 1032
+        },
+        "total_tokens": 6666
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11702.2,
+      "request_bytes": 18971,
+      "response_bytes": 14276,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0eba22def165f627016aa8eb961d2087d191ba794f4f42a8eb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3054,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3054,
+              "output_tokens": 0
+            },
+            "rs_0eba22def165f627016aa8eb96a48487d1b09ede3213deb5e3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0eba22def165f627016aa8eba0139887d18c2c7ef359798138": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4190,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 536,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 4726
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 12581,
+    "output_tokens": 2553,
+    "total_tokens": 15134
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 14943.9,
+      "avg_ms": 7471.9,
+      "max_ms": 8235.3
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 27996.4,
+      "avg_ms": 27996.4,
+      "max_ms": 27996.4
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 11704.1,
+      "avg_ms": 11704.1,
+      "max_ms": 11704.1
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-1fc4e73ad5d044bc905cedd56f1d8c1d",
+    "mission_id": "mission-f767d69f2bf04e8a97f33e9d954b4d99",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把它放到那儿",
+        "created_at_ms": 1789455209498,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请明确“它”指哪个物体，以及“那儿”指哪个目标位置。",
+        "created_at_ms": 1789455217891,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "把窗台上的绿植搬到阳台的架子上",
+        "created_at_ms": 1789455217947,
+        "in_reply_to": "turn-0002"
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将窗台上的绿植搬到阳台的架子上。",
+      "constraints": [],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-f767d69f2bf04e8a97f33e9d954b4d99",
+        "objective": "将窗台上的绿植搬到阳台的架子上。",
+        "actors": [
+          {
+            "id": "actor-relocator"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-plant-relocation",
+          "roles": [
+            {
+              "id": "ctx-role-relocator",
+              "actor": "actor-relocator"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-plant",
+          "description": "将窗台上的绿植搬到阳台的架子上。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "task-role-relocator",
+              "context_role": "ctx-role-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将窗台上的绿植搬到阳台的架子上。",
+                "parameters": {
+                  "destination": "阳台的架子上",
+                  "object": "绿植",
+                  "source": "窗台"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-plant-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "绿植已从窗台搬到阳台的架子上。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:5668e7e0cc3e86115a7b5e8310ee3e16b290fc766d837f3de4750b308b6e3141",
+      "request_id": "request-1fc4e73ad5d044bc905cedd56f1d8c1d",
+      "dialogue_digest": "sha256:aaf8c38494b5ee472d99487a4f909ac9731c3dd83e066a30b7dcdbb6475c1d7c",
+      "captured_at_ms": 1789455218054,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:45696462ff1536a03db46a0ac442aa5f43f906e3d9d9d0a54c07c9fe36b034e4",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:45696462ff1536a03db46a0ac442aa5f43f906e3d9d9d0a54c07c9fe36b034e4",
+        "grounding_context_digest": "sha256:5668e7e0cc3e86115a7b5e8310ee3e16b290fc766d837f3de4750b308b6e3141",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455264684
+      }
+    ],
+    "created_at_ms": 1789455209498,
+    "updated_at_ms": 1789455264778
+  }
+}

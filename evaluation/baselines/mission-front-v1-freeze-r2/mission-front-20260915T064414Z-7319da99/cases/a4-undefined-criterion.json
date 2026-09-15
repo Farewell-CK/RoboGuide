@@ -1,0 +1,557 @@
+{
+  "case_id": "a4-undefined-criterion",
+  "category": "ambiguity",
+  "instruction": "把贵重物品搬到安全的地方",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 61.2,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "2 first-pass question(s) asked: 请明确要搬运哪些贵重物品。 | 请明确“安全的地方”具体指哪个地点，或说明用于判定安全地点的标准。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 将保险柜里的贵重文件搬运到二楼档案室。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8228.2,
+      "request_bytes": 7275,
+      "response_bytes": 12464,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0822a13e12e54da7016aa8eba21e3087d18fccb2b5e4309e9b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 312,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 312,
+              "output_tokens": 0
+            },
+            "rs_0822a13e12e54da7016aa8eba2892c87d1a6444e3a68c0d375": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 276
+            },
+            "msg_0822a13e12e54da7016aa8eba7af6487d19b738f48c1440350": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 79
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 79
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1497,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 355,
+        "output_tokens_details": {
+          "reasoning_tokens": 276
+        },
+        "total_tokens": 1852
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8758.1,
+      "request_bytes": 8011,
+      "response_bytes": 12415,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0226ac3364bac9b6016aa8ebaa57bc87d1aef5f820bf0010ae": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 510,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 510,
+              "output_tokens": 0
+            },
+            "rs_0226ac3364bac9b6016aa8ebaae04487d1976f096ae2987c07": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 294
+            },
+            "msg_0226ac3364bac9b6016aa8ebb0570087d1a38e0fe0b648cca4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 75
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 75
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1695,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 369,
+        "output_tokens_details": {
+          "reasoning_tokens": 294
+        },
+        "total_tokens": 2064
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 31094.1,
+      "request_bytes": 26191,
+      "response_bytes": 31969,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0862ef8b9eba863d016aa8ebb3b27087d1aa993949d22d1791": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2696,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2696,
+              "output_tokens": 0
+            },
+            "rs_0862ef8b9eba863d016aa8ebb432d487d180041b89b76b910a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0862ef8b9eba863d016aa8ebbd849487d19f4cf1f89e279864": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0862ef8b9eba863d016aa8ebc6d75487d1870ac63a50a54860": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 154
+            },
+            "msg_0862ef8b9eba863d016aa8ebc9bc2887d1b66c9375122912b7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 407
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 407
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5283,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1595,
+        "output_tokens_details": {
+          "reasoning_tokens": 1188
+        },
+        "total_tokens": 6878
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 12475.5,
+      "request_bytes": 19285,
+      "response_bytes": 14020,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b7d1ad20982beae016aa8ebd35a4c87d1b33048f73b04f3ba": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3113,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3113,
+              "output_tokens": 0
+            },
+            "rs_0b7d1ad20982beae016aa8ebd3e6e087d1ae3bd3e773ae457a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0b7d1ad20982beae016aa8ebdd531487d19ff8e37a217803c7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4249,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 536,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 4785
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 12724,
+    "output_tokens": 2855,
+    "total_tokens": 15579
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 16988.3,
+      "avg_ms": 8494.2,
+      "max_ms": 8759.1
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 31099.2,
+      "avg_ms": 31099.2,
+      "max_ms": 31099.2
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 12477.3,
+      "avg_ms": 12477.3,
+      "max_ms": 12477.3
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-02fb4aeb1cca41c2a501a688ecd6b168",
+    "mission_id": "mission-e2666cc088474104a9df5c470bde6a5d",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贵重物品搬到安全的地方",
+        "created_at_ms": 1789455264830,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请明确要搬运哪些贵重物品。",
+        "created_at_ms": 1789455273208,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请明确“安全的地方”具体指哪个地点，或说明用于判定安全地点的标准。",
+        "created_at_ms": 1789455273208,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0004",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "贵重物品是保险柜里的文件，安全的地方是二楼档案室",
+        "created_at_ms": 1789455273262,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将保险柜里的贵重文件搬运到二楼档案室。",
+      "constraints": [],
+      "assumptions": [
+        "将“保险柜里的文件”作为本次搬运的全部目标物品范围，不扩展到其他未指明物品。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-e2666cc088474104a9df5c470bde6a5d",
+        "objective": "将保险柜里的贵重文件搬运到二楼档案室。",
+        "actors": [
+          {
+            "id": "actor-1"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-relocation",
+          "roles": [
+            {
+              "id": "relocator",
+              "actor": "actor-1"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "relocate-files",
+          "description": "任务完成后的物理世界结果是：保险柜里的贵重文件位于二楼档案室。本次搬运范围仅限保险柜里的文件，不扩展到其他未指明物品。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocator-role",
+              "context_role": "relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将保险柜里的贵重文件搬运到二楼档案室。",
+                "parameters": {
+                  "destination": "二楼档案室",
+                  "object": "贵重文件",
+                  "source": "保险柜"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "保险柜里的贵重文件位于二楼档案室。本次搬运范围仅限保险柜里的文件，不扩展到其他未指明物品。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:457b7f5c3869bf79b9617322f8c1e931bdd1b7f2bd745019020341164dce3a1c",
+      "request_id": "request-02fb4aeb1cca41c2a501a688ecd6b168",
+      "dialogue_digest": "sha256:fcb601f8a1ceab040def3057e1765d15eeae435ee82d1b135f4bafdb638357d0",
+      "captured_at_ms": 1789455273361,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:b5127b2b93d1ceb9757e50efeaec912ffde2ce058a24357004a7e03a13c2610d",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:b5127b2b93d1ceb9757e50efeaec912ffde2ce058a24357004a7e03a13c2610d",
+        "grounding_context_digest": "sha256:457b7f5c3869bf79b9617322f8c1e931bdd1b7f2bd745019020341164dce3a1c",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455325905
+      }
+    ],
+    "created_at_ms": 1789455264830,
+    "updated_at_ms": 1789455326008
+  }
+}

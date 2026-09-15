@@ -1,0 +1,544 @@
+{
+  "case_id": "a2-missing-object",
+  "category": "ambiguity",
+  "instruction": "去厨房把东西拿过来",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 55.7,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "1 first-pass question(s) asked: 要从厨房拿哪一件或哪些物品？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 1 term(s) in: 从厨房取出红色水壶，并将其放到餐桌上。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11971.7,
+      "request_bytes": 7266,
+      "response_bytes": 13551,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_01855aa8fe477092016aa8eb3305fc87d1a5f7370d14ce8576": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 307,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 307,
+              "output_tokens": 0
+            },
+            "rs_01855aa8fe477092016aa8eb33733c87d194702612c85e5f49": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 460
+            },
+            "msg_01855aa8fe477092016aa8eb3be52487d19134d9c27565ded6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 75
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 75
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1492,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 535,
+        "output_tokens_details": {
+          "reasoning_tokens": 460
+        },
+        "total_tokens": 2027
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 7345.8,
+      "request_bytes": 7698,
+      "response_bytes": 12139,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_07e017097d5557d0016aa8eb3ee69c87d18cab757b91910190": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 441,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 441,
+              "output_tokens": 0
+            },
+            "rs_07e017097d5557d0016aa8eb3f535087d192d8805a5ead8166": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 253
+            },
+            "msg_07e017097d5557d0016aa8eb440dc487d18172c639c0765f01": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 70
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 70
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1626,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 323,
+        "output_tokens_details": {
+          "reasoning_tokens": 253
+        },
+        "total_tokens": 1949
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 24291.5,
+      "request_bytes": 26152,
+      "response_bytes": 27415,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_036c5adb76a45cc4016aa8eb47207887d1aa33a22780681397": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2705,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2705,
+              "output_tokens": 0
+            },
+            "rs_036c5adb76a45cc4016aa8eb47a17087d1a01e5a74a543afbe": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_036c5adb76a45cc4016aa8eb50f63887d190791ed3c9a212c4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 301
+            },
+            "msg_036c5adb76a45cc4016aa8eb567bf087d1ad222b7f0c162fe8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 393
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 393
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5292,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1210,
+        "output_tokens_details": {
+          "reasoning_tokens": 817
+        },
+        "total_tokens": 6502
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11443.9,
+      "request_bytes": 19115,
+      "response_bytes": 14064,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0df3462918ced6a9016aa8eb5ef98487d1b38a713929f01bdb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3102,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3102,
+              "output_tokens": 0
+            },
+            "rs_0df3462918ced6a9016aa8eb5f712c87d194aad6493a361483": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0df3462918ced6a9016aa8eb68e2f887d1bfdb799e1adb1ab5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4238,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 536,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 4774
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 12648,
+    "output_tokens": 2604,
+    "total_tokens": 15252
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 19319.6,
+      "avg_ms": 9659.8,
+      "max_ms": 11972.7
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 24297.1,
+      "avg_ms": 24297.1,
+      "max_ms": 24297.1
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 11445.7,
+      "avg_ms": 11445.7,
+      "max_ms": 11445.7
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-1709663bf7f8405b8ff2eb31b5e12f30",
+    "mission_id": "mission-0f6f16bb97e84c7aaf8f3bbd3ef5ee5e",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去厨房把东西拿过来",
+        "created_at_ms": 1789455153784,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "要从厨房拿哪一件或哪些物品？",
+        "created_at_ms": 1789455165905,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "拿红色的水壶，放到餐桌上",
+        "created_at_ms": 1789455165957,
+        "in_reply_to": "turn-0002"
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "从厨房取出红色水壶，并将其放到餐桌上。",
+      "constraints": [
+        "取物范围限定为红色水壶",
+        "从厨房取出并放置到餐桌上"
+      ],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-0f6f16bb97e84c7aaf8f3bbd3ef5ee5e",
+        "objective": "从厨房取出红色水壶，并将其放到餐桌上。",
+        "actors": [
+          {
+            "id": "actor-1"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-relocate-kettle",
+          "roles": [
+            {
+              "id": "role-relocator",
+              "actor": "actor-1"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-red-kettle",
+          "description": "红色水壶已完成从厨房到餐桌的转移，并位于餐桌上。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "task-role-relocator",
+              "context_role": "role-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将红色水壶从厨房移至餐桌并使其位于餐桌上。",
+                "parameters": {
+                  "destination": "餐桌",
+                  "object": "红色水壶",
+                  "source": "厨房"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-relocate-kettle",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "红色水壶已完成从厨房到餐桌的转移，并位于餐桌上。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:17b9bf25dea1fd365f74c500c54f24b82d6959f785be3bc32e4c2a6464c9dffa",
+      "request_id": "request-1709663bf7f8405b8ff2eb31b5e12f30",
+      "dialogue_digest": "sha256:be0d08b9c46598595d972f4d4780ad86afdf1a997d6b9363b1c82c15f43ceaff",
+      "captured_at_ms": 1789455166055,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:a71b898a7af7986367ead56cd2d511df65b424a8a7f8bfe4d5dcdbfaa02136be",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:a71b898a7af7986367ead56cd2d511df65b424a8a7f8bfe4d5dcdbfaa02136be",
+        "grounding_context_digest": "sha256:17b9bf25dea1fd365f74c500c54f24b82d6959f785be3bc32e4c2a6464c9dffa",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455209344
+      }
+    ],
+    "created_at_ms": 1789455153784,
+    "updated_at_ms": 1789455209446
+  }
+}

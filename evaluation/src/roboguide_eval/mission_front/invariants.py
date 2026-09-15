@@ -233,57 +233,109 @@ def check_final_lifecycle(
     return InvariantOutcome("final_lifecycle", False, detail)
 
 
+def _partition_clarification_questions(
+    record: dict[str, object],
+) -> tuple[list[str], list[str]]:
+    """Split clarification questions into first-pass and review-triggered.
+
+    First-pass questions are produced by the Interpreter before any
+    Planner/Reviewer stage ran; review-triggered questions arise after a
+    review routed to RequestClarification. The boundary is the record's
+    stage timings: once any planner/reviewer call exists, later questions
+    count as review-triggered.
+
+    Args:
+        record: The serialized MissionRequestRecord.
+
+    Returns:
+        ``(first_pass, review_triggered)`` question-content lists.
+    """
+    timings = record.get("stage_timings")
+    downstream_started = False
+    if isinstance(timings, dict):
+        for stage in ("planner", "reviewer"):
+            stage_timing = timings.get(stage)
+            if (
+                isinstance(stage_timing, dict)
+                and isinstance(stage_timing.get("calls"), int)
+                and stage_timing["calls"] > 0
+            ):
+                downstream_started = True
+    dialogue = record.get("dialogue")
+    turns = dialogue if isinstance(dialogue, list) else []
+    first_pass: list[str] = []
+    review_triggered: list[str] = []
+    for turn in turns:
+        if not isinstance(turn, dict) or turn.get("kind") != "ClarificationQuestion":
+            continue
+        content = str(turn.get("content", ""))
+        if downstream_started:
+            review_triggered.append(content)
+        else:
+            first_pass.append(content)
+    return first_pass, review_triggered
+
+
 def check_clarification_behavior(
     case: object, record: dict[str, object], clarify_first_pass: bool | None
 ) -> InvariantOutcome:
-    """Check that clarification behavior matches the case expectation.
+    """Check that first-pass clarification behavior matches the expectation.
+
+    Only Interpreter questions asked before any Planner/Reviewer stage ran
+    count as first-pass; questions produced after a review routed to
+    RequestClarification are reported separately as review-triggered and
+    never count as first-pass over-asking.
 
     Args:
         case: The eval case (used only for naming).
         record: The serialized MissionRequestRecord.
-        clarify_first_pass: Whether the case expects clarification questions.
+        clarify_first_pass: Whether the case expects first-pass
+            clarification questions (``None`` is observe-only).
 
     Returns:
-        The invariant outcome; over-asking on unambiguous cases and silent
-        guessing on ambiguous cases both fail.
+        The invariant outcome; first-pass over-asking on unambiguous cases
+        and silent guessing on ambiguous cases both fail.
     """
-    dialogue = record.get("dialogue")
-    turns = dialogue if isinstance(dialogue, list) else []
-    questions = [
-        str(turn.get("content", ""))
-        for turn in turns
-        if isinstance(turn, dict)
-        and turn.get("kind") == "ClarificationQuestion"
-        and turn.get("speaker") == "MissionIntelligence"
-    ]
+    first_pass, review_triggered = _partition_clarification_questions(record)
+    suffix = ""
+    if review_triggered:
+        suffix = (
+            f"; {len(review_triggered)} review-triggered question(s) recorded "
+            f"separately: {' | '.join(review_triggered[:2])}"
+        )
     if clarify_first_pass is None:
         return InvariantOutcome(
             "clarification_behavior",
             None,
-            f"observe-only: {len(questions)} clarification question(s) recorded"
-            + (f": {' | '.join(questions[:3])}" if questions else ""),
+            f"observe-only: {len(first_pass)} first-pass question(s)"
+            + (f": {' | '.join(first_pass[:3])}" if first_pass else "")
+            + suffix,
         )
     if clarify_first_pass:
-        if questions:
+        if first_pass:
             return InvariantOutcome(
                 "clarification_behavior",
                 True,
-                f"{len(questions)} clarification question(s) asked: {' | '.join(questions[:3])}",
+                f"{len(first_pass)} first-pass question(s) asked: "
+                f"{' | '.join(first_pass[:3])}" + suffix,
             )
         return InvariantOutcome(
             "clarification_behavior",
             False,
-            "case expected clarification questions but the pipeline produced none",
+            "case expected first-pass clarification questions but the pipeline "
+            "produced none" + suffix,
         )
-    if not questions:
+    if not first_pass:
         return InvariantOutcome(
-            "clarification_behavior", True, "no clarification needed, as expected"
+            "clarification_behavior",
+            True,
+            "no first-pass clarification needed, as expected" + suffix,
         )
     return InvariantOutcome(
         "clarification_behavior",
         False,
-        f"unambiguous case produced {len(questions)} clarification question(s): "
-        f"{' | '.join(questions[:3])}",
+        f"unambiguous case produced {len(first_pass)} first-pass question(s): "
+        f"{' | '.join(first_pass[:3])}" + suffix,
     )
 
 

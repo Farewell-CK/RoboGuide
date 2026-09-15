@@ -1,0 +1,347 @@
+{
+  "case_id": "a5-vague-scope",
+  "category": "ambiguity",
+  "instruction": "把仓库整理一下",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 113.5,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: task task-organize-warehouse role role-organize-warehouse references unknown context role"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "case expected first-pass clarification questions but the pipeline produced none"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle Failed); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: task task-organize-warehouse role role-organize-warehouse references unknown context role",
+    "clarification_behavior: case expected first-pass clarification questions but the pipeline produced none"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 16716.7,
+      "request_bytes": 7260,
+      "response_bytes": 16788,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09d7501b8ae3c160016aa8ebdee30487d18d37d0e22530d189": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 306,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 306,
+              "output_tokens": 0
+            },
+            "rs_09d7501b8ae3c160016aa8ebdf3e2487d1947755f872f42c93": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_09d7501b8ae3c160016aa8ebe894e487d1aea95f406cc0fb94": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 188
+            },
+            "msg_09d7501b8ae3c160016aa8ebec192087d198b21b910c350b38": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 95
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 95
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1491,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 799,
+        "output_tokens_details": {
+          "reasoning_tokens": 704
+        },
+        "total_tokens": 2290
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 96488.8,
+      "request_bytes": 26254,
+      "response_bytes": 66713,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0785a4af59f1f045016aa8ebf0152087d18ad3ab42d2deb3d1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2717,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2717,
+              "output_tokens": 0
+            },
+            "rs_0785a4af59f1f045016aa8ebf076d087d1b8c6b56f9f270045": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0785a4af59f1f045016aa8ebf9c95c87d18cb8cc8272e4d7d5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec0320bc87d1a904a7f56a8e26a0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec0c736487d19747b5971b317d39": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec15cce887d19370068a34debfc5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec1f245487d1865848193605a139": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec286bd087d1b13fa045429e6deb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec31bd8887d1be4655e6c5bcd7b9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0785a4af59f1f045016aa8ec3b0fb487d1a973df46e496884b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0785a4af59f1f045016aa8ec447d0887d18a3a9520b7bcfa93": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 595
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 595
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5304,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 5255,
+        "output_tokens_details": {
+          "reasoning_tokens": 4660
+        },
+        "total_tokens": 10559
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 6795,
+    "output_tokens": 6054,
+    "total_tokens": 12849
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 16717.7,
+      "avg_ms": 16717.7,
+      "max_ms": 16717.7
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 96494.4,
+      "avg_ms": 96494.4,
+      "max_ms": 96494.4
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-da05ddc3183148009fde13343a9eba6a",
+    "mission_id": "mission-4198af0974244571af4b634e43d5ad4b",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把仓库整理一下",
+        "created_at_ms": 1789455326061,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "将仓库整理得整齐、有序。",
+      "constraints": [],
+      "assumptions": [
+        "将“整理”解释为对仓库内现有物品进行适度归类和重新摆放，使整体更整齐、有序；不包含清扫、盘点、丢弃物品或新增物品等未明确要求的工作。"
+      ],
+      "open_questions": []
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:a961605f826a6a1c7a2c562f848b4f966c7db1d88f01f0b16cdff017ea2b8863",
+      "request_id": "request-da05ddc3183148009fde13343a9eba6a",
+      "dialogue_digest": "sha256:41729b43324b6dac0dd30b500eab7da4be36f2d1922dd512da69d1cc909a8d38",
+      "captured_at_ms": 1789455326167,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "task task-organize-warehouse role role-organize-warehouse references unknown context role"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789455326061,
+    "updated_at_ms": 1789455439483
+  }
+}

@@ -1,0 +1,540 @@
+{
+  "case_id": "i4-relocate-two-objects",
+  "category": "integrated",
+  "instruction": "先把工具箱搬到车库，再把备件盒搬上货架",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 108.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 按指定顺序完成两项搬运：先把工具箱搬到车库，再把备件盒搬上货架。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=2 roles=2 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "operation object.relocate@v1 preserved as one semantic goal"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 127 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 10062.6,
+      "request_bytes": 7296,
+      "response_bytes": 13055,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0c627f5c729d1130016aa8ed2b9d0087d1bd90a8d613d291b1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 316,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 316,
+              "output_tokens": 0
+            },
+            "rs_0c627f5c729d1130016aa8ed2c1dec87d1898076b7742f578b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 369
+            },
+            "msg_0c627f5c729d1130016aa8ed32fd4087d19202fe61bef3b8da": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 80
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 80
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1501,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 449,
+        "output_tokens_details": {
+          "reasoning_tokens": 369
+        },
+        "total_tokens": 1950
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 51311.5,
+      "request_bytes": 26191,
+      "response_bytes": 40715,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0fd5a1f2a43a9132016aa8ed36727887d1b537b9b4563e4c88": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2701,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2701,
+              "output_tokens": 0
+            },
+            "rs_0fd5a1f2a43a9132016aa8ed36f95887d1b7aec92bec44ad35": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0fd5a1f2a43a9132016aa8ed40506487d184f99732a7063492": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fd5a1f2a43a9132016aa8ed49a03887d185a14ed1820af55c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fd5a1f2a43a9132016aa8ed52f61c87d1a4562f0a79d1ba8d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0fd5a1f2a43a9132016aa8ed5c61c887d19f8004e590124067": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 640
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 640
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5288,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2710,
+        "output_tokens_details": {
+          "reasoning_tokens": 2070
+        },
+        "total_tokens": 7998
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 47075.3,
+      "request_bytes": 20271,
+      "response_bytes": 34910,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0a2fb76b69312fd6016aa8ed69454087d1be576a481b074f19": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3372,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3372,
+              "output_tokens": 0
+            },
+            "rs_0a2fb76b69312fd6016aa8ed69a6fc87d1b95dafb848b63829": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0a2fb76b69312fd6016aa8ed72f72c87d1b5c16b3757c665ad": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a2fb76b69312fd6016aa8ed7c4ba487d19789823a093a3097": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a2fb76b69312fd6016aa8ed859bf487d1a8e5c879ddaba87c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a2fb76b69312fd6016aa8ed8ef0b487d1b9f0810926862030": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 435
+            },
+            "msg_0a2fb76b69312fd6016aa8ed96e04487d1b93f4a2e4b6c110a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4508,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2525,
+        "output_tokens_details": {
+          "reasoning_tokens": 2505
+        },
+        "total_tokens": 7033
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11297,
+    "output_tokens": 5684,
+    "total_tokens": 16981
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 10063.5,
+      "avg_ms": 10063.5,
+      "max_ms": 10063.5
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 51317.1,
+      "avg_ms": 51317.1,
+      "max_ms": 51317.1
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 47077.2,
+      "avg_ms": 47077.2,
+      "max_ms": 47077.2
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-7caa564b1a304c37aeb877d201624714",
+    "mission_id": "mission-3fbf80bc348c42c6ac84be17cc1c5842",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先把工具箱搬到车库，再把备件盒搬上货架",
+        "created_at_ms": 1789455658666,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "按指定顺序完成两项搬运：先把工具箱搬到车库，再把备件盒搬上货架。",
+      "constraints": [
+        "必须先将工具箱搬到车库，完成后再将备件盒搬上货架。"
+      ],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-3fbf80bc348c42c6ac84be17cc1c5842",
+        "objective": "按指定顺序完成两项搬运：先把工具箱搬到车库，再把备件盒搬上货架。",
+        "actors": [
+          {
+            "id": "embodied-agent-1"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "relocation-context",
+          "roles": [
+            {
+              "id": "relocation-agent",
+              "actor": "embodied-agent-1"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "relocate-toolbox-to-garage",
+          "description": "工具箱已搬运到车库并位于车库中。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "toolbox-relocation-role",
+              "context_role": "relocation-agent",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将工具箱从其当前所在位置搬运到车库。",
+                "parameters": {
+                  "destination": "车库",
+                  "object": "工具箱",
+                  "source": "工具箱当前所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "relocation-context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "工具箱已从其当前所在位置搬运到车库并位于车库中。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "relocate-spare-parts-box-to-shelf",
+          "description": "备件盒已搬运到货架并位于货架上。",
+          "depends_on": [
+            "relocate-toolbox-to-garage"
+          ],
+          "roles": [
+            {
+              "id": "spare-parts-box-relocation-role",
+              "context_role": "relocation-agent",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将备件盒从其当前所在位置搬运到货架。",
+                "parameters": {
+                  "destination": "货架",
+                  "object": "备件盒",
+                  "source": "备件盒当前所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "relocation-context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "备件盒已从其当前所在位置搬运到货架并位于货架上。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:ecb1693bc332a505d81659ed87313e8bb77d00b84dd415d812eb581eefec1be1",
+      "request_id": "request-7caa564b1a304c37aeb877d201624714",
+      "dialogue_digest": "sha256:69a68ec7debb4a84d4504286a455660f28e8ff3855f5e0d13a4a0656f2947a22",
+      "captured_at_ms": 1789455658766,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:3936087b5c982802ee52e25c3c6e45141f4831605056637b6b6c5e2d2014f033",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:3936087b5c982802ee52e25c3c6e45141f4831605056637b6b6c5e2d2014f033",
+        "grounding_context_digest": "sha256:ecb1693bc332a505d81659ed87313e8bb77d00b84dd415d812eb581eefec1be1",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455767429
+      }
+    ],
+    "created_at_ms": 1789455658666,
+    "updated_at_ms": 1789455767533
+  }
+}

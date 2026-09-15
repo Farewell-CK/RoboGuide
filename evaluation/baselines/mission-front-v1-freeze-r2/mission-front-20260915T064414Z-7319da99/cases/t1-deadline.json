@@ -1,0 +1,469 @@
+{
+  "case_id": "t1-deadline",
+  "category": "resource_timing",
+  "instruction": "一小时内把打印室里的季度报表送到经理办公室",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 64.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no first-pass clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 在一小时内将打印室里的季度报表送到经理办公室。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "operation object.relocate@v1 preserved as one semantic goal"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "1/1 task(s) carry timing constraints"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9999.5,
+      "request_bytes": 7302,
+      "response_bytes": 13117,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09ad6a93907fcae7016aa8edde869887d18796f27a4c40bf90": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 317,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 317,
+              "output_tokens": 0
+            },
+            "rs_09ad6a93907fcae7016aa8eddee1c887d1bb88504e1768a7d7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 353
+            },
+            "msg_09ad6a93907fcae7016aa8ede566bc87d1b7fbba05aab030f7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 108
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 108
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1502,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 461,
+        "output_tokens_details": {
+          "reasoning_tokens": 353
+        },
+        "total_tokens": 1963
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 34778.5,
+      "request_bytes": 26336,
+      "response_bytes": 33803,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0d767a74ca6e0593016aa8ede93c4487d19187b6ad47995ed9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2734,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2734,
+              "output_tokens": 0
+            },
+            "rs_0d767a74ca6e0593016aa8edea385487d1998eb87e3360aaf4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0d767a74ca6e0593016aa8edf37dc087d1a173cf6439a407de": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0d767a74ca6e0593016aa8edfccfc487d1b7ebe574052a137f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 401
+            },
+            "msg_0d767a74ca6e0593016aa8ee04252887d1816d7ddf5dceb3a9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 349
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 349
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1252,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5321,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1784,
+        "output_tokens_details": {
+          "reasoning_tokens": 1435
+        },
+        "total_tokens": 7105
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 18985.3,
+      "request_bytes": 19284,
+      "response_bytes": 18502,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f28f3447fff9d1b016aa8ee0cb47087d1b598999da508fb5d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3093,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3093,
+              "output_tokens": 0
+            },
+            "rs_0f28f3447fff9d1b016aa8ee0d3af887d182e7954658e5a7f9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f28f3447fff9d1b016aa8ee168af087d1887bc22a7b2c06dc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 358
+            },
+            "msg_0f28f3447fff9d1b016aa8ee1d196887d19cb1f7b2322d2356": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1052,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4229,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 894,
+        "output_tokens_details": {
+          "reasoning_tokens": 874
+        },
+        "total_tokens": 5123
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11052,
+    "output_tokens": 3139,
+    "total_tokens": 14191
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 10000.2,
+      "avg_ms": 10000.2,
+      "max_ms": 10000.2
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 34783.4,
+      "avg_ms": 34783.4,
+      "max_ms": 34783.4
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 18987.3,
+      "avg_ms": 18987.3,
+      "max_ms": 18987.3
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-480df57762f74321bc1e627b39eb5dd2",
+    "mission_id": "mission-0bc5837406f94c31bd31e4acb2825aee",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "一小时内把打印室里的季度报表送到经理办公室",
+        "created_at_ms": 1789455837603,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "在一小时内将打印室里的季度报表送到经理办公室。",
+      "constraints": [
+        "必须在一小时期限内完成送达。"
+      ],
+      "assumptions": [
+        "将“一小时内”理解为自该指令发出起一小时内完成送达。",
+        "将“送到经理办公室”理解为把季度报表送至该办公室，不额外要求签收、通知或拍照。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-0bc5837406f94c31bd31e4acb2825aee",
+        "objective": "在一小时内将打印室里的季度报表送到经理办公室。",
+        "actors": [
+          {
+            "id": "delivery-agent"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "delivery-context",
+          "roles": [
+            {
+              "id": "delivery-role",
+              "actor": "delivery-agent"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "deliver-quarterly-report",
+          "description": "在一小时内将季度报表从打印室送达经理办公室。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "delivery-task-role",
+              "context_role": "delivery-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将季度报表从打印室送达经理办公室。",
+                "parameters": {
+                  "destination": "经理办公室",
+                  "object": "季度报表",
+                  "source": "打印室"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "delivery-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": 3600000
+          },
+          "satisfaction": {
+            "expected_effect": "季度报表已从打印室送达经理办公室。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:32376e5482cb2f048d1997fc8ef54f8c38a1bab2e93564a6d2b428572ece91f0",
+      "request_id": "request-480df57762f74321bc1e627b39eb5dd2",
+      "dialogue_digest": "sha256:00c5d0bde9acc47033afba983ea3c1b18b25f9ae47f5eff981a8c72a26de2921",
+      "captured_at_ms": 1789455837703,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:08540d2d9a3f11452ac1621e0b0db504843dff615d4520c633842a6d8432be11",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:08540d2d9a3f11452ac1621e0b0db504843dff615d4520c633842a6d8432be11",
+        "grounding_context_digest": "sha256:32376e5482cb2f048d1997fc8ef54f8c38a1bab2e93564a6d2b428572ece91f0",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789455901697
+      }
+    ],
+    "created_at_ms": 1789455837603,
+    "updated_at_ms": 1789455901805
+  }
+}
