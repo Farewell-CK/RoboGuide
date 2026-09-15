@@ -489,6 +489,12 @@ Local System 保留 Navigation、Local Planning、Perception、Motion、Hardware
 部署侧 Local EAIOS 适配器位于 [`integrations/`](integrations/)；例如
 [`integrations/robonix-map-service/`](integrations/robonix-map-service/) 只把 canonical
 `ExecutionIntent` 映射到本机 Robonix Mapping WebUI，并维护本地执行句柄与受控地图文件。
+[`integrations/habitat-local-eaios/`](integrations/habitat-local-eaios/) 是 C1-S0 的真实
+Habitat/EMOS bridge：它在独立 `habitat` 环境中保留一个 simulator process，并以独立 HTTP
+facade 持续响应 Node workflow，将既有
+`mobility.navigate@v1` 的 semantic destination 映射到 EMOS 所用的 Habitat Oracle navigation
+action，并通过稳定 local handle 上报 `ACCEPTED → RUNNING → terminal`。Habitat/EMOS 依赖、
+PDDL entity、agent selection、path 与 pose control 均不进入 RoboGuide Core。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。
@@ -643,7 +649,8 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
 ├── integrations/
-│   └── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
+│   ├── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
+│   └── habitat-local-eaios/ # C1-S0 real Habitat/EMOS local execution bridge
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/

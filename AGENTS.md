@@ -139,8 +139,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   staleness and never changes health, readiness, execution lifecycle, or recovery. The v0.2
   endpoint is rejection-only.
 - `integrations/` contains deployment-owned Local EAIOS adapters (for example the
-  Robonix map adapter); these adapters own vendor calls and local file layout only,
+  Robonix map adapter and Habitat Local EAIOS bridge); these adapters own vendor calls,
+  simulator calls, and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.
+- The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
+  It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
+  destination to the existing local Oracle navigation action, owns one persistent simulator process
+  behind a responsive loopback HTTP facade, and reports terminal state only from the local execution
+  outcome. Cancel acceptance is not
+  `CANCELLED`; transient status-query recovery remains a later robustness slice.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
@@ -244,13 +251,17 @@ uv-managed environment. New implementation paths must update this file and
 For Mission changes, run:
 
 ```bash
-uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service
-uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service
+uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service \
+  integrations/habitat-local-eaios
+uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service \
+  integrations/habitat-local-eaios
 uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality \
   integrations/robonix-map-service/robonix-map-service.py \
-  integrations/robonix-map-service/tests
+  integrations/robonix-map-service/tests \
+  integrations/habitat-local-eaios/habitat_local_eaios \
+  integrations/habitat-local-eaios/tests
 uv run python tools/quality/check_python_function_docs.py \
-  mission apps/mission-service integrations/robonix-map-service
+  mission apps/mission-service integrations/robonix-map-service integrations/habitat-local-eaios
 uv run pytest -q
 ```
 

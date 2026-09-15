@@ -217,6 +217,22 @@ cargo run -p roboguide-node -- --validate \
 单独列出，并不表示当前 facade 已执行 runtime probe。认证、真实状态值、物理副作用、
 Local Safety、取消和重启语义仍需在 deployment-owned facade/硬件上单独验证。
 
+### C1-S0 Habitat Local EAIOS bridge
+
+[`integrations/habitat-local-eaios/`](../../integrations/habitat-local-eaios/) 在不修改 Node
+Protocol、MissionPlan、Control 或 Runtime 的前提下，将现有 `mobility.navigate@v1` 连接到独立
+EMOS/Habitat 环境。通用 Node Service 仍只看到启动时冻结的 HTTP workflow；bridge 的持久
+simulator process 才拥有 Habitat episode、agent、PDDL entity resolution、Oracle navigation
+action 和逐步 simulator lifecycle，独立 HTTP facade 在执行期间保持可响应。Execute 返回
+durable local handle，status 是终态唯一来源，cancel accepted
+只记录请求而不合成 `CANCELLED`。
+
+对应 production smoke 位于
+[`scenarios/habitat-local-eaios-c1-s0/`](../../scenarios/habitat-local-eaios-c1-s0/)。它必须从
+`POST /v1/missions` 开始并保留 Controller、Node journal、bridge outcome 与物理位置变化证据；
+直接调用 backend 不能替代 E2E 结论。Transient status-query failure 后恢复 polling 仍属于
+C1-S1，不在本 slice 中扩展。
+
 每个 canonical capability profile 在 Node 配置内只有一个 local-system owner；operation workflow
 mapping 独立于 profile。endpoint、method、
 tool 和 descriptor 都由本地配置固定，网络输入只能进入受限 JSON Pointer/白名单函数映射。

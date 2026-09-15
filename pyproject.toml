@@ -39,7 +39,12 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["mission/tests", "integrations/robonix-map-service/tests", "evaluation/tests"]
+testpaths = [
+    "mission/tests",
+    "integrations/robonix-map-service/tests",
+    "integrations/habitat-local-eaios/tests",
+    "evaluation/tests",
+]
 
 [tool.mypy]
 python_version = "3.13"
@@ -50,6 +55,7 @@ files = [
     "apps/mission-service",
     "tools/quality",
     "integrations/robonix-map-service",
+    "integrations/habitat-local-eaios",
     "evaluation/src",
     "evaluation/tests",
 ]
