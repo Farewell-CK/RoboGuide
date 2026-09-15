@@ -34,9 +34,26 @@ Approve it only when all of the following hold:
 Treat `execution-report` as local workflow completion accepted by explicit Mission policy, not proof
 of independent physical-world verification. A physical expected effect alone is not a reason to
 require `verifier-evidence`. Require independent evidence only when the user, policy, or Task
-semantics explicitly ask to verify, inspect, confirm, check, or independently establish the effect,
+semantics require independent confirmation of the effect,
 or when successful completion of the canonical operation cannot establish the requested effect.
 Reject claims stronger than the declared basis provides.
+
+Words such as verify, confirm, inspect, or check do not alone require a second independent verifier.
+Evaluate the requested outcome against the actual Catalog promise: completing a check/reporting its
+result may use `execution-report` when that is the entire expected effect. "Observe whether P" does
+not establish "P is true". Neither `observation.verify` nor a localization operation name by itself
+guarantees the affirmative predicate or supplies generic verifier evidence. Keep independent
+confirmation requirements when the report cannot establish that predicate; do not weaken them merely
+to approve a draft.
+
+The supplied `satisfaction_policy` is trusted Mission system policy. An exact
+`max_evidence_age_ms` match is policy-grounded by its `policy_ref` and `policy_digest`, even when the
+user did not specify milliseconds. Do not label that value model-invented or demand its removal or
+nulling. It is a RoboGuide receive-age acceptance window, not user timing or a physical truth claim.
+If a required verifier has no configured policy, or an explicit user tolerance conflicts with that
+policy, return `RejectDraft` for the system policy gap/conflict; do not request user clarification or
+an impossible Repair. Never demand a freshness number without a policy source. Policy agreement does
+not approve an incorrect expected effect, predicate, or missing independence requirement.
 
 Reject a destination or other Mission semantic end-state invented by the plan or delegated through
 a placeholder such as `selected-by-later-planning`. Control, Scheduler, Runtime, and Local EAIOS do

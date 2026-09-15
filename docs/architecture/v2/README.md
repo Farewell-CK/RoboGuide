@@ -104,6 +104,13 @@ positive verdict 与 receive-time freshness 后才记录 `TaskSatisfied`、释�
 推进 DAG，并在所有 Task 满足后结束 Mission。该 slice 不进行多源融合、争议裁决或宣称全局
 物理真值。详见 ADR-0033 与 ADR-0034。
 
+Mission Intelligence 的 verifier freshness 来自显式、版本化的系统 satisfaction policy；
+Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能为了填满 schema 猜测数值。
+该 policy 只规定已接收 verdict 在 satisfaction 判定时允许的年龄，不证明物理真值、source
+采样新鲜度或 verifier 当前可用性。Verification operation 的执行完成能否被接受，取决于其
+明确承诺与 requested effect，而不是 `verify` 名称；独立 positive-verdict 要求仍保留。
+MissionPlan shape、Runtime/Control authority 和 generic verifier ingress 均不改变，见 ADR-0039。
+
 ## 3. 核心抽象
 
 ### Embodied Node（具身节点）

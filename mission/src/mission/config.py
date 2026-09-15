@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from mission.satisfaction_policy import MissionSatisfactionPolicy, MissionSatisfactionPolicyError
+
 
 class MissionConfigError(ValueError):
     """Report an invalid or unsafe Mission planner configuration."""
@@ -85,6 +87,7 @@ class MissionSettings:
     prompts: PromptSettings
     llm: LlmSettings
     provider: ProviderSettings
+    satisfaction_policy: MissionSatisfactionPolicy | None = None
 
 
 def _table(value: object, path: str) -> dict[str, object]:
@@ -149,7 +152,14 @@ def load_settings(
     wire_api = _string(provider, "wire_api", f"model_providers.{provider_name}")
     if wire_api != "responses":
         raise MissionConfigError(f"unsupported provider wire_api: {wire_api}")
+    try:
+        satisfaction_policy = MissionSatisfactionPolicy.from_config(
+            mission.get("satisfaction_policy")
+        )
+    except MissionSatisfactionPolicyError as error:
+        raise MissionConfigError(str(error)) from error
     return MissionSettings(
+        satisfaction_policy=satisfaction_policy,
         planner=_string(mission, "planner", "mission"),
         contract_version=_string(mission, "contract_version", "mission"),
         schema_path=root / _string(mission, "schema_path", "mission"),

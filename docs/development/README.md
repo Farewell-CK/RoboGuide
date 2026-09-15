@@ -119,6 +119,16 @@ provider-only MissionPlan DTO：canonical `ExecutionIntent.parameters` map 在 s
 表示为 closed key/value entries，接收后拒绝重复或 malformed entry，并还原为 canonical map；随后
 仍由原始 MissionPlan v0.7 parser、implementation validation 与 Capability Catalog 执行最终准入。
 该适配不会改变 `contracts/mission/v0.7/`。
+`satisfaction_policy.py` 负责独立的生成草案 freshness policy 校验：
+`config/mission.toml` 显式声明 policy_ref 与 max_evidence_age_ms，启动后不可变，三个 Responses
+stage 的输入携带同一值和 content digest。默认配置采用维护中 v0.7 fixture 的五秒 receive-age
+接受窗口；未配置时没有隐藏 fallback。Planner/Repairer 的 canonical + Catalog validation 后
+拒绝无来源或与配置不符的 verifier bound，Reviewer 使用同一 policy，不将它误判为模型发明。
+显式用户 tolerance 与该 policy 冲突时，需要部署 policy 决定，不能猜数值或进入不可满足的
+Repair 循环。Policy provenance 在模型输入中，尚未添加到持久化 MissionRequest history。
+`verify/confirm` 不是强制第二套 verifier 的关键词；检查完整 expected effect 与 canonical
+operation 的真实承诺。Affirmative predicate 的独立证据要求不因操作名称而消失。
+Generic verifier ingress 和真实执行验证仍 deferred，详见 ADR-0039。
 Interpreter 的 `open_questions` 是 blocking-only semantic contract；Defaultable interpretation
 进入 `assumptions`，Control-owned deployment feasibility 和 Local-EAIOS-owned How 不进入用户
 问答。单一待答问题可以自动建立 `in_reply_to`，多问题必须由调用者提供当前 question turn ID，

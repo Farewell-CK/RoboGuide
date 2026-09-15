@@ -221,6 +221,9 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     assert planning_input == {
         "mission_id": mission_id,
         "grounded_intent": grounded_intent.to_json(),
+        "satisfaction_policy": settings.satisfaction_policy.to_json()
+        if settings.satisfaction_policy is not None
+        else None,
         "capability_catalog": capability_catalog.to_json(),
         "grounding_context": grounding.to_json(),
     }
@@ -288,6 +291,9 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
     )
     assert json.loads(cast(str, payload["input"])) == {
         "grounded_intent": grounded_intent.to_json(),
+        "satisfaction_policy": settings.satisfaction_policy.to_json()
+        if settings.satisfaction_policy is not None
+        else None,
         "mission_plan": plan_json,
         "capability_catalog": _catalog().to_json(),
         "grounding_context": grounding.to_json(),
@@ -298,8 +304,9 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
     """Repair input preserves rejected evidence and output passes the normal draft gates."""
     plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
     transport = FakeTransport([_response(_provider_plan(plan_json))])
+    settings = _local_settings()
     repairer = ResponsesMissionRepairer(
-        _local_settings(),
+        settings,
         {"OPENAI_API_KEY": "test-only-key"},
         transport,
     )
@@ -327,6 +334,9 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
     )
     assert json.loads(cast(str, payload["input"])) == {
         "mission_id": mission_id,
+        "satisfaction_policy": settings.satisfaction_policy.to_json()
+        if settings.satisfaction_policy is not None
+        else None,
         "grounded_intent": grounded_intent.to_json(),
         "rejected_plan": plan_json,
         "review": review.to_json(),

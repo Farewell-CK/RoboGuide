@@ -22,6 +22,17 @@ itself require `verifier-evidence`; independent evidence is required only when t
 Task semantics demand independent confirmation, or the execution report cannot establish the
 requested effect.
 
+Verifier freshness is required by the existing shape and must have an explicit policy source.
+For Responses-generated drafts, Planner, Reviewer, and Repairer share the configured
+`mission.satisfaction_policy` (reference, digest, and receive-age bound). They use its exact value;
+an absent policy has no numeric default. See [ADR-0039](../../../docs/decisions/0039-mission-satisfaction-freshness-policy.md).
+This does not add fields to MissionPlan or change already accepted/manual plans. A policy-grounded
+bound is not a guarantee that independent evidence is available: generic verifier ingress is deferred.
+
+An operation named `verify` does not imply an affirmative verdict on success. Completing a check and
+reporting whether a condition holds is different from establishing that it holds. The basis follows
+the requested effect and the actual canonical promise; explicit independence requirements remain.
+
 `resources` retain the existing exclusive ResourceId capacity contract. Task timing is the
 temporal scheduling constraint. A deployment-defined `time` resource, when used, is an exclusive
 named token and does not represent elapsed time or a duration estimate.

@@ -189,6 +189,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   automatic repair, and routes missing user facts back to clarification instead of letting Repair
   invent them. Structured DialogueTurn history remains separate from internal review evidence, and
   context-aware approval rules persist the exact reasons bound to an immutable draft.
+- Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
+  reference/digest provenance. Generated verifier freshness must match that policy; absent policy
+  supplies no numeric default. Verification names do not prove affirmative outcomes, and policy
+  admission never proves generic verifier evidence will arrive. See ADR-0039; MissionPlan v0.7,
+  Grounding, Control, and Runtime remain unchanged.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace

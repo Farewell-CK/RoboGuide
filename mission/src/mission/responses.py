@@ -20,6 +20,7 @@ from mission.provider_mission_plan import (
 )
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
+from mission.satisfaction_policy import MissionSatisfactionPolicy, validate_satisfaction_policy
 
 
 class MissionProviderError(RuntimeError):
@@ -90,6 +91,7 @@ def _validate_plan_output(
     mission_id: str,
     grounded_intent: GroundedIntent,
     capability_catalog: CanonicalCapabilityCatalog,
+    satisfaction_policy: MissionSatisfactionPolicy | None,
 ) -> MissionPlan:
     """Validate one generated draft against identity, implementation, and Catalog boundaries."""
     plan = MissionPlan.from_json(value)
@@ -99,6 +101,7 @@ def _validate_plan_output(
     if plan.mission.objective != grounded_intent.objective:
         raise MissionProviderError("model changed the requested mission objective")
     capability_catalog.validate_plan(plan)
+    validate_satisfaction_policy(plan, satisfaction_policy)
     return plan
 
 
@@ -167,6 +170,11 @@ class _ResponsesClient:
         if not prompt:
             raise MissionProviderError(f"Mission prompt is empty: {path}")
         return prompt
+
+    def _satisfaction_policy_input(self) -> JSONObject | None:
+        """Expose the startup-frozen system policy equally to planning, review, and repair."""
+        policy = self._settings.satisfaction_policy
+        return None if policy is None else policy.to_json()
 
     def _provider_schema(self, value: JSONValue) -> JSONValue:
         """Project the full contract into the strict provider subset without weakening parsing."""
@@ -303,6 +311,7 @@ class ResponsesMissionPlanner:
                 {
                     "mission_id": mission_id,
                     "grounded_intent": grounded_intent.to_json(),
+                    "satisfaction_policy": self._client._satisfaction_policy_input(),
                     "capability_catalog": capability_catalog.to_json(),
                     "grounding_context": grounding_context.to_json(),
                 },
@@ -317,6 +326,7 @@ class ResponsesMissionPlanner:
             mission_id,
             grounded_intent,
             capability_catalog,
+            self._settings.satisfaction_policy,
         )
 
 
@@ -341,6 +351,7 @@ class ResponsesMissionReviewer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Review the plan against its exact grounded input and authority boundaries."""
+        validate_satisfaction_policy(plan, self._settings.satisfaction_policy)
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
@@ -348,6 +359,7 @@ class ResponsesMissionReviewer:
                 {
                     "grounded_intent": grounded_intent.to_json(),
                     "mission_plan": plan.to_json(),
+                    "satisfaction_policy": self._client._satisfaction_policy_input(),
                     "capability_catalog": capability_catalog.to_json(),
                     "grounding_context": grounding_context.to_json(),
                 },
@@ -391,6 +403,7 @@ class ResponsesMissionRepairer:
                     "mission_id": mission_id,
                     "grounded_intent": grounded_intent.to_json(),
                     "rejected_plan": rejected_plan.to_json(),
+                    "satisfaction_policy": self._client._satisfaction_policy_input(),
                     "review": review.to_json(),
                     "capability_catalog": capability_catalog.to_json(),
                     "grounding_context": grounding_context.to_json(),
@@ -406,6 +419,7 @@ class ResponsesMissionRepairer:
             mission_id,
             grounded_intent,
             capability_catalog,
+            self._settings.satisfaction_policy,
         )
 
 

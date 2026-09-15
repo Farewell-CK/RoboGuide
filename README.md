@@ -60,6 +60,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   Actor、ContextRole 与 TaskRole 已正规化，每个 TaskRole 可声明多个 exact Capability requirements、
   Resource requirements 与独立 semantic `ExecutionIntent`；每个 Task 显式声明 expected effect 及
   `execution-report` 或 `verifier-evidence` satisfaction policy；
+- Planner/Reviewer/Repairer 共用 `config/mission.toml` 中显式的 satisfaction policy；其 ref/digest
+  随模型输入保留，生成的 verifier receive-age bound 必须匹配配置。当前五秒窗口是系统接受
+  策略，不是模型猜测、Task duration 或物理真值保证。Generic verifier ingress 仍 deferred，见
+  [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过

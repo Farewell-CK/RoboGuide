@@ -6,6 +6,12 @@ capability_catalog_path = "contracts/capability/v0.3/catalog.json"
 review_enabled = true
 max_repair_attempts = 2
 
+[mission.satisfaction_policy]
+# ADR-0039: five-second RoboGuide receive-age acceptance window, not physical validity or duration.
+# Deployment policy owns this value. Omitting this table supplies no verifier freshness default.
+policy_ref = "roboguide.mission-satisfaction/receive-age/v1"
+max_evidence_age_ms = 5000
+
 [mission.prompts]
 version = "v0"
 interpreter_path = "mission/prompts/v0/interpreter.md"
