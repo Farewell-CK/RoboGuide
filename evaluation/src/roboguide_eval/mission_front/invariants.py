@@ -147,7 +147,12 @@ def _execution_identity(role: dict[str, object]) -> str | None:
     execution = role.get("execution_intent")
     if not isinstance(execution, dict):
         return None
-    contract = execution.get("capability_contract")
+    # MissionPlan v0.7 renamed the intent operation reference from
+    # ``capability_contract`` to ``operation``; both shapes are accepted so
+    # historical evidence (v0.5 and earlier records) still resolves.
+    contract = execution.get("operation")
+    if not isinstance(contract, dict):
+        contract = execution.get("capability_contract")
     if not isinstance(contract, dict):
         return None
     namespace = contract.get("namespace")

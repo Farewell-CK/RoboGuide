@@ -423,3 +423,68 @@ def test_run_suite_produces_complete_evidence_on_stub_transport(
     assert first_case["failure_reasons"]
     jsonl_lines = (suite_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(jsonl_lines) == 2
+
+
+def test_execution_identity_reads_v0_7_operation_key() -> None:
+    """MissionPlan v0.7 execution intents resolve through ``operation``.
+
+    Regression guard: the invariant previously read the pre-v0.7
+    ``capability_contract`` key and reported every v0.7 plan as having no
+    execution intents, silently breaking the integrated-operation check on
+    real evidence.
+    """
+    from roboguide_eval.mission_front.invariants import check_integrated_operation
+
+    record: dict[str, object] = {
+        "lifecycle": "Failed",
+        "issues": [],
+        "dialogue": [],
+        "review_history": [],
+        "plan": {
+            "mission": {"id": "m", "objective": "relocate", "actors": [{"id": "spot"}]},
+            "contexts": [],
+            "tasks": [
+                {
+                    "id": "t1",
+                    "description": "搬运气泡垫托盘",
+                    "depends_on": [],
+                    "roles": [
+                        {
+                            "id": "r1",
+                            "requirements": {
+                                "capabilities": [
+                                    {
+                                        "contract": {
+                                            "namespace": "object",
+                                            "name": "relocate",
+                                            "version": "v1",
+                                        },
+                                        "constraints": [],
+                                    }
+                                ],
+                                "resources": [],
+                            },
+                            "execution_intent": {
+                                "operation": {
+                                    "namespace": "object",
+                                    "name": "relocate",
+                                    "version": "v1",
+                                },
+                                "objective": "Relocate the pallet.",
+                                "parameters": {
+                                    "object": "pallet",
+                                    "source": "dock",
+                                    "destination": "bay",
+                                },
+                            },
+                            "context_role": "cr1",
+                            "resource_scope": "task",
+                        }
+                    ],
+                    "context_id": "ctx1",
+                }
+            ],
+        },
+    }
+    outcome = check_integrated_operation(object(), record, "object.relocate@v1", ())
+    assert outcome.passed is True, outcome.detail
