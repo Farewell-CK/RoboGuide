@@ -1,0 +1,562 @@
+{
+  "case_id": "n2-mapping",
+  "category": "normal",
+  "instruction": "在仓库区域建立地图并发布",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 141.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 在仓库区域建立环境地图，并发布所建立的地图。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=2 roles=2 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "required capabilities covered: ['spatial.map.build@v0', 'spatial.map.publish@v0']"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 135 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13137.9,
+      "request_bytes": 7275,
+      "response_bytes": 13822,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_01cdc2632bb01ddd016aa8bf51335087d1b25c9bcd491ad621": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 305,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 305,
+              "output_tokens": 0
+            },
+            "rs_01cdc2632bb01ddd016aa8bf53698887d1bc2bcb18c1028222": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_01cdc2632bb01ddd016aa8bf5cdb4c87d1b5d01e73ba2bcdbc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 43
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 43
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1490,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 559,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2049
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 51220.1,
+      "request_bytes": 24194,
+      "response_bytes": 39465,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_095cdf71c983b5db016aa8bf5e884c87d19bd343ce1476ec9a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2566,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2566,
+              "output_tokens": 0
+            },
+            "rs_095cdf71c983b5db016aa8bf5faea087d1960cfeb7d2cdf789": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_095cdf71c983b5db016aa8bf68ff8087d1bd2700b1fba28ab3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_095cdf71c983b5db016aa8bf72532087d185495ba637a3c3bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_095cdf71c983b5db016aa8bf7ba91087d1bfdc36a8783c5eb2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_095cdf71c983b5db016aa8bf85150887d19cd31fffb96e0cfa": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 652
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 652
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4844,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2722,
+        "output_tokens_details": {
+          "reasoning_tokens": 2070
+        },
+        "total_tokens": 7566
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 76387.6,
+      "request_bytes": 18702,
+      "response_bytes": 49759,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_054d535813c60085016aa8bf91cde487d196b57905e6c928e9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3240,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3240,
+              "output_tokens": 0
+            },
+            "rs_054d535813c60085016aa8bf92d1b887d185044ec72c55aa1c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_054d535813c60085016aa8bf9c24a887d185b09d73518b1309": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfa578d887d19bd5e9fa90e1e2b6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfaecd0887d1a59a1974d9cf28ab": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfb81e0887d1ae2b4dc62b71d09b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfc187c887d18ef84660c3da60ce": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfcac24487d1b3bae68f85f56147": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_054d535813c60085016aa8bfd4176487d1865730f42afa50b4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 489
+            },
+            "msg_054d535813c60085016aa8bfdd003087d19af2bc07f9e8c220": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4112,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4133,
+        "output_tokens_details": {
+          "reasoning_tokens": 4113
+        },
+        "total_tokens": 8245
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 10446,
+    "output_tokens": 7414,
+    "total_tokens": 17860
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13138.9,
+      "avg_ms": 13138.9,
+      "max_ms": 13138.9
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 51225.8,
+      "avg_ms": 51225.8,
+      "max_ms": 51225.8
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 76389.7,
+      "avg_ms": 76389.7,
+      "max_ms": 76389.7
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-362fd58c69d8413ebf357d38297c4b7c",
+    "mission_id": "mission-970c56693edb46a7bc13c9e5a0c100fb",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "在仓库区域建立地图并发布",
+        "created_at_ms": 1789443920472,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "在仓库区域建立环境地图，并发布所建立的地图。",
+      "constraints": [],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-970c56693edb46a7bc13c9e5a0c100fb",
+        "objective": "在仓库区域建立环境地图，并发布所建立的地图。",
+        "actors": [
+          {
+            "id": "mapping-agent"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "warehouse-map-context",
+          "roles": [
+            {
+              "id": "mapper",
+              "actor": "mapping-agent"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "sequential-handoff"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-build-warehouse-map",
+          "description": "在仓库区域建立一份不可变环境地图修订版。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-build-warehouse-map",
+              "context_role": "mapper",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "spatial.map",
+                      "name": "build",
+                      "version": "v0"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "spatial.map",
+                  "name": "build",
+                  "version": "v0"
+                },
+                "objective": "建立仓库区域的不可变环境地图修订版。",
+                "parameters": {
+                  "artifact_operation": "build",
+                  "artifact_slot": "warehouse-environment-map",
+                  "map_id": "warehouse-environment-map",
+                  "revision_id": "warehouse-environment-map-revision",
+                  "spatial_anchor_id": "warehouse-area"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "warehouse-map-context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "仓库区域的不可变环境地图修订版已建立。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "task-publish-warehouse-map",
+          "description": "所建立的仓库区域环境地图修订版已发布。",
+          "depends_on": [
+            "task-build-warehouse-map"
+          ],
+          "roles": [
+            {
+              "id": "role-publish-warehouse-map",
+              "context_role": "mapper",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "spatial.map",
+                      "name": "publish",
+                      "version": "v0"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "spatial.map",
+                  "name": "publish",
+                  "version": "v0"
+                },
+                "objective": "发布所建立的仓库区域不可变环境地图修订版。",
+                "parameters": {
+                  "artifact_operation": "publish",
+                  "artifact_slot": "warehouse-environment-map",
+                  "map_id": "warehouse-environment-map",
+                  "revision_id": "warehouse-environment-map-revision",
+                  "spatial_anchor_id": "warehouse-area"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "warehouse-map-context",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "所建立的仓库区域不可变环境地图修订版已发布。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:60deb4eb551b6f8eb0b06e07846a677cdc045a5c48e79a649845006a5fd75ea9",
+      "request_id": "request-362fd58c69d8413ebf357d38297c4b7c",
+      "dialogue_digest": "sha256:378dea0f0c6392d668c735dade88645224a4b2db1600ffe94586e8107fe41fb9",
+      "captured_at_ms": 1789443920592,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:509477c63e7166d7d9d24964f70024382adcd74bdfe5069ee798a2ebcb4c2e9d",
+    "approval_required": false,
+    "approval_reasons": [
+      "spatial-map-build"
+    ],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:509477c63e7166d7d9d24964f70024382adcd74bdfe5069ee798a2ebcb4c2e9d",
+        "grounding_context_digest": "sha256:60deb4eb551b6f8eb0b06e07846a677cdc045a5c48e79a649845006a5fd75ea9",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789444061568
+      }
+    ],
+    "created_at_ms": 1789443920472,
+    "updated_at_ms": 1789444061719
+  }
+}

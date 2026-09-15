@@ -1,0 +1,1197 @@
+{
+  "case_id": "m2-map-then-localize",
+  "category": "multi_role",
+  "instruction": "先在新区建图，建图完成后在新地图上做定位验证",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 654.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: mission review repair attempts exhausted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 在用户所指的新区完成建图，并在建图完成后使用新地图进行定位验证。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=2 roles=2 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "required capabilities covered: ['spatial.localization.verify@v0', 'spatial.map.build@v0']"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 135 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": false,
+      "detail": "repair exhausted after 2 attempt(s), 3 review(s)"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: mission review repair attempts exhausted",
+    "review_repair_convergence: repair exhausted after 2 attempt(s), 3 review(s)"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13411.4,
+      "request_bytes": 7305,
+      "response_bytes": 14322,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_051d72f1ecc938c4016aa8c5efce3087d19a430586c08b46ac": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 314,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 314,
+              "output_tokens": 0
+            },
+            "rs_051d72f1ecc938c4016aa8c5f0767487d1813d3b1e8b7ba7aa": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_051d72f1ecc938c4016aa8c5f9ec4487d1a5a7752e69a238b6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 128
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 128
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1499,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 644,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2143
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 148706.0,
+      "request_bytes": 24565,
+      "response_bytes": 92253,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0964ebd0d11dcb3a016aa8c5fd4f4087d19e6e558d27bcb644": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2650,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2650,
+              "output_tokens": 0
+            },
+            "rs_0964ebd0d11dcb3a016aa8c5fdd5b487d191de0427e92490ed": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0964ebd0d11dcb3a016aa8c6072b0487d1b45317869b76694f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c6108be487d192ca9b0f59886200": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c619d28c87d193ccba7599d1c1ef": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c62325a087d1aa9c1eba79bb3d2d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c62c788c87d19f48bcd88071e033": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c635c8e487d18b897a37a33af162": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c63f1d4c87d1852c892cedc429aa": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c6486da487d184f6a1709d369301": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c651c46887d19b873d58e207b539": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c65b15c487d18eaff56ec41b2f3c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c66465dc87d18cc8e7ab90e71d3e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c66dba1c87d193ea6edc6d3b7401": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c677115887d1b451efe4c7ef938d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0964ebd0d11dcb3a016aa8c680630c87d18c03556e02138141": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 158
+            },
+            "msg_0964ebd0d11dcb3a016aa8c683531087d1ba5f74111e8a14a9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 740
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 740
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4928,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 8148,
+        "output_tokens_details": {
+          "reasoning_tokens": 7408
+        },
+        "total_tokens": 13076
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 172068.7,
+      "request_bytes": 19394,
+      "response_bytes": 103766,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0fc156e8fee52eb0016aa8c69301e087d1baf31b7c6f1e8626": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3414,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3414,
+              "output_tokens": 0
+            },
+            "rs_0fc156e8fee52eb0016aa8c6938b7487d188d5f93188ae8cf0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0fc156e8fee52eb0016aa8c69cdd0487d182b6763712eb0dfb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6a6324087d1b8185f9df170cbb8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6af957487d19460b3faffd99815": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6b8d4f887d18e406418b9e5f103": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6c22a7487d1a6acdff30eca1c42": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6cb7e8087d196e5ddaaf4f3ba3e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6d4d0cc87d19a61ce75e8f6edc5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6de361c87d182895be6ecd949dc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6e775cc87d1b8619284bcac730b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6f0d23487d18d076f05169a615b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c6fa1ba487d1adf93bead14ff582": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c7036c3c87d1975617eefed9de9f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c70cc28487d1aa6ed7ddf4e6dc91": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c71616bc87d1bf260eaeb5708b1c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c71f66fc87d18b8c90c6e667d69c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c728bad087d182c2c24d4caa3f2c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0fc156e8fee52eb0016aa8c7320e1087d1ac4b07b1d0ea3d26": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0fc156e8fee52eb0016aa8c73b799087d1b894a7c0684dc3f2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 99
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 99
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4286,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 9421,
+        "output_tokens_details": {
+          "reasoning_tokens": 9322
+        },
+        "total_tokens": 13707
+      }
+    },
+    {
+      "stage": "repairer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 24827.8,
+      "request_bytes": 25517,
+      "response_bytes": 21638,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0bf71fb0a3a3e92e016aa8c73e6bf887d1a1dc809546bbdf26": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3538,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3538,
+              "output_tokens": 0
+            },
+            "rs_0bf71fb0a3a3e92e016aa8c73ee73887d193ca30bb48904ab2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0bf71fb0a3a3e92e016aa8c74860c887d193b349b148504616": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 780
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 780
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1335,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 439,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5314,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1296,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 6610
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 146446.4,
+      "request_bytes": 19562,
+      "response_bytes": 89422,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f830e7950e53dde016aa8c757351887d18f43e027fae02af7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3462,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3462,
+              "output_tokens": 0
+            },
+            "rs_0f830e7950e53dde016aa8c757b18c87d198116e5b9620f24f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f830e7950e53dde016aa8c761069087d18c4168046b8c9bf0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c76a581c87d1afe81ed8313081d9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c773af9c87d1bbd1a92eca5174bc": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c77cff8487d1b2fa551055b901f0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c786545887d1b84df3c3de440235": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c78fa61887d1a68b4d8519dff3c3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c799039887d1b7b0f4402eb37f72": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7a24d0887d1be123417de7cc1d8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7ab9edc87d1a5281b0eb021dae8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7b4f1e887d1bea96f90541c7504": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7be446487d19728be49e88d0992": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7c798f487d1835fe77b07f246a5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7d0ed9c87d1b4e6d158254db768": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7da3c9c87d1bfff3042524eb108": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0f830e7950e53dde016aa8c7e38f1487d1a24bc2b41bed5b10": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 188
+            },
+            "msg_0f830e7950e53dde016aa8c7e70f0c87d19bca110fd2bfc955": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 98
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 98
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4334,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 8054,
+        "output_tokens_details": {
+          "reasoning_tokens": 7956
+        },
+        "total_tokens": 12388
+      }
+    },
+    {
+      "stage": "repairer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 28135.7,
+      "request_bytes": 25577,
+      "response_bytes": 24925,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_07463e2a46879360016aa8c7e9df6487d1b40261e34c32498a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3585,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3585,
+              "output_tokens": 0
+            },
+            "rs_07463e2a46879360016aa8c7ea81dc87d192fe0f73b4c99c46": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_07463e2a46879360016aa8c7f3d5bc87d195277b0a23a76417": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 222
+            },
+            "msg_07463e2a46879360016aa8c7f7f92087d1bcb32070224ac376": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 730
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 730
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1335,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 439,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 5361,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1468,
+        "output_tokens_details": {
+          "reasoning_tokens": 738
+        },
+        "total_tokens": 6829
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 119761.7,
+      "request_bytes": 19337,
+      "response_bytes": 74933,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0701b0a0f435076a016aa8c806666887d1aa203f7ab5ee2286": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3402,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3402,
+              "output_tokens": 0
+            },
+            "rs_0701b0a0f435076a016aa8c80783ac87d1ba9e771d8c404a0c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0701b0a0f435076a016aa8c810d53087d1b99b10f11225d507": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c81a2af487d1a507cf88deeff007": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c8237a5087d1b8fa99f5d89db4d7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c82ccdb887d181676636debc167d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c836242887d191976cb813cee71a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c83f741c87d189d76fd048808c47": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c848c79c87d19893385ef8d4e3b2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c8521c1487d183ace2774dfd7e4d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c85b6f4087d18d90a4150c3b8a0a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c865431887d1a918c05afc2665e7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c86e168087d1b2ca8dc6d6499111": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0701b0a0f435076a016aa8c877679887d1b0c43c55dd38d37c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 188
+            },
+            "msg_0701b0a0f435076a016aa8c87ae67887d1a5face1369ff5a2e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 113
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 113
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4274,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 6515,
+        "output_tokens_details": {
+          "reasoning_tokens": 6402
+        },
+        "total_tokens": 10789
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 29996,
+    "output_tokens": 35546,
+    "total_tokens": 65542
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13412.4,
+      "avg_ms": 13412.4,
+      "max_ms": 13412.4
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 148760.4,
+      "avg_ms": 148760.4,
+      "max_ms": 148760.4
+    },
+    "reviewer": {
+      "calls": 3,
+      "total_ms": 438284.4,
+      "avg_ms": 146094.8,
+      "max_ms": 172071.4
+    },
+    "repairer": {
+      "calls": 2,
+      "total_ms": 52974.8,
+      "avg_ms": 26487.4,
+      "max_ms": 28141.4
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-5aaa916ef90f48a5911122d63ea00d68",
+    "mission_id": "mission-4166d7f445804e06adcc5b3538395e70",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先在新区建图，建图完成后在新地图上做定位验证",
+        "created_at_ms": 1789445614952,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "在用户所指的新区完成建图，并在建图完成后使用新地图进行定位验证。",
+      "constraints": [
+        "必须先完成新区建图，再在新生成的地图上进行定位验证。"
+      ],
+      "assumptions": [
+        "将“定位验证”理解为在刚完成的新地图上进行定位验证，不额外指定验证指标、报告格式或验收标准。",
+        "将“新区”保留为用户指定的区域称谓，具体物理位置由后续系统侧进行目标解析。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-4166d7f445804e06adcc5b3538395e70",
+        "objective": "在用户所指的新区完成建图，并在建图完成后使用新地图进行定位验证。",
+        "actors": [
+          {
+            "id": "actor-spatial-workflow"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-spatial-workflow",
+          "roles": [
+            {
+              "id": "ctx-role-spatial-workflow",
+              "actor": "actor-spatial-workflow"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "sequential-handoff"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-build-new-area-map",
+          "description": "为用户所指的“新区”（具体物理位置由后续系统解析）生成一份不可变的空间地图修订版。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-build-map",
+              "context_role": "ctx-role-spatial-workflow",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "spatial.map",
+                      "name": "build",
+                      "version": "v0"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "spatial.map",
+                  "name": "build",
+                  "version": "v0"
+                },
+                "objective": "生成用户所指的“新区”对应的不可变空间地图修订版。",
+                "parameters": {
+                  "artifact_operation": "build",
+                  "artifact_slot": "mission-map",
+                  "map_id": "map-new-area",
+                  "revision_id": "revision-new-area",
+                  "spatial_anchor_id": "新区"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-spatial-workflow",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "为用户所指的“新区”（具体物理位置由后续系统解析）生成一份不可变的空间地图修订版。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "task-verify-localization",
+          "description": "在为用户所指的“新区”（具体物理位置由后续系统解析）生成的新地图修订版上完成定位验证，并产生该验证的执行结果。",
+          "depends_on": [
+            "task-build-new-area-map"
+          ],
+          "roles": [
+            {
+              "id": "role-verify-localization",
+              "context_role": "ctx-role-spatial-workflow",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "spatial.localization",
+                      "name": "verify",
+                      "version": "v0"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "spatial.localization",
+                  "name": "verify",
+                  "version": "v0"
+                },
+                "objective": "使用刚生成的“新区”地图修订版完成定位验证。",
+                "parameters": {
+                  "artifact_operation": "verify",
+                  "artifact_slot": "mission-map",
+                  "map_id": "map-new-area",
+                  "revision_id": "revision-new-area",
+                  "spatial_anchor_id": "新区"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-spatial-workflow",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "在为用户所指的“新区”地图修订版上完成定位验证。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:697eddd865abc37a0f04d67f11334959c90886a24a64f17366168d1cd18c5bf1",
+      "request_id": "request-5aaa916ef90f48a5911122d63ea00d68",
+      "dialogue_digest": "sha256:8095763bb6440b98d17f39cc3f0d85b348b1617f90832fa2f532ddac20f35347",
+      "captured_at_ms": 1789445615057,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 3,
+    "draft_digest": "sha256:b91b0164851d949952b40f17bfedd41b7d8d2428d735b24f6357724e0b5184c8",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review repair attempts exhausted"
+    ],
+    "repair_attempts": 2,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:157a43a062b13e6cb3b47eb696e2aac25dd3b988ac560a28c7ccef554e921254",
+        "grounding_context_digest": "sha256:697eddd865abc37a0f04d67f11334959c90886a24a64f17366168d1cd18c5bf1",
+        "review": {
+          "approved": false,
+          "issues": [
+            {
+              "code": "verification-lacks-independent-evidence",
+              "path": "/tasks/1/satisfaction",
+              "message": "The mission explicitly requests localization verification, but this task accepts only `execution-report` and declares no verifier. Local workflow completion is not independent verification evidence under Review policy. The plan must declare verifier-based evidence from an independent verification boundary without inventing additional acceptance criteria.",
+              "required_action": "RepairPlan"
+            }
+          ]
+        },
+        "reviewed_at_ms": 1789445949575
+      },
+      {
+        "draft_revision": 2,
+        "draft_digest": "sha256:b59de8ed37ddef69b061146e32abf1896976edf3cbfc63ac04d3fa0ed47d6158",
+        "grounding_context_digest": "sha256:697eddd865abc37a0f04d67f11334959c90886a24a64f17366168d1cd18c5bf1",
+        "review": {
+          "approved": false,
+          "issues": [
+            {
+              "code": "ungrounded_evidence_freshness",
+              "path": "/tasks/1/satisfaction/verifier/max_evidence_age_ms",
+              "message": "The verifier declares a 60000 ms evidence-age limit, which adds an ungrounded freshness/acceptance criterion. The GroundedIntent explicitly provides no additional acceptance standard, and no policy grounds this timing constraint.",
+              "required_action": "RepairPlan"
+            }
+          ]
+        },
+        "reviewed_at_ms": 1789446121082
+      },
+      {
+        "draft_revision": 3,
+        "draft_digest": "sha256:b91b0164851d949952b40f17bfedd41b7d8d2428d735b24f6357724e0b5184c8",
+        "grounding_context_digest": "sha256:697eddd865abc37a0f04d67f11334959c90886a24a64f17366168d1cd18c5bf1",
+        "review": {
+          "approved": false,
+          "issues": [
+            {
+              "code": "verification-basis-insufficient",
+              "path": "/tasks/1/satisfaction",
+              "message": "The localization-verification task explicitly requests verification, but its satisfaction basis is `execution-report` and its verifier is null. An execution report establishes only local workflow completion, not independent evidence for the requested localization verification. Use an independent `verifier-evidence` basis and a catalog-conformant evidence boundary without inventing additional acceptance criteria.",
+              "required_action": "RepairPlan"
+            }
+          ]
+        },
+        "reviewed_at_ms": 1789446269190
+      }
+    ],
+    "created_at_ms": 1789445614952,
+    "updated_at_ms": 1789446269239
+  }
+}

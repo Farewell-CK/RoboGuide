@@ -1,0 +1,230 @@
+{
+  "case_id": "n4-edge-inference",
+  "category": "normal",
+  "instruction": "使用 pointcloud-analysis-v1 模型对录制的激光点云数据做一次推理分析",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 11.3,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 1 clarification question(s): 请指定要分析的录制激光点云数据，例如文件、数据集或录制时间范围。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 1 clarification question(s): 请指定要分析的录制激光点云数据，例如文件、数据集或录制时间范围。"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11076.3,
+      "request_bytes": 7326,
+      "response_bytes": 13279,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_01c31c4bac884d57016aa8c08de3e887d1a8a71c4590f6ceec": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 328,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 328,
+              "output_tokens": 0
+            },
+            "rs_01c31c4bac884d57016aa8c08ef65087d1ad106e3f2e6f811e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 395
+            },
+            "msg_01c31c4bac884d57016aa8c096393c87d1b5fc09eb32605bd4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 109
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 109
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1513,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 504,
+        "output_tokens_details": {
+          "reasoning_tokens": 395
+        },
+        "total_tokens": 2017
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1513,
+    "output_tokens": 504,
+    "total_tokens": 2017
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 11077.3,
+      "avg_ms": 11077.3,
+      "max_ms": 11077.3
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-21d890e557a44f20bc53a5dfca3e38e7",
+    "mission_id": "mission-c8ba37c88f4a4ac9a302dfd3e8a31046",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "使用 pointcloud-analysis-v1 模型对录制的激光点云数据做一次推理分析",
+        "created_at_ms": 1789444237040,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请指定要分析的录制激光点云数据，例如文件、数据集或录制时间范围。",
+        "created_at_ms": 1789444248291,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "使用 pointcloud-analysis-v1 模型对目标录制激光点云数据执行一次推理分析。",
+      "constraints": [
+        "必须使用 pointcloud-analysis-v1 模型。",
+        "仅执行一次推理分析。",
+        "输入数据应为录制的激光点云数据。"
+      ],
+      "assumptions": [],
+      "open_questions": [
+        "请指定要分析的录制激光点云数据，例如文件、数据集或录制时间范围。"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:b23ac8ab4dbb8b34e2eb11e10ee92bbc8126872104d68bb7bb86c2bdb280faec",
+      "request_id": "request-21d890e557a44f20bc53a5dfca3e38e7",
+      "dialogue_digest": "sha256:2853de00f9a38cc0204e657c77c2c20c7cfa2c43ef6b74aabe1a2cf89d639ef9",
+      "captured_at_ms": 1789444237155,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789444237040,
+    "updated_at_ms": 1789444248291
+  }
+}

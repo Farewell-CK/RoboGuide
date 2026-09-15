@@ -1,0 +1,237 @@
+{
+  "case_id": "h2-mapper-then-transport",
+  "category": "heterogeneous",
+  "instruction": "先给新仓库建图，然后把一批样品从门口运到检验台",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 23.2,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 1 clarification question(s): 请明确要运送的那一批样品（例如批次号、容器/标签或其他选择标准）。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 1 clarification question(s): 请明确要运送的那一批样品（例如批次号、容器/标签或其他选择标准）。"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 23005.3,
+      "request_bytes": 7308,
+      "response_bytes": 19088,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09ca46cc5ce61d32016aa8c1db965c87d1aadb9758384a8522": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 321,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 321,
+              "output_tokens": 0
+            },
+            "rs_09ca46cc5ce61d32016aa8c1dc3b8c87d1b9bed0eda50450ab": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_09ca46cc5ce61d32016aa8c1e5907487d1a58ab22ea600ce5a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_09ca46cc5ce61d32016aa8c1ef032887d19bbb439b458bca59": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 155
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 155
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1506,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1189,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 2695
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1506,
+    "output_tokens": 1189,
+    "total_tokens": 2695
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 23006.3,
+      "avg_ms": 23006.3,
+      "max_ms": 23006.3
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-7190df105f7347fc96b5f1e347c81fdc",
+    "mission_id": "mission-dc7ce8408b9f480ea1af8b59606a12a1",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "先给新仓库建图，然后把一批样品从门口运到检验台",
+        "created_at_ms": 1789444570791,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请明确要运送的那一批样品（例如批次号、容器/标签或其他选择标准）。",
+        "created_at_ms": 1789444593947,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "为新仓库建立地图；建图完成后，将指定的一批样品从门口运送到检验台。",
+      "constraints": [
+        "必须先完成新仓库建图，再开始样品运输。"
+      ],
+      "assumptions": [
+        "将“新仓库”“门口”和“检验台”按用户给出的地点名称作为目标 referent，不额外扩大任务范围。",
+        "不额外增加样品清点、筛选、拍照或交接确认等未提出的工作。"
+      ],
+      "open_questions": [
+        "请明确要运送的那一批样品（例如批次号、容器/标签或其他选择标准）。"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:405a00ea50ae4600abe149ca0b5f4c946cb6d44900156df549c80879dc1671af",
+      "request_id": "request-7190df105f7347fc96b5f1e347c81fdc",
+      "dialogue_digest": "sha256:486a992f551445b11ba3afa5a8dcda3ea6dc41a3ce24b96b444a15b1bbbd3f5e",
+      "captured_at_ms": 1789444570890,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789444570791,
+    "updated_at_ms": 1789444593947
+  }
+}

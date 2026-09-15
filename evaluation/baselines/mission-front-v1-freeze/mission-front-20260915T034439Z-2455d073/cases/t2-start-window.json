@@ -1,0 +1,563 @@
+{
+  "case_id": "t2-start-window",
+  "category": "resource_timing",
+  "instruction": "任务接受后 1 小时开始在园区大门执行迎宾巡逻",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "NeedsClarification",
+  "passed": false,
+  "wall_seconds": 194.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": false,
+      "detail": "unambiguous case produced 1 clarification question(s): The task claims that a welcome patrol begins at the park gate, but its only canonical operation is `mobility.navigate`, which establishes navigation to a destination and does not start or execute a patrol. The supplied Catalog contains no operation that faithfully expresses the requested patrol-start outcome, so the plan cannot establish its declared expected effect."
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 在任务接受后1小时，于园区大门开始执行迎宾巡逻。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "1/1 task(s) carry timing constraints"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to NeedsClarification"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached NeedsClarification",
+    "clarification_behavior: unambiguous case produced 1 clarification question(s): The task claims that a welcome patrol begins at the park gate, but its only canonical operation is `mobility.navigate`, which establishes navigation to a destination and does not start or execute a patrol. The supplied Catalog contains no operation that faithfully expresses the requested patrol-start outcome, so the plan cannot establish its declared expected effect."
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 30034.4,
+      "request_bytes": 7302,
+      "response_bytes": 23532,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b8316f6503acedd016aa8c37e11ec87d18c83cd7de14be958": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 327,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 327,
+              "output_tokens": 0
+            },
+            "rs_0b8316f6503acedd016aa8c37e74ac87d19883287e4a1234a2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0b8316f6503acedd016aa8c387c47887d1ba0f53a904d638c7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0b8316f6503acedd016aa8c39119cc87d18fc74903720e2f3e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 428
+            },
+            "msg_0b8316f6503acedd016aa8c398ed2487d19ed944a32c5a09df": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 100
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 100
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1512,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1562,
+        "output_tokens_details": {
+          "reasoning_tokens": 1462
+        },
+        "total_tokens": 3074
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 138877.8,
+      "request_bytes": 24429,
+      "response_bytes": 87791,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e52c53abbda5546016aa8c39c5ac087d1bc53651adaf4d513": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2631,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2631,
+              "output_tokens": 0
+            },
+            "rs_0e52c53abbda5546016aa8c39d14a087d191fc04c85a0c37d7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0e52c53abbda5546016aa8c3a667d087d1a5ed2230dd763018": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3afb87487d1a8b859e548b05c95": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3b90dcc87d1923fc235e732b066": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3c260f087d19577117ec086c626": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3cbb57887d198a60d1c6fc3f545": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3d505a887d1b42a34f52344f95f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3de575087d18b44858da4ebd203": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3e7ab8487d18320181c69ae9ab5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3f0fda087d1b462d65ec01bfe9d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c3fa512087d19b64b5ad1afe00ba": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c403a42487d18186c1b2b8bb222a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c40cf84c87d1b99214d8f3d8b6ca": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e52c53abbda5546016aa8c4164b4487d19cb3aa154d3d798a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0e52c53abbda5546016aa8c41fb9a087d1b1a41c2729239c77": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 363
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 363
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4909,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 7613,
+        "output_tokens_details": {
+          "reasoning_tokens": 7250
+        },
+        "total_tokens": 12522
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 25515.0,
+      "request_bytes": 17575,
+      "response_bytes": 18606,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_029ed40ca81778e6016aa8c4274e7487d19a32bedaeb953d49": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3013,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3013,
+              "output_tokens": 0
+            },
+            "rs_029ed40ca81778e6016aa8c428760c87d183c4b071713c3e20": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_029ed40ca81778e6016aa8c431ca9087d182a91edf9e8646d2": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_029ed40ca81778e6016aa8c43b3ae487d182a671842600b0f8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 119
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 119
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3885,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1153,
+        "output_tokens_details": {
+          "reasoning_tokens": 1034
+        },
+        "total_tokens": 5038
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 10306,
+    "output_tokens": 10328,
+    "total_tokens": 20634
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 30035.5,
+      "avg_ms": 30035.5,
+      "max_ms": 30035.5
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 138883.4,
+      "avg_ms": 138883.4,
+      "max_ms": 138883.4
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 25516.7,
+      "avg_ms": 25516.7,
+      "max_ms": 25516.7
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-41a0f71d9df54b1a8db6c9d7f0f7c99c",
+    "mission_id": "mission-a48370189a074229b2f93e367fbffe06",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "任务接受后 1 小时开始在园区大门执行迎宾巡逻",
+        "created_at_ms": 1789444989392,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "The task claims that a welcome patrol begins at the park gate, but its only canonical operation is `mobility.navigate`, which establishes navigation to a destination and does not start or execute a patrol. The supplied Catalog contains no operation that faithfully expresses the requested patrol-start outcome, so the plan cannot establish its declared expected effect.",
+        "created_at_ms": 1789445184213,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "在任务接受后1小时，于园区大门开始执行迎宾巡逻。",
+      "constraints": [
+        "开始时间为任务接受后1小时。",
+        "执行地点限定为园区大门。"
+      ],
+      "assumptions": [
+        "将“开始执行”理解为任务目标是在指定时间启动迎宾巡逻，不额外指定巡逻持续时长、路线或结束条件。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-a48370189a074229b2f93e367fbffe06",
+        "objective": "在任务接受后1小时，于园区大门开始执行迎宾巡逻。",
+        "actors": [
+          {
+            "id": "actor-1"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-welcome-patrol",
+          "roles": [
+            {
+              "id": "ctxrole-patrol-executor",
+              "actor": "actor-1"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-start-welcome-patrol",
+          "description": "在任务接受后1小时，迎宾巡逻于园区大门开始执行。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "taskrole-patrol-executor",
+              "context_role": "ctxrole-patrol-executor",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "navigate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "objective": "在园区大门开始执行迎宾巡逻。",
+                "parameters": {
+                  "destination": "园区大门"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-welcome-patrol",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 3600000,
+            "latest_start_offset_ms": 3600000,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "迎宾巡逻已于任务接受后1小时在园区大门开始执行。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:e3a3dbdcd49bd5b691a9c174aac145cb577e0b28309dc65af81c2367ee47c2d3",
+      "request_id": "request-41a0f71d9df54b1a8db6c9d7f0f7c99c",
+      "dialogue_digest": "sha256:73ae1d24b7f1115c2433f0738bee1746c90ebac7b8056df22274e876ef1abed2",
+      "captured_at_ms": 1789444989507,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:5aa7e2c807d85e244bd71091e97045838b28e63a4a5d79a8f55e13fe1796b547",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:5aa7e2c807d85e244bd71091e97045838b28e63a4a5d79a8f55e13fe1796b547",
+        "grounding_context_digest": "sha256:e3a3dbdcd49bd5b691a9c174aac145cb577e0b28309dc65af81c2367ee47c2d3",
+        "review": {
+          "approved": false,
+          "issues": [
+            {
+              "code": "unsupported-mission-objective",
+              "path": "/tasks/0/roles/0/execution_intent/operation",
+              "message": "The task claims that a welcome patrol begins at the park gate, but its only canonical operation is `mobility.navigate`, which establishes navigation to a destination and does not start or execute a patrol. The supplied Catalog contains no operation that faithfully expresses the requested patrol-start outcome, so the plan cannot establish its declared expected effect.",
+              "required_action": "RequestClarification"
+            }
+          ]
+        },
+        "reviewed_at_ms": 1789445184159
+      }
+    ],
+    "created_at_ms": 1789444989392,
+    "updated_at_ms": 1789445184213
+  }
+}

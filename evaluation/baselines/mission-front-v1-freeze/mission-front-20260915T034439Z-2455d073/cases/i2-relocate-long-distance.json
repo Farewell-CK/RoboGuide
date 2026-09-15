@@ -1,0 +1,397 @@
+{
+  "case_id": "i2-relocate-long-distance",
+  "category": "integrated",
+  "instruction": "把实验楼的样品盒运送到对面办公楼一层的前台",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Failed",
+  "passed": false,
+  "wall_seconds": 93.5,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": false,
+      "detail": "expected Accepted, reached Failed; issues: mission review failed: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "no clarification needed, as expected"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 将实验楼的样品盒运送到对面办公楼一层的前台。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "operation object.relocate@v1 preserved as one semantic goal"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "no review cycle engaged for this case"
+    }
+  ],
+  "failure_reasons": [
+    "final_lifecycle: expected Accepted, reached Failed; issues: mission review failed: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+  ],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 9486.5,
+      "request_bytes": 7302,
+      "response_bytes": 12989,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0457d4d99c5d7616016aa8c2309e3487d1884c9a9cc8ad307d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 319,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 319,
+              "output_tokens": 0
+            },
+            "rs_0457d4d99c5d7616016aa8c231181487d1a4f3b79994d5ffe9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 352
+            },
+            "msg_0457d4d99c5d7616016aa8c23795bc87d19185d08158a7554e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 108
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 108
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1504,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 460,
+        "output_tokens_details": {
+          "reasoning_tokens": 352
+        },
+        "total_tokens": 1964
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 54766.9,
+      "request_bytes": 24408,
+      "response_bytes": 38176,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e66239902ee8263016aa8c23a615887d1913c3ae0d150eb96": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2633,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2633,
+              "output_tokens": 0
+            },
+            "rs_0e66239902ee8263016aa8c23b1aec87d18e578addad2c59bd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0e66239902ee8263016aa8c2446f1887d19c970c4ca5012b8d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e66239902ee8263016aa8c24dbdc487d1b2c3e6814583d87d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e66239902ee8263016aa8c257115c87d1b50925eded3e629d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0e66239902ee8263016aa8c260804887d198254a60f41af29f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 447
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 447
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4911,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2517,
+        "output_tokens_details": {
+          "reasoning_tokens": 2070
+        },
+        "total_tokens": 7428
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 28830.6,
+      "request_bytes": 17852,
+      "response_bytes": 0,
+      "ok": false,
+      "error": "provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}",
+      "usage": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 6415,
+    "output_tokens": 2977,
+    "total_tokens": 9392
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 9487.6,
+      "avg_ms": 9487.6,
+      "max_ms": 9487.6
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 54773.2,
+      "avg_ms": 54773.2,
+      "max_ms": 54773.2
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 28831.9,
+      "avg_ms": 28831.9,
+      "max_ms": 28831.9
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-5d86defc93ba493b97d641bcbe086f5e",
+    "mission_id": "mission-71c7d4e1866c49b2aadf386889467607",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把实验楼的样品盒运送到对面办公楼一层的前台",
+        "created_at_ms": 1789444655974,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Failed",
+    "assessment": {
+      "objective": "将实验楼的样品盒运送到对面办公楼一层的前台。",
+      "constraints": [],
+      "assumptions": [
+        "“对面办公楼”指相对于实验楼的办公楼；“一层前台”是此次运送的交付地点。",
+        "任务以将样品盒送达该前台为止，不额外包含签收、通知或拍照等工作。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-71c7d4e1866c49b2aadf386889467607",
+        "objective": "将实验楼的样品盒运送到对面办公楼一层的前台。",
+        "actors": [
+          {
+            "id": "delivery-agent"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "delivery-context",
+          "roles": [
+            {
+              "id": "delivery-role",
+              "actor": "delivery-agent"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "relocate-sample-box",
+          "description": "将实验楼的样品盒运送到对面办公楼一层的前台。规划前提：“对面办公楼”指相对于实验楼的办公楼；“一层前台”是此次运送的交付地点。任务以将样品盒送达该前台为止，不额外包含签收、通知或拍照等工作。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocate-sample-box-role",
+              "context_role": "delivery-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将实验楼的样品盒运送到对面办公楼一层的前台。",
+                "parameters": {
+                  "destination": "对面办公楼一层的前台（相对于实验楼）",
+                  "object": "样品盒",
+                  "source": "实验楼"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "delivery-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "将实验楼的样品盒运送到对面办公楼一层的前台。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:95f97773e44e8625649217d1c164c5005309d418eb18cec1c2620eda6bd0c2b1",
+      "request_id": "request-5d86defc93ba493b97d641bcbe086f5e",
+      "dialogue_digest": "sha256:d1a567cf7671a3398a9f17b5dc452f0801b392973302bf4e9c541d4658d34a38",
+      "captured_at_ms": 1789444656081,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:065b9b3f35beefc941b2846d02c837f2ad00ad9c719f496c43a8d6f52d3f8f6d",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [
+      "mission review failed: provider returned HTTP 502: {\"error\":{\"message\":\"Upstream request failed\",\"type\":\"upstream_error\"}}"
+    ],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789444655974,
+    "updated_at_ms": 1789444749365
+  }
+}

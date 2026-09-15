@@ -1,0 +1,561 @@
+{
+  "case_id": "a3-pronoun-reference",
+  "category": "ambiguity",
+  "instruction": "把它放到那儿",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 77.1,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "1 clarification question(s) asked: 请明确“它”指哪个物体，以及“那儿”指哪个目标位置。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 2 term(s) in: 将窗台上的绿植搬运并放置到阳台的架子上。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 8190.2,
+      "request_bytes": 7257,
+      "response_bytes": 11937,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_067fbb8231ea9298016aa8c1024dac87d1b92cd96a2845154d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 300,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 300,
+              "output_tokens": 0
+            },
+            "rs_067fbb8231ea9298016aa8c1040ddc87d1bac20c294574ff6f": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 234
+            },
+            "msg_067fbb8231ea9298016aa8c1086ea087d1883b7b500924c1a4": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 66
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 66
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1485,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 300,
+        "output_tokens_details": {
+          "reasoning_tokens": 234
+        },
+        "total_tokens": 1785
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 7466.2,
+      "request_bytes": 7734,
+      "response_bytes": 12051,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0efcb2ae0b16afa4016aa8c10abc6487d1b2069d880f1a953e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 438,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 438,
+              "output_tokens": 0
+            },
+            "rs_0efcb2ae0b16afa4016aa8c10b5ab487d193ed51355fc52adf": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 235
+            },
+            "msg_0efcb2ae0b16afa4016aa8c10fbbdc87d1819696a11060bc2b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 83
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 83
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1623,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 318,
+        "output_tokens_details": {
+          "reasoning_tokens": 235
+        },
+        "total_tokens": 1941
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 37577.2,
+      "request_bytes": 24303,
+      "response_bytes": 32291,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09034829fae6d9b3016aa8c112983887d1b7a3354572d26641": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2603,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2603,
+              "output_tokens": 0
+            },
+            "rs_09034829fae6d9b3016aa8c11318fc87d1afdae01ffda1b564": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_09034829fae6d9b3016aa8c11c6eec87d19046210b236801f6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_09034829fae6d9b3016aa8c125c22487d19fca714c8f0c17b5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_09034829fae6d9b3016aa8c12f317087d19aea6fccacb22fc5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 431
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 431
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4881,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1983,
+        "output_tokens_details": {
+          "reasoning_tokens": 1552
+        },
+        "total_tokens": 6864
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 23205.4,
+      "request_bytes": 17668,
+      "response_bytes": 20629,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_039119f69df70d0e016aa8c137e16887d19c3d741cea514ead": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 3046,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 3046,
+              "output_tokens": 0
+            },
+            "rs_039119f69df70d0e016aa8c138547c87d1880bbf7a5f9fca25": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_039119f69df70d0e016aa8c141ac5087d1922a27704a32b73a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_039119f69df70d0e016aa8c14afe6c87d1947fb9528c12c304": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 156
+            },
+            "msg_039119f69df70d0e016aa8c14de72c87d1850f39c815a1bcd6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3918,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1210,
+        "output_tokens_details": {
+          "reasoning_tokens": 1190
+        },
+        "total_tokens": 5128
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11907,
+    "output_tokens": 3811,
+    "total_tokens": 15718
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 15658.6,
+      "avg_ms": 7829.3,
+      "max_ms": 8191.3
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 37582.2,
+      "avg_ms": 37582.2,
+      "max_ms": 37582.2
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 23207.4,
+      "avg_ms": 23207.4,
+      "max_ms": 23207.4
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-21554eda5a154469aa3e9acbfa0604be",
+    "mission_id": "mission-2b4d796a8456484685abf180bd70439e",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把它放到那儿",
+        "created_at_ms": 1789444353469,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请明确“它”指哪个物体，以及“那儿”指哪个目标位置。",
+        "created_at_ms": 1789444361809,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "把窗台上的绿植搬到阳台的架子上",
+        "created_at_ms": 1789444361867,
+        "in_reply_to": "turn-0002"
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将窗台上的绿植搬运并放置到阳台的架子上。",
+      "constraints": [],
+      "assumptions": [
+        "将“搬到阳台的架子上”理解为把绿植放置在该架子上，不附加浇水、整理等工作。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-2b4d796a8456484685abf180bd70439e",
+        "objective": "将窗台上的绿植搬运并放置到阳台的架子上。",
+        "actors": [
+          {
+            "id": "actor-plant-relocator"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "plant-relocation-context",
+          "roles": [
+            {
+              "id": "plant-relocation-role",
+              "actor": "actor-plant-relocator"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "relocate-plant",
+          "description": "规划前提为将“搬到阳台的架子上”理解为把绿植放置在该架子上；预期物理结果是窗台上的绿植位于阳台的架子上，不包含浇水或整理等其他工作。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "relocator",
+              "context_role": "plant-relocation-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将窗台上的绿植搬运并放置到阳台的架子上。",
+                "parameters": {
+                  "destination": "阳台的架子",
+                  "object": "窗台上的绿植",
+                  "source": "窗台"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "plant-relocation-context",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "窗台上的绿植已被放置在阳台的架子上，且本任务不包含浇水或整理。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:f758357071ccd083594fe3ec0baa7d47ce83c5588c235dcab5c8db5d32ecd298",
+      "request_id": "request-21554eda5a154469aa3e9acbfa0604be",
+      "dialogue_digest": "sha256:c722aa98c434f4a31dc03e0357b592e78cf0f88b098f4ef506e82a1a16bf2a7c",
+      "captured_at_ms": 1789444361966,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:84c9cdf64a8e15e1945926a41aab852309da449a8a0d73f8c37f1a7ef8a1cdb8",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:84c9cdf64a8e15e1945926a41aab852309da449a8a0d73f8c37f1a7ef8a1cdb8",
+        "grounding_context_digest": "sha256:f758357071ccd083594fe3ec0baa7d47ce83c5588c235dcab5c8db5d32ecd298",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789444430430
+      }
+    ],
+    "created_at_ms": 1789444353469,
+    "updated_at_ms": 1789444430534
+  }
+}
