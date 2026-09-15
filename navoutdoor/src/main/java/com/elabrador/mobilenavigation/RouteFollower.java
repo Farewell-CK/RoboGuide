@@ -111,9 +111,8 @@ final class RouteFollower {
         int remaining = (int) Math.max(0, Math.round(route.distanceMeters - apiProgress));
         AmapRouteClient.GeoPoint destination = points.get(points.size() - 1);
         double destinationDistance = AmapRouteClient.distanceMeters(current, destination);
-        double accuracyBound = Math.max(0.0f, accuracyMeters);
-        boolean arrived = destinationDistance <= Math.max(10.0, accuracyBound * 1.2)
-                || (remaining <= 5 && destinationDistance <= Math.max(20.0, accuracyBound * 1.5));
+        boolean arrived = accuracyMeters <= 8 && routeGeometryMeters - lastProgressMeters <= 12
+                && destinationDistance <= 10.0;
         double offRouteThreshold = Math.max(25.0, Math.max(0.0f, accuracyMeters) * 1.5);
         boolean offRoute = !arrived && match.distanceMeters > offRouteThreshold;
 
