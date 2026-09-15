@@ -1,0 +1,80 @@
+{
+  "schema": "roboguide.c0c-summary/v0.1",
+  "git_sha": "31bc9f6071a7d427affc48f1854e9137827a546d",
+  "server_binary": "target/debug/integration-server (cargo build -p integration-server)",
+  "node_binary": "target/debug/roboguide-node (cargo build -p roboguide-node)",
+  "c0c1_exact_operation": {
+    "verdict": "PASS",
+    "http_post_status": "202",
+    "mission_final_status": "Completed",
+    "task_final_status": "Completed",
+    "node_side_invocation_operation": "compute.infer@v1",
+    "node_side_invocation_parameters": {
+      "model": "pointcloud-analysis-v1"
+    },
+    "data_identity_observability": "lidar-run-017 present in objective text only; not a structured parameter of this fixture",
+    "event_chain": [
+      "CandidatesMatched",
+      "TaskSchedulingSelected",
+      "ProposalCreated",
+      "PlanCommitted",
+      "ExecutionGroupBound",
+      "MissionActorBound",
+      "TaskExecutionActivated",
+      "NodeObservation",
+      "TaskExecutionCompleted",
+      "TaskSatisfied",
+      "ExecutionGroupCompleted",
+      "ExecutionGroupReleased"
+    ]
+  },
+  "c0c2_future_timing": {
+    "verdict": "PASS",
+    "http_post_status": "202",
+    "timing_submitted": {
+      "earliest_start_offset_ms": 3600000,
+      "latest_start_offset_ms": 3600000
+    },
+    "mission_status_immediate": "Running",
+    "task_status_immediate": "Ready",
+    "premature_activation": false,
+    "eaios_dispatch_calls": 0,
+    "execution_attempts": 0,
+    "scheduler_evidence": "TaskSchedulingDeferred no-feasible-interval: unbounded future start (+3600000ms) without duration evidence is refused by policy (scheduler/policy.rs:186); identical machinery with timing 0 (C0-C1) dispatched immediately",
+    "scheduling_reservations": "empty: consistent with deferral; no production caller supplies duration estimates today (prepare_task_with_duration_estimate has zero production call sites)"
+  },
+  "c0c3_independent_parallel": {
+    "verdict": "BLOCKED",
+    "http_post_status": "202",
+    "control_level_semantics": "PASS: both tasks independently Match/Schedule/Propose/Commit/Bind inside one mission group; task-infer-analysis -> c0c-node-a, task-move-gate -> c0c-node-b; relations=[]; peer_channels=[]; no coupling upgrade",
+    "runtime_level": "BLOCKED: deterministic (2/2) controller process exit 'control rejected orchestration: invalid lifecycle: Blocked' while applying a node completion fact after a Dispatching-status snapshot replay fenced the first attempt as Unknown",
+    "reproduction": "run-c0c3.sh twice; identical failure signature and event ordering"
+  },
+  "transaction_boundary": {
+    "verdict": "PASS",
+    "malformed_json": "400",
+    "v0_7_missing_timing": "400",
+    "provider_absence": "202 accepted; provider absence is a Control scheduling condition, not semantic rejection; events present",
+    "non_executable_relation": "409 'valid contract syntax but is not executable by this Controller build'",
+    "rejected_mission_get": "404 with zero event trace (no candidate-controller swap)",
+    "checkpoint_persistence_503": "source-verified only (server.rs save_checkpoint branch); not triggered live",
+    "command_delivery_failure_semantics": "flush_command_outboxes failure after durable commit defers delivery without rolling back the accepted Mission (main.rs eprintln 'durable command outbox delivery deferred')"
+  },
+  "core_blockers": [
+    {
+      "id": "C0C-B1",
+      "stage": "C0-C3 runtime-level task completion after group recovery",
+      "reproducible": "2/2 deterministic",
+      "actual": "integration-server process exits; Mission stuck Running; nodes reconnect-loop",
+      "expected": "in-flight Dispatching snapshot must not be reduced to physical-ambiguity recovery, and a node completion fact for a fenced attempt must not kill the controller",
+      "sites": [
+        "core/node-service/src/engine/validation.rs:528-531 snapshot_from_record maps JournalStatus::Dispatching to ExecutionPhase::Unknown with empty reason",
+        "core/node-service/src/service/mod.rs:152 broadcast Lagged -> replay_snapshots delivers that snapshot mid-dispatch",
+        "core/orchestration/src/integration_bridge/execution_facts.rs:23 Unknown/Unspecified phase -> ExecutionStatus::Unknown",
+        "core/runtime/src/execution/observation.rs:194 Unknown observation -> RecoveryRequired(reason \"\")",
+        "core/control reconciliation marks the node unavailable and Blocks the group",
+        "apps/integration-server/src/main.rs:629-641 apply_runtime_outcomes Err -> fatal_sender -> process exit"
+      ]
+    }
+  ]
+}

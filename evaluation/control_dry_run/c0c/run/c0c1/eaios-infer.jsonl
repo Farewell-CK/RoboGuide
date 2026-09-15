@@ -1,0 +1,6 @@
+{"received_at": "2026-09-15T11:06:57.696440+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:06:57.699410+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}
+{"received_at": "2026-09-15T11:06:57.761105+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:06:57.763677+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}
+{"received_at": "2026-09-15T11:06:58.658256+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions", "body": {"invocation": {"group_id": "group-mission-0ad889942e7d4a81b71903900fc13104", "mission_id": "mission-0ad889942e7d4a81b71903900fc13104", "objective": "使用 pointcloud-analysis-v1 模型对录制文件 lidar-run-017 执行一次推理分析，并按整个录制文件作为分析范围。", "operation": "compute.infer@v1", "parameters": {"model": "pointcloud-analysis-v1"}, "resource_ids": [], "role_id": "role-infer", "task_id": "task-infer-recording"}}}
+{"received_at": "2026-09-15T11:06:58.743071+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions/status", "body": {"execution_id": "c0c-fake-execution-1"}}

@@ -1,0 +1,4 @@
+{"received_at": "2026-09-15T11:07:24.196188+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:07:24.200229+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/mobility.move", "body": null}
+{"received_at": "2026-09-15T11:07:24.276183+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:07:24.278729+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/mobility.move", "body": null}

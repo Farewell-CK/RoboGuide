@@ -1,0 +1,4 @@
+{"received_at": "2026-09-15T11:20:24.707669+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:20:24.711073+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}
+{"received_at": "2026-09-15T11:20:24.754180+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:20:24.757103+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}

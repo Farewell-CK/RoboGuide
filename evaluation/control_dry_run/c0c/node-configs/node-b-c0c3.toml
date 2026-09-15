@@ -1,0 +1,153 @@
+schema = "roboguide.node-config/v0.7"
+node_id = "c0c-node-b"
+server_endpoint = "http://127.0.0.1:25053"
+state_directory = "node-state/c0c3/b"
+reconnect_delay_ms = 500
+
+[artifacts]
+endpoint = "http://127.0.0.1:28094"
+cache_directory = "artifact-cache/c0c3-b"
+max_artifact_bytes = 4294967296
+chunk_size_bytes = 1048576
+connect_timeout_ms = 5000
+read_timeout_ms = 30000
+
+[[local_systems]]
+id = "c0c-eaios"
+runtime_name = "c0c-fake-eaios"
+runtime_version = "0.1.0"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "eaios-health"
+connection = "eaios-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "eaios-http"
+local_system = "c0c-eaios"
+endpoint = "http://127.0.0.1:28086"
+timeout_ms = 5000
+
+[[capability_profiles]]
+contract = "mobility.move@v1"
+kind = "compute"
+owner = "c0c-eaios"
+attributes = {}
+
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capability_profiles.readiness.step]
+id = "b-readiness"
+connection = "eaios-http"
+
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/mobility.move"
+
+[capability_profiles.readiness.step.request]
+base = {}
+
+[[resources]]
+id = "c0c-b-compute-slot"
+kind = "compute"
+capacity = 1
+owner = "c0c-eaios"
+
+[[operations]]
+operation = "mobility.move@v1"
+owner = "c0c-eaios"
+local_locks = ["c0c-b-executor"]
+
+[operations.workflow]
+poll_interval_ms = 250
+
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[operations.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[operations.workflow.execute]]
+id = "dispatch"
+connection = "eaios-http"
+
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[operations.workflow.execute.request]
+base = {}
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[operations.workflow.status]]
+id = "status"
+connection = "eaios-http"
+
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[operations.workflow.status.request]
+base = {}
+
+[[operations.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations.workflow.cancel]]
+id = "cancel"
+connection = "eaios-http"
+
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[operations.workflow.cancel.request]
+base = {}
+
+[[operations.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"

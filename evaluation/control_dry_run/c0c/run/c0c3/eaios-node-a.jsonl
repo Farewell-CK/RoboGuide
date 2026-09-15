@@ -1,0 +1,6 @@
+{"received_at": "2026-09-15T11:16:27.850841+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:16:27.854332+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}
+{"received_at": "2026-09-15T11:16:27.897681+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:16:27.900450+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/compute.infer", "body": null}
+{"received_at": "2026-09-15T11:16:28.600109+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions", "body": {"invocation": {"group_id": "group-mission-c0c3-parallel-demo", "mission_id": "mission-c0c3-parallel-demo", "objective": "使用 pointcloud-analysis-v1 模型对录制文件执行一次推理分析。", "operation": "compute.infer@v1", "parameters": {"model": "pointcloud-analysis-v1"}, "resource_ids": [], "role_id": "role-infer", "task_id": "task-infer-analysis"}}}
+{"received_at": "2026-09-15T11:16:28.750468+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions/status", "body": {"execution_id": "c0c-fake-execution-1"}}

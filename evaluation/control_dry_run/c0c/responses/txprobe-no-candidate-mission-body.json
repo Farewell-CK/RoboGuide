@@ -1,0 +1,1 @@
+{"group_id":"group-mission-c0c-txprobe-no-candidate","mission_id":"mission-c0c-txprobe-no-candidate","peer_channels":[],"relations":[],"status":"Running","tasks":[{"context_id":"ctx-probe","status":"Ready","task_id":"task-probe-relocate"}]}

@@ -1,0 +1,137 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-c0c3-parallel-demo",
+    "objective": "对录制数据执行一次推理分析，同时独立地移动至园区大门。",
+    "actors": [
+      {
+        "id": "actor-analyst"
+      },
+      {
+        "id": "actor-mover"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-infer",
+      "roles": [
+        {
+          "id": "ctx-role-infer",
+          "actor": "actor-analyst"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    },
+    {
+      "id": "ctx-move",
+      "roles": [
+        {
+          "id": "ctx-role-move",
+          "actor": "actor-mover"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-infer-analysis",
+      "description": "使用 pointcloud-analysis-v1 模型对录制文件执行一次推理分析。",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-infer",
+          "context_role": "ctx-role-infer",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "compute",
+                  "name": "infer",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "compute",
+              "name": "infer",
+              "version": "v1"
+            },
+            "objective": "使用 pointcloud-analysis-v1 模型对录制文件执行一次推理分析。",
+            "parameters": {
+              "model": "pointcloud-analysis-v1"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-infer",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "录制文件已产生一次推理分析结果。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "task-move-gate",
+      "description": "独立地移动至园区大门。",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-move",
+          "context_role": "ctx-role-move",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "move",
+              "version": "v1"
+            },
+            "objective": "移动至园区大门。",
+            "parameters": {
+              "destination": "园区大门"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-move",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "已到达园区大门。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

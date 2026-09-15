@@ -1,0 +1,6 @@
+{"received_at": "2026-09-15T11:16:27.898180+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:16:27.900976+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/mobility.move", "body": null}
+{"received_at": "2026-09-15T11:16:28.014839+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/health", "body": null}
+{"received_at": "2026-09-15T11:16:28.017404+00:00", "client": "127.0.0.1", "method": "GET", "path": "/v1/capabilities/mobility.move", "body": null}
+{"received_at": "2026-09-15T11:16:28.571942+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions", "body": {"invocation": {"group_id": "group-mission-c0c3-parallel-demo", "mission_id": "mission-c0c3-parallel-demo", "objective": "移动至园区大门。", "operation": "mobility.move@v1", "parameters": {"destination": "园区大门"}, "resource_ids": [], "role_id": "role-move", "task_id": "task-move-gate"}}}
+{"received_at": "2026-09-15T11:16:28.719639+00:00", "client": "127.0.0.1", "method": "POST", "path": "/v1/executions/status", "body": {"execution_id": "c0c-fake-execution-1"}}

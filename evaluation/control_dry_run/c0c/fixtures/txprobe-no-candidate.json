@@ -1,0 +1,73 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-c0c-txprobe-no-candidate",
+    "objective": "probe decode gate",
+    "actors": [
+      {
+        "id": "actor-probe"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-probe",
+      "roles": [
+        {
+          "id": "ctx-role-probe",
+          "actor": "actor-probe"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-probe-relocate",
+      "description": "v0.7 task without timing must be rejected by decode.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-probe",
+          "context_role": "ctx-role-probe",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "object",
+              "name": "relocate",
+              "version": "v1"
+            },
+            "objective": "probe",
+            "parameters": {}
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-probe",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "probe",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

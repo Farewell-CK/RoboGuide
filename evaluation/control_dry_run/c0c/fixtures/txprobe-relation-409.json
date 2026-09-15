@@ -1,0 +1,140 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-c0c-txprobe-relation409",
+    "objective": "probe relation preflight gate",
+    "actors": [
+      {
+        "id": "actor-observe"
+      },
+      {
+        "id": "actor-navigate"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-probe",
+      "roles": [
+        {
+          "id": "ctx-role-observe",
+          "actor": "actor-observe"
+        },
+        {
+          "id": "ctx-role-navigate",
+          "actor": "actor-navigate"
+        }
+      ],
+      "relations": [
+        {
+          "id": "relation-probe-pose",
+          "kind": "relative-pose",
+          "frame_id": "map",
+          "source": {
+            "task_id": "task-probe-observe",
+            "role_id": "role-observe"
+          },
+          "target": {
+            "task_id": "task-probe-navigate",
+            "role_id": "role-navigate"
+          }
+        }
+      ],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-probe-observe",
+      "description": "Observe continuously.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-observe",
+          "context_role": "ctx-role-observe",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "safety",
+                  "name": "observe",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "safety",
+              "name": "observe",
+              "version": "v1"
+            },
+            "objective": "observe",
+            "parameters": {}
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-probe",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "observed",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "task-probe-navigate",
+      "description": "Navigate.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-navigate",
+          "context_role": "ctx-role-navigate",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "navigate",
+            "parameters": {}
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-probe",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "navigated",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}
