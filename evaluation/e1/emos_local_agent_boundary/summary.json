@@ -1,0 +1,53 @@
+{
+  "schema": "roboguide.e1-emos-boundary-summary/v0.1",
+  "roboguide_sha": "a2089ca2c11acd815c3b48f83a52cc7f47026c37",
+  "emos_root": "/data/workspace/code/emos-baseline",
+  "method": "source tracing (file:line evidence in TRACE.md) + isolated feasibility probe",
+  "em_leader": {
+    "what": "one-episode task decomposition + cross-robot assignment via {robot_id||subtask} with <=3 reflection rounds",
+    "implementation": "OpenAIModel instance with leader prompt (multi_llm_policy.py L289), not a class"
+  },
+  "crab_agent": {
+    "what": "per-robot local execution policy: subtask->action-sequence planning + per-tick action selection + send_request peer help",
+    "accepts_preassigned_subtask": true,
+    "entry_point": "CrabAgent.init_agent(robot_type, task_description, subtask_description, chat_history=None)",
+    "probe_evidence": "probe/probe-output.txt: standalone chat returned nav_to_obj(any_targets|0) without Leader"
+  },
+  "local_llm_loop_is_execution_policy": true,
+  "oracle_action_position": "below CrabAgent: defined_skills(nav_to_obj)->OracleNavPolicy->OracleNavAction(base_velocity)->env.step",
+  "bridge_skipped_layers": [
+    "Leader group discussion",
+    "CrabAgent local LLM loop",
+    "skill selection"
+  ],
+  "bridge_shared_layers": [
+    "simulator",
+    "scene/episode",
+    "embodiment",
+    "OracleNavAction",
+    "termination measure"
+  ],
+  "protocol_a": "current bridge is sufficient (native stacks on both sides)",
+  "protocol_b": "requires local-agent alignment: reuse CrabAgent below Leader as RoboGuide Local EAIOS executor (Option A form)",
+  "recommendation": "B (reuse CrabAgent layer for Controlled protocol; keep direct Oracle adapter as Native form and ablation)",
+  "held_constant": [
+    "simulator",
+    "scene/episode",
+    "embodiment",
+    "Oracle skills",
+    "termination",
+    "success metric",
+    "LLM model/endpoint",
+    "local policy"
+  ],
+  "independent_variable": "distributed mission organization / coordination system",
+  "remaining_confounders": [
+    "subtask wording level (natural-language objective vs entity reference)",
+    "message_pipe peer-help triggering in single-robot tasks",
+    "LLM temperature/version drift",
+    "episode termination conditions differ via RoboGuide satisfaction/cancel semantics"
+  ],
+  "requires_core_change": false,
+  "blocker": null,
+  "probe_tokens": 2398
+}
