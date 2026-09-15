@@ -1,0 +1,1 @@
+{"group_id":"group-mission-c1-s0-habitat-cancel","mission_id":"mission-c1-s0-habitat-cancel","peer_channels":[],"relations":[],"status":"Cancelled","tasks":[{"context_id":"habitat-navigation-context","status":"Active","task_id":"navigate-until-cancelled"}]}

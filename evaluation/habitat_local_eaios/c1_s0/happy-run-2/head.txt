@@ -1,0 +1,7 @@
+run=happy-2
+start_utc=2026-09-15T15:08:19Z
+end_utc=2026-09-15T15:09:09Z
+sha=727f5e4e5e938cf1c1907f131647a25d68974892
+episode=51
+agent=0
+note=deterministic replay of run-1 trajectory (same episode/seed)

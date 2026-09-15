@@ -1,0 +1,4 @@
+git_sha=727f5e4e5e938cf1c1907f131647a25d68974892
+revalidated_utc_start=2026-09-15T15:06:57Z revalidated_utc_end=2026-09-15T15:11:52Z
+scenario_md5s recorded in summary.json (frozen, unmodified)
+binary_rebuild=cargo clean -p integration-server -p roboguide-node && cargo build (mtime 2026-09-15 23:03 +0800)

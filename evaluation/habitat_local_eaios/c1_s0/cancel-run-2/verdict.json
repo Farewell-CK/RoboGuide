@@ -1,0 +1,35 @@
+{
+  "checks": {
+    "bridge_responsive": true,
+    "cancel_accepted_while_running": true,
+    "cancel_post_202": true,
+    "controller_alive": true,
+    "local_cancelled": true,
+    "mission_cancelled": true,
+    "mission_post_202": true,
+    "node_connected": true,
+    "terminal_cancelled_later": true
+  },
+  "local_execution": {
+    "execution_id": "habitat-007b38538078d8732d00c7aa",
+    "outcome": {
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "final_position": [
+        -0.16678085923194885,
+        2.3872528076171875,
+        3.768552780151367
+      ],
+      "initial_position": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "simulator_steps": 1,
+      "state": "CANCELLED"
+    }
+  },
+  "schema": "roboguide.c1-s0-habitat-cancel-verdict/v0.1",
+  "verdict": "PASS"
+}

@@ -1,0 +1,142 @@
+{
+  "schema": "roboguide.c1-s0-revalidation-summary/v0.1",
+  "git_sha": "727f5e4e5e938cf1c1907f131647a25d68974892",
+  "binaries": {
+    "integration-server": "target/debug/integration-server (rebuilt 2026-09-15 23:03 +0800)",
+    "roboguide-node": "target/debug/roboguide-node (rebuilt 2026-09-15 23:03 +0800)",
+    "build": "cargo clean -p integration-server -p roboguide-node && cargo build -p integration-server -p roboguide-node"
+  },
+  "environment": {
+    "emos_root": "/data/workspace/code/emos-baseline",
+    "conda_env": "habitat",
+    "gpu": "RTX 4090 x2, CUDA_VISIBLE_DEVICES=1",
+    "episode": "51",
+    "scene": "mp3d/pRbA3pwrgk9",
+    "agent": "0",
+    "destination": "any_targets|0"
+  },
+  "frozen_inputs_md5": {
+    "run-happy-path.sh": "dc7ad6b1aface14ef87c3502617b24c0",
+    "run-cancel-sanity.sh": "b3db673a032cfb50715c37549688b78b",
+    "mission-plan.json": "6fb6eaa400f58f81e7bde45c4499220b",
+    "mission-plan-cancel.json": "8fd05cd7545a00a4b3bdae3ae3db111b",
+    "node.toml": "8b83ccc451b7a5ed52189fd01a74e6cf",
+    "node-cancel.toml": "8999b3c878ad1fcc6eea694d9371c673",
+    "verify-smoke.py": "a06ca1993bdc4525dc0d8dbf0a74007e",
+    "verify-cancel.py": "d822a8e121bbcf1e60b90abb676090cb"
+  },
+  "runs": {
+    "happy-run-1": {
+      "verdict": "PASS",
+      "checks_passed": 20,
+      "checks_total": 20,
+      "local_execution": {
+        "execution_id": "habitat-820baa2cba19b6d314f6465a",
+        "outcome": {
+          "destination": "any_targets|0",
+          "episode_id": "51",
+          "final_position": [
+            -0.4185841977596283,
+            2.91664981842041,
+            -1.4727776050567627
+          ],
+          "initial_position": [
+            -0.16678085923194885,
+            2.3214714527130127,
+            3.768552780151367
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+          "simulator_steps": 101,
+          "state": "COMPLETED"
+        }
+      }
+    },
+    "happy-run-2": {
+      "verdict": "PASS",
+      "checks_passed": 20,
+      "checks_total": 20,
+      "local_execution": {
+        "execution_id": "habitat-820baa2cba19b6d314f6465a",
+        "outcome": {
+          "destination": "any_targets|0",
+          "episode_id": "51",
+          "final_position": [
+            -0.4185841977596283,
+            2.91664981842041,
+            -1.4727776050567627
+          ],
+          "initial_position": [
+            -0.16678085923194885,
+            2.3214714527130127,
+            3.768552780151367
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+          "simulator_steps": 101,
+          "state": "COMPLETED"
+        }
+      }
+    },
+    "cancel-run-1": {
+      "verdict": "PASS",
+      "checks_passed": 9,
+      "checks_total": 9,
+      "local_execution": {
+        "execution_id": "habitat-007b38538078d8732d00c7aa",
+        "outcome": {
+          "destination": "any_targets|0",
+          "episode_id": "51",
+          "final_position": [
+            -0.16678085923194885,
+            2.3872528076171875,
+            3.768552780151367
+          ],
+          "initial_position": [
+            -0.16678085923194885,
+            2.3214714527130127,
+            3.768552780151367
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+          "simulator_steps": 1,
+          "state": "CANCELLED"
+        }
+      }
+    },
+    "cancel-run-2": {
+      "verdict": "PASS",
+      "checks_passed": 9,
+      "checks_total": 9,
+      "local_execution": {
+        "execution_id": "habitat-007b38538078d8732d00c7aa",
+        "outcome": {
+          "destination": "any_targets|0",
+          "episode_id": "51",
+          "final_position": [
+            -0.16678085923194885,
+            2.3872528076171875,
+            3.768552780151367
+          ],
+          "initial_position": [
+            -0.16678085923194885,
+            2.3214714527130127,
+            3.768552780151367
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+          "simulator_steps": 1,
+          "state": "CANCELLED"
+        }
+      }
+    }
+  },
+  "acceptance": {
+    "happy_path": "2/2 PASS",
+    "cancel_sanity": "2/2 PASS",
+    "exact_operation_preserved": true,
+    "running_observed": true,
+    "physical_simulator_movement": true,
+    "exactly_once_dispatch": true,
+    "cancel_accepted_not_terminal": true,
+    "controller_node_bridge_survival": true,
+    "new_production_blocker": null
+  },
+  "overall": "PASS"
+}
