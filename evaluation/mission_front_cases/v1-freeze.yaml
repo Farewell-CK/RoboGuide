@@ -1,0 +1,177 @@
+# RoboGuide Mission Front-half V1 freeze suite (20 cases, 7 categories).
+#
+# This suite was frozen before the final real-model regression after a
+# machine-enforceability audit of the historical 29-case baseline.
+# Historical baseline.yaml is intentionally immutable.
+schema: roboguide-eval.mission-front-cases/v0.1
+cases:
+  # ---- normal ---------------------------------------------------------------
+  - id: n1-single-relocate
+    category: normal
+    instruction: "把客厅的杯子搬到卧室的床头柜上"
+    expect:
+      must_cover_objective: ["杯子", "卧室"]
+      integrated_operation: object.relocate@v1
+      min_roles: 1
+
+  - id: n2-mapping
+    category: normal
+    instruction: "在仓库区域建立地图并发布"
+    expect:
+      must_cover_objective: ["仓库", "地图"]
+      require_capabilities: ["spatial.map.build@v0", "spatial.map.publish@v0"]
+      min_tasks: 2
+      min_roles: 1
+
+  - id: n3-patrol-verify
+    category: normal
+    instruction: "确认走廊内每个灭火器都在原位"
+    expect:
+      must_cover_objective: ["走廊", "灭火器"]
+      require_capabilities: ["observation.verify@v1"]
+      min_roles: 1
+
+  - id: n4-edge-inference
+    category: normal
+    instruction: "使用 pointcloud-analysis-v1 模型对录制的激光点云数据做一次推理分析"
+    expect:
+      must_cover_objective: ["点云", "推理"]
+      require_capabilities: ["compute.infer@v1"]
+      min_roles: 1
+
+  # ---- ambiguity ------------------------------------------------------------
+  - id: a1-missing-destination
+    category: ambiguity
+    instruction: "把桌子上的杯子搬走"
+    follow_ups: ["搬到卧室的床头柜上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["杯子"]
+      integrated_operation: object.relocate@v1
+
+  - id: a2-missing-object
+    category: ambiguity
+    instruction: "去厨房把东西拿过来"
+    follow_ups: ["拿红色的水壶，放到餐桌上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["水壶"]
+
+  - id: a3-pronoun-reference
+    category: ambiguity
+    instruction: "把它放到那儿"
+    follow_ups: ["把窗台上的绿植搬到阳台的架子上"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["绿植", "阳台"]
+
+  - id: a4-undefined-criterion
+    category: ambiguity
+    instruction: "把贵重物品搬到安全的地方"
+    follow_ups: ["贵重物品是保险柜里的文件，安全的地方是二楼档案室"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["文件", "档案室"]
+
+  - id: a5-vague-scope
+    category: ambiguity
+    instruction: "把仓库整理一下"
+    follow_ups: ["把货架上的成品箱子搬运到出货区"]
+    expect:
+      clarify_first_pass: true
+      must_cover_objective: ["箱子", "出货区"]
+      integrated_operation: object.relocate@v1
+
+  # ---- heterogeneous --------------------------------------------------------
+  - id: h2-mapper-then-transport
+    category: heterogeneous
+    instruction: "先给新仓库建图，然后把一批样品从门口运到检验台"
+    expect:
+      must_cover_objective: ["建图", "样品", "检验台"]
+      min_tasks: 2
+      require_capabilities: ["spatial.map.build@v0", "object.relocate@v1"]
+
+  # ---- integrated -----------------------------------------------------------
+  - id: i1-relocate-canonical
+    category: integrated
+    instruction: "把厨房的易拉罐搬到储藏室的货架上"
+    expect:
+      must_cover_objective: ["易拉罐", "储藏室"]
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b", "抓取", "放置后"]
+
+  - id: i2-relocate-long-distance
+    category: integrated
+    instruction: "把实验楼的样品盒运送到对面办公楼一层的前台"
+    expect:
+      must_cover_objective: ["样品盒", "前台"]
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b"]
+
+  - id: i4-relocate-two-objects
+    category: integrated
+    instruction: "先把工具箱搬到车库，再把备件盒搬上货架"
+    expect:
+      must_cover_objective: ["工具箱", "备件盒"]
+      min_tasks: 2
+      integrated_operation: object.relocate@v1
+      forbid_task_description_patterns: ["\\bpick\\b", "\\bplace\\b"]
+
+  # ---- cross_node -----------------------------------------------------------
+  - id: c1-two-robots-parallel
+    category: cross_node
+    instruction: "让机器人甲把 A 区的货物送到 B 区卸货点，同时机器人乙把 C 区的货架推到 D 区"
+    expect:
+      must_cover_objective: ["A 区", "B 区", "D 区"]
+      min_roles: 2
+      min_actors: 2
+
+  # ---- resource_timing ------------------------------------------------------
+  - id: t1-deadline
+    category: resource_timing
+    instruction: "一小时内把打印好的季度报表送到经理办公室"
+    expect:
+      must_cover_objective: ["报表", "经理办公室"]
+      timing_required: true
+      integrated_operation: object.relocate@v1
+
+  - id: t2-start-window
+    category: resource_timing
+    instruction: "任务接受后 1 小时开始在园区大门执行迎宾巡逻"
+    expect:
+      must_cover_objective: ["园区大门", "巡逻"]
+      timing_required: true
+
+  - id: t4-compute-resource
+    category: resource_timing
+    instruction: "把刚才录制的巡检视频使用 defect-detection-v1 模型做缺陷检测推理，并要求占用 1 单位通用计算资源"
+    expect:
+      must_cover_objective: ["视频", "缺陷"]
+      require_capabilities: ["compute.infer@v1"]
+      resource_kinds: ["compute"]
+
+  # ---- multi_role -----------------------------------------------------------
+  - id: m1-relocate-then-verify
+    category: multi_role
+    instruction: "把贵重样品从实验室运到展示厅，送达后确认样品状态完好"
+    expect:
+      must_cover_objective: ["样品", "展示厅", "状态"]
+      min_tasks: 2
+      min_roles: 2
+      require_capabilities: ["object.relocate@v1", "observation.verify@v1"]
+
+  - id: m2-map-then-localize
+    category: multi_role
+    instruction: "先在新区建图，建图完成后在新地图上做定位验证"
+    expect:
+      must_cover_objective: ["建图", "定位"]
+      min_tasks: 2
+      require_capabilities: ["spatial.map.build@v0", "spatial.localization.verify@v0"]
+
+  - id: m4-map-relocate-verify
+    category: multi_role
+    instruction: "先给新库房建图，然后把三箱样品搬入库房，最后确认上架情况"
+    expect:
+      must_cover_objective: ["建图", "样品", "上架"]
+      min_tasks: 3
+      require_capabilities: ["spatial.map.build@v0", "object.relocate@v1", "observation.verify@v1"]
