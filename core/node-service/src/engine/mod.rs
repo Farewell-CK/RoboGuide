@@ -111,6 +111,9 @@ impl NodeObservation {
 pub enum ExecuteDisposition {
     /// Local dispatch was durably authorized exactly once.
     Started,
+    /// The same identity is durably admitted but has no local execution fact to replay yet.
+    /// This grants no further dispatch permission; only the command receipt may be repeated.
+    DispatchPending,
     /// The same identity already exists and its current snapshot must be replayed.
     Existing(ExecutionSnapshot),
 }

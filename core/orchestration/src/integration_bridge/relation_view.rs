@@ -349,16 +349,35 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime_events.drain(..).collect()
     }
 
-    /// Reports terminal outcomes for active TaskExecutions without changing Mission or Group state.
+    /// Reports terminal outcomes only while Control permits current bindings to progress.
+    ///
+    /// Blocked Groups retain terminal attempt evidence for later evaluation. A late old-attempt
+    /// completion cannot satisfy a replacement binding before its own attempt is dispatched.
     pub fn terminal_task_execution_outcomes(&self) -> Vec<ObservedTaskExecutionOutcome> {
         let mut outcomes = Vec::new();
         for group_id in self.control.group_ids() {
             let Some(group) = self.control.group(&group_id) else {
                 continue;
             };
+            if !matches!(
+                group.lifecycle(),
+                control::GroupLifecycle::Bound
+                    | control::GroupLifecycle::Active
+                    | control::GroupLifecycle::Adapted
+            ) {
+                continue;
+            }
             for task in group.task_executions().filter(|task| {
                 task.lifecycle() == domain::TaskExecutionLifecycle::Active
                     && task_assignments_are_complete(task)
+                    && task.assignments().iter().all(|assignment| {
+                        self.runtime.current_attempt_matches_node(
+                            &group_id,
+                            task.task_ref(),
+                            assignment.role_id(),
+                            assignment.node_id(),
+                        )
+                    })
             }) {
                 let role_ids = task
                     .assignments()

@@ -667,4 +667,5 @@ fn gated_catalog_for_contract(
 mod artifact;
 mod execution;
 mod protocol;
+mod snapshot_replay;
 mod workflow;

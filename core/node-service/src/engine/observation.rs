@@ -245,12 +245,13 @@ impl LocalIntegrationEngine {
 
     /// Returns all durable snapshots for reconnect replay.
     pub fn snapshots(&self) -> Result<Vec<ExecutionSnapshot>, EngineError> {
-        self.inner
+        Ok(self
+            .inner
             .journal
             .replay_records()?
             .into_iter()
-            .map(snapshot_from_record)
-            .collect()
+            .filter_map(snapshot_from_record)
+            .collect())
     }
 
     /// Recovers status polling for known active executions without redispatching them.

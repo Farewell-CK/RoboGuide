@@ -75,6 +75,22 @@ The inner integration checkpoint advances to `roboguide.controller-checkpoint/v1
 wrapper advances to `roboguide.controller-checkpoint/v13`. Each accepts only its immediately previous
 version for migration. Node configuration remains v0.6; contract bundle v0.7 contains Protocol v0.4.
 
+### C0C-B1 replay and application fence correction
+
+Same-process replay (including a lagged Node broadcast receiver) omits `Dispatching` journal rows:
+they have command-admission evidence but no local execution phase yet. Duplicate Execute returns
+the persisted receipt without a new dispatch authorization or synthetic activation/`Unknown` fact.
+Journal open still fences interrupted dispatches before reconnect snapshots; timeout and restart
+ambiguity continue to produce `Unknown` with the journal reason.
+
+Application progression respects Control's recovery fence. A Blocked Group is excluded from normal
+Ready-Task dispatch and terminal Task outcome application. Late attempt facts remain in Runtime and
+the checkpoint; they do not reactivate an unbound Task. Once Control restores the Group, retained
+outcomes may progress only for complete current bindings whose Node owners match Runtime's current
+attempts. A replacement binding cannot consume its predecessor's completion before dispatching its
+own attempt. This corrects C0C-B1 without changing the wire protocol, Control lifecycle, or fail-stop
+handling of genuine application/persistence errors.
+
 ## Consequences
 
 The Controller crash windows now have explicit durable intent and conservative restart semantics.

@@ -45,7 +45,7 @@ impl LocalIntegrationEngine {
                             capability,
                         )?;
                     }
-                    Ok(ExecuteDisposition::Existing(snapshot_from_record(record)?))
+                    Ok(existing_disposition(record))
                 }
                 PrepareDispatch::Conflict(_) => Err(EngineError::ExecutionConflict(execution_id)),
                 PrepareDispatch::Start(_) => unreachable!("existing record cannot start"),
@@ -67,7 +67,7 @@ impl LocalIntegrationEngine {
             }
             PrepareDispatch::Existing(record) => {
                 self.release_locks(&execution_id);
-                Ok(ExecuteDisposition::Existing(snapshot_from_record(record)?))
+                Ok(existing_disposition(record))
             }
             PrepareDispatch::Conflict(_) => {
                 self.release_locks(&execution_id);
@@ -136,4 +136,12 @@ impl LocalIntegrationEngine {
             .get(operation)
             .ok_or_else(|| EngineError::UnsupportedCapability(operation.to_string()))
     }
+}
+
+/// Replays only an existing lifecycle fact, never inventing one for a live dispatch.
+fn existing_disposition(record: JournalExecution) -> ExecuteDisposition {
+    snapshot_from_record(record).map_or(
+        ExecuteDisposition::DispatchPending,
+        ExecuteDisposition::Existing,
+    )
 }

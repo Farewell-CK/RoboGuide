@@ -198,7 +198,7 @@ async fn execution_identity_canonicalizes_resource_order() {
                 vec!["base".to_string(), "aux".to_string()]
             )
             .expect("same resource set is idempotent"),
-        crate::ExecuteDisposition::Existing(_)
+        crate::ExecuteDisposition::DispatchPending
     ));
 }
 

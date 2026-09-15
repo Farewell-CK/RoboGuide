@@ -10,6 +10,7 @@ use testkit::InMemoryEventLog;
 mod checkpoint_ingestion;
 mod dispatch_recovery;
 mod execution_facts;
+mod outcome_fences;
 mod relation_view;
 mod state_view;
 

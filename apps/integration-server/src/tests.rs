@@ -1,5 +1,7 @@
 use super::*;
 
+mod runtime_replay;
+
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
 #[tokio::test]
 async fn unknown_execution_cancel_rolls_back_transaction() {

@@ -141,17 +141,9 @@ impl NodeService {
                             &management_sequence,
                         ).await?;
                     }
-                    event = local_events.recv() => match event {
-                        Ok(event) => outbound.send(NodeMessage { message: Some(NodePayload::ExecutionEvent(ExecutionEvent {
-                            session_id: registered.session_id.clone(),
-                            execution_id: event.execution_id,
-                            sequence: event.sequence,
-                            phase: event.phase as i32,
-                            reason: event.reason,
-                        })) }).map_err(|_| NodeServiceError::Closed)?,
-                        Err(broadcast::error::RecvError::Lagged(_)) => self.replay_snapshots(&registered.session_id, &outbound)?,
-                        Err(broadcast::error::RecvError::Closed) => return Err(NodeServiceError::Closed),
-                    },
+                    event = local_events.recv() => self.forward_execution_event(
+                        event, &registered.session_id, &outbound,
+                    )?,
                     event = peer_readiness_events.recv() => match event {
                         Ok(event) => {
                             let mut sequence = management_sequence.lock().await;
@@ -480,7 +472,7 @@ impl NodeService {
                     invocation,
                     execute.resource_ids,
                 ) {
-                    Ok(ExecuteDisposition::Started) => {
+                    Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
                         integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
                     }
                     Ok(ExecuteDisposition::Existing(mut snapshot)) => {
@@ -579,7 +571,33 @@ impl NodeService {
         }
     }
 
-    /// Replays durable execution state into the current transport session.
+    /// Forwards local facts, recovering a lagged receiver from the journal without redispatch.
+    fn forward_execution_event(
+        &self,
+        event: Result<crate::LocalExecutionEvent, broadcast::error::RecvError>,
+        session_id: &str,
+        outbound: &mpsc::UnboundedSender<NodeMessage>,
+    ) -> Result<(), NodeServiceError> {
+        match event {
+            Ok(event) => outbound
+                .send(NodeMessage {
+                    message: Some(NodePayload::ExecutionEvent(ExecutionEvent {
+                        session_id: session_id.to_string(),
+                        execution_id: event.execution_id,
+                        sequence: event.sequence,
+                        phase: event.phase as i32,
+                        reason: event.reason,
+                    })),
+                })
+                .map_err(|_| NodeServiceError::Closed),
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                self.replay_snapshots(session_id, outbound)
+            }
+            Err(broadcast::error::RecvError::Closed) => Err(NodeServiceError::Closed),
+        }
+    }
+
+    /// Replays durable lifecycle facts; live dispatch admission is covered by command receipts.
     fn replay_snapshots(
         &self,
         session_id: &str,

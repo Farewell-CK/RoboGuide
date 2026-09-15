@@ -40,6 +40,14 @@ impl MissionOrchestrator {
         let Some(group) = control.group(execution.group_id()) else {
             return Vec::new();
         };
+        // A released Ready role is owned by recovery until Control restores its Group.
+        // Normal scheduling must not silently bind it again while the Group is Blocked.
+        if !matches!(
+            group.lifecycle(),
+            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
+            return Vec::new();
+        }
         execution
             .plan()
             .task_graph()

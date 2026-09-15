@@ -18,6 +18,21 @@ pub(crate) fn apply_runtime_events(
                     .and_then(|group| {
                         group
                             .task_execution(&task_ref)
+                            .filter(|task| {
+                                // A late old-attempt fact is still evidence, but cannot activate
+                                // a released or differently rebound logical Task.
+                                task.assignments().len() == task.role_scopes().len()
+                                    && !task.assignments().is_empty()
+                                    && task.assignments().iter().all(|assignment| {
+                                        task.role_scopes().contains_key(assignment.role_id())
+                                            && controller.bridge.current_attempt_matches_binding(
+                                                &group_id,
+                                                &task_ref,
+                                                assignment.role_id(),
+                                                assignment.node_id(),
+                                            )
+                                    })
+                            })
                             .map(|task| (group.lifecycle(), task.lifecycle()))
                     });
                 if lifecycles.is_some_and(|(_, task)| task == domain::TaskExecutionLifecycle::Ready)

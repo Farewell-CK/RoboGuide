@@ -521,21 +521,21 @@ pub(super) fn decode_invocation_json(bytes: &[u8]) -> Result<serde_json::Value, 
     serde_json::from_slice(bytes).map_err(EngineError::Json)
 }
 
-/// Converts one journal record into a Node Protocol reconnect snapshot.
-pub(super) fn snapshot_from_record(
-    record: JournalExecution,
-) -> Result<ExecutionSnapshot, EngineError> {
+/// Projects reported execution facts; live dispatch has only command-admission evidence.
+///
+/// Journal open fences interrupted dispatch as `ReconciliationRequired` before replay.
+/// A still-live `Dispatching` row proves neither local activation nor physical ambiguity.
+pub(super) fn snapshot_from_record(record: JournalExecution) -> Option<ExecutionSnapshot> {
     let phase = match record.status() {
-        JournalStatus::Dispatching | JournalStatus::ReconciliationRequired => {
-            ExecutionPhase::Unknown
-        }
+        JournalStatus::Dispatching => return None,
+        JournalStatus::ReconciliationRequired => ExecutionPhase::Unknown,
         JournalStatus::Accepted => ExecutionPhase::Accepted,
         JournalStatus::Running => ExecutionPhase::Started,
         JournalStatus::Completed => ExecutionPhase::Completed,
         JournalStatus::Failed => ExecutionPhase::Failed,
         JournalStatus::Cancelled => ExecutionPhase::Cancelled,
     };
-    Ok(ExecutionSnapshot {
+    Some(ExecutionSnapshot {
         session_id: String::new(),
         execution_id: record.execution_id().to_string(),
         last_sequence: record.sequence(),

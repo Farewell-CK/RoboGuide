@@ -320,6 +320,16 @@ async fn reconciliation_required_execution_fences_local_resources_after_restart(
     )
     .expect("engine reopens journal");
     engine.recover().expect("ambiguous execution is fenced");
+    let snapshots = engine.snapshots().expect("restart ambiguity replays");
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        snapshots[0].phase,
+        integration::grpc::v0_4::ExecutionPhase::Unknown as i32
+    );
+    assert!(
+        !snapshots[0].reason.is_empty(),
+        "restart ambiguity has diagnostic evidence"
+    );
     let competing = integration::grpc::v0_4::CanonicalInvocation {
         mission_id: "mission-a".to_string(),
         task_id: "task-a".to_string(),
