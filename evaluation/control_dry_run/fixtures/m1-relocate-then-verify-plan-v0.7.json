@@ -1,0 +1,125 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-64cc07d0bb65486db1625751ee670aec",
+    "objective": "将实验室中的贵重样品运送至展示厅，并在送达后确认样品状态完好。",
+    "actors": [
+      {
+        "id": "mission-actor"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "delivery-context",
+      "roles": [
+        {
+          "id": "delivery-agent",
+          "actor": "mission-actor"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "deliver-sample",
+      "description": "贵重样品已从实验室送达展示厅。",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "delivery-role",
+          "context_role": "delivery-agent",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "object",
+              "name": "relocate",
+              "version": "v1"
+            },
+            "objective": "将贵重样品从实验室送达展示厅。",
+            "parameters": {
+              "destination": "展示厅",
+              "object": "贵重样品",
+              "source": "实验室"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "delivery-context",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "贵重样品已从实验室送达展示厅。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "confirm-sample-condition",
+      "description": "已获得送达展示厅后样品状态是否完好的观察结果。",
+      "depends_on": [
+        "deliver-sample"
+      ],
+      "roles": [
+        {
+          "id": "condition-confirmation-role",
+          "context_role": "delivery-agent",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "observation",
+                  "name": "verify",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "observation",
+              "name": "verify",
+              "version": "v1"
+            },
+            "objective": "获得送达展示厅后样品状态是否完好的观察结果。",
+            "parameters": {
+              "expected": "样品状态完好"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "delivery-context",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "已获得送达展示厅后样品状态是否完好的观察结果。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}
