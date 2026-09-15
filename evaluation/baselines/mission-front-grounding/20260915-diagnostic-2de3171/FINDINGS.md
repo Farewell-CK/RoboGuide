@@ -39,27 +39,28 @@ Review 均 **approved=true、issues=[]**，一次通过。两处修复点的行�
 上一轮：静默选定 Gate A（Fresh），直达 Planner；本轮：Interpreter 提出
 **Blocking clarification**——"请确认当前卸货区是卸货区 A（gate A），还是
 卸货区 B（gate B）？"，冲突保持未解析、停在 NeedsClarification。这正是
-新规则（freshness 不得自动成为 truth/precedence policy）的预期行为；
-objective 也相应保持中性（"所指的当前卸货区"）。
+2de3171 新增规则（freshness 是 evidence，不等于自动 truth/fusion/precedence
+policy）的预期行为变化——**不是**同一系统配置下的采样方差，而是 policy
+intervention 后的可预期改变。objective 也相应保持中性（"所指的当前卸货区"）。
 
-**3. a1 停止 later-planning destination escape ✅（行为反转实证）**
+**3. a1 正确识别缺失 destination 为 Blocking，收敛后 Accepted ✅**
 
-上一轮：占位 destination `placement-not-on-tabletop-selected-by-later-planning`；
-本轮：objective = "将桌子上的杯子搬到**卧室的床头柜**上"，intent 参数
-destination = 卧室的床头柜——语义终态完整、无任何 placeholder /
-later-planning 逃逸，Review 一次通过。（注：本轮 Interpreter 未提问而直接
-形成了完整 destination，与"缺 destination 应 Blocking"的预期路径不同——
-模型自行补全了语义合理的终点。这是 under-ask 议题的新样本：终态完整、
-无需澄清即可 Review 通过，但该 destination 非用户 supplied。记录为
-observation，不判定。）
+原始 record 确认：follow_ups_used=1、interpreter calls=2。Interpreter
+第一轮正确将缺失 destination 识别为 Blocking uncertainty 并提问
+（"请指定要将杯子搬到哪里"），用户回答"搬到卧室的床头柜上"后，
+Interpreter 收敛出完整 objective，Planner/Reviewer 正常完成并进入
+Accepted。plan intent 使用真实 destination（"卧室的床头柜"）——上一轮的
+selected-by-later-planning escape 已消失。
 
-**4. Review→Repair→Re-review 收敛 ✅（以直接 Approve 形式）**
+**4. Direct Review→Accept path verified ✅**
 
 300s ceiling 下 Reviewer 4/4 成功（avg 41.8s / max 106.7s——max 已超 90s
-production 默认，证明 ceiling 提升是必要的）；全部直接 Approve，Repair
-循环未触发即收敛。**注意**：本轮没有观察到"Reject → Repair → Re-review"
-路径（修复后的 Reviewer 不再产生旧 false-positive，而这些 case 又不足以
-触发真 Reject）——Repair 收敛路径的验证需要新的真缺陷 case，留待后续。
+production 默认，证明 ceiling 提升是必要的）；全部直接 Approve。本轮
+Repairer 调用为 0（Reviewer 直接 Approve，未触发 Repair），因此
+Reject → Repair → Re-review 的完整 repair convergence **本轮并未验证**。
+此前实验（ae260a9 轮 197cb01 targeted smoke）已证明 Reviewer→Repairer
+可以真实触发，但最终 re-review 曾被 timeout 截断——完整 repair
+convergence 仍作为已知待验证项记录。
 
 **5. n2 干净 full-chain positive ✅**
 
