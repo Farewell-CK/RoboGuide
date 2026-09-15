@@ -12,6 +12,7 @@ case's semantic invariants.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 import uuid
@@ -82,6 +83,7 @@ class SuiteComponents:
     model: str
     relay_base_url: str
     grounding_label: str = "empty"
+    llm_timeout_seconds: float = 0.0
 
 
 def build_suite_components(
@@ -89,6 +91,7 @@ def build_suite_components(
     transport: RecordingTransport,
     stages: StageScope,
     grounding_reader: object | None = None,
+    llm_timeout_override: float | None = None,
 ) -> SuiteComponents:
     """Compose the production front-half engine with evaluation-only seams.
 
@@ -106,6 +109,10 @@ def build_suite_components(
             implementation injected into the engine (fixture-grounded mode);
             ``None`` keeps the engine's empty-context default
             (context-free mode).
+        llm_timeout_override: Optional diagnostic ceiling (seconds)
+            replacing the production ``timeout_seconds`` for this run only.
+            The production config file is never modified; the override and
+              the production default are both recorded in suite evidence.
 
     Returns:
         The assembled suite components.
@@ -118,6 +125,11 @@ def build_suite_components(
     mission_settings = load_settings(
         repository_root / "config" / "mission.toml", repository_root=repository_root
     )
+    if llm_timeout_override is not None and llm_timeout_override > 0:
+        mission_settings = dataclasses.replace(
+            mission_settings,
+            llm=dataclasses.replace(mission_settings.llm, timeout_seconds=llm_timeout_override),
+        )
     service_settings = load_service_settings(
         repository_root / "config" / "mission-service.toml", repository_root=repository_root
     )
@@ -191,6 +203,7 @@ def build_suite_components(
         model=mission_settings.llm.model,
         relay_base_url=mission_settings.provider.base_url,
         grounding_label=str(grounding_label),
+        llm_timeout_seconds=mission_settings.llm.timeout_seconds,
     )
 
 
@@ -415,6 +428,7 @@ def run_suite(
     only: tuple[str, ...] = (),
     limit: int = 0,
     grounding_reader: object | None = None,
+    llm_timeout_override: float | None = None,
 ) -> dict[str, object]:
     """Run a suite of front-half cases and write the complete evidence set.
 
@@ -427,6 +441,8 @@ def run_suite(
         limit: Optional maximum number of cases to run (0 = all).
         grounding_reader: Optional official reader injected into the engine
             (fixture-grounded mode); ``None`` runs context-free.
+        llm_timeout_override: Optional diagnostic timeout ceiling (seconds)
+            applied in-memory only; production config stays untouched.
 
     Returns:
         The summary document written to ``summary.json``.
@@ -447,7 +463,11 @@ def run_suite(
     stages = StageScope()
     transport = RecordingTransport(_default_transport_factory(), stages)
     suite = build_suite_components(
-        repository_root, transport, stages, grounding_reader=grounding_reader
+        repository_root,
+        transport,
+        stages,
+        grounding_reader=grounding_reader,
+        llm_timeout_override=llm_timeout_override,
     )
     run_dir = out_dir / suite_id
     cases_dir = run_dir / "cases"
@@ -552,6 +572,7 @@ def build_summary(
         "model": suite.model,
         "relay_base_url": suite.relay_base_url,
         "grounding": suite.grounding_label,
+        "llm_timeout_seconds": suite.llm_timeout_seconds,
         "cases_executed": len(results),
         "cases_passed": sum(1 for result in results if result.passed),
         "by_category": by_category,

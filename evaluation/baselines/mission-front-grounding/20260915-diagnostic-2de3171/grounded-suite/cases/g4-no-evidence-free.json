@@ -1,0 +1,476 @@
+{
+  "case_id": "g4-no-evidence-free",
+  "category": "grounding",
+  "instruction": "把贴有红色标签的工具箱搬到装卸区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 81.9,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 6605.7,
+      "request_bytes": 7287,
+      "response_bytes": 11910,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f4e137dbbe3c26a016aa8a942db4c87d1bb9996843b6eb0af": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 316,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 316,
+              "output_tokens": 0
+            },
+            "rs_0f4e137dbbe3c26a016aa8a9435c2487d1ae11143bb9cad691": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 240
+            },
+            "msg_0f4e137dbbe3c26a016aa8a947d3dc87d18efc95c8192c432c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 45
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 45
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1501,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 285,
+        "output_tokens_details": {
+          "reasoning_tokens": 240
+        },
+        "total_tokens": 1786
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 55378.6,
+      "request_bytes": 24182,
+      "response_bytes": 43217,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_09f40a66ca098161016aa8a949b51487d1b5eb95c303b68f50": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1564,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 1564,
+                  "input_tokens": 2571,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2571,
+              "output_tokens": 0
+            },
+            "rs_09f40a66ca098161016aa8a94a532c87d1b4de7060d91037be": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_09f40a66ca098161016aa8a953a9c087d1a5998ef93e0162c7": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_09f40a66ca098161016aa8a95cf94c87d1a3c4e4336e07408e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_09f40a66ca098161016aa8a9664e6887d1bc0d9b56f2494ad5": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_09f40a66ca098161016aa8a96fa1cc87d1a503d64634ed5a46": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_09f40a66ca098161016aa8a9790e3887d1b8565eb34c268d1c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 380
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 380
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1333,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 943,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4849,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 3840
+        },
+        "output_tokens": 2968,
+        "output_tokens_details": {
+          "reasoning_tokens": 2588
+        },
+        "total_tokens": 7817
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 19428.8,
+      "request_bytes": 17383,
+      "response_bytes": 17625,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0f565d597fd5918d016aa8a9811ec087d18669a7d81083e978": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2962,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2962,
+              "output_tokens": 0
+            },
+            "rs_0f565d597fd5918d016aa8a981a03887d185542eb46a308acd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0f565d597fd5918d016aa8a98af49087d1a236863f08ae475b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 449
+            },
+            "msg_0f565d597fd5918d016aa8a993231c87d19246d8a54b1625bb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3834,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 985,
+        "output_tokens_details": {
+          "reasoning_tokens": 965
+        },
+        "total_tokens": 4819
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 10184,
+    "output_tokens": 4238,
+    "total_tokens": 14422
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 6606.7,
+      "avg_ms": 6606.7,
+      "max_ms": 6606.7
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 55384.1,
+      "avg_ms": 55384.1,
+      "max_ms": 55384.1
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 19430.4,
+      "avg_ms": 19430.4,
+      "max_ms": 19430.4
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-b39cec9be2df4be28648cbf76a87c3b1",
+    "mission_id": "mission-c5da7d453b7845dab74a7278388d71a7",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把贴有红色标签的工具箱搬到装卸区",
+        "created_at_ms": 1789438273986,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+      "constraints": [],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-c5da7d453b7845dab74a7278388d71a7",
+        "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+        "actors": [
+          {
+            "id": "actor-relocator"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-toolbox-relocation",
+          "roles": [
+            {
+              "id": "ctxrole-relocator",
+              "actor": "actor-relocator"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-toolbox",
+          "description": "贴有红色标签的工具箱位于装卸区。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-relocate-toolbox",
+              "context_role": "ctxrole-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将贴有红色标签的工具箱搬运至装卸区。",
+                "parameters": {
+                  "destination": "装卸区",
+                  "object": "贴有红色标签的工具箱",
+                  "source": "贴有红色标签的工具箱当前所在位置"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-toolbox-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "贴有红色标签的工具箱位于装卸区。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:39607de955e57f590f13892b5333020e1bc87020f8c1816e8fdc182b9b77029a",
+      "request_id": "request-b39cec9be2df4be28648cbf76a87c3b1",
+      "dialogue_digest": "sha256:0b6d588e1a49a3e36a4eb14a559c55b00276000441bc2025f1cac779f01bc0dc",
+      "captured_at_ms": 1789438274102,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:584be1e1aecb8d78495b02e37d87c57ce088d0a2b81145d5fd2f3f523a2382fd",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:584be1e1aecb8d78495b02e37d87c57ce088d0a2b81145d5fd2f3f523a2382fd",
+        "grounding_context_digest": "sha256:39607de955e57f590f13892b5333020e1bc87020f8c1816e8fdc182b9b77029a",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789438355751
+      }
+    ],
+    "created_at_ms": 1789438273986,
+    "updated_at_ms": 1789438355858
+  }
+}

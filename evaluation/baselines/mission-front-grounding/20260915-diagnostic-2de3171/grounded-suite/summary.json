@@ -1,0 +1,111 @@
+{
+  "suite_id": "mission-front-20260915T020934Z-eb514399",
+  "scenarios_executed": 3,
+  "scenarios_passed": 3,
+  "pairs": {
+    "fresh-vs-stale": {
+      "instruction": "把载有发动机备件的托盘送到当前卸货区",
+      "modes": {
+        "fixture_grounded": {
+          "final_lifecycle": "NeedsClarification",
+          "clarification_questions": 1,
+          "llm_calls": 1,
+          "token_totals": {
+            "input_tokens": 1831,
+            "output_tokens": 1047,
+            "total_tokens": 2878
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "no-evidence": {
+      "instruction": "把贴有红色标签的工具箱搬到装卸区",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Accepted",
+          "clarification_questions": 0,
+          "llm_calls": 3,
+          "token_totals": {
+            "input_tokens": 10184,
+            "output_tokens": 4238,
+            "total_tokens": 14422
+          },
+          "failed_invariants": []
+        }
+      }
+    },
+    "stale": {
+      "instruction": "去充电桩那里待命",
+      "modes": {
+        "context_free": {
+          "final_lifecycle": "Accepted",
+          "clarification_questions": 0,
+          "llm_calls": 3,
+          "token_totals": {
+            "input_tokens": 10183,
+            "output_tokens": 5045,
+            "total_tokens": 15228
+          },
+          "failed_invariants": []
+        }
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "case_id": "g3-stale-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Accepted",
+      "wall_seconds": 99.0,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior"
+      ],
+      "llm_calls": 3,
+      "mode": "context_free",
+      "pair": "stale"
+    },
+    {
+      "case_id": "g4-no-evidence-free",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "Accepted",
+      "wall_seconds": 81.9,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior"
+      ],
+      "llm_calls": 3,
+      "mode": "context_free",
+      "pair": "no-evidence"
+    },
+    {
+      "case_id": "g6-fresh-vs-stale-grounded",
+      "category": "grounding",
+      "passed": true,
+      "expected_lifecycle": "Any",
+      "final_lifecycle": "NeedsClarification",
+      "wall_seconds": 22.8,
+      "failed_invariants": [],
+      "not_evaluated_invariants": [
+        "clarification_behavior",
+        "objective_fidelity",
+        "decomposition_sanity",
+        "capability_coverage",
+        "integrated_operation",
+        "resource_kinds",
+        "timing_presence",
+        "local_how_leakage",
+        "review_repair_convergence"
+      ],
+      "llm_calls": 1,
+      "mode": "fixture_grounded",
+      "pair": "fresh-vs-stale"
+    }
+  ],
+  "llm_timeout_seconds": 300.0
+}

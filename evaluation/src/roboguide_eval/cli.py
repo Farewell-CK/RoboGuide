@@ -145,6 +145,13 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="run grounding A/B canaries from this scenario YAML instead of plain cases",
     )
+    mission_front.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=None,
+        help="diagnostic LLM timeout ceiling in seconds (in-memory only; "
+        "production config is not modified)",
+    )
     return parser
 
 
@@ -553,6 +560,8 @@ def _mission_front(arguments: argparse.Namespace) -> int:
                 scenarios,
                 repository_root=arguments.repository_root.resolve(),
                 out_dir=arguments.out,
+                only=tuple(arguments.only),
+                llm_timeout_override=arguments.llm_timeout,
             )
             print(f"suite: {summary['suite_id']}  grounding canaries")
             print(f"scenarios passed {summary['scenarios_passed']}/{summary['scenarios_executed']}")
@@ -581,6 +590,7 @@ def _mission_front(arguments: argparse.Namespace) -> int:
             out_dir=arguments.out,
             only=tuple(arguments.only),
             limit=arguments.limit,
+            llm_timeout_override=arguments.llm_timeout,
         )
     except Exception as error:  # noqa: BLE001 - CLI boundary reports cleanly
         print(f"error: {error}", file=sys.stderr)

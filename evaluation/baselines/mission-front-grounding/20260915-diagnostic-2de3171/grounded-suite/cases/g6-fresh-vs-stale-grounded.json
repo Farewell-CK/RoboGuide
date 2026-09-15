@@ -1,0 +1,277 @@
+{
+  "case_id": "g6-fresh-vs-stale-grounded",
+  "category": "grounding",
+  "instruction": "把载有发动机备件的托盘送到当前卸货区",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "NeedsClarification",
+  "passed": true,
+  "wall_seconds": 22.8,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached NeedsClarification"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 1 clarification question(s) recorded: 请确认当前卸货区是卸货区 A（gate A），还是卸货区 B（gate B）？"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "timing_presence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": null,
+      "detail": "no plan in record (lifecycle NeedsClarification); planner stage not reached"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 22521.0,
+      "request_bytes": 8392,
+      "response_bytes": 18275,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_03a80582ea70badf016aa8a997153c87d18e41d736950c419d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 646,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 646,
+              "output_tokens": 0
+            },
+            "rs_03a80582ea70badf016aa8a9979bb887d1b245770e3632a7b6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_03a80582ea70badf016aa8a9a0ec4487d19b797b04e645491a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 406
+            },
+            "msg_03a80582ea70badf016aa8a9a85c1487d186293b574c94ea22": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 125
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 125
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1831,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1047,
+        "output_tokens_details": {
+          "reasoning_tokens": 922
+        },
+        "total_tokens": 2878
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 1831,
+    "output_tokens": 1047,
+    "total_tokens": 2878
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 22521.9,
+      "avg_ms": 22521.9,
+      "max_ms": 22521.9
+    },
+    "planner": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "reviewer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-42980a7b89794b0d85ac7753e47b56df",
+    "mission_id": "mission-f81a334734d248598a1fbf6dd5e359c6",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把载有发动机备件的托盘送到当前卸货区",
+        "created_at_ms": 1789438356177,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请确认当前卸货区是卸货区 A（gate A），还是卸货区 B（gate B）？",
+        "created_at_ms": 1789438378882,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "NeedsClarification",
+    "assessment": {
+      "objective": "将载有发动机备件的托盘送到所指的当前卸货区。",
+      "constraints": [],
+      "assumptions": [
+        "将“载有发动机备件的托盘”作为目标物的完整语义描述。",
+        "“送到”仅表示运至目的地，不额外包含卸货、签收、拍照或交接确认。"
+      ],
+      "open_questions": [
+        "请确认当前卸货区是卸货区 A（gate A），还是卸货区 B（gate B）？"
+      ]
+    },
+    "plan": null,
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:71d604fcb6ddffe1fca7b1d76b9e6976584c0838af913e9abcbdcd810c955ad6",
+      "request_id": "request-42980a7b89794b0d85ac7753e47b56df",
+      "dialogue_digest": "sha256:1a4658631b86715e5c53e941bc881cb64228f919d3d4d1fde715d97a19f66288",
+      "captured_at_ms": 1789438356285,
+      "selection_policy_ref": "roboguide-eval.fixture-grounding/fixture:g6-fresh-vs-stale-grounded",
+      "state_evidence": [
+        {
+          "evidence_id": "state::1d2c37553a97a3343bceeb74f2fd6e21fa2ddf1d683b42da8767a571fa80baf5",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "unloading-zone"
+          },
+          "semantic": "observed",
+          "source": "node:gate-a/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "unloading zone A (gate A)"
+          },
+          "source_observed_at_ms": 5000,
+          "received_at_ms": 5000,
+          "valid_for_ms": 3600000,
+          "freshness": "Fresh",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 10
+        },
+        {
+          "evidence_id": "state::765aca9a305711fa4267d4a978c60c424ea6b56a1adb1d4bc10da0430ef37df0",
+          "object": {
+            "class": "world",
+            "object_type": "place",
+            "object_id": "unloading-zone"
+          },
+          "semantic": "observed",
+          "source": "node:gate-b/perception",
+          "channel_id": "semantic-places",
+          "payload_schema": "roboguide.semantic-place/v0.1",
+          "value": {
+            "label": "unloading zone B (gate B)"
+          },
+          "source_observed_at_ms": 1000,
+          "received_at_ms": 1000,
+          "valid_for_ms": 3600000,
+          "freshness": "Stale",
+          "confidence_millionths": null,
+          "source_epoch": null,
+          "sequence": 9
+        }
+      ],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 0,
+    "draft_digest": null,
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [],
+    "created_at_ms": 1789438356177,
+    "updated_at_ms": 1789438378882
+  }
+}

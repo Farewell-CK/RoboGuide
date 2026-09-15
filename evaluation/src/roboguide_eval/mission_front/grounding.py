@@ -543,6 +543,7 @@ def run_grounding_suite(
     repository_root: Path,
     out_dir: Path,
     only: tuple[str, ...] = (),
+    llm_timeout_override: float | None = None,
 ) -> dict[str, object]:
     """Run grounding A/B canaries: one fresh engine per scenario.
 
@@ -557,6 +558,8 @@ def run_grounding_suite(
         out_dir: Output directory receiving suite evidence.
         only: Optional filter matching scenario ids or pair ids (repeatable);
             both arms of a matched pair run so A/B comparison stays intact.
+        llm_timeout_override: Optional diagnostic timeout ceiling (seconds)
+            applied in-memory only; production config stays untouched.
 
     Returns:
         The summary document with per-pair comparison written to
@@ -596,6 +599,7 @@ def run_grounding_suite(
             transport,
             stages,
             grounding_reader=build_scenario_reader(scenario),
+            llm_timeout_override=llm_timeout_override,
         )
         eval_case = scenario_to_case(scenario)
         result = run_case(eval_case, suite, 0)

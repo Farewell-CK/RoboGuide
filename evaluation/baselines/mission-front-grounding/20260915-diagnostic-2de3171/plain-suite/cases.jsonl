@@ -1,0 +1,2 @@
+{"case_id": "n2-mapping", "category": "normal", "passed": true, "expected_lifecycle": "Accepted", "final_lifecycle": "Accepted", "wall_seconds": 220.2, "failed_invariants": [], "not_evaluated_invariants": [], "llm_calls": 3}
+{"case_id": "a1-missing-destination", "category": "ambiguity", "passed": true, "expected_lifecycle": "Accepted", "final_lifecycle": "Accepted", "wall_seconds": 53.3, "failed_invariants": [], "not_evaluated_invariants": [], "llm_calls": 4}

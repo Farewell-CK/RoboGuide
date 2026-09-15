@@ -1,0 +1,541 @@
+{
+  "case_id": "a1-missing-destination",
+  "category": "ambiguity",
+  "instruction": "把桌子上的杯子搬走",
+  "expected_lifecycle": "Accepted",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 53.3,
+  "follow_ups_used": 1,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": true,
+      "detail": "1 clarification question(s) asked: 请指定要将杯子搬到哪里；如果你的意图只是让杯子离开桌面而不指定具体目的地，请明确说明。"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "covered 1 term(s) in: 将桌子上的杯子搬到卧室的床头柜上。"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "operation object.relocate@v1 preserved as one semantic goal"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 76 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11991.2,
+      "request_bytes": 7266,
+      "response_bytes": 14128,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0e543642d183c531016aa8a9c64f4887d18150c48a7d291fd0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 303,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 303,
+              "output_tokens": 0
+            },
+            "rs_0e543642d183c531016aa8a9c6cd0887d190f3203d010a5cd0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_0e543642d183c531016aa8a9d0429c87d18ef65a69371d6603": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 70
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 70
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1488,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 586,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 2074
+      }
+    },
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 4646.8,
+      "request_bytes": 7776,
+      "response_bytes": 11223,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_08e0deaeaf6b26f2016aa8a9d26e6c87d19f82428b6f1cf19e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 456,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 456,
+              "output_tokens": 0
+            },
+            "rs_08e0deaeaf6b26f2016aa8a9d2fd5487d19780f6e9a2297487": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 125
+            },
+            "msg_08e0deaeaf6b26f2016aa8a9d5614487d1be00e0145e3056c0": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 45
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 45
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1641,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 170,
+        "output_tokens_details": {
+          "reasoning_tokens": 125
+        },
+        "total_tokens": 1811
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 24678.2,
+      "request_bytes": 24179,
+      "response_bytes": 26625,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_00dd616b82eead41016aa8a9d76c1087d19c60888157079e2e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1564,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 1564,
+                  "input_tokens": 2573,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2573,
+              "output_tokens": 0
+            },
+            "rs_00dd616b82eead41016aa8a9d7f26487d1b21ba756e3f96e18": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_00dd616b82eead41016aa8a9e1478c87d180f9eb07229ebf7a": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 385
+            },
+            "msg_00dd616b82eead41016aa8a9e84fa887d1adc8a63038959fbb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 370
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 370
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 1333,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 943,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4851,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 3840
+        },
+        "output_tokens": 1271,
+        "output_tokens_details": {
+          "reasoning_tokens": 901
+        },
+        "total_tokens": 6122
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 11302.0,
+      "request_bytes": 17327,
+      "response_bytes": 12779,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_07ffe6718730368a016aa8a9f037ec87d1aa923b01479abb2b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2955,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2955,
+              "output_tokens": 0
+            },
+            "rs_07ffe6718730368a016aa8a9f0c1d887d1be38e110c874b08b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "msg_07ffe6718730368a016aa8a9fa2fb087d1839d9b7d55368385": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3827,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 536,
+        "output_tokens_details": {
+          "reasoning_tokens": 516
+        },
+        "total_tokens": 4363
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 11807,
+    "output_tokens": 2563,
+    "total_tokens": 14370
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 2,
+      "total_ms": 16640.3,
+      "avg_ms": 8320.1,
+      "max_ms": 11992.4
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 24684.0,
+      "avg_ms": 24684.0,
+      "max_ms": 24684.0
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 11303.7,
+      "avg_ms": 11303.7,
+      "max_ms": 11303.7
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-13a9836aca4d492eb2cfde91cc04ee9a",
+    "mission_id": "mission-2bce037abea14c159024430a26f109a2",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "把桌子上的杯子搬走",
+        "created_at_ms": 1789438405487,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0002",
+        "speaker": "MissionIntelligence",
+        "kind": "ClarificationQuestion",
+        "content": "请指定要将杯子搬到哪里；如果你的意图只是让杯子离开桌面而不指定具体目的地，请明确说明。",
+        "created_at_ms": 1789438417634,
+        "in_reply_to": null
+      },
+      {
+        "turn_id": "turn-0003",
+        "speaker": "User",
+        "kind": "ClarificationAnswer",
+        "content": "搬到卧室的床头柜上",
+        "created_at_ms": 1789438417690,
+        "in_reply_to": "turn-0002"
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "将桌子上的杯子搬到卧室的床头柜上。",
+      "constraints": [],
+      "assumptions": [],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-2bce037abea14c159024430a26f109a2",
+        "objective": "将桌子上的杯子搬到卧室的床头柜上。",
+        "actors": [
+          {
+            "id": "actor-relocator"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "context-cup-relocation",
+          "roles": [
+            {
+              "id": "context-role-relocator",
+              "actor": "actor-relocator"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-relocate-cup",
+          "description": "将桌子上的杯子搬到卧室的床头柜上。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "task-role-relocator",
+              "context_role": "context-role-relocator",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "object",
+                      "name": "relocate",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "objective": "将桌子上的杯子搬到卧室的床头柜上。",
+                "parameters": {
+                  "destination": "卧室的床头柜",
+                  "object": "杯子",
+                  "source": "桌子"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "context-cup-relocation",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "将桌子上的杯子搬到卧室的床头柜上。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:0798b3213634f71872abdaed2b5bac310b9594c811f0d34db835ff67a9e5e7d7",
+      "request_id": "request-13a9836aca4d492eb2cfde91cc04ee9a",
+      "dialogue_digest": "sha256:012a0de8c6b231f1d6939f54c3cdd7e9cc94b6626413f92af36735be66b13fa1",
+      "captured_at_ms": 1789438417789,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:e1166f05209a60644127bb98ffd406fe21ef376c10a43c982860ec4f82c195ab",
+    "approval_required": false,
+    "approval_reasons": [],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:e1166f05209a60644127bb98ffd406fe21ef376c10a43c982860ec4f82c195ab",
+        "grounding_context_digest": "sha256:0798b3213634f71872abdaed2b5bac310b9594c811f0d34db835ff67a9e5e7d7",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789438458644
+      }
+    ],
+    "created_at_ms": 1789438405487,
+    "updated_at_ms": 1789438458746
+  }
+}

@@ -1,0 +1,484 @@
+{
+  "case_id": "g3-stale-free",
+  "category": "grounding",
+  "instruction": "去充电桩那里待命",
+  "expected_lifecycle": "Any",
+  "final_lifecycle": "Accepted",
+  "passed": true,
+  "wall_seconds": 99.0,
+  "follow_ups_used": 0,
+  "harness_error": null,
+  "invariants": [
+    {
+      "name": "final_lifecycle",
+      "passed": true,
+      "detail": "any lifecycle accepted; reached Accepted"
+    },
+    {
+      "name": "clarification_behavior",
+      "passed": null,
+      "detail": "observe-only: 0 clarification question(s) recorded"
+    },
+    {
+      "name": "objective_fidelity",
+      "passed": true,
+      "detail": "no coverage terms declared"
+    },
+    {
+      "name": "decomposition_sanity",
+      "passed": true,
+      "detail": "tasks=1 roles=1 actors=1"
+    },
+    {
+      "name": "capability_coverage",
+      "passed": true,
+      "detail": "no capability expectations"
+    },
+    {
+      "name": "integrated_operation",
+      "passed": true,
+      "detail": "no integrated expectation"
+    },
+    {
+      "name": "resource_kinds",
+      "passed": true,
+      "detail": "no resource expectations"
+    },
+    {
+      "name": "timing_presence",
+      "passed": true,
+      "detail": "no timing expectation"
+    },
+    {
+      "name": "local_how_leakage",
+      "passed": true,
+      "detail": "no Local How leakage across 72 plan strings"
+    },
+    {
+      "name": "review_repair_convergence",
+      "passed": true,
+      "detail": "1 review(s), 0 repair(s), converged to Accepted"
+    }
+  ],
+  "failure_reasons": [],
+  "llm_calls": [
+    {
+      "stage": "interpreter",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 13268.7,
+      "request_bytes": 7263,
+      "response_bytes": 13534,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_032bf7e5325c80d1016aa8a8e163b087d1baec121c5367ad11": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 305,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 305,
+              "output_tokens": 0
+            },
+            "rs_032bf7e5325c80d1016aa8a8e2017887d1ab0d04e480c06cf6": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 468
+            },
+            "msg_032bf7e5325c80d1016aa8a8ea949487d1900df4f2095eccc8": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 68
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 68
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 124,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1059,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 1490,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 536,
+        "output_tokens_details": {
+          "reasoning_tokens": 468
+        },
+        "total_tokens": 2026
+      }
+    },
+    {
+      "stage": "planner",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 55398.7,
+      "request_bytes": 24270,
+      "response_bytes": 43331,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0a1979d0b89cb6dc016aa8a8eda2ec87d194f585263061f325": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2590,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2590,
+              "output_tokens": 0
+            },
+            "rs_0a1979d0b89cb6dc016aa8a8ee2d1887d18ce8b8c1ad6ce782": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0a1979d0b89cb6dc016aa8a8f782bc87d193541ad9bed5d1e9": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a1979d0b89cb6dc016aa8a900d12887d1a6e80f5928eb290c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a1979d0b89cb6dc016aa8a90a28dc87d1bd4561a264198541": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0a1979d0b89cb6dc016aa8a9137bec87d197f631f78713c967": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0a1979d0b89cb6dc016aa8a91ce76087d1aed4560bcf0ccefb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 349
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 349
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 1333,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 943,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 4868,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 2937,
+        "output_tokens_details": {
+          "reasoning_tokens": 2588
+        },
+        "total_tokens": 7805
+      }
+    },
+    {
+      "stage": "reviewer",
+      "url": "http://101.43.45.215:8080/responses",
+      "latency_ms": 29764.8,
+      "request_bytes": 17403,
+      "response_bytes": 23449,
+      "ok": true,
+      "error": null,
+      "usage": {
+        "attribution": {
+          "items": {
+            "msg_0b435ab0f5db3543016aa8a92444c887d196516ca24a079b26": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 2953,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 2953,
+              "output_tokens": 0
+            },
+            "rs_0b435ab0f5db3543016aa8a924b6c087d1954d29bce3ef9bac": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0b435ab0f5db3543016aa8a92e0df087d1bec2216a73de9d49": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0b435ab0f5db3543016aa8a9375ec887d19eae97a8958e6070": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "msg_0b435ab0f5db3543016aa8a940cc2887d1829d52f9115e3d83": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          },
+          "request_fields": {
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            },
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 788,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 3825,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 1572,
+        "output_tokens_details": {
+          "reasoning_tokens": 1552
+        },
+        "total_tokens": 5397
+      }
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 10183,
+    "output_tokens": 5045,
+    "total_tokens": 15228
+  },
+  "stage_timings": {
+    "interpreter": {
+      "calls": 1,
+      "total_ms": 13269.5,
+      "avg_ms": 13269.5,
+      "max_ms": 13269.5
+    },
+    "planner": {
+      "calls": 1,
+      "total_ms": 55404.5,
+      "avg_ms": 55404.5,
+      "max_ms": 55404.5
+    },
+    "reviewer": {
+      "calls": 1,
+      "total_ms": 29766.9,
+      "avg_ms": 29766.9,
+      "max_ms": 29766.9
+    },
+    "repairer": {
+      "calls": 0,
+      "total_ms": 0.0,
+      "avg_ms": null,
+      "max_ms": null
+    }
+  },
+  "record": {
+    "schema_version": "roboguide.mission-request/v0.4",
+    "request_id": "request-353a1abb5bac4343962bb3d3c9fdd857",
+    "mission_id": "mission-7a97c2985bac4837850dd8a3f7714d91",
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "去充电桩那里待命",
+        "created_at_ms": 1789438174623,
+        "in_reply_to": null
+      }
+    ],
+    "lifecycle": "Accepted",
+    "assessment": {
+      "objective": "前往充电桩处，并在那里待命。",
+      "constraints": [],
+      "assumptions": [
+        "“待命”解释为到达充电桩处后等待，不额外包含开始充电或其他操作。"
+      ],
+      "open_questions": []
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.7",
+      "mission": {
+        "id": "mission-7a97c2985bac4837850dd8a3f7714d91",
+        "objective": "前往充电桩处，并在那里待命。",
+        "actors": [
+          {
+            "id": "actor-mobile-system"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "ctx-mobile-system",
+          "roles": [
+            {
+              "id": "context-role-mobile-system",
+              "actor": "actor-mobile-system"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task-move-to-charging-station",
+          "description": "实体系统到达充电桩处，并在那里保持待命状态。",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "role-move-to-charging-station",
+              "context_role": "context-role-mobile-system",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": []
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "前往充电桩处，并在那里待命。",
+                "parameters": {
+                  "destination": "充电桩处"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "ctx-mobile-system",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "实体系统已到达充电桩处，并在那里保持待命状态。",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.1",
+      "context_digest": "sha256:2d4542ede802a6fb26482f08bbdce49e0050491c9e1fd268f92259a952b0871e",
+      "request_id": "request-353a1abb5bac4343962bb3d3c9fdd857",
+      "dialogue_digest": "sha256:b6461737c09eda8f3b4ddddc3f2fac99a4eb18f830a580561ba6254677cbf900",
+      "captured_at_ms": 1789438174722,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": []
+    },
+    "draft_revision": 1,
+    "draft_digest": "sha256:e1b3543c59879d95d3e8a2fb992520557e22b62e1146a54d5fbb3e877f3d3482",
+    "approval_required": false,
+    "approval_reasons": [
+      "mobility-move"
+    ],
+    "issues": [],
+    "repair_attempts": 0,
+    "review_history": [
+      {
+        "draft_revision": 1,
+        "draft_digest": "sha256:e1b3543c59879d95d3e8a2fb992520557e22b62e1146a54d5fbb3e877f3d3482",
+        "grounding_context_digest": "sha256:2d4542ede802a6fb26482f08bbdce49e0050491c9e1fd268f92259a952b0871e",
+        "review": {
+          "approved": true,
+          "issues": []
+        },
+        "reviewed_at_ms": 1789438273367
+      }
+    ],
+    "created_at_ms": 1789438174623,
+    "updated_at_ms": 1789438273543
+  }
+}
