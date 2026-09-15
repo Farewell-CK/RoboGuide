@@ -1,0 +1,52 @@
+{
+  "schema": "roboguide.c0c-postfix-summary/v0.1",
+  "purpose": "C0C-B1 independent post-fix revalidation at 2f19e8a",
+  "baseline_sha": "2f19e8a5cd7d0df8e86d691fb0d0727ccbfd2f88",
+  "fix_commit": "2f19e8a fix: fence dispatch replay and late recovery outcomes",
+  "frozen_script": "commands/run-c0c3.sh executed unmodified (md5 in head.txt)",
+  "fresh_state_per_run": [
+    "run/c0c3 removed (fresh controller sqlite)",
+    "node-configs/node-state/c0c3 removed (fresh node journals)",
+    "node-configs/artifact-cache/c0c3-{a,b} removed",
+    "fresh integration-server / roboguide-node A / roboguide-node B / fake EAIOS processes"
+  ],
+  "runs": {
+    "run-1": {
+      "verdict": "PASS",
+      "events_total": 35,
+      "independent_state_proof": "distinct first-event timestamp and node lease id per run (head.txt + events)"
+    },
+    "run-2": {
+      "verdict": "PASS",
+      "events_total": 35,
+      "independent_state_proof": "distinct first-event timestamp and node lease id per run (head.txt + events)"
+    }
+  },
+  "criteria_all_runs": {
+    "post_202": true,
+    "task_a_completed": true,
+    "task_b_completed": true,
+    "mission_completed": true,
+    "node_a_dispatch_authorizations_exactly_1": true,
+    "node_b_dispatch_authorizations_exactly_1": true,
+    "duplicate_physical_execute_0": true,
+    "runtime_recovery_required_0": true,
+    "group_blocked_0": true,
+    "false_unknown_from_live_dispatching_replay_0": true,
+    "controller_process_alive_through_final_get": true,
+    "nodes_connected_no_reconnect_loop": true,
+    "event_chain_match_schedule_proposal_commit_bind_dispatch_execution_completed_satisfied": true,
+    "relations_empty": true,
+    "peer_channels_empty": true,
+    "no_coupling_upgrade": true,
+    "no_binding_collision": true,
+    "old_failure_signature_absent": true
+  },
+  "overall": "PASS",
+  "closure": {
+    "C0-A Internal invariants": "PASS",
+    "C0-B Production path trace": "PASS",
+    "C0-C Runtime HTTP smoke": "PASS",
+    "C0 Control Dry-run": "PASS (CLOSED)"
+  }
+}

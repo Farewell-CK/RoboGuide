@@ -1,0 +1,1 @@
+{"group_id":"group-mission-c0c3-parallel-demo","mission_id":"mission-c0c3-parallel-demo","peer_channels":[],"relations":[],"status":"Completed","tasks":[{"context_id":"ctx-infer","status":"Completed","task_id":"task-infer-analysis"},{"context_id":"ctx-move","status":"Completed","task_id":"task-move-gate"}]}

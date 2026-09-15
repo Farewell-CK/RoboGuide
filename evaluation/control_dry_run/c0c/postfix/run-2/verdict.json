@@ -1,0 +1,37 @@
+{
+  "schema": "roboguide.c0c-postfix-verdict/v0.1",
+  "run": "run-2",
+  "mission_id": "mission-c0c3-parallel-demo",
+  "verdict": "PASS",
+  "checks": {
+    "post_202": true,
+    "mission_completed": true,
+    "task_a_completed": true,
+    "task_b_completed": true,
+    "relations_empty": true,
+    "peer_channels_empty": true,
+    "zero_recovery_required": true,
+    "zero_group_blocked": true,
+    "chain_task_a": true,
+    "chain_task_b": true,
+    "chain_notes": [
+      "task-infer-analysis: full chain 10 events in order",
+      "task-move-gate: full chain 10 events in order"
+    ],
+    "group_completed": true,
+    "attempts_terminal": true,
+    "node_a_single_execution": true,
+    "node_a_single_authorization": true,
+    "node_a_single_physical_execute": true,
+    "node_b_single_execution": true,
+    "node_b_single_authorization": true,
+    "node_b_single_physical_execute": true,
+    "server_no_fatal": true,
+    "server_no_invalid_lifecycle": true,
+    "nodes_no_session_loss": true,
+    "node_session_end_counts": {
+      "a": 0,
+      "b": 0
+    }
+  }
+}

@@ -1,0 +1,4 @@
+git_sha=2f19e8a5cd7d0df8e86d691fb0d0727ccbfd2f88
+git_branch=main
+started_at_utc=2026-09-15T12:46:56Z
+mission_id=mission-c0c3-parallel-demo
