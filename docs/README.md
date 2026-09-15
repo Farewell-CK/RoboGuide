@@ -16,6 +16,7 @@
 
 - [`development/README.md`](development/README.md)：`Proposed` 开发基线、目标目录、模块职责、依赖方向和变更门槛；
 - [`development/coding-standards.md`](development/coding-standards.md)：Rust/Python 函数文档、类型、错误处理、测试和质量门槛；
+- [`development/pre-c1-readiness-audit-2026-09-15.md`](development/pre-c1-readiness-audit-2026-09-15.md)：Habitat Local EAIOS Bridge 前的生产链准入审计、证据范围与未闭环风险；
 - [`extensions/device-extension-conformance-v0.1.md`](extensions/device-extension-conformance-v0.1.md)：不修改 RoboGuide core 接入新 Local EAIOS 的配置、离线 conformance 与真机验证边界；
 - [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。
 - [`decisions/0002-deaios-node-contract.md`](decisions/0002-deaios-node-contract.md)：DEAIOS 与本地 EAIOS/厂商运行时之间的 Node Contract v0。
