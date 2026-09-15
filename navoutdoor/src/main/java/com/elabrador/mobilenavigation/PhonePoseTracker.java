@@ -68,7 +68,7 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
         try {
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER, 1000L, 0.5f, this);
+                        LocationManager.GPS_PROVIDER, 1000L, 0f, this);
                 requested = true;
                 publishLastKnown(LocationManager.GPS_PROVIDER);
             }

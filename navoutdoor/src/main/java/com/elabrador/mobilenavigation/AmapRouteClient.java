@@ -261,6 +261,7 @@ final class AmapRouteClient {
         String query = "origin=" + encode(origin)
                 + "&destination=" + encode(destination)
                 + "&output=json&key=" + encode(key);
+        NavigationAudit.log("ROUTE_REQUEST mode=walking api=v3 origin_gcj="+origin+" destination_gcj="+destination);
         JSONObject response = requestJson(WALKING_URL + "?" + query);
         requireSuccess(response);
 
@@ -280,6 +281,7 @@ final class AmapRouteClient {
             for (int i = 0; i < stepJson.length(); i++) {
                 JSONObject item = stepJson.getJSONObject(i);
                 List<GeoPoint> points = parsePolyline(item.optString("polyline", ""));
+                if(points.isEmpty())throw new IllegalStateException("高德步行路段缺少几何信息，请重新规划");
                 String stepInstruction = item.optString("instruction", "继续沿路线步行");
                 String action = item.optString("action", "");
                 if (action.isEmpty()) {
@@ -297,13 +299,17 @@ final class AmapRouteClient {
             instruction = steps.get(0).instruction;
         }
         if (routePoints.size() < 2) {
-            routePoints.clear();
-            routePoints.add(start);
-            routePoints.add(end);
+            throw new IllegalStateException("高德步行路线缺少有效道路几何，请重新规划");
         } else {
             bearing = bearingFromPoints(routePoints, bearing);
         }
 
+        NavigationAudit.log("ROUTE_RESULT paths="+paths.length()+" selected=0 steps="+steps.size()
+                +" points="+routePoints.size()+" distance="+path.optString("distance",""));
+        for(int i=0;i<routePoints.size();i++){
+            GeoPoint point=routePoints.get(i);
+            NavigationAudit.log("ROUTE_POINT index="+i+" lat_gcj="+point.latitude+" lon_gcj="+point.longitude);
+        }
         return new RouteResult(
                 end.name,
                 end.latitude,
@@ -364,20 +370,20 @@ final class AmapRouteClient {
         }
     }
 
-    private List<GeoPoint> parsePolyline(String polyline) {
+    static List<GeoPoint> parsePolyline(String polyline) {
         List<GeoPoint> result = new ArrayList<>();
         for (String point : polyline.split(";")) {
             String[] coordinate = point.split(",");
             if (coordinate.length != 2) {
-                continue;
+                throw new IllegalArgumentException("高德路线包含无效坐标，不能跨过该路段连线");
             }
             try {
-                result.add(new GeoPoint(
-                        Double.parseDouble(coordinate[1]),
-                        Double.parseDouble(coordinate[0]),
-                        ""));
+                double lat=Double.parseDouble(coordinate[1]),lon=Double.parseDouble(coordinate[0]);
+                if(!Double.isFinite(lat)||!Double.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)
+                    throw new NumberFormatException("Invalid coordinate");
+                result.add(new GeoPoint(lat,lon,""));
             } catch (NumberFormatException ignored) {
-                // Ignore a malformed point while preserving the rest of the route.
+                throw new IllegalArgumentException("高德路线包含无效坐标，请重新规划");
             }
         }
         return result;

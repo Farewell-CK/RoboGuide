@@ -217,6 +217,58 @@
                     android:textSize="@dimen/sp_18"
                     android:textStyle="bold" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:text="更多信息与设置"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_13" />
+
+                <Switch
+                    android:id="@+id/switch_vision_hints"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:checked="true"
+                    android:text="大模型视觉提示（上传彩色画面）"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_13" />
+
+                <TextView
+                    android:id="@+id/tv_vision_hints"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_card"
+                    android:padding="@dimen/dp_14"
+                    android:text="左侧：无\n左前方：无\n正前方：无\n右前方：无\n右侧：无"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_vision_diagnostic"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:text="等待彩色画面"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <TextView
+                    android:id="@+id/btn_vision_settings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_btn_outline"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:paddingHorizontal="@dimen/dp_14"
+                    android:text="视觉提示设置"
+                    android:textColor="@color/color_primary"
+                    android:textSize="@dimen/sp_13" />
+
                 <LinearLayout
                     android:orientation="horizontal"
                     android:layout_width="match_parent"

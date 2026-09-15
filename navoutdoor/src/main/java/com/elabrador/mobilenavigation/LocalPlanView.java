@@ -20,6 +20,8 @@ public final class LocalPlanView extends View {
     private int bitmapCols;
     private int[][] visualizationGrid;
     private String waitingReason = "等待导航目标方向";
+    private FrameEvidence evidence;
+    private final ObservationRefreshTracker draws = new ObservationRefreshTracker();
 
     public LocalPlanView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -39,8 +41,16 @@ public final class LocalPlanView extends View {
 
     /** Public entry point for cross-package callers (e.g. NavigateFragment via LocalPlanSnapshot). */
     public void setPlan(int[][] visualizationGrid, String waitingReason) {
+        setPlan(visualizationGrid, waitingReason, Double.NaN, -1L, -1L);
+    }
+
+    /** Cross-package entry point retaining immutable acquisition identity for draw auditing. */
+    public void setPlan(int[][] visualizationGrid, String waitingReason,
+                        double cameraSeconds, long captureElapsedMillis, long generation) {
         this.visualizationGrid = visualizationGrid;
         this.waitingReason = waitingReason;
+        evidence = Double.isFinite(cameraSeconds) && captureElapsedMillis >= 0L
+                ? new FrameEvidence(cameraSeconds, generation, captureElapsedMillis) : null;
         gridBitmap = null;
         invalidate();
     }
@@ -82,6 +92,12 @@ public final class LocalPlanView extends View {
                 new android.graphics.RectF(left, top, left + cols * cell, top + rows * cell),
                 cellPaint);
         drawPersonMarker(canvas, left + cols * cell / 2f, top + rows * cell / 2f, cell);
+        long drawn = android.os.SystemClock.elapsedRealtime();
+        if (draws.observe(evidence, drawn)) {
+            NavigationAudit.log("MAP_DRAW_AUDIT frame=" + evidence.cameraSeconds
+                    + " capture_to_draw_ms=" + evidence.ageMillis(drawn)
+                    + " new_observation_interval_ms=" + draws.intervalMillis);
+        }
     }
 
     private void drawPersonMarker(Canvas canvas, float centerX, float centerY, float cell) {

@@ -3,8 +3,12 @@ package com.seaway.guideassistant.fragment
 import android.Manifest
 import android.location.Location
 import android.os.Bundle
+import android.text.InputType
 import android.view.View
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.doOnLayout
@@ -16,6 +20,7 @@ import com.elabrador.mobilenavigation.GuidanceLevel
 import com.elabrador.mobilenavigation.LocalPlanSnapshot
 import com.elabrador.mobilenavigation.OutdoorNavController
 import com.elabrador.mobilenavigation.PlaceSuggestion
+import com.elabrador.mobilenavigation.VisionHintSettings
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.base.Constant
@@ -57,6 +62,13 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         outdoorController = OutdoorNavController(requireContext(), Constant.AMAP_KEY, OutdoorListener())
+        val visionSettings = outdoorController?.visionHintSettings()
+        bind.switchVisionHints.isChecked = visionSettings?.enabled ?: true
+        bind.switchVisionHints.setOnCheckedChangeListener { _, enabled ->
+            val current = outdoorController?.visionHintSettings() ?: return@setOnCheckedChangeListener
+            outdoorController?.updateVisionHintSettings(current.copy(enabled = enabled))
+        }
+        bind.btnVisionSettings.setOnClickListener { showVisionHintSettingsDialog() }
         bind.btnPlanRoute.setOnClickListener { outdoorController?.planRoute(bind.etEnd.text.toString()) }
         bind.btnStartStop.setOnClickListener { outdoorController?.endNavigation() }
         bind.btnCalibrateHeading.setOnClickListener { outdoorController?.calibrateHeading() }
@@ -352,6 +364,51 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
     }
 
+    private fun showVisionHintSettingsDialog() {
+        val controller = outdoorController ?: return
+        val current = controller.visionHintSettings()
+        val density = resources.displayMetrics.density
+        val padding = (20 * density).toInt()
+        val container = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding / 2, padding, 0)
+        }
+        fun field(hint: String, value: String, password: Boolean = false) =
+            EditText(requireContext()).apply {
+                this.hint = hint
+                setText(value)
+                setSingleLine(true)
+                if (password) {
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                container.addView(this)
+            }
+        val endpoint = field("HTTPS 兼容接口地址", current.endpoint)
+        val key = field("API Key", current.key, password = true)
+        val model = field("模型名称", current.model)
+
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("视觉提示设置")
+            .setMessage("仅用于补充五方向物体描述，不参与导航方向、避障或安全决策。")
+            .setView(container)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                try {
+                    controller.updateVisionHintSettings(
+                        VisionHintSettings(
+                            enabled = bind.switchVisionHints.isChecked,
+                            key = key.text.toString(),
+                            endpoint = endpoint.text.toString(),
+                            model = model.text.toString()))
+                } catch (error: IllegalArgumentException) {
+                    Toast.makeText(
+                        requireContext(),
+                        error.message ?: "接口地址无效",
+                        Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
+    }
     /** 仅在用户手动点击"结束导航"后调用：回到路线选择分组，推进到 LLM 计划的下一阶段 */
     private fun finishOutdoorPhase() {
         showOutdoorSelectGroup()
@@ -397,7 +454,12 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
                 plan.planned -> "局部规划：规划失败"
                 else -> plan.waitingReason ?: "局部规划：等待中"
             }
-            bind.localPlanView.setPlan(plan.visualizationGrid, plan.waitingReason)
+            bind.localPlanView.setPlan(
+                plan.visualizationGrid,
+                plan.waitingReason,
+                plan.cameraSeconds ?: Double.NaN,
+                plan.captureElapsedMillis,
+                plan.frameGeneration)
         }
 
         override fun onHeading(headingDegrees: Float, text: String) {
@@ -466,6 +528,14 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         override fun onVinsStatus(text: String, level: GuidanceLevel) {
             bind.tvVinsStatus.text = text
             bind.tvVinsStatus.setTextColor(colorFor(level))
+        }
+
+        override fun onVisionHints(primary: String, diagnostic: String, enabled: Boolean) {
+            bind.switchVisionHints.isChecked = enabled
+            bind.tvVisionHints.text = primary.ifBlank {
+                "左侧：无\n左前方：无\n正前方：无\n右前方：无\n右侧：无"
+            }
+            bind.tvVisionDiagnostic.text = diagnostic
         }
     }
 }

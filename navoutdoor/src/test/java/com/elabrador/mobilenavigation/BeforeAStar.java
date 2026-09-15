@@ -3,24 +3,15 @@ package com.elabrador.mobilenavigation;
 import java.util.*;
 
 /** Direct port of nvi_planning/src/local_planning/Astar.py. */
-final class AStar {
+final class BeforeAStar {
     private static final double STRAIGHTNESS_TIE_BREAK = 0.01;
     enum Heuristic { MANHATTAN, EUCLIDEAN }
     private final int[] start, goal; private final int[][] map; private final Set<Long> obstacles;
     private final int rows, cols; private final double alpha, turnPenalty; private final Heuristic heuristic;
-    private double minimumCellCost;
     private final int[][] motions={{-1,0},{-1,1},{0,1},{1,1},{1,0},{1,-1},{0,-1},{-1,-1}};
-    AStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha){this(start,goal,map,obstacles,heuristic,alpha,0.0);}
-    AStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha,double turnPenalty){this.start=start;this.goal=goal;this.map=map;this.obstacles=obstacles;this.heuristic=heuristic;this.alpha=alpha;this.turnPenalty=Math.max(0.0,turnPenalty);rows=map.length;cols=map[0].length;}
+    BeforeAStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha){this(start,goal,map,obstacles,heuristic,alpha,0.0);}
+    BeforeAStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha,double turnPenalty){this.start=start;this.goal=goal;this.map=map;this.obstacles=obstacles;this.heuristic=heuristic;this.alpha=alpha;this.turnPenalty=Math.max(0.0,turnPenalty);rows=map.length;cols=map[0].length;}
     List<int[]> searching(){
-        if(start[0]<0||start[0]>=rows||start[1]<0||start[1]>=cols
-                ||goal[0]<0||goal[0]>=rows||goal[1]<0||goal[1]>=cols
-                ||obstacles.contains(key(start[0],start[1]))||obstacles.contains(key(goal[0],goal[1])))
-            return Collections.emptyList();
-        minimumCellCost=Double.POSITIVE_INFINITY;
-        for(int r=0;r<rows;r++)for(int c=0;c<cols;c++)
-            if(!obstacles.contains(key(r,c)))minimumCellCost=Math.min(minimumCellCost,Math.abs(map[r][c]));
-        if(!Double.isFinite(minimumCellCost))return Collections.emptyList();
         if(turnPenalty>0.0)return searchingWithTurnPenalty();
         final int cells=rows*cols;
         double[] g=new double[cells]; Arrays.fill(g,Double.POSITIVE_INFINITY);
@@ -106,14 +97,7 @@ final class AStar {
         return Math.abs(dy*(x-start[0])-dx*(y-start[1]))/length;
     }
     private boolean collision(boolean[] occupied,int x,int y,int nx,int ny){if(nx<0||ny<0||nx>=rows||ny>=cols||occupied[x*cols+y]||occupied[nx*cols+ny])return true;if(nx!=x&&ny!=y){if(occupied[nx*cols+y]||occupied[x*cols+ny])return true;}return false;}
-    // Admissible lower bound for eight-connected movement, including unavoidable
-    // cell cost. The previous unit-distance bound ignored road cost and expanded
-    // almost the whole grid (nine heading states per cell in the turn search).
-    private double heuristic(int x,int y){
-        int dx=Math.abs(goal[0]-x),dy=Math.abs(goal[1]-y);
-        return alpha*(Math.max(dx,dy)+(Math.sqrt(2)-1)*Math.min(dx,dy))
-                +minimumCellCost*Math.max(dx,dy);
-    }
+    private double heuristic(int x,int y){return heuristic==Heuristic.MANHATTAN?Math.abs(goal[0]-x)+Math.abs(goal[1]-y):Math.hypot(goal[0]-x,goal[1]-y);}
     static long key(int x,int y){return ((long)x<<32)^(y&0xffffffffL);} private static int x(long k){return (int)(k>>32);}private static int y(long k){return (int)k;}
     private static final class Node{final int n;final double g,f;Node(int n,double g,double f){this.n=n;this.g=g;this.f=f;}}
     private static final class DirectionNode{final int state;final double g,f;DirectionNode(int state,double g,double f){this.state=state;this.g=g;this.f=f;}}

@@ -7,6 +7,14 @@ plugins {
     id 'kotlin-android'
 }
 
+// Optional local Qwen credentials; never commit this file or a configured APK.
+def visionConfig = new Properties()
+def visionConfigFile = file(System.getenv('QWEN_CONFIG') ?: rootProject.file('qwen.private.properties').path)
+if (visionConfigFile.isFile()) visionConfigFile.withInputStream { visionConfig.load(it) }
+def visionLiteral = { String name, String fallback -> groovy.json.JsonOutput.toJson(visionConfig.getProperty(name, fallback)) }
+
+
+
 android {
     namespace 'com.elabrador.mobilenavigation'
     compileSdk 35
@@ -14,6 +22,10 @@ android {
     defaultConfig {
         minSdk 24
         targetSdk 35
+        buildConfigField 'String', 'QWEN_KEY', visionLiteral('key', '')
+        buildConfigField 'String', 'QWEN_ENDPOINT', visionLiteral('endpoint', '')
+        buildConfigField 'String', 'QWEN_MODEL', visionLiteral('model', 'qwen3-vl-flash')
+        buildConfigField 'String', 'NAV_SOURCE_VERSION', '"0.9.92-qwen-speech-text"'
 
         ndk { abiFilters 'arm64-v8a' }
     }
@@ -136,6 +148,7 @@ dependencies {
     npuImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
     implementation project(':librealsense')
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }
 
 // 与原 mobile-navigation 一致的原生库完整性校验：打包前检查三个 VINS/native .so 是否
