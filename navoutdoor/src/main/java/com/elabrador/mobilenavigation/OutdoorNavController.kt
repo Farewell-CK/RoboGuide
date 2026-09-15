@@ -111,6 +111,9 @@ class OutdoorNavController(
         fun onDistances(left: String, center: String, right: String)
         fun onSemanticOverlay(text: String, level: GuidanceLevel)
         fun onLocalPlan(plan: LocalPlanSnapshot)
+        /** A* single-run timing/refresh diagnostics, kept separate from [onSemanticOverlay] so the
+         * two don't overwrite each other with different line counts on the same view. */
+        fun onLocalPlanMetrics(text: String, level: GuidanceLevel)
         fun onHeading(headingDegrees: Float, text: String)
         fun onLocation(location: Location, text: String)
         fun onLocationStatus(text: String)
@@ -1566,7 +1569,6 @@ class OutdoorNavController(
 
         renderVinsStatus(vinsStatus)
         renderSemanticStatus(semantic)
-        renderLocalPlanStatus(semantic)
 
         var guidance: String
         var level: GuidanceLevel
@@ -1690,7 +1692,6 @@ class OutdoorNavController(
                 latestRenderedLocalPlanSequence = sequence
                 recordRenderedLocalPlanRefresh()
                 renderSemanticStatus(latestSemanticResult)
-                renderLocalPlanStatus(latestSemanticResult)
                 renderLocalPlanMetrics()
                 if (!hasValidLocalPlanDisplay) {
                     listener.onLocalPlan(waiting.toSnapshot())
@@ -1716,7 +1717,6 @@ class OutdoorNavController(
             latestRenderedLocalPlanSequence = sequence
             recordRenderedLocalPlanRefresh()
             renderSemanticStatus(projected)
-            renderLocalPlanStatus(projected)
             renderLocalPlanMetrics()
             listener.onLocalPlan(plan.toSnapshot())
             hasValidLocalPlanDisplay = true
@@ -1780,30 +1780,6 @@ class OutdoorNavController(
         }
     }
 
-    /** Runs the ported local_planner grid preprocessing and A* on each semantic map result. */
-    private fun renderLocalPlanStatus(semantic: SemanticSegmenter.Result) {
-        val result = latestLocalPlan
-        if (!result.planned) {
-            var text = "A*局部规划: ${result.waitingReason}"
-            if (hasValidLocalPlanDisplay) {
-                text += "（下方保留上次有效地图，仅供显示）"
-            }
-            listener.onSemanticOverlay(text, GuidanceLevel.MUTED)
-            return
-        }
-        var text = String.format(
-            Locale.CHINA,
-            "A*移植规划: %s，路径点 %d，转角 %s，起点代价 %d，目标代价 %d，障碍格 %d",
-            if (result.success) (if (result.blocked) "前视阻塞" else "已找到路径") else "搜索无路径",
-            result.worldPath.size,
-            if (result.steeringDegrees.isFinite()) String.format(Locale.CHINA, "%+.1f°", result.steeringDegrees) else "--",
-            result.startCost, result.targetCost, result.obstacleCount)
-        if (latestRenderedLocalPlanSequence > 0) {
-            text += String.format(Locale.CHINA, " · 更新 #%,d", latestRenderedLocalPlanSequence)
-        }
-        listener.onSemanticOverlay(text, GuidanceLevel.MUTED)
-    }
-
     private fun renderVinsStatus(status: VinsInputBuffer.Status) {
         val pose = latestVinsPose
         val text: String
@@ -1834,7 +1810,7 @@ class OutdoorNavController(
 
     private fun renderLocalPlanMetrics() {
         if (!navigationActive) {
-            listener.onSemanticOverlay("A*诊断：等待开始导航", GuidanceLevel.MUTED)
+            listener.onLocalPlanMetrics("A*诊断：等待开始导航", GuidanceLevel.MUTED)
             return
         }
         val duration = if (latestLocalPlanDurationNanos >= 0L)
@@ -1846,7 +1822,7 @@ class OutdoorNavController(
         val text = String.format(
             Locale.CHINA, "A*单次 %s · 刷新间隔 %s\n代价图输入年龄 %s · 更新 #%,d",
             duration, refresh, inputAge, latestRenderedLocalPlanSequence)
-        listener.onSemanticOverlay(text, if (latestLocalPlanDurationNanos >= 0L) GuidanceLevel.SAFE else GuidanceLevel.WARNING)
+        listener.onLocalPlanMetrics(text, if (latestLocalPlanDurationNanos >= 0L) GuidanceLevel.SAFE else GuidanceLevel.WARNING)
     }
 
     private fun resetLocalPlanning() {

@@ -12,7 +12,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 object NavigationPlanManager {
 
-    data class NavigationPlan(val destination: String?, val phases: List<NavigationPhase>)
+    data class NavigationPlan(
+        val destination: String?,
+        val phases: List<NavigationPhase>,
+        val rawInstruction: String
+    )
 
     sealed class PlanState {
         object Idle : PlanState()
@@ -28,10 +32,11 @@ object NavigationPlanManager {
     fun currentPhase(): NavigationPhase? =
         (state.value as? PlanState.InProgress)?.let { it.plan.phases[it.phaseIndex] }
 
-    /** Agent 侧解析出多阶段导航意图后调用：保存计划 + 跳转到出行 Tab */
-    fun startPlan(intent: NavigationIntent) {
+    /** Agent 侧解析出多阶段导航意图后调用：保存计划 + 跳转到出行 Tab。
+     * [rawInstruction] 是 AgentFragment 下发给大模型的完整原始指令文本，供 NavigateFragment 展示。 */
+    fun startPlan(intent: NavigationIntent, rawInstruction: String) {
         if (intent.intent != "navigation" || intent.needClarification || intent.navigationPhases.isEmpty()) return
-        val plan = NavigationPlan(intent.destination, intent.navigationPhases.sortedBy { it.phase })
+        val plan = NavigationPlan(intent.destination, intent.navigationPhases.sortedBy { it.phase }, rawInstruction)
         state.value = PlanState.InProgress(plan, 0, ++nextPlanId)
         Apollo.emit(ApolloEvents.SWITCH_TO_NAVIGATE_TAB)
     }

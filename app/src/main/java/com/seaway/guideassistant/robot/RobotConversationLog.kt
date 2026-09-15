@@ -20,7 +20,9 @@ object RobotConversationLog {
     fun append(instruction: String, resultSummary: String, kind: String = "") {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         entries.value = entries.value + Entry(timestamp, instruction, resultSummary, kind)
-        TtsUtils.speak(resultSummary)
+        if(kind == "final_text"||kind=="error") {
+            TtsUtils.speak(resultSummary)
+        }
     }
 
     /** 重新下发新指令前调用，清空上一阶段残留的记录 */

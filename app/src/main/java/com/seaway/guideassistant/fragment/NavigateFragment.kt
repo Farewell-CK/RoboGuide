@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.doOnLayout
 import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -142,6 +143,9 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
                 setPadding(0, resources.getDimensionPixelSize(R.dimen.dp_6), 0, 0)
             }
             bind.containerRobotLog.addView(row)
+            bind.sv.doOnLayout {
+                bind.sv.fullScroll(View.FOCUS_DOWN)
+            }
         }
     }
 
@@ -151,10 +155,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         if (inProgress != null && phase != null) {
             bind.tvPhaseStatus.visibility = View.VISIBLE
-            bind.tvPhaseStatus.text = getString(
-                R.string.nav_phase_status_fmt,
-                inProgress.phaseIndex + 1, inProgress.plan.phases.size, phase.description
-            )
+            bind.tvPhaseStatus.text = buildPhaseStatusText(inProgress)
         } else {
             bind.tvPhaseStatus.visibility = View.GONE
         }
@@ -191,6 +192,25 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
     }
 
+    /** 拼出顶部状态区文案：AgentFragment 下发的完整指令 + 当前任务 + 下一步任务（若还有） */
+    private fun buildPhaseStatusText(inProgress: NavigationPlanManager.PlanState.InProgress): String {
+        val total = inProgress.plan.phases.size
+        val currentPhase = inProgress.plan.phases[inProgress.phaseIndex]
+        val currentLine = getString(
+            R.string.nav_phase_status_fmt,
+            inProgress.phaseIndex + 1, total, currentPhase.description
+        )
+        val lines = mutableListOf(
+            getString(R.string.nav_instruction_dispatch_fmt, inProgress.plan.rawInstruction),
+            getString(R.string.nav_current_task_fmt, currentLine)
+        )
+        inProgress.plan.phases.getOrNull(inProgress.phaseIndex + 1)?.let { next ->
+            val nextLine = getString(R.string.nav_phase_status_fmt, inProgress.phaseIndex + 2, total, next.description)
+            lines += getString(R.string.nav_next_task_fmt, nextLine)
+        }
+        return lines.joinToString("\n")
+    }
+
     /** 把当前室内阶段的指令下发给机器狗：先中止上一轮可能未结束的任务、清空旧记录，再重新下发。
      * 只把 final_text/error 写入 RobotConversationLog，text_chunk/plan/batch_result/node_state/
      * task_state/status 等中间态事件不展示也不播报，避免刷屏（参考 robonix-client-android 的
@@ -205,9 +225,11 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         RobotConnectionManager.sendIndoorInstruction(
             text = instruction,
             onEvent = { event ->
-                if (event.kind == "final_text" && event.finalText.isNotBlank()) {
-                    RobotConversationLog.append(instruction, event.finalText, event.kind)
-                }
+//                if (event.kind == "final_text" && event.finalText.isNotBlank()) {
+//                    RobotConversationLog.append(instruction, event.finalText, event.kind)
+//                }
+                val summary = event.finalText.ifBlank { event.textChunk.ifBlank { event.status?.message.orEmpty() } }
+                RobotConversationLog.append(instruction, summary.ifBlank { event.kind }, event.kind)
             },
             onError = { error -> RobotConversationLog.append(instruction, error, "error") },
         )
@@ -361,6 +383,11 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         override fun onSemanticOverlay(text: String, level: GuidanceLevel) {
             bind.tvSemanticStatus.text = text
             bind.tvSemanticStatus.setTextColor(colorFor(level))
+        }
+
+        override fun onLocalPlanMetrics(text: String, level: GuidanceLevel) {
+            bind.tvLocalPlanMetrics.text = text
+            bind.tvLocalPlanMetrics.setTextColor(colorFor(level))
         }
 
         override fun onLocalPlan(plan: LocalPlanSnapshot) {

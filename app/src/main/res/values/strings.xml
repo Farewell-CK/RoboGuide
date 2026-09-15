@@ -92,6 +92,9 @@
     <string name="cd_locate_btn">定位当前位置，功能开发中</string>
     <string name="nav_arrived_toast">您已到达目的地，导航结束。</string>
     <string name="nav_phase_status_fmt">阶段 %1$d/%2$d · %3$s</string>
+    <string name="nav_instruction_dispatch_fmt">指令：%1$s</string>
+    <string name="nav_current_task_fmt">当前任务：%1$s</string>
+    <string name="nav_next_task_fmt">下一步任务：%1$s</string>
     <string name="nav_indoor_placeholder">室内导航模式开发中</string>
     <string name="nav_btn_start_outdoor">开始导航</string>
     <string name="nav_btn_end_outdoor">结束导航</string>

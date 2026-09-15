@@ -3,6 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <ScrollView
+        android:id="@+id/sv"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/color_bg"
@@ -13,6 +14,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:padding="@dimen/dp_20">
+
+            <TextView
+                android:id="@+id/tv_phase_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dp_16"
+                android:accessibilityLiveRegion="polite"
+                android:textColor="@color/color_text"
+                android:textSize="@dimen/sp_14"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/group_outdoor_mode"
@@ -263,6 +275,14 @@
                     android:textColor="@color/color_text_muted"
                     android:textSize="@dimen/sp_12" />
 
+                <TextView
+                    android:id="@+id/tv_local_plan_metrics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
                 <LinearLayout
                     android:orientation="horizontal"
                     android:layout_width="match_parent"
@@ -354,16 +374,6 @@
             </LinearLayout>
 
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/tv_phase_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_12"
-                android:accessibilityLiveRegion="polite"
-                android:textColor="@color/color_text_muted"
-                android:textSize="@dimen/sp_13"
-                android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/group_indoor_mode"

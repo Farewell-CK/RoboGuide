@@ -111,7 +111,7 @@ class AgentFragment : BaseBindFragment<FragmentAgentBinding>() {
                 return@launch
             }
 
-            NavigationPlanManager.startPlan(result)
+            NavigationPlanManager.startPlan(result, text)
         }
     }
 
