@@ -1,0 +1,2 @@
+{"destination": "any_targets|0", "mission_id": "mission-e1-i-shared-world-negative", "node": "node-b", "task_id": "task-navigate-goal-a", "unix": 1789540938.7477787}
+{"destination": "any_targets|0", "mission_id": "mission-e1-i-shared-world-negative", "node": "node-a", "task_id": "task-navigate-goal-b", "unix": 1789540938.7878165}

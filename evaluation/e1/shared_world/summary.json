@@ -1,0 +1,87 @@
+{
+  "schema": "roboguide.e1-shared-world-summary/v0.1",
+  "git_sha": "7690348f5ca681125e64cd48ff6741e492fc6f30 (baseline) + this commit",
+  "architecture": {
+    "world_owner": "one child process owning one Habitat simulator + one original EMOS Stage2 MultiAgentAccessMgr (ProcessWorldService); HTTP parent never imports Habitat",
+    "node_mapping": "deployment Local How: node-a endpoint -> Habitat agent_0, node-b endpoint -> agent_1; Task->Node assignment decided by RoboGuide Matching/Scheduling (observed cross-assignment in run1)",
+    "episode_start_barrier": "bounded shared-world pair wait (evaluation-owned synchronization, not a Mission dependency)",
+    "stage1": "never runs; original EMOS group_discussion symbol replaced per execution with the two Control-committed assignments"
+  },
+  "episode_semantics": {
+    "official_goals": [
+      "any_at(any_targets|0)",
+      "any_at(TARGET_any_targets|0)"
+    ],
+    "any_at_is_agent_agnostic": true,
+    "assignment_swappable": true,
+    "hard_binding_in_mission": false,
+    "official_step_budget": 3000,
+    "evidence": "habitat-lab/config/benchmark/multi_agent/pddl/pddl_spot_fetch_mobility.yaml goal + solution (reference only)"
+  },
+  "runs": {
+    "run1": {
+      "mode": "paired",
+      "verdict": "PASS",
+      "pddl_success": true,
+      "outcomes": {
+        "0": "COMPLETED",
+        "1": "COMPLETED"
+      },
+      "steps": 209
+    },
+    "run2": {
+      "mode": "paired",
+      "verdict": "PASS",
+      "pddl_success": true,
+      "outcomes": {
+        "0": "COMPLETED",
+        "1": "COMPLETED"
+      },
+      "steps": 209
+    },
+    "single_S1": {
+      "mode": "single",
+      "verdict": "PASS",
+      "result": "lone assignment failed closed, no episode, no fake pddl_success, mission Failed"
+    },
+    "negative": {
+      "mode": "negative",
+      "verdict": "PASS",
+      "result": "one official goal only -> pddl_success false despite a completed Task; benchmark authority honored"
+    },
+    "cancel_S3": {
+      "mode": "cancel",
+      "verdict": "PASS",
+      "result": "cancel at true RUNNING: both endpoints CANCELLED, mission Cancelled, no fake terminal"
+    },
+    "S2_duplicate": {
+      "mode": "deterministic-tests",
+      "result": "tests/test_shared_world.py: same handle, no re-run, no second reset, consumed-episode guard"
+    }
+  },
+  "peer_communication_observed": {
+    "run1": {
+      "0": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      },
+      "1": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      }
+    },
+    "run2": {
+      "0": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      },
+      "1": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      }
+    }
+  },
+  "peer_communication_count": 0,
+  "core_changes": "none",
+  "formal_e1_preflight": "READY (see admission update in controlled-workload-v0.1.yaml)"
+}

@@ -1,0 +1,115 @@
+{
+  "checks": {
+    "assign_admitted_once_each": true,
+    "both_agents_moved": true,
+    "both_goals_satisfied": true,
+    "both_running_observed": true,
+    "canonical_intents_preserved": true,
+    "controller_alive": true,
+    "mission_completed": true,
+    "no_recovery_storm": true,
+    "no_stage1_reassignment": true,
+    "node_a_exactly_once": true,
+    "node_b_exactly_once": true,
+    "official_pddl_success": true,
+    "one_episode_reset": true,
+    "one_simulator_world": true,
+    "original_stage2_active": true,
+    "post_202": true,
+    "two_distinct_local_handles": true,
+    "two_nodes_registered": true,
+    "two_tasks_bound": true
+  },
+  "context": {
+    "identity": {
+      "episode_id": "51",
+      "episode_reset_count": 1,
+      "episode_started_unix": 1789540623.3887699,
+      "episode_terminated": true,
+      "pid": 1149472,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "simulator_steps": 209,
+      "simulator_worlds": 1
+    },
+    "mission_status": "Completed",
+    "outcomes": {
+      "0": {
+        "benchmark_task_achieved": true,
+        "destination": "TARGET_any_targets|0",
+        "episode_id": "51",
+        "episode_terminated": true,
+        "final_position": [
+          -0.8147434592247009,
+          0.23217561841011047,
+          -2.1878693103790283
+        ],
+        "initial_position": [
+          -0.16678085923194885,
+          2.3214714527130127,
+          3.768552780151367
+        ],
+        "invalid_outputs": 0,
+        "local_llm_calls": 2,
+        "local_replans": 0,
+        "local_skill_completed": false,
+        "local_tokens": 2757,
+        "message_pipe_activity_count": 0,
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+        "send_request_count": 0,
+        "simulator_steps": 209,
+        "skill_sequence": [
+          "nav_to_obj|nav_to_obj"
+        ],
+        "state": "COMPLETED",
+        "terminal_basis": "habitat-pddl-success"
+      },
+      "1": {
+        "benchmark_task_achieved": true,
+        "destination": "any_targets|0",
+        "episode_id": "51",
+        "episode_terminated": true,
+        "final_position": [
+          1.3818612098693848,
+          2.833804130554199,
+          -2.9596474170684814
+        ],
+        "initial_position": [
+          2.932368516921997,
+          2.8338050842285156,
+          -0.5269778370857239
+        ],
+        "invalid_outputs": 0,
+        "local_llm_calls": 2,
+        "local_replans": 0,
+        "local_skill_completed": false,
+        "local_tokens": 2752,
+        "message_pipe_activity_count": 0,
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+        "send_request_count": 0,
+        "simulator_steps": 209,
+        "skill_sequence": [
+          "nav_to_obj|nav_to_obj"
+        ],
+        "state": "COMPLETED",
+        "terminal_basis": "habitat-pddl-success"
+      }
+    },
+    "peer_communication": {
+      "0": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      },
+      "1": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      }
+    },
+    "task_statuses": {
+      "task-navigate-goal-a": "Completed",
+      "task-navigate-goal-b": "Completed"
+    }
+  },
+  "mode": "paired",
+  "schema": "roboguide.e1-shared-world-verdict/v0.1",
+  "verdict": "PASS"
+}

@@ -1,0 +1,19 @@
+{
+  "checks": {
+    "mission_failed_not_success": true,
+    "no_fake_pddl_success": true,
+    "no_shared_episode": true,
+    "pair_never_assembled_fail_closed": true,
+    "post_202": true,
+    "second_node_absent": true,
+    "single_node_registered": true
+  },
+  "context": {
+    "lone_detail": "shared-world pair never assembled; refusing to fake a paired episode",
+    "lone_local_state": "FAILED",
+    "mission_status": "Failed"
+  },
+  "mode": "single",
+  "schema": "roboguide.e1-shared-world-verdict/v0.1",
+  "verdict": "PASS"
+}

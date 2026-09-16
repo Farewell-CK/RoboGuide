@@ -1,0 +1,332 @@
+{
+  "derived_needed": {
+    "SequentialHandoff": "no official task requires inter-agent object handoff; derive e.g. sample-transfer chains",
+    "ConcurrentCooperation": "official set empty; RoboGuide scenarios/execution-relations-v0.1 (requires-active safety guidance) is the semantic template",
+    "TightlyCoupledCooperation": "no official or existing scenario; derive (e.g. cooperative carrying) if claimed"
+  },
+  "official_coverage": {
+    "Independent": "all 12 official multi-agent task specs",
+    "SequentialHandoff": 0,
+    "ConcurrentCooperation": 0,
+    "TightlyCoupled": 0
+  },
+  "entries": [
+    {
+      "benchmark": "spot_fetch_mobility",
+      "task_spec": "pddl/pddl_spot_fetch_mobility",
+      "episode_count": 99,
+      "robot_types": [
+        "SpotRobot",
+        "FetchRobot"
+      ],
+      "goal_predicates": [
+        "any_at(any_targets|0)",
+        "any_at(TARGET_any_targets|0)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "navigate"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent",
+        "phases": {
+          "ctx-a": "Independent",
+          "ctx-b": "Independent"
+        }
+      },
+      "assignment_swappable": true,
+      "confidence": "high",
+      "evidence_source": "pddl_spot_fetch_mobility.yaml + evaluation/e1/shared_world (proven)",
+      "protocol_a": true,
+      "protocol_b": "ready (navigation integrated, 2/2 shared-world PASS)"
+    },
+    {
+      "benchmark": "height_per",
+      "task_spec": "pddl/pddl_height_per",
+      "episode_count": null,
+      "robot_types": [
+        "SpotRobot",
+        "FetchRobot"
+      ],
+      "goal_predicates": [
+        "any_at(any_targets|0)",
+        "any_at(any_targets|1)",
+        "is_detected(any_targets|0)",
+        "is_detected(any_targets|1)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "navigate",
+        "detect",
+        "detect"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "assignment_swappable": true,
+      "confidence": "high",
+      "evidence_source": "pddl_height_per.yaml",
+      "protocol_a": true,
+      "protocol_b": "partial (perception skills not integrated)"
+    },
+    {
+      "benchmark": "spot_drone_per",
+      "task_spec": "pddl/pddl_spot_drone_per",
+      "episode_count": null,
+      "robot_types": [
+        "SpotRobot",
+        "DJIDrone"
+      ],
+      "goal_predicates": [
+        "is_detected(any_targets|0)",
+        "is_detected(any_targets|1)"
+      ],
+      "expected_phase_structure": [
+        "navigate+detect"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "assignment_swappable": true,
+      "confidence": "medium",
+      "evidence_source": "pddl_spot_drone_per.yaml",
+      "protocol_a": true,
+      "protocol_b": "partial (perception not integrated)"
+    },
+    {
+      "benchmark": "multi_agent_per",
+      "task_spec": "pddl/pddl_multi_agent_per",
+      "episode_count": null,
+      "robot_types": [
+        "multi"
+      ],
+      "goal_predicates": [
+        "robot_at(any_targets|i, agent_i) x N"
+      ],
+      "expected_phase_structure": [
+        "navigate x N"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "assignment_swappable": false,
+      "assignment_constraint": "goal predicates bind specific agents",
+      "confidence": "high",
+      "evidence_source": "pddl_multi_agent_per.yaml",
+      "protocol_a": true,
+      "protocol_b": "partial"
+    },
+    {
+      "benchmark": "dist_man",
+      "task_spec": "pddl/pddl_dist_man",
+      "episode_count": null,
+      "robot_types": [
+        "SpotRobot",
+        "FetchRobot"
+      ],
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "pick",
+        "navigate",
+        "place",
+        "navigate",
+        "pick",
+        "navigate",
+        "place"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent",
+        "note": "per-task sequential skill phases are single-agent, not inter-context coupling"
+      },
+      "assignment_swappable": "per-object",
+      "confidence": "medium-high",
+      "evidence_source": "pddl_dist_man.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires pick/place skill integration"
+    },
+    {
+      "benchmark": "height_man",
+      "task_spec": "pddl/pddl_height_man",
+      "episode_count": null,
+      "robot_types": [
+        "SpotRobot",
+        "FetchRobot"
+      ],
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "pick",
+        "navigate",
+        "place",
+        "navigate",
+        "pick",
+        "navigate",
+        "place"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "confidence": "medium-high",
+      "evidence_source": "pddl_height_man.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires pick/place integration; multi-floor"
+    },
+    {
+      "benchmark": "multi_agent_mobility",
+      "task_spec": "pddl/pddl_multi_agent_mobility",
+      "episode_count": null,
+      "robot_types": [
+        "2 robots"
+      ],
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "pick",
+        "navigate",
+        "place",
+        "navigate",
+        "pick",
+        "navigate",
+        "place"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "confidence": "medium",
+      "evidence_source": "pddl_multi_agent_mobility.yaml (name says mobility but solution includes pick/place)",
+      "protocol_a": true,
+      "protocol_b": "requires pick/place integration"
+    },
+    {
+      "benchmark": "fetch_stretch_man",
+      "task_spec": "pddl/pddl_fetch_stretch_man",
+      "episode_count": null,
+      "robot_types": [
+        "FetchRobot",
+        "StretchRobot"
+      ],
+      "goal_predicates": [
+        "at(any_i, TARGET_i) + not_holding x 2 family"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "pick",
+        "navigate",
+        "place",
+        "x2 objects"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "confidence": "medium",
+      "evidence_source": "pddl_fetch_stretch_man.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires manipulation integration"
+    },
+    {
+      "benchmark": "multi_agent_social_nav",
+      "task_spec": "pddl/multi_agent_social_nav",
+      "episode_count": null,
+      "robot_types": [
+        "2 robots"
+      ],
+      "goal_predicates": [
+        "at(any_i, TARGET_i) + not_holding x 2 family"
+      ],
+      "expected_phase_structure": [
+        "stage_1_1..stage_2_2 dual-object manipulate"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "confidence": "medium",
+      "evidence_source": "multi_agent_social_nav.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires manipulation integration"
+    },
+    {
+      "benchmark": "multi_agent_tidy_house",
+      "task_spec": "pddl/multi_agent_tidy_house",
+      "episode_count": null,
+      "robot_types": [
+        "2 robots"
+      ],
+      "goal_predicates": [
+        "at(any_i, TARGET_i) + not_holding x 2 family"
+      ],
+      "expected_phase_structure": [
+        "dual-object tidy"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent"
+      },
+      "confidence": "medium",
+      "evidence_source": "multi_agent_tidy_house.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires manipulation integration"
+    },
+    {
+      "benchmark": "drone_spot_rearrange",
+      "task_spec": "pddl/drone_spot_rearrange",
+      "episode_count": null,
+      "robot_types": [
+        "DJIDrone",
+        "SpotRobot"
+      ],
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "not_holding(agent_0)",
+        "not_holding(agent_1)"
+      ],
+      "expected_phase_structure": [
+        "navigate",
+        "pick",
+        "navigate",
+        "place"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent",
+        "assignment_constraint": "capability-differentiated pick owner"
+      },
+      "confidence": "medium",
+      "evidence_source": "drone_spot_rearrange.yaml",
+      "protocol_a": true,
+      "protocol_b": "requires manipulation integration"
+    },
+    {
+      "benchmark": "multi_agent_man",
+      "task_spec": "pddl/pddl_multi_agent_man",
+      "episode_count": null,
+      "robot_types": [
+        "4 agents"
+      ],
+      "goal_predicates": [
+        "robot_at(TARGET_any_targets|1, agent_1)",
+        "robot_at(TARGET_any_targets|3, agent_3)",
+        "at(any_targets|0, TARGET) mixed"
+      ],
+      "expected_phase_structure": [
+        "navigate x N + manipulation"
+      ],
+      "proposed_coupling": {
+        "mission": "Independent",
+        "assignment_constraint": "robot_at binds agents"
+      },
+      "confidence": "medium",
+      "evidence_source": "pddl_multi_agent_man.yaml",
+      "protocol_a": true,
+      "protocol_b": "partial + manipulation"
+    }
+  ],
+  "schema": "roboguide.e1-workload-taxonomy/v0.1"
+}

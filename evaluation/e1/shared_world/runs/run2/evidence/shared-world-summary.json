@@ -1,0 +1,80 @@
+{
+  "goal_predicates": [
+    "any_at(any_targets|0)",
+    "any_at(TARGET_any_targets|0)"
+  ],
+  "identity": {
+    "episode_id": "51",
+    "episode_reset_count": 1,
+    "episode_started_unix": 1789540785.4600346,
+    "episode_terminated": true,
+    "pid": 1154146,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "simulator_steps": 209,
+    "simulator_worlds": 1
+  },
+  "official_pddl_success": true,
+  "outcomes": {
+    "0": {
+      "benchmark_task_achieved": true,
+      "destination": "TARGET_any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": true,
+      "final_position": [
+        -0.8147434592247009,
+        0.23217561841011047,
+        -2.1878693103790283
+      ],
+      "initial_position": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2794,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 209,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "COMPLETED",
+      "terminal_basis": "habitat-pddl-success"
+    },
+    "1": {
+      "benchmark_task_achieved": true,
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": true,
+      "final_position": [
+        1.3818612098693848,
+        2.833804130554199,
+        -2.9596474170684814
+      ],
+      "initial_position": [
+        2.932368516921997,
+        2.8338050842285156,
+        -0.5269778370857239
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2866,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 209,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "COMPLETED",
+      "terminal_basis": "habitat-pddl-success"
+    }
+  },
+  "stage1_assignment": "RoboGuide committed assignments (original EMOS group_discussion replaced per execution)"
+}

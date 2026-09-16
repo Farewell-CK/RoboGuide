@@ -1,0 +1,2 @@
+{"destination": "any_targets|0", "mission_id": "mission-e1-i-shared-world-episode-51", "node": "node-a", "task_id": "task-navigate-goal-a", "unix": 1789541440.0987175}
+{"destination": "TARGET_any_targets|0", "mission_id": "mission-e1-i-shared-world-episode-51", "node": "node-b", "task_id": "task-navigate-goal-b", "unix": 1789541440.1525679}

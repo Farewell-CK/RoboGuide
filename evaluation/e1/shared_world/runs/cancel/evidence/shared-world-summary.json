@@ -1,0 +1,80 @@
+{
+  "goal_predicates": [
+    "any_at(any_targets|0)",
+    "any_at(TARGET_any_targets|0)"
+  ],
+  "identity": {
+    "episode_id": "51",
+    "episode_reset_count": 1,
+    "episode_started_unix": 1789541455.7139888,
+    "episode_terminated": false,
+    "pid": 1180816,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "simulator_steps": 1,
+    "simulator_worlds": 1
+  },
+  "official_pddl_success": false,
+  "outcomes": {
+    "0": {
+      "benchmark_task_achieved": false,
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": false,
+      "final_position": [
+        -0.16678085923194885,
+        2.3872528076171875,
+        3.768552780151367
+      ],
+      "initial_position": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2761,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 1,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "CANCELLED",
+      "terminal_basis": "cancellation"
+    },
+    "1": {
+      "benchmark_task_achieved": false,
+      "destination": "TARGET_any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": false,
+      "final_position": [
+        2.932368516921997,
+        2.833804130554199,
+        -0.5269778370857239
+      ],
+      "initial_position": [
+        2.932368516921997,
+        2.8338050842285156,
+        -0.5269778370857239
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2760,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 1,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "CANCELLED",
+      "terminal_basis": "cancellation"
+    }
+  },
+  "stage1_assignment": "RoboGuide committed assignments (original EMOS group_discussion replaced per execution)"
+}

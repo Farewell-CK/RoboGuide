@@ -1,0 +1,82 @@
+{
+  "goal_predicates": [
+    "any_at(any_targets|0)",
+    "any_at(TARGET_any_targets|0)"
+  ],
+  "identity": {
+    "episode_id": "51",
+    "episode_reset_count": 1,
+    "episode_started_unix": 1789540954.5161598,
+    "episode_terminated": true,
+    "pid": 1160193,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "simulator_steps": 3000,
+    "simulator_worlds": 1
+  },
+  "official_pddl_success": false,
+  "outcomes": {
+    "0": {
+      "benchmark_task_achieved": false,
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": false,
+      "final_position": [
+        -0.4185841977596283,
+        2.91664981842041,
+        -1.4727776050567627
+      ],
+      "initial_position": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": true,
+      "local_tokens": 2767,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 101,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "COMPLETED",
+      "terminal_basis": "oracle-nav-skill"
+    },
+    "1": {
+      "benchmark_task_achieved": false,
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": true,
+      "final_position": [
+        1.3818612098693848,
+        2.833804130554199,
+        -2.9596474170684814
+      ],
+      "initial_position": [
+        2.932368516921997,
+        2.8338050842285156,
+        -0.5269778370857239
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 6,
+      "local_replans": 4,
+      "local_skill_completed": false,
+      "local_tokens": 11184,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 3000,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj",
+        "wait|nav_to_obj",
+        "wait|wait"
+      ],
+      "state": "FAILED",
+      "terminal_basis": "episode-terminated-before-success"
+    }
+  },
+  "stage1_assignment": "RoboGuide committed assignments (original EMOS group_discussion replaced per execution)"
+}

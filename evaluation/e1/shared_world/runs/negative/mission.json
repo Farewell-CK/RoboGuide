@@ -1,0 +1,1 @@
+{"group_id":"group-mission-e1-i-shared-world-negative","mission_id":"mission-e1-i-shared-world-negative","peer_channels":[],"relations":[],"status":"Failed","tasks":[{"context_id":"ctx-goal-a","status":"Failed","task_id":"task-navigate-goal-a"},{"context_id":"ctx-goal-b","status":"Completed","task_id":"task-navigate-goal-b"}]}
