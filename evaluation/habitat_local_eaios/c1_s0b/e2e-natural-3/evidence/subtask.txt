@@ -1,0 +1,1 @@
+Navigate the Habitat robot to the configured semantic target.

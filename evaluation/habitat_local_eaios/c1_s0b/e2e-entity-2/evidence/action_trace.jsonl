@@ -1,0 +1,1 @@
+{"call_index": 1, "stage": "local-agent", "decision": {"name": "nav_to_obj", "arguments": {"target_obj": "any_targets|0", "robot": "agent_0"}}, "token_delta": 1862, "latency_ms": 4426.5, "message_pipe_entries": [], "simulator_steps_before": 0}

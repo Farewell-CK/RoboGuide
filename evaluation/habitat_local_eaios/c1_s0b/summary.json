@@ -1,0 +1,101 @@
+{
+  "schema": "roboguide.c1-s0b-summary/v0.1",
+  "git_sha": "c29f3840e610e6c60b5ab0d723bf5b8a4d067849",
+  "model_endpoint": "EMOS emos.env relay (see environment), model gpt-5.6-luna via EMOS_LLM_MODEL",
+  "backend_selection": "deployment CLI --backend emos-crabagent --subtask-mode <mode>; canonical operation unchanged mobility.navigate@v1",
+  "deterministic_tests": "16/16 pass (test_adapter 6 + test_crabagent_backend 10)",
+  "runs": {
+    "e2e-entity-1": {
+      "kind": "production-e2e",
+      "subtask_mode": "entity-grounded",
+      "verdict": "PASS",
+      "mission_status": "Completed",
+      "local_state": "COMPLETED",
+      "nav_targets": [
+        "any_targets|0"
+      ],
+      "llm_calls": 2,
+      "local_model_tokens": 2748,
+      "decision_count": 1
+    },
+    "e2e-entity-2": {
+      "kind": "production-e2e",
+      "subtask_mode": "entity-grounded",
+      "verdict": "PASS",
+      "mission_status": "Completed",
+      "local_state": "COMPLETED",
+      "nav_targets": [
+        "any_targets|0"
+      ],
+      "llm_calls": 2,
+      "local_model_tokens": 2755,
+      "decision_count": 1
+    },
+    "e2e-natural-1": {
+      "kind": "production-e2e",
+      "subtask_mode": "natural-objective",
+      "verdict": "PASS",
+      "mission_status": "Completed",
+      "local_state": "COMPLETED",
+      "nav_targets": [
+        "TARGET_any_targets|0"
+      ],
+      "llm_calls": 2,
+      "local_model_tokens": 2879,
+      "decision_count": 1
+    },
+    "e2e-natural-2": {
+      "kind": "production-e2e",
+      "subtask_mode": "natural-objective",
+      "verdict": "PASS",
+      "mission_status": "Completed",
+      "local_state": "COMPLETED",
+      "nav_targets": [
+        "TARGET_any_targets|0"
+      ],
+      "llm_calls": 2,
+      "local_model_tokens": 2869,
+      "decision_count": 1
+    },
+    "e2e-natural-3": {
+      "kind": "production-e2e",
+      "subtask_mode": "natural-objective",
+      "verdict": "PASS",
+      "mission_status": "Completed",
+      "local_state": "COMPLETED",
+      "nav_targets": [
+        "TARGET_any_targets|0"
+      ],
+      "llm_calls": 2,
+      "local_model_tokens": 3459,
+      "decision_count": 1
+    },
+    "isolated-run-1": {
+      "kind": "isolated-adapter",
+      "subtask_mode": "entity-grounded",
+      "verdict": "COMPLETED",
+      "local_state": "COMPLETED",
+      "simulator_steps": 101
+    },
+    "isolated-run-2": {
+      "kind": "isolated-adapter",
+      "subtask_mode": "natural-objective",
+      "verdict": "COMPLETED",
+      "local_state": "COMPLETED",
+      "simulator_steps": 223
+    }
+  },
+  "groups": {
+    "entity-grounded_e2e": "2/2 PASS",
+    "natural-objective_e2e": "3/3 PASS (mission Completed each; TARGET_-prefixed entity selected by local agent)",
+    "isolated": "2/2 local COMPLETED (one per mode)",
+    "direct_oracle_regression": "happy-path PASS + cancel-sanity PASS after the new backend landed"
+  },
+  "model_variance_observations": [
+    "natural-objective runs consistently selected TARGET_any_targets|0 (valid PDDL entity) instead of any_targets|0; 223 vs 101 simulator steps; recorded as local-agent variance, not a system failure",
+    "token totals vary per run (2748-3459) with identical decision counts; latency recorded per call in token_usage_details.jsonl"
+  ],
+  "message_pipe_observations": "send_request never triggered in any run; message_pipe empty at every tick",
+  "blockers": [],
+  "overall": "PASS"
+}

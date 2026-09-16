@@ -1,0 +1,53 @@
+{
+  "checks": {
+    "bridge_responsive": true,
+    "controller_alive": true,
+    "decision_count": 1,
+    "exactly_once": true,
+    "llm_calls": 2,
+    "llm_calls_recorded": true,
+    "local_model_tokens": 2879,
+    "local_outcome_state": "COMPLETED",
+    "local_terminal": true,
+    "mission_matches_local": true,
+    "mission_status": "Completed",
+    "mission_terminal": true,
+    "nav_target_recorded": true,
+    "nav_targets": [
+      "TARGET_any_targets|0"
+    ],
+    "nav_to_obj_selected": true,
+    "no_recovery": true,
+    "node_connected": true,
+    "physical_position_changed": true,
+    "post_202": true,
+    "real_crabagent_called": true,
+    "running_observed": true,
+    "send_request_absent": true,
+    "simulator_stepped": true,
+    "subtask_mode": "natural-objective"
+  },
+  "local_execution": {
+    "execution_id": "habitat-820baa2cba19b6d314f6465a",
+    "outcome": {
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "final_position": [
+        -0.2237982302904129,
+        0.12554523348808289,
+        -2.7719459533691406
+      ],
+      "initial_position": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "simulator_steps": 223,
+      "state": "COMPLETED"
+    }
+  },
+  "mission_id": "mission-c1-s0-habitat-navigation",
+  "schema": "roboguide.c1-s0b-controlled-verdict/v0.1",
+  "verdict": "PASS"
+}

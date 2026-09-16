@@ -1,0 +1,96 @@
+ACCEPT {"cancel_requested": false, "detail": "accepted by Habitat Local EAIOS", "execution_id": "habitat-a3846752fed250d65a45c197", "group_id": "group-c1-s0b-isolated-entity-grounded", "local_outcome": null, "mission_id": "mission-c1-s0b-isolated-entity-grounded", "objective": "Navigate the Habitat robot to the semantic target.", "operation": "mobility.navigate@v1", "parameters": {"destination": "any_targets|0"}, "resource_ids": ["habitat-navigation-slot"], "role_id": "navigator", "state": "ACCEPTED", "task_id": "navigate-target", "updated_at_unix_ms": 1789488310223}
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+STATUS ACCEPTED
+pybullet build time: Sep  8 2026 08:34:54
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_hr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_fngrb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+STATUS ACCEPTED
+STATUS RUNNING
+STATUS RUNNING
+STATUS RUNNING
+STATUS RUNNING
+STATUS RUNNING
+STATUS RUNNING
+STATUS COMPLETED
+RESULT {"init_seconds": 20.5, "terminal": {"cancel_requested": false, "detail": "Habitat Oracle navigation reported the destination reached", "execution_id": "habitat-a3846752fed250d65a45c197", "group_id": "group-c1-s0b-isolated-entity-grounded", "local_outcome": {"destination": "any_targets|0", "episode_id": "51", "final_position": [-0.4185841977596283, 2.91664981842041, -1.4727776050567627], "initial_position": [-0.16678085923194885, 2.3214714527130127, 3.768552780151367], "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb", "simulator_steps": 101, "state": "COMPLETED"}, "mission_id": "mission-c1-s0b-isolated-entity-grounded", "objective": "Navigate the Habitat robot to the semantic target.", "operation": "mobility.navigate@v1", "parameters": {"destination": "any_targets|0"}, "resource_ids": ["habitat-navigation-slot"], "role_id": "navigator", "state": "COMPLETED", "task_id": "navigate-target", "updated_at_unix_ms": 1789488342736}, "health_after": {"detail": "Habitat episode 51 is loaded for agent 0", "state": "ONLINE"}, "readiness_after": {"detail": "Habitat episode 51 is loaded for agent 0", "operation": "mobility.navigate@v1", "state": "READY"}}
+===============CrabAgent Prompt==============
+Your assigned subtask is:"""
+Navigate to any_targets|0.
+"""
+
+You are provided with the following actions:
+[**send_request**:
+action description: Send a text request to the fellow agents.
+action arguments json schema: {'properties': {'request': {'description': 'The text request to send.', 'title': 'Request', 'type': 'string'}, 'target_agent': {'description': 'The agent to send the request to.', 'title': 'Target Agent', 'type': 'string'}}, 'required': ['request', 'target_agent'], 'title': 'send_request', 'type': 'object'}
+]
+[**nav_to_obj**:
+action description: Navigate to the specified 'any_targets' or 'TARGET_any_target' object. Upon successfully completing this action, you should be positioned at the exact location of the 'any_targets' or 'TARGET_any_target'. 'target_obj' can NOT be a region name!
+action arguments json schema: {'properties': {'target_obj': {'description': "The 'any_targets' or 'TARGET_any_targets' object to navigate to. 'target_obj' MUST follow the format 'any_targets|x' or 'TARGET_any_targets|x'. Must NOT be a region name.", 'title': 'Target Obj', 'type': 'string'}}, 'required': ['target_obj'], 'title': 'nav_to_obj', 'type': 'object'}
+]
+[**pick**:
+action description: Pick up the 'any_targets' object. This action can only be executed under the following conditions: (1) You must not already be holding the 'any_targets' object, and (2) You must be exactly at the 'any_targets' position, which means you have to navigate to the 'any_targets' position first. After successfully executing this action, you will be holding the 'any_targets' object while remaining at the 'any_targets' position.
+action arguments json schema: {'properties': {'target_obj': {'description': "The 'any_targets' object to pick.", 'title': 'Target Obj', 'type': 'string'}}, 'required': ['target_obj'], 'title': 'pick', 'type': 'object'}
+]
+[**place**:
+action description: Place the 'any_targets' object at the 'TARGET_any_targets' position. This action can only be executed under the following conditions: (1) You must be holding the 'any_targets' object, and (2) You must be precisely at the 'TARGET_any_targets' position, which mean you have to navigate to the 'TARGET_any_targets' position first. After successfully executing this action, you will no longer be holding the 'any_targets' object, and it will be positioned at the 'TARGET_any_targets' position.
+action arguments json schema: {'properties': {'target_obj': {'description': "The 'any_targets' object you are holding.", 'title': 'Target Obj', 'type': 'string'}, 'target_location': {'description': "The 'TARGET_any_targets' position to place the any_targets object.", 'title': 'Target Location', 'type': 'string'}}, 'required': ['target_obj', 'target_location'], 'title': 'place', 'type': 'object'}
+]
+[**reset_arm**:
+action description: Reset your arm to its default position. This action can only be executed if you have an arm and you MUST call this after performing pick-and-place actions.
+action arguments json schema: {'properties': {}, 'title': 'reset_arm', 'type': 'object'}
+]
+[**wait**:
+action description: Wait if no immediate action is required from you.
+action arguments json schema: {'properties': {}, 'title': 'wait', 'type': 'object'}
+]
+
+Now you should convert it into a FULL subtask action sequence to complete YOUR assigned subtask.
+===============CrabAgent Subtasks==============
+None
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/tensorboard/compat/tensorflow_stub/dtypes.py:326: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  np.bool8: (False, True),
+2026-09-16 00:04:59,975 Initializing dataset RearrangeDataset-v0
+2026-09-16 00:04:59,982 initializing sim RearrangeSim-v0
+2026-09-16 00:05:09,173 Initializing task RearrangePddlTask-v0
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/core.py:317: DeprecationWarning: [33mWARN: Initializing wrapper in old step API which returns one bool instead of two. It is recommended to set `new_step_api=True` to use new step API. This will be the default behaviour in future.[0m
+  deprecation(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/spaces/box.py:128: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")

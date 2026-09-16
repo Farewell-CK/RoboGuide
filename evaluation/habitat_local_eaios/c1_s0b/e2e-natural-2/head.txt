@@ -1,0 +1,1 @@
+subtask_mode=natural-objective run=natural-2 archived_utc=2026-09-15T17:03:25Z sha=c29f3840e610e6c60b5ab0d723bf5b8a4d067849

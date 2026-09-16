@@ -1,0 +1,8 @@
+{
+  "start_action_prompt_sha256": "2c0945a8378b3bdf05d003937a67bf230b067059dd8316b816d2ea4435cfbe04",
+  "step_action_prompt_sha256": "8547e82ddd2e7adfad3e2e0209cf76733e3449f4291e097138b375144903a928",
+  "hash_algorithm": "sha256",
+  "subtask_mode": "natural-objective",
+  "robot_type": "SpotRobot",
+  "model": "not explicitly controlled (EMOS OpenAIModel reads EMOS_LLM_MODEL from the deployment environment)"
+}
