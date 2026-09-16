@@ -21,7 +21,7 @@ data class DeviceInfo(
 object MockDeviceRepository {
     val glasses = DeviceInfo(
         id = "glasses",
-        name = "导盲眼镜 Pro",
+        name = "导盲眼镜",
         icon = "👓",
         sn = "GL-2024-00821",
         connection = "蓝牙 BLE",

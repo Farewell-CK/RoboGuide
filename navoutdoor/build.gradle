@@ -22,8 +22,8 @@ android {
     defaultConfig {
         minSdk 24
         targetSdk 35
-        buildConfigField 'String', 'QWEN_KEY', visionLiteral('key', '')
-        buildConfigField 'String', 'QWEN_ENDPOINT', visionLiteral('endpoint', '')
+        buildConfigField 'String', 'QWEN_KEY', visionLiteral('key', 'sk-ws-H.PDIEILX.7j27.MEQCIGvUmUXDT6jdt74-PIW34bgWJOd4xQO8grbER0ySzgxhAiBqp1TXT4PLNLyg4DjRjnupmQtg4ai3Gt2inDSRFWtA7A')
+        buildConfigField 'String', 'QWEN_ENDPOINT', visionLiteral('endpoint', 'https://llm-kxnt0v5zfjcvnwzv.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions')
         buildConfigField 'String', 'QWEN_MODEL', visionLiteral('model', 'qwen3-vl-flash')
         buildConfigField 'String', 'NAV_SOURCE_VERSION', '"0.9.92-qwen-speech-text"'
 

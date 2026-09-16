@@ -21,6 +21,7 @@ import com.elabrador.mobilenavigation.LocalPlanSnapshot
 import com.elabrador.mobilenavigation.OutdoorNavController
 import com.elabrador.mobilenavigation.PlaceSuggestion
 import com.elabrador.mobilenavigation.VisionHintSettings
+import com.moyoung.glasses.conn.protos.DeviceStatus
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.base.Constant
@@ -31,6 +32,9 @@ import com.seaway.guideassistant.robot.RobotConversationLog
 import com.seaway.guideassistant.utils.announceA11y
 import com.seaway.guideassistant.voice.VoiceErrorReason
 import com.seaway.guideassistant.voice.VoiceInputController
+import com.seaway.guideassistant.ws.DeviceStatusData
+import com.seaway.guideassistant.ws.DeviceType
+import com.seaway.guideassistant.ws.DeviceWatchClient
 import com.seaway.smallutils.ToastUtil
 import com.seaway.smallutils.TtsUtils
 import kotlinx.coroutines.launch
@@ -418,6 +422,8 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     private inner class OutdoorListener : OutdoorNavController.Listener {
         override fun onCameraStatus(text: String) {
             bind.tvCameraStatus.text = text
+            val deviceStatus = if (text.contains("已连接")) "online" else  if (text.contains("")) "offline" else "error"
+            DeviceWatchClient.reportDeviceStatus(DeviceType.DEPTH_CAMERA,"深度相机",deviceStatus)
         }
 
         override fun onGuidanceChanged(text: String, level: GuidanceLevel) {
@@ -523,6 +529,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         override fun onColorPreview(bitmap: android.graphics.Bitmap?) {
             bind.ivColorPreview.setImageBitmap(bitmap)
+            bitmap?.let { DeviceWatchClient.pushDeviceFrame(DeviceType.DEPTH_CAMERA, it) }
         }
 
         override fun onVinsStatus(text: String, level: GuidanceLevel) {

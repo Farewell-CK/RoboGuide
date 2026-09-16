@@ -4,6 +4,8 @@ import com.lsxiao.apollo.core.Apollo
 import com.seaway.guideassistant.llm.NavigationIntent
 import com.seaway.guideassistant.llm.NavigationPhase
 import com.seaway.guideassistant.utils.ApolloEvents
+import com.seaway.guideassistant.ws.DeviceWatchClient
+import com.seaway.guideassistant.ws.NavigationPhaseData
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -36,7 +38,18 @@ object NavigationPlanManager {
      * [rawInstruction] 是 AgentFragment 下发给大模型的完整原始指令文本，供 NavigateFragment 展示。 */
     fun startPlan(intent: NavigationIntent, rawInstruction: String) {
         if (intent.intent != "navigation" || intent.needClarification || intent.navigationPhases.isEmpty()) return
-        val plan = NavigationPlan(intent.destination, intent.navigationPhases.sortedBy { it.phase }, rawInstruction)
+        val sortedPhases = intent.navigationPhases.sortedBy { it.phase }
+        DeviceWatchClient.reportNavigation(
+            instruction = rawInstruction,
+            destination = intent.destination.orEmpty(),
+            phases = sortedPhases.map { NavigationPhaseData(it.phase, it.mode, it.description, it.floor) },
+            currentPhase = sortedPhases.first().phase,
+            totalPhases = sortedPhases.size,
+            needClarification = intent.needClarification,
+            clarificationQuestion = intent.clarificationQuestion,
+            confidence = intent.confidence?.toFloat() ?: 0f
+        )
+        val plan = NavigationPlan(intent.destination, sortedPhases, rawInstruction)
         state.value = PlanState.InProgress(plan, 0, ++nextPlanId)
         Apollo.emit(ApolloEvents.SWITCH_TO_NAVIGATE_TAB)
     }

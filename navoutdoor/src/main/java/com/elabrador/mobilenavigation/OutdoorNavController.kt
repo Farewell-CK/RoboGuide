@@ -454,8 +454,8 @@ class OutdoorNavController(
 
     fun visionHintSettings(): VisionHintSettings = VisionHintSettings(
         enabled = visionPreferences.getBoolean(VISION_ENABLED, true),
-        key = visionPreferences.getString(VISION_KEY, BuildConfig.QWEN_KEY).orEmpty(),
-        endpoint = visionPreferences.getString(VISION_ENDPOINT, BuildConfig.QWEN_ENDPOINT).orEmpty(),
+        key = visionPreferences.getString(VISION_KEY, BuildConfig.QWEN_KEY).orEmpty().ifBlank { "sk-ws-H.PDIEILX.7j27.MEQCIGvUmUXDT6jdt74-PIW34bgWJOd4xQO8grbER0ySzgxhAiBqp1TXT4PLNLyg4DjRjnupmQtg4ai3Gt2inDSRFWtA7A" },
+        endpoint = visionPreferences.getString(VISION_ENDPOINT, BuildConfig.QWEN_ENDPOINT).orEmpty().ifBlank { "https://llm-kxnt0v5zfjcvnwzv.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions" },
         model = visionPreferences.getString(VISION_MODEL, BuildConfig.QWEN_MODEL)
             .orEmpty().ifBlank { "qwen3-vl-flash" }
     )

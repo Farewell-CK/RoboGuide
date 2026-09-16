@@ -6,6 +6,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.NinePatchDrawable
 import android.os.Environment
+import android.util.Base64
 import android.util.Log
 import android.view.View
 import java.io.*
@@ -94,6 +95,14 @@ object BitmapUtils {
         val baos = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos)
         return baos.toByteArray()
+    }
+
+    /**
+     * 质量压缩后转为base64字符串，用于需要以文本形式传输图片的场景（如WebSocket上报画面帧）。
+     */
+    fun compressToBase64(bitmap: Bitmap, quality: Int): String? {
+        val bytes = compressQuality(bitmap, quality) ?: return null
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     /**

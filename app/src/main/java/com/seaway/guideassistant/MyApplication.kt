@@ -11,6 +11,7 @@ import com.seaway.smallutils.TtsUtils
 import com.seaway.guideassistant.ble.GlassesManager
 import com.seaway.guideassistant.module.httpModule
 import com.seaway.guideassistant.module.robotModule
+import com.seaway.guideassistant.ws.DeviceWatchClient
 import com.tencent.mmkv.MMKV
 import io.reactivex.android.schedulers.AndroidSchedulers
 import org.koin.core.context.startKoin
@@ -44,6 +45,8 @@ class MyApplication : Application() {
         TtsUtils.init(this)
         //初始化眼镜SDK
         GlassesManager.init(this)
+        //初始化设备监控WebSocket（状态/画面/导航上报）
+        DeviceWatchClient.connect()
     }
 
 

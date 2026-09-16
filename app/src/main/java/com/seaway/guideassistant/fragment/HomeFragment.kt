@@ -25,6 +25,8 @@ import com.seaway.guideassistant.mock.MockDeviceRepository
 import com.seaway.guideassistant.robot.RobotConnectionManager
 import com.seaway.guideassistant.utils.SessionManager
 import com.seaway.guideassistant.utils.announceA11y
+import com.seaway.guideassistant.ws.DeviceType
+import com.seaway.guideassistant.ws.DeviceWatchClient
 import kotlinx.coroutines.launch
 
 class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
@@ -54,6 +56,7 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
                         is RobotConnectionManager.ConnectionState.Failed -> MockDeviceRepository.unbindDog()
                         is RobotConnectionManager.ConnectionState.Connecting -> Unit
                     }
+                    reportRobotStatus(state)
                     buildDeviceCards()
                 }
             }
@@ -76,7 +79,49 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
         }
     }
 
+    /** 上报机器狗连接状态给设备监控 watch 服务 */
+    private fun reportRobotStatus(state: RobotConnectionManager.ConnectionState) {
+        val status: String
+        val reason: String?
+        when (state) {
+            is RobotConnectionManager.ConnectionState.Idle -> { status = "offline"; reason = null }
+            is RobotConnectionManager.ConnectionState.Connecting -> { status = "connecting"; reason = null }
+            is RobotConnectionManager.ConnectionState.Connected -> { status = "online"; reason = null }
+            is RobotConnectionManager.ConnectionState.Failed -> { status = "error"; reason = state.reason }
+        }
+        DeviceWatchClient.reportDeviceStatus(
+            deviceType = DeviceType.ROBOT_DOG,
+            deviceName = MockDeviceRepository.dog.name,
+            status = status,
+            reason = reason
+        )
+    }
+
+    /** 上报导盲眼镜连接状态给设备监控 watch 服务 */
+    private fun reportGlassesStatus(state: GlassesManager.ConnectionState) {
+        val status: String
+        val reason: String?
+        when (state) {
+            GlassesManager.ConnectionState.Idle -> return
+            GlassesManager.ConnectionState.Scanning,
+            GlassesManager.ConnectionState.Connecting -> { status = "connecting"; reason = null }
+            GlassesManager.ConnectionState.Connected -> { status = "online"; reason = null }
+            GlassesManager.ConnectionState.Disconnected -> { status = "offline"; reason = null }
+            GlassesManager.ConnectionState.PermissionDenied -> { status = "error"; reason = "蓝牙权限被拒绝" }
+            is GlassesManager.ConnectionState.Reconnecting -> { status = "connecting"; reason = "重连中(${state.attempt}/${state.maxAttempts})" }
+            is GlassesManager.ConnectionState.Failed -> { status = "error"; reason = state.reason }
+        }
+        DeviceWatchClient.reportDeviceStatus(
+            deviceType = DeviceType.GLASSES,
+            deviceName = MockDeviceRepository.glasses.name,
+            status = status,
+            battery = GlassesManager.batteryState.value?.level,
+            reason = reason
+        )
+    }
+
     private fun updateGlassesStatus(state: GlassesManager.ConnectionState) {
+        reportGlassesStatus(state)
         bind.tvStatus.text = when (state) {
             GlassesManager.ConnectionState.Idle -> ""
             GlassesManager.ConnectionState.Scanning -> getString(R.string.glasses_status_scanning)
