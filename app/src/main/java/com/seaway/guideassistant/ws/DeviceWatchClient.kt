@@ -42,10 +42,10 @@ object DeviceWatchClient : KoinComponent {
 
     fun connect() {
         isManuallyClosed = false
-        val requestBuilder = Request.Builder().url(Constant.DMWS_URL)
-        if (Constant.DMWS_TOKEN.isNotBlank()) {
-            requestBuilder.addHeader("X-Token", Constant.DMWS_TOKEN)
-        }
+        val requestBuilder = Request.Builder().url(Constant.DMWS_URL+"?token="+Constant.DMWS_TOKEN)
+//        if (Constant.DMWS_TOKEN.isNotBlank()) {
+//            requestBuilder.addHeader("X-Token", Constant.DMWS_TOKEN)
+//        }
         webSocket = okHttpClient.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "connected: ${Constant.DMWS_URL}")
