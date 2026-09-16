@@ -76,12 +76,12 @@
       "id": "R2",
       "requirement": "cross-floor/stairs reachability differences",
       "source": "episode 51 same_floor=false, height delta 2.87m",
-      "needed_abstraction": "none global (any agent suffices); floor is LOCAL_HOW",
+      "needed_abstraction": "any_at proves goals are not agent-bound only; it does NOT prove identical physical reachability across all 99 episodes for both embodiments. No static benchmark evidence currently establishes a provider-dependent mobility feasibility distinction; none is required for the validated episode-51 case; full-dataset interchangeability remains an empirical pilot question",
       "current_representation": "zero-attribute mobility.navigate@v1 (faithful)",
-      "coverage": "EXPRESSIBLE",
+      "coverage": "EXPRESSIBLE (validated episode-51 case only)",
       "e1_blocking": false,
       "severity": null,
-      "evidence": "pddl_sim_state.py:412-424 is_any_robot_at loops all robots; agent yaml has no locomotion deltas"
+      "evidence": "pddl_sim_state.py:412-424 is_any_robot_at; shared-world run1 verdict (cross assignment, pddl_success=true); full-dataset reachability evidence: none"
     },
     {
       "id": "R3",
@@ -153,12 +153,12 @@
       "id": "R9",
       "requirement": "exclusive holding of one object",
       "source": "manipulation specs",
-      "needed_abstraction": "RESOURCE (object mutex) for handoff; LOCAL_HOW for Independent",
+      "needed_abstraction": "cross-node object exclusivity = Control-owned Resource (global reservation authority); local_locks are Node-local concurrency/safety protection ONLY. Current official Independent manipulation workloads do NOT require explicit object-level cross-node reservation: NOT REQUIRED BY CURRENT TESTED SEMANTICS. Whether future shared-object/handoff/tightly-coupled workloads need an object-scoped global resource is a later evidence-driven question",
       "current_representation": "node-local locks suffice for official Independent set",
-      "coverage": "EXPRESSIBLE",
+      "coverage": "NOT_NEEDED (NOT REQUIRED BY CURRENT TESTED SEMANTICS)",
       "e1_blocking": false,
       "severity": null,
-      "evidence": "node.toml local_locks; census coupling=all Independent"
+      "evidence": "node.toml local_locks; ADR-0021 resource semantics; pddl yaml"
     },
     {
       "id": "R10",
@@ -289,5 +289,6 @@
     "families_partial": 2,
     "families_missing": 0,
     "recommendation": "run E1 now (E1-I scope); F1 needs a future Catalog/contract upgrade decision (owner Codex), F2 is integration work (owner ZCode); neither blocks the first pilot"
-  }
+  },
+  "requirements_note": "R2 wording tightened: agent-agnostic predicates do not by themselves establish universal provider feasibility."
 }

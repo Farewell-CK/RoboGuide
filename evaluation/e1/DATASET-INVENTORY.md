@@ -53,8 +53,11 @@ Census method: 每个 benchmark config 的 defaults 链 + **inline
   `is_detected` agent 无关）
 - **swappable per object**：dist_man、height_man、multi_agent_mobility、
   fetch_stretch_man（`at(obj, goal)` 任何可搬运 robot 皆可）
-- **agent-bound**：multi_agent_man、multi_agent_per（`robot_at(..., agent_i)`
-  谓词把目标钉死到具体 agent；RoboGuide 侧需以 capability contract 表达）
+- **agent-bound**：multi_agent_man、multi_agent_per（`robot_at(..., agent_i)` 经
+  `PddlRobotState.is_true(sim_info, robot_entity)` 求值——绑定**具体 benchmark
+  robot 实例**。RoboGuide 对应映射是 Mission **Actor/Role placement / identity
+  constraint**（deployment-owned placement），**不是** capability contract；
+  与 RNS-SEMANTIC-COVERAGE.md R7 一致）
 
 ## Protocol B 缺口映射
 

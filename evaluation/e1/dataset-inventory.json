@@ -253,7 +253,7 @@
         "robot_at(TARGET_any_targets|3, agent_3)",
         "at(any_targets|0, TARGET_any_targets|0) + others (see spec)"
       ],
-      "assignment_constraint": "agent-bound (robot_at predicates pin goals to specific agents)",
+      "assignment_constraint": "agent-bound: robot_at(x, agent_i) evaluates the specific benchmark robot instance (PddlRobotState.is_true by robot entity); RoboGuide mapping is Mission Actor/Role placement / identity constraint, NOT a capability",
       "coupling": "Independent",
       "protocol_b": "partial",
       "missing_skills": [
@@ -360,5 +360,6 @@
     "protocol_b_needs_perception": 297,
     "protocol_b_needs_manipulation": 565,
     "configs_blocked_by_missing_dataset": 5
-  }
+  },
+  "assignment_ownership_note": "agent-bound predicates map to Mission Actor/Role placement, not capabilities (consistent with RNS-SEMANTIC-COVERAGE.md R7)."
 }

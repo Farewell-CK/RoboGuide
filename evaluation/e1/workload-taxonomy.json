@@ -369,5 +369,6 @@
     "protocol_b_directly_runnable_episodes": 99,
     "configs_blocked_by_missing_local_dataset": 5,
     "correction_note": "the v0.1 taxonomy over-counted 12 task specs and left episode counts null; this revision is grounded in evaluation/e1/DATASET-INVENTORY.md (inline data_path overrides resolved, episode counts from file contents)"
-  }
+  },
+  "assignment_ownership_note": "agent-bound predicates map to Mission Actor/Role placement, not capabilities."
 }

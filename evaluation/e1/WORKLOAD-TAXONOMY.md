@@ -38,8 +38,9 @@
    CoordinationContext 的 Mission 耦合；Mission 级仍标 Independent，阶段结构
    记入 expected_phase_structure。
 6. **Embodiment/assignment 约束**：`robot_at(target, agent_i)` 类谓词把 goal
-   绑到具体 agent——RoboGuide 侧应以 capability contracts 表达（而非 NodeId），
-   分类时标注 assignment-constrained。
+   绑到具体 benchmark robot 实例——RoboGuide 侧对应 **Mission Actor/Role
+   placement / identity constraint**（deployment-owned），不是 capability
+   contract（与 RNS-SEMANTIC-COVERAGE.md R7 一致）。
 
 机器可读版本：`workload-taxonomy.json`。
 
