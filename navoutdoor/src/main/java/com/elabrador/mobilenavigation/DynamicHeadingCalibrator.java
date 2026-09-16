@@ -20,6 +20,7 @@ final class DynamicHeadingCalibrator {
     private double initialLatitude, initialLongitude;
     private Point lastVinsPoint;
     private boolean collecting, ready;
+    private boolean automaticAligned;
     private double r00, r01, r10, r11;
     private String fitQuality = "";
     private String fitFailure = "";
@@ -37,18 +38,60 @@ final class DynamicHeadingCalibrator {
     }
 
     synchronized void start() {
+        automaticAligned=false;
         clearSamples(); collecting=true; ready=false;
         motionGate.reset();lastWindowRestart="";lastPairedFixNanos=0;
         status="采集最近 17 个同期 GPS/VINS 点；失败后随行走逐点替换旧点";
     }
 
     synchronized void resetForVinsRestart() {
+        if(automaticAligned){
+            startAutoAligned();
+            status="VINS 已重启：请保持手机顶部与镜头同向，等待自动重新对齐";
+            return;
+        }
         start(); status="VINS 已重启，方向轨迹需要重新采集（0/17）";
+    }
+
+    synchronized void startAutoAligned(){
+        start();automaticAligned=true;
+        status="自动同向标定：请保持手机顶部与 D455F 镜头朝向一致";
+    }
+
+    /** Same alignment as the former manual button, locked for this VINS frame. */
+    synchronized boolean updateAutoAligned(float trueHeading,VinsMono.Pose pose,
+                                          long headingAgeNanos,long nowWallMillis){
+        if(!automaticAligned||!collecting||ready)return false;
+        if(pose==null||!pose.initialized){
+            status="自动同向标定：等待 VINS 初始化";return false;
+        }
+        double poseAge=nowWallMillis-pose.timestamp*1000.;
+        if(!Double.isFinite(poseAge)||poseAge< -100||poseAge>=1500){
+            status="自动同向标定：等待新鲜 VINS 位姿";return false;
+        }
+        if(!Float.isFinite(trueHeading)||headingAgeNanos<0||headingAgeNanos>2_000_000_000L){
+            status=(!Float.isFinite(trueHeading)&&headingAgeNanos>=0&&headingAgeNanos<=2_000_000_000L)
+                    ?"自动同向标定：等待真北修正位置"
+                    :"自动同向标定：等待新鲜手机方向";
+            return false;
+        }
+        double yaw=pose.egoRightAxisYawRadians();
+        if(!Double.isFinite(yaw)){
+            status="自动同向标定：相机朝向无效";return false;
+        }
+        // GPS axes are north / west. Camera forward in VINS is (-sin(yaw), cos(yaw)).
+        // Rotate the geographic heading vector onto that camera-forward vector.
+        double angle=yaw+Math.PI/2+Math.toRadians(trueHeading);
+        double c=Math.cos(angle),s=Math.sin(angle);
+        r00=c;r01=-s;r10=s;r11=c;
+        ready=true;collecting=false;
+        status=String.format(Locale.CHINA,"自动同向标定完成并锁定 · 手机真北航向 %.1f°",trueHeading);
+        return true;
     }
 
     synchronized void updateTimed(double latitude,double longitude,float accuracyMeters,
                                   double vinsX,double vinsY,boolean initialized,long fixNanos){
-        if(!collecting||ready)return;
+        if(automaticAligned||!collecting||ready)return;
         if(fixNanos<=0||fixNanos<=lastPairedFixNanos){status="忽略重复或倒序的定位时间";return;}
         lastPairedFixNanos=fixNanos;
         if(initialized && Double.isFinite(latitude)&&Math.abs(latitude)<=90
@@ -68,7 +111,7 @@ final class DynamicHeadingCalibrator {
 
     synchronized void update(double latitude, double longitude, float accuracyMeters,
                              double vinsX, double vinsY, boolean vinsInitialized) {
-        if (!collecting || ready) return;
+        if (automaticAligned || !collecting || ready) return;
         if (!vinsInitialized || !Double.isFinite(vinsX) || !Double.isFinite(vinsY)) {
             status="源码轨迹标定：等待 VINS 初始化"; return;
         }
@@ -105,6 +148,9 @@ final class DynamicHeadingCalibrator {
     synchronized int totalSampleCount(){return totalSamples;}
     synchronized double sampledDistanceMeters(){return sampledDistance;}
     synchronized String qualityDetails(){
+        if(automaticAligned)return ready
+                ?"已按同向假设完成对齐；之后可分别转动手机和相机。VINS 重启后需再次保持同向。"
+                :"无需采集 17 点或行走标定；完成前请让手机顶部与镜头前方保持同向。";
         String warning=!ready && sampledDistance>=30
                 ? "\n已采集超过 30 米仍未通过；请到开阔处。当前只检查最近 17 点，不应在此无限来回走" : "";
         if(!lastWindowRestart.isEmpty())warning+="\n最近窗口重建原因："+lastWindowRestart;

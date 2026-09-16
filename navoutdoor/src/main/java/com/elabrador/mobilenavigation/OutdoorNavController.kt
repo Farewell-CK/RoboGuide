@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.hardware.GeomagneticField
 import android.location.Location
 import android.location.LocationManager
 import android.os.Handler
@@ -225,12 +226,6 @@ class OutdoorNavController(
     private val vinsInput = VinsInputBuffer()
     private val vinsTimestampMapper = RealSenseTimestampMapper()
     private val calibrationVinsPoseHistory = VinsPoseHistory()
-    private val outdoorFixGate = OutdoorFixGate()
-    @Volatile private var pendingCalibrationLocation: Location? = null
-    @Volatile private var latestGpsAccuracyMeters = Float.NaN
-    @Volatile private var latestGpsFixElapsedNanos = 0L
-    @Volatile private var latestGpsRejection = ""
-    @Volatile private var gnssDirectionDiagnostic = "GNSS 行进方向：暂无数据（仅诊断）"
     @Volatile private var latestPoseCaptureMillis = -1L
     @Volatile private var vinsMono: VinsMono? = null
     @Volatile private var latestVinsPose: VinsMono.Pose? = null
@@ -239,11 +234,12 @@ class OutdoorNavController(
     private val dynamicHeadingCalibrator = DynamicHeadingCalibrator()
     private var currentRoute: AmapRouteClient.RouteResult? = null
     @Volatile private var navigationActive = false
-    /** 附近地点搜索可使用网络粗定位；正式导航仍只使用通过严格检查的 [lastLocation]。 */
+    /** 附近地点搜索可使用较新的网络粗定位。 */
     @Volatile private var destinationSearchLocation: Location? = null
     @Volatile private var lastLocation: Location? = null
     @Volatile private var currentHeading = Float.NaN
     @Volatile private var latestHeadingNanos = 0L
+    private val declinationPosition = DeclinationPosition()
 
     private val searchHandler = Handler(Looper.getMainLooper())
     private val localPlanHandler = Handler(Looper.getMainLooper())
@@ -316,6 +312,7 @@ class OutdoorNavController(
     private val safetyTick = object : Runnable {
         override fun run() {
             if (released) return
+            tryAutoAlignedCalibration()
             renderDirectionGuidance()
             val now = SystemClock.elapsedRealtime()
             val evidence = latestPlanEvidence
@@ -336,7 +333,7 @@ class OutdoorNavController(
         NavigationAudit.start(context.applicationContext)
         val settings = visionHintSettings()
         visionHints.configure(settings.key, settings.endpoint, settings.model, settings.enabled)
-        dynamicHeadingCalibrator.start()
+        dynamicHeadingCalibrator.startAutoAligned()
         mainHandler.postDelayed(safetyTick, 100L)
 
         val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -373,6 +370,23 @@ class OutdoorNavController(
         renderDynamicHeadingCalibration()
 
         phonePoseTracker = PhonePoseTracker(context, object : PhonePoseTracker.Listener {
+            override fun onDeclinationLocation(location: Location) {
+                updatePlaceSearchLocation(location)
+                val accepted = declinationPosition.accept(
+                    location.latitude,
+                    location.longitude,
+                    if (location.hasAccuracy()) location.accuracy else Float.NaN,
+                    location.elapsedRealtimeNanos,
+                    SystemClock.elapsedRealtimeNanos(),
+                    location.provider)
+                if (accepted) {
+                    NavigationAudit.log(
+                        "DECLINATION_POSITION source=${location.provider}" +
+                            " accuracy=${location.accuracy} navigation_fix_unchanged=true")
+                    tryAutoAlignedCalibration()
+                }
+            }
+
             override fun onHeading(headingDegrees: Float) {
                 currentHeading = headingDegrees
                 latestHeadingNanos = SystemClock.elapsedRealtimeNanos()
@@ -384,35 +398,17 @@ class OutdoorNavController(
             }
 
             override fun onLocation(location: Location) {
-                destinationSearchLocation = Location(location)
+                if (!location.latitude.isFinite() || Math.abs(location.latitude) > 90 ||
+                    !location.longitude.isFinite() || Math.abs(location.longitude) > 180
+                ) return
+                NavigationAudit.log(
+                    "LOCATION_ALIGNED source=${location.provider}" +
+                        " accuracy=${location.accuracy} fix_ns=${location.elapsedRealtimeNanos}")
+                lastLocation = Location(location)
                 pendingLocationSearchKeyword?.let { keyword ->
                     pendingLocationSearchKeyword = null
                     searchDestinationSuggestions(keyword)
                 }
-                if (LocationManager.GPS_PROVIDER != location.provider) return
-                latestGpsAccuracyMeters =
-                    if (location.hasAccuracy()) location.accuracy else Float.NaN
-                latestGpsFixElapsedNanos = location.elapsedRealtimeNanos
-                gnssDirectionDiagnostic = describeGnssDirection(location)
-                val accepted = outdoorFixGate.accept(
-                    location.latitude,
-                    location.longitude,
-                    latestGpsAccuracyMeters,
-                    location.elapsedRealtimeNanos,
-                    SystemClock.elapsedRealtimeNanos())
-                latestGpsRejection = if (accepted) "" else outdoorFixGate.rejection
-                NavigationAudit.log(
-                    "GPS_AUDIT accepted=$accepted fix_ns=${location.elapsedRealtimeNanos}" +
-                        " lat=${location.latitude} lon=${location.longitude}" +
-                        " accuracy=${location.accuracy} reason=${outdoorFixGate.rejection}")
-                NavigationAudit.log(
-                    "GNSS_DIRECTION fix_ns=${location.elapsedRealtimeNanos} $gnssDirectionDiagnostic")
-                if (!accepted) {
-                    listener.onLocationStatus(outdoorFixGate.rejection)
-                    renderDynamicHeadingCalibration()
-                    return
-                }
-                lastLocation = Location(location)
                 listener.onLocation(
                     location,
                     String.format(
@@ -598,13 +594,37 @@ class OutdoorNavController(
         searchHandler.postDelayed(runnable, 500L)
     }
 
+    private fun usableForPlaceSearch(location: Location?): Boolean =
+        location != null && PlaceSearchPosition.usable(
+            location.latitude,
+            location.longitude,
+            if (location.hasAccuracy()) location.accuracy else Float.NaN,
+            location.elapsedRealtimeNanos,
+            SystemClock.elapsedRealtimeNanos())
+
+    private fun placeSearchOrigin(): Location? {
+        lastLocation?.let { return Location(it) }
+        return destinationSearchLocation?.takeIf(::usableForPlaceSearch)?.let(::Location)
+    }
+
+    private fun updatePlaceSearchLocation(location: Location) {
+        if (!usableForPlaceSearch(location)) return
+        val previous = destinationSearchLocation
+        if (previous != null && location.elapsedRealtimeNanos <= previous.elapsedRealtimeNanos) return
+        destinationSearchLocation = Location(location)
+        pendingLocationSearchKeyword?.let { keyword ->
+            pendingLocationSearchKeyword = null
+            scheduleDestinationSearch(keyword)
+        }
+    }
+
     private fun searchDestinationSuggestions(keyword: String) {
         val key = amapWebKey.trim()
         if (key.isEmpty()) {
             listener.onRouteStatus("输入高德 Key 后显示附近地点")
             return
         }
-        val location = destinationSearchLocation
+        val location = placeSearchOrigin()
         if (location == null) {
             listener.onRouteStatus("等待手机定位后显示附近地点")
             pendingLocationSearchKeyword = keyword
@@ -657,8 +677,8 @@ class OutdoorNavController(
             return
         }
         val location = lastLocation
-        if (location == null || !gpsFresh()) {
-            listener.onRouteStatus("尚未获得新鲜手机定位，请到室外等待定位")
+        if (location == null) {
+            listener.onRouteStatus("尚未获得手机定位，请到室外等待定位")
             return
         }
 
@@ -761,19 +781,11 @@ class OutdoorNavController(
         }
     }
 
-    private fun gpsFresh(): Boolean {
-        val fix = lastLocation ?: return false
-        val age = SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos
-        return age >= 0L && age < TimeUnit.SECONDS.toNanos(5)
-    }
+    private fun hasNavigationLocation(): Boolean = lastLocation != null
 
     private fun updateNavigationGuidance() {
         val location = lastLocation
         if (!navigationActive || location == null || !routeFollower.hasRoute()) return
-        if (!gpsFresh()) {
-            listener.onNavigationStatus("等待新鲜 GPS 定位（超过 5 秒）", true)
-            return
-        }
         val guidance = routeFollower.update(
             location.latitude,
             location.longitude,
@@ -833,7 +845,19 @@ class OutdoorNavController(
     }
 
     /** Returns the fresh phone compass heading corrected from magnetic to true north. */
-
+    private fun currentTrueNorthHeading(): Float {
+        if (!currentHeading.isFinite() || latestHeadingNanos == 0L ||
+            SystemClock.elapsedRealtimeNanos() - latestHeadingNanos > TimeUnit.SECONDS.toNanos(2)
+        ) return Float.NaN
+        if (!declinationPosition.fresh(SystemClock.elapsedRealtimeNanos())) return Float.NaN
+        val field = GeomagneticField(
+            declinationPosition.latitude.toFloat(),
+            declinationPosition.longitude.toFloat(),
+            0f,
+            System.currentTimeMillis())
+        return DynamicHeadingCalibrator.normalizeDegrees(
+            (currentHeading + field.declination).toDouble()).toFloat()
+    }
 
     private fun formatNavigationDistance(meters: Int): String {
         if (meters < 1000) {
@@ -847,114 +871,42 @@ class OutdoorNavController(
     // ---------------------------------------------------------------------
 
     fun calibrateHeading() {
-        dynamicHeadingCalibrator.start()
-        pendingCalibrationLocation = null
+        dynamicHeadingCalibrator.startAutoAligned()
         renderDynamicHeadingCalibration()
         resetLocalPlanning()
         requestLocalPlanRefresh()
     }
 
-    /**
-     * Snapshots the aligned phone compass against the settled VINS world frame once at entry.
-     * A mid-session VINS restart permanently switches this controller session to manual mode.
-     */
-
-
-
-
     private fun updateDynamicHeadingCalibration(location: Location) {
-        if (LocationManager.GPS_PROVIDER != location.provider) return
-        pendingCalibrationLocation = Location(location)
-        tryPendingCalibration()
+        tryAutoAlignedCalibration()
     }
 
-    private fun tryPendingCalibration() {
-        val location = pendingCalibrationLocation ?: return
+    private fun tryAutoAlignedCalibration() {
         if (dynamicHeadingCalibrator.isReady()) return
-        val ageMillis =
-            (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
-        if (ageMillis > 5_000L) {
-            dynamicHeadingCalibrator.waitForFreshGps()
+        val headingAge = if (latestHeadingNanos == 0L) Long.MAX_VALUE else
+            SystemClock.elapsedRealtimeNanos() - latestHeadingNanos
+        if (dynamicHeadingCalibrator.updateAutoAligned(
+                currentTrueNorthHeading(), latestVinsPose, headingAge, System.currentTimeMillis())) {
+            NavigationAudit.log(
+                "CALIBRATION_AUTO_ALIGNED ready=true ${dynamicHeadingCalibrator.status()}")
+            requestLocalPlanRefresh()
             renderDynamicHeadingCalibration()
-            return
         }
-        val pose = calibrationVinsPoseHistory.atOrNearest(location.time / 1000.0, 0.10)
-        if (pose == null) {
-            searchHandler.postDelayed({
-                if (pendingCalibrationLocation === location) tryPendingCalibration()
-            }, 20L)
-            dynamicHeadingCalibrator.waitForTimeAlignedVinsPose()
-            renderDynamicHeadingCalibration()
-            return
-        }
-        pendingCalibrationLocation = null
-        val fitStarted = SystemClock.elapsedRealtimeNanos()
-        NavigationAudit.log(
-            "CALIBRATION_PAIR gps_s=${location.time / 1000.0} vins_s=${pose.timestamp}" +
-                " delta_ms=${Math.abs(location.time - pose.timestamp * 1000)}" +
-                " lat=${location.latitude} lon=${location.longitude}" +
-                " accuracy=${location.accuracy} vins_x=${pose.x} vins_y=${pose.y}" +
-                " vins_z=${pose.z} camera_yaw=${pose.egoRightAxisYawRadians()}")
-        dynamicHeadingCalibrator.updateTimed(
-            location.latitude,
-            location.longitude,
-            if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
-            pose.x,
-            pose.y,
-            pose.initialized,
-            location.elapsedRealtimeNanos)
-        NavigationAudit.log(
-            "CALIBRATION_FIT points=${dynamicHeadingCalibrator.sampleCount()}" +
-                " compute_ms=${(SystemClock.elapsedRealtimeNanos() - fitStarted) / 1e6}" +
-                " fix_age_ms=$ageMillis total_points=${dynamicHeadingCalibrator.totalSampleCount()}" +
-                " ready=${dynamicHeadingCalibrator.isReady()}" +
-                " reason=${dynamicHeadingCalibrator.status()}" +
-                " quality=${dynamicHeadingCalibrator.qualityDetails().replace('\n', ' ')}")
-        if (dynamicHeadingCalibrator.isReady()) {
-            dynamicHeadingCalibrator.save(
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
-        }
-        renderDynamicHeadingCalibration()
-    }
-
-    private fun describeGnssDirection(location: Location): String {
-        val bearing = if (location.hasBearing() && location.bearing.isFinite()) {
-            String.format(Locale.CHINA, "%.1f°", location.bearing)
-        } else "未提供"
-        var bearingAccuracy = "未提供"
-        var speedAccuracy = "未提供"
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
-            if (location.hasBearingAccuracy() && location.bearingAccuracyDegrees.isFinite()) {
-                bearingAccuracy =
-                    String.format(Locale.CHINA, "±%.1f°", location.bearingAccuracyDegrees)
-            }
-            if (location.hasSpeedAccuracy() && location.speedAccuracyMetersPerSecond.isFinite()) {
-                speedAccuracy =
-                    String.format(Locale.CHINA, "±%.2fm/s", location.speedAccuracyMetersPerSecond)
-            }
-        }
-        val speed = if (location.hasSpeed() && location.speed.isFinite()) {
-            String.format(Locale.CHINA, "%.2fm/s", location.speed)
-        } else "未提供"
-        return "GNSS 行进方向：$bearing · 方向精度 $bearingAccuracy" +
-            "\n速度 $speed · 速度精度 $speedAccuracy（仅记录，不参与标定）"
     }
 
     private fun renderDynamicHeadingCalibration() {
         val ready = dynamicHeadingCalibrator.isReady()
-        val gpsAgeMillis = if (latestGpsFixElapsedNanos > 0L) {
-            (SystemClock.elapsedRealtimeNanos() - latestGpsFixElapsedNanos) / 1_000_000L
-        } else Long.MAX_VALUE
-        val text = CalibrationStatusFormatter.format(
-            latestGpsAccuracyMeters,
-            gpsAgeMillis,
-            dynamicHeadingCalibrator,
-            latestGpsRejection) + "\n" + gnssDirectionDiagnostic
-        val accepted =
-            CalibrationStatusFormatter.accuracyAccepted(latestGpsAccuracyMeters) &&
-                CalibrationStatusFormatter.isFresh(gpsAgeMillis) &&
-                latestGpsRejection.isEmpty()
-        listener.onCalibrationStatus(text, ready, !ready && accepted)
+        var text = dynamicHeadingCalibrator.status() + "\n" +
+            dynamicHeadingCalibrator.qualityDetails()
+        if (!ready) {
+            text += "\n" + if (declinationPosition.fresh(SystemClock.elapsedRealtimeNanos())) {
+                "真北修正位置已就绪（${declinationPosition.provider}）"
+            } else {
+                "等待真北修正位置：可使用网络定位，无需高精度 GPS"
+            }
+        }
+        // VINS 重启或尚未完成对齐时必须显示重新标定按钮，供用户重新摆正后确认。
+        listener.onCalibrationStatus(text, ready, !ready)
     }
 
     // ---------------------------------------------------------------------
@@ -1505,7 +1457,6 @@ class OutdoorNavController(
     }
 
     private fun resetVinsDependents() {
-        pendingCalibrationLocation = null
         latestPlanEvidence = null
         calibrationVinsPoseHistory.clear()
         dynamicHeadingCalibrator.resetForVinsRestart()
@@ -1729,7 +1680,7 @@ class OutdoorNavController(
         if (!navigationActive) {
             guidance = ""
         } else if (
-            cuePlan.planned && observationFresh && poseFresh && gpsFresh() &&
+            cuePlan.planned && observationFresh && poseFresh && hasNavigationLocation() &&
             dynamicHeadingCalibrator.isReady()
         ) {
             if (cuePlan !== lastCuePlan) {
@@ -1746,7 +1697,7 @@ class OutdoorNavController(
             reason = when {
                 !poseFresh -> "等待新鲜 VINS 位姿"
                 !observationFresh -> "等待新鲜语义地图"
-                !gpsFresh() -> "等待新鲜 GPS"
+                !hasNavigationLocation() -> "等待手机定位"
                 !dynamicHeadingCalibrator.isReady() -> "等待地理方向对齐"
                 else -> cuePlan.waitingReason.orEmpty()
             }
@@ -1790,7 +1741,7 @@ class OutdoorNavController(
 
     private fun computeLocalPlan(semantic: SemanticSegmenter.Result): LocalPlanner.PathResult {
         if (!navigationActive) return LocalPlanner.PathResult.waitingForTarget()
-        if (!gpsFresh()) return LocalPlanner.PathResult.waiting("等待新鲜 GPS 定位")
+        if (!hasNavigationLocation()) return LocalPlanner.PathResult.waiting("等待手机定位")
         val evidence = semantic.evidence
         if (evidence == null || !evidence.fresh(SystemClock.elapsedRealtime())) {
             return LocalPlanner.PathResult.waiting("语义观测过期")

@@ -109,7 +109,27 @@ public class OutdoorAuditTest {
         RouteFollower.Guidance g=f.update(2*M,4*M,5,Float.NaN,1_000_000_000L);
         assertNotNull(g);assertEquals(0,g.targetBearingDegrees,1);
     }
-    @Test public void poorGpsCannotAdvanceRoute(){
-        RouteFollower f=loop();assertNull(f.update(0,0,30,Float.NaN,1_000_000_000L));
+    @Test public void alignedModeAcceptsCoarsePhoneLocationsAndAdvancesRoute(){
+        RouteFollower f=loop();
+        RouteFollower.Guidance first=f.update(0,0,33,Float.NaN,1_000_000_000L);
+        RouteFollower.Guidance next=f.update(6*M,0,40.2f,Float.NaN,3_000_000_000L);
+        assertNotNull(first);assertNotNull(next);
+        assertTrue(next.remainingMeters<first.remainingMeters);
+        assertEquals(0,next.targetBearingDegrees,1);
+        assertFalse(next.arrived);
+    }
+    @Test public void alignedModeRejectsInvalidCoordinatesWithoutConsumingFix(){
+        RouteFollower f=loop();
+        assertNull(f.update(Double.NaN,0,33,Float.NaN,1_000_000_000L));
+        assertNull(f.update(91,0,33,Float.NaN,1_000_000_000L));
+        assertNull(f.update(0,181,33,Float.NaN,1_000_000_000L));
+        assertNotNull(f.update(0,0,33,Float.NaN,1_000_000_000L));
+    }
+    @Test public void alignedModeArrivalDoesNotRequireEightMeterAccuracy(){
+        RouteFollower f=new RouteFollower();
+        f.setRoute(new AmapRouteClient.RouteResult("终点",0,0,20,20,"北行",0,
+                Collections.emptyList(),Arrays.asList(point(0,0),point(20,0))));
+        assertFalse(f.update(0,0,33,Float.NaN,1_000_000_000L).arrived);
+        assertTrue(f.update(15*M,0,33,Float.NaN,6_000_000_000L).arrived);
     }
 }

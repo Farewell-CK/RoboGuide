@@ -86,10 +86,12 @@ final class RouteFollower {
     synchronized Guidance update(double wgsLatitude,double wgsLongitude,float accuracyMeters,
                                   float heading,long fixNanos) {
         if(!hasRoute())return null;
-        if(!Double.isFinite(wgsLatitude)||!Double.isFinite(wgsLongitude)
-                || !Float.isFinite(accuracyMeters)||accuracyMeters<=0||accuracyMeters>15){
-            waitingReason="等待 GPS 精度优于 15 米";return null;
+        if(!Double.isFinite(wgsLatitude)||Math.abs(wgsLatitude)>90
+                ||!Double.isFinite(wgsLongitude)||Math.abs(wgsLongitude)>180){
+            waitingReason="等待有效手机位置";return null;
         }
+        // Legacy aligned mode accepts both network and GPS fixes; accuracy is diagnostic.
+        if(!Float.isFinite(accuracyMeters)||accuracyMeters<0)accuracyMeters=0;
         if(fixNanos<lastFixNanos){waitingReason="GPS 时间倒退";return null;}
         if(fixNanos==lastFixNanos)return lastGuidance;
         if(lastFixNanos>=0)advanceBudget=Math.min(15,advanceBudget+3*Math.min(5,(fixNanos-lastFixNanos)/1e9));
@@ -111,8 +113,8 @@ final class RouteFollower {
         int remaining = (int) Math.max(0, Math.round(route.distanceMeters - apiProgress));
         AmapRouteClient.GeoPoint destination = points.get(points.size() - 1);
         double destinationDistance = AmapRouteClient.distanceMeters(current, destination);
-        boolean arrived = accuracyMeters <= 8 && routeGeometryMeters - lastProgressMeters <= 12
-                && destinationDistance <= 10.0;
+        boolean arrived = routeGeometryMeters-lastProgressMeters<=12
+                && destinationDistance<=10.0;
         double offRouteThreshold = Math.max(25.0, Math.max(0.0f, accuracyMeters) * 1.5);
         boolean offRoute = !arrived && match.distanceMeters > offRouteThreshold;
 

@@ -21,6 +21,8 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
 
         void onLocation(Location location);
 
+        default void onDeclinationLocation(Location location) {}
+
         void onLocationStatus(String status);
     }
 
@@ -124,6 +126,7 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
 
     @Override
     public void onLocationChanged(Location location) {
+        listener.onDeclinationLocation(location);
         long measurementNanos = location.getElapsedRealtimeNanos();
         boolean gps = LocationManager.GPS_PROVIDER.equals(location.getProvider());
         if (gps) {
@@ -156,6 +159,7 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
 
     private void publishLastKnown(String provider) {
         Location location = locationManager.getLastKnownLocation(provider);
+        if(location!=null)listener.onDeclinationLocation(location);
         if (location == null
                 || Math.max(0L, System.currentTimeMillis() - location.getTime())
                 > MAX_LAST_KNOWN_AGE_MILLIS) return;
