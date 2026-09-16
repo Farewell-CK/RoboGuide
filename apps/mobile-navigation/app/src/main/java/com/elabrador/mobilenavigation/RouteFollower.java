@@ -45,6 +45,11 @@ final class RouteFollower {
     private double[] cumulativeMeters = new double[0];
     private double routeGeometryMeters;
     private double lastProgressMeters = -1.0;
+    private long lastFixNanos=-1;
+    private double advanceBudget=12;
+    private Guidance lastGuidance;
+    private String waitingReason="等待有效 GPS 路线匹配";
+    synchronized String waitingReason(){return waitingReason;}
 
     synchronized void setRoute(AmapRouteClient.RouteResult route) {
         this.route = route;
@@ -58,9 +63,11 @@ final class RouteFollower {
                 ? 0.0
                 : cumulativeMeters[cumulativeMeters.length - 1];
         lastProgressMeters = -1.0;
+        lastFixNanos=-1; advanceBudget=12; lastGuidance=null;
     }
 
     synchronized void clear() {
+        lastFixNanos=-1; advanceBudget=12; lastGuidance=null;
         route = null;
         points = Collections.emptyList();
         cumulativeMeters = new double[0];
@@ -73,14 +80,32 @@ final class RouteFollower {
     }
 
     synchronized Guidance update(double wgsLatitude, double wgsLongitude, float accuracyMeters, float heading) {
-        if (!hasRoute()) {
-            return null;
-        }
+        return update(wgsLatitude,wgsLongitude,accuracyMeters,heading,System.nanoTime());
+    }
 
+    synchronized Guidance update(double wgsLatitude,double wgsLongitude,float accuracyMeters,
+                                  float heading,long fixNanos) {
+        if(!hasRoute())return null;
+        if(!Double.isFinite(wgsLatitude)||Math.abs(wgsLatitude)>90
+                ||!Double.isFinite(wgsLongitude)||Math.abs(wgsLongitude)>180){
+            waitingReason="等待有效手机位置";return null;
+        }
+        // Legacy aligned mode accepts both network and GPS fixes; accuracy is diagnostic.
+        if(!Float.isFinite(accuracyMeters)||accuracyMeters<0)accuracyMeters=0;
+        if(fixNanos<lastFixNanos){waitingReason="GPS 时间倒退";return null;}
+        if(fixNanos==lastFixNanos)return lastGuidance;
+        if(lastFixNanos>=0)advanceBudget=Math.min(15,advanceBudget+3*Math.min(5,(fixNanos-lastFixNanos)/1e9));
+        lastFixNanos=fixNanos;
         AmapRouteClient.GeoPoint current = AmapRouteClient.wgs84ToGcj02(
                 wgsLatitude, wgsLongitude);
         Match match = findClosestMatch(current);
+        if(match.distanceMeters>Math.max(25,accuracyMeters*2)){
+            waitingReason="GPS 与连续路线段不一致，请确认定位或重新选择目的地";
+            lastGuidance=null;return null;
+        }
+        double previous=lastProgressMeters;
         lastProgressMeters = Math.max(lastProgressMeters, match.progressMeters);
+        if(previous>=0)advanceBudget=Math.max(0,advanceBudget-(lastProgressMeters-previous));
 
         double apiProgress = routeGeometryMeters > 0.0
                 ? lastProgressMeters / routeGeometryMeters * route.distanceMeters
@@ -88,8 +113,8 @@ final class RouteFollower {
         int remaining = (int) Math.max(0, Math.round(route.distanceMeters - apiProgress));
         AmapRouteClient.GeoPoint destination = points.get(points.size() - 1);
         double destinationDistance = AmapRouteClient.distanceMeters(current, destination);
-        boolean arrived = destinationDistance <= 10.0
-                || (remaining <= 5 && destinationDistance <= 20.0);
+        boolean arrived = routeGeometryMeters-lastProgressMeters<=12
+                && destinationDistance<=10.0;
         double offRouteThreshold = Math.max(25.0, Math.max(0.0f, accuracyMeters) * 1.5);
         boolean offRoute = !arrived && match.distanceMeters > offRouteThreshold;
 
@@ -116,7 +141,7 @@ final class RouteFollower {
             action = actionForTurn(relativeTurn);
         }
 
-        return new Guidance(
+        lastGuidance = new Guidance(
                 action,
                 step.instruction,
                 remaining,
@@ -126,6 +151,8 @@ final class RouteFollower {
                 (int) Math.round(match.distanceMeters),
                 offRoute,
                 arrived);
+        waitingReason="";
+        return lastGuidance;
     }
 
     private Match findClosestMatch(AmapRouteClient.GeoPoint current) {
@@ -138,7 +165,9 @@ final class RouteFollower {
         for (int i = 0; i < points.size() - 1; i++) {
             double segmentStart = cumulativeMeters[i];
             double segmentEnd = cumulativeMeters[i + 1];
-            if (lastProgressMeters >= 0.0 && segmentEnd < lastProgressMeters - 30.0) {
+            if(lastProgressMeters<0 && segmentStart>25)continue;
+            if (lastProgressMeters >= 0.0 && (segmentEnd < lastProgressMeters - 15.0
+                    || segmentStart>lastProgressMeters+advanceBudget)) {
                 continue;
             }
 
@@ -153,6 +182,10 @@ final class RouteFollower {
             double lengthSquared = dx * dx + dy * dy;
             double t = lengthSquared <= 0.001 ? 0.0 : -(ax * dx + ay * dy) / lengthSquared;
             t = Math.max(0.0, Math.min(1.0, t));
+            if(lastProgressMeters<0 && segmentEnd>segmentStart)
+                t=Math.min(t,Math.max(0,(25-segmentStart)/(segmentEnd-segmentStart)));
+            if(lastProgressMeters>=0 && segmentEnd>segmentStart)
+                t=Math.min(t,Math.max(0,(lastProgressMeters+advanceBudget-segmentStart)/(segmentEnd-segmentStart)));
             double x = ax + t * dx;
             double y = ay + t * dy;
             double distance = Math.hypot(x, y);
@@ -202,7 +235,7 @@ final class RouteFollower {
 
     private static String actionForTurn(float relativeTurn) {
         float magnitude = Math.abs(relativeTurn);
-        if (magnitude < 20f) {
+        if (magnitude < 30f) {
             return "沿路线直行";
         }
         String side = relativeTurn > 0f ? "右" : "左";

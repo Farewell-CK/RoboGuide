@@ -9,3 +9,4 @@ work/
 *.apk
 *.aab
 *.log
+qwen.private.properties

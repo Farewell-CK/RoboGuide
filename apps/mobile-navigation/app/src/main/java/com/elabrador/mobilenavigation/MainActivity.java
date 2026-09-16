@@ -100,6 +100,8 @@ public class MainActivity extends AppCompatActivity {
     private final AtomicBoolean diagnosticRgbWritten = new AtomicBoolean(false);
     private final AtomicLong diagnosticRgbFrames = new AtomicLong();
     private final AtomicBoolean previewUpdatePending = new AtomicBoolean(false);
+    private final AtomicBoolean colorPreviewPending = new AtomicBoolean(false);
+    private volatile long colorPreviewGeneration;
     private final AtomicBoolean uiUpdatePending = new AtomicBoolean(false);
     private byte[] previewDepthBuffer;
     private byte[] previewAlternateDepthBuffer;
@@ -109,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean previewUsesNativeDepth;
     private RsContext rsContext;
     private Thread streamingThread;
-    private boolean activityResumed;
+    private volatile boolean activityResumed;
     private boolean restartStreamingWhenStopped;
     private PhonePoseTracker phonePoseTracker;
     private AmapRouteClient amapRouteClient;
@@ -119,6 +121,37 @@ public class MainActivity extends AppCompatActivity {
     private final RealSenseTimestampMapper vinsTimestampMapper =
             new RealSenseTimestampMapper();
     private final VinsPoseHistory calibrationVinsPoseHistory = new VinsPoseHistory();
+    private final Handler safetyHandler=new Handler(Looper.getMainLooper());
+    private FrameEvidence cueEvidence;
+    private volatile FrameEvidence latestPlanEvidence;
+    private static final class PlanObservation {
+        final LocalPlanner.PathResult plan;
+        final FrameEvidence evidence;
+        PlanObservation(LocalPlanner.PathResult plan,FrameEvidence evidence){this.plan=plan;this.evidence=evidence;}
+    }
+    private volatile PlanObservation planObservation=new PlanObservation(LocalPlanner.PathResult.waitingForTarget(),null);
+    private volatile long latestPoseCaptureMillis=-1;
+    private String lastAuditCue="", lastAuditReason="";
+    private long lastAuditNanos;
+    private long lastCalibrationPanelMillis;
+    private final Runnable safetyTick=new Runnable(){
+        public void run(){
+            tryAutoAlignedCalibration();
+            renderDirectionGuidance();
+            long panelNow=SystemClock.elapsedRealtime();
+            if(navigationActive && hasValidLocalPlanDisplay && latestPlanEvidence!=null
+                    && !latestPlanEvidence.fresh(panelNow)){
+                hasValidLocalPlanDisplay=false;
+                localPlanView.setPlan(LocalPlanner.PathResult.waiting("观测已过期，等待新地图"));
+            }
+            if(panelNow-lastCalibrationPanelMillis>=1000){
+                lastCalibrationPanelMillis=panelNow;
+                renderDynamicHeadingCalibration();
+            }
+            if(navigationActive)updateNavigationGuidance();
+            safetyHandler.postDelayed(this,100);
+        }
+    };
     private volatile VinsMono vinsMono;
     private volatile VinsMono.Pose latestVinsPose;
     private volatile LocalPlanner.PathResult latestLocalPlan =
@@ -129,7 +162,10 @@ public class MainActivity extends AppCompatActivity {
     private AmapRouteClient.RouteResult currentRoute;
     private volatile boolean navigationActive;
     private volatile Location lastLocation;
+    private Location placeSearchLocation;
+    private boolean waitingForPlaceSearchLocation;
     private volatile float currentHeading = Float.NaN;
+    private final DeclinationPosition declinationPosition=new DeclinationPosition();
     private volatile long latestHeadingNanos;
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
     private final Handler localPlanHandler = new Handler(Looper.getMainLooper());
@@ -159,18 +195,12 @@ public class MainActivity extends AppCompatActivity {
     private volatile int vinsResetCount;
     private int consecutiveUninitializedPoses;
     private volatile long latestVinsPoseNanos;
-    private static final long AUTO_CALIBRATE_POSE_SETTLE_NANOS = TimeUnit.SECONDS.toNanos(2);
-    private static final long AUTO_CALIBRATE_HEADING_STABLE_NANOS = TimeUnit.SECONDS.toNanos(1);
-    private static final float AUTO_CALIBRATE_HEADING_JITTER_DEGREES = 3f;
-    private long vinsReadySinceNanos;
-    private long headingStableSinceNanos;
-    private float previousStabilityHeading = Float.NaN;
-    private final Object autoCalibrateLock = new Object();
-    // Entry-time VINS initialization calibrates automatically; after any mid-session
-    // VINS restart the user holds the devices separately, so calibration must be
-    // triggered manually from the re-aligned posture via the button instead.
-    private volatile boolean manualCalibrationAfterRestart;
     private final GuidanceStabilizer guidanceStabilizer = new GuidanceStabilizer();
+    private final GuidanceTextComposer guidanceTextComposer = new GuidanceTextComposer();
+    // Advance cue state once per immutable planning result, not per UI/depth redraw.
+    private LocalPlanner.PathResult lastCuePlan;
+    private String lastPlanCue = "";
+    private final NavigationCue.Tracker navigationCueTracker = new NavigationCue.Tracker();
     private long destinationGeneration;
     private Runnable pendingDestinationSearch;
     private AmapRouteClient.PlaceSuggestion selectedDestination;
@@ -182,6 +212,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView cameraStatusText;
     private TextView vinsStatusPanel;
     private ImageView depthPreview;
+    private ImageView colorPreview;
+    private VisionHintPanel visionHintPanel;
     private TextView guidanceText;
     private TextView leftDistanceText;
     private TextView centerDistanceText;
@@ -207,11 +239,16 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        DemoPanels.bind(this);
+        NavigationAudit.start(getApplicationContext());
 
         cameraStatusText = findViewById(R.id.cameraStatusText);
         vinsStatusPanel = findViewById(R.id.vinsStatusPanel);
         depthPreview = findViewById(R.id.depthPreview);
+        colorPreview = findViewById(R.id.colorPreview);
+        visionHintPanel = new VisionHintPanel(this,this::renderDirectionGuidance);
         guidanceText = findViewById(R.id.guidanceText);
+        safetyHandler.postDelayed(safetyTick,100);
         leftDistanceText = findViewById(R.id.leftDistanceText);
         centerDistanceText = findViewById(R.id.centerDistanceText);
         rightDistanceText = findViewById(R.id.rightDistanceText);
@@ -269,7 +306,8 @@ public class MainActivity extends AppCompatActivity {
         amapKeyInput.setText(getPreferences(MODE_PRIVATE).getString("amap_web_key", ""));
         calibrateAlignedButton.setOnClickListener(this::calibrateAlignedHeading);
         toggleNavigationButton.setOnClickListener(this::toggleNavigation);
-        // A geographic offset belongs to one VINS world frame, not to every new session.
+        // Automatically perform the former aligned-heading button operation once.
+        dynamicHeadingCalibrator.startAutoAligned();
         getPreferences(MODE_PRIVATE).edit().remove("asr_token").apply();
         renderDynamicHeadingCalibration();
         destinationInput.addTextChangedListener(new TextWatcher() {
@@ -301,18 +339,37 @@ public class MainActivity extends AppCompatActivity {
 
         phonePoseTracker = new PhonePoseTracker(this, new PhonePoseTracker.Listener() {
             @Override
+            public void onDeclinationLocation(Location location) {
+                updatePlaceSearchLocation(location);
+                boolean accepted=declinationPosition.accept(location.getLatitude(),location.getLongitude(),
+                        location.hasAccuracy()?location.getAccuracy():Float.NaN,
+                        location.getElapsedRealtimeNanos(),SystemClock.elapsedRealtimeNanos(),location.getProvider());
+                if(accepted){
+                    NavigationAudit.log("DECLINATION_POSITION source="+location.getProvider()
+                            +" accuracy="+location.getAccuracy()+" navigation_fix_unchanged=true");
+                    tryAutoAlignedCalibration();
+                }
+            }
+            @Override
             public void onHeading(float headingDegrees) {
                 currentHeading = headingDegrees;
                 latestHeadingNanos = SystemClock.elapsedRealtimeNanos();
                 headingText.setText(String.format(
                         Locale.CHINA, "朝向\n%.0f° %s", headingDegrees, cardinalDirection(headingDegrees)));
-                autoCalibrateHeadingIfNeeded();
                 updateNavigationGuidance();
             }
 
             @Override
             public void onLocation(Location location) {
-                lastLocation = location;
+                if(!Double.isFinite(location.getLatitude())||Math.abs(location.getLatitude())>90
+                        ||!Double.isFinite(location.getLongitude())||Math.abs(location.getLongitude())>180)return;
+                NavigationAudit.log("LOCATION_ALIGNED source="+location.getProvider()
+                        +" accuracy="+location.getAccuracy()+" fix_ns="+location.getElapsedRealtimeNanos());
+                lastLocation = new Location(location);
+                if(waitingForPlaceSearchLocation && selectedDestination==null){
+                    waitingForPlaceSearchLocation=false;
+                    scheduleDestinationSearch(destinationInput.getText().toString().trim());
+                }
                 locationText.setText(String.format(
                         Locale.CHINA,
                         "位置\n%.6f, %.6f\n精度 %.0f m",
@@ -340,12 +397,14 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onDeviceDetach() {
+                colorPreviewGeneration++;
                 stopStreaming();
                 runOnUiThread(() -> {
                     if (depthPreview != null) {
                         depthPreview.setImageBitmap(null);
                     }
                     cameraStatusText.setText("深度相机已断开");
+                    if (colorPreview != null) colorPreview.setImageDrawable(null);
                     guidanceText.setText("");
                     renderVinsStatus(vinsInput.status());
                 });
@@ -363,6 +422,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if(visionHintPanel!=null)visionHintPanel.foreground(true);
         synchronized (this) {
             activityResumed = true;
         }
@@ -382,6 +442,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        if(visionHintPanel!=null)visionHintPanel.foreground(false);
+        colorPreviewGeneration++;
+        if (colorPreview != null) colorPreview.setImageDrawable(null);
         synchronized (this) {
             activityResumed = false;
         }
@@ -401,6 +464,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if(visionHintPanel!=null){visionHintPanel.close();visionHintPanel=null;}
         releaseNavigationWakeLock();
         stopStreaming();
         if (rsContext != null) {
@@ -415,12 +479,14 @@ public class MainActivity extends AppCompatActivity {
             semanticSegmenter.close();
             semanticSegmenter = null;
         }
+        safetyHandler.removeCallbacksAndMessages(null);
         searchHandler.removeCallbacksAndMessages(null);
         localPlanHandler.removeCallbacksAndMessages(null);
         vinsExecutor.shutdownNow();
         vinsEstimatorExecutor.shutdownNow();
         localPlanExecutor.shutdownNow();
         depthPreview = null;
+        colorPreview = null;
         phonePoseTracker = null;
         super.onDestroy();
     }
@@ -545,6 +611,7 @@ public class MainActivity extends AppCompatActivity {
         }
         navigationActive = true;
         guidanceStabilizer.reset();
+        guidanceTextComposer.reset();
         if (navigationWakeLock != null && !navigationWakeLock.isHeld()) {
             navigationWakeLock.acquire();
         }
@@ -562,6 +629,7 @@ public class MainActivity extends AppCompatActivity {
     private void stopNavigationAndClearRoute() {
         destinationGeneration++;
         guidanceStabilizer.reset();
+        guidanceTextComposer.reset();
         navigationActive = false;
         releaseNavigationWakeLock();
         guidanceText.setText("");
@@ -579,15 +647,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateNavigationGuidance() {
-        if (!navigationActive || lastLocation == null || !routeFollower.hasRoute()) {
+        Location location=lastLocation;
+        if (!navigationActive || location == null || !routeFollower.hasRoute()) {
             return;
         }
         RouteFollower.Guidance guidance = routeFollower.update(
-                lastLocation.getLatitude(),
-                lastLocation.getLongitude(),
-                lastLocation.hasAccuracy() ? lastLocation.getAccuracy() : 0f,
-                currentTrueNorthHeading());
+                location.getLatitude(), location.getLongitude(),
+                location.hasAccuracy() ? location.getAccuracy() : Float.NaN,
+                Float.NaN, location.getElapsedRealtimeNanos());
         if (guidance == null) {
+            navigationStatusText.setText(routeFollower.waitingReason());
             return;
         }
 
@@ -622,6 +691,7 @@ public class MainActivity extends AppCompatActivity {
             navigationActive = false;
             releaseNavigationWakeLock();
             guidanceStabilizer.reset();
+            guidanceTextComposer.reset();
             resetLocalPlanning();
             toggleNavigationButton.setText("导航完成");
             toggleNavigationButton.setEnabled(false);
@@ -636,12 +706,11 @@ public class MainActivity extends AppCompatActivity {
                 > TimeUnit.SECONDS.toNanos(2)) {
             return Float.NaN;
         }
-        Location location = lastLocation;
-        if (location == null) return currentHeading;
+        if (!declinationPosition.fresh(SystemClock.elapsedRealtimeNanos())) return Float.NaN;
         GeomagneticField field = new GeomagneticField(
-                (float) location.getLatitude(),
-                (float) location.getLongitude(),
-                location.hasAltitude() ? (float) location.getAltitude() : 0f,
+                (float) declinationPosition.latitude,
+                (float) declinationPosition.longitude,
+                0f,
                 System.currentTimeMillis());
         return (float) DynamicHeadingCalibrator.normalizeDegrees(
                 currentHeading + field.getDeclination());
@@ -655,150 +724,54 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void calibrateAlignedHeading(View ignored) {
-        float trueHeading = currentHeading;
-        long nowNanos = SystemClock.elapsedRealtimeNanos();
-        if (latestHeadingNanos == 0L
-                || nowNanos - latestHeadingNanos > TimeUnit.SECONDS.toNanos(2)) {
-            trueHeading = Float.NaN;
-        }
-        VinsMono.Pose pose = latestVinsPose;
-        if (latestVinsPoseNanos == 0L
-                || nowNanos - latestVinsPoseNanos > TimeUnit.SECONDS.toNanos(2)) {
-            pose = null;
-        }
-        Location location = lastLocation;
-        if (Float.isFinite(trueHeading) && location != null) {
-            GeomagneticField magneticField = new GeomagneticField(
-                    (float) location.getLatitude(), (float) location.getLongitude(),
-                    location.hasAltitude() ? (float) location.getAltitude() : 0f,
-                    System.currentTimeMillis());
-            trueHeading = (float) DynamicHeadingCalibrator.normalizeDegrees(
-                    trueHeading + magneticField.getDeclination());
-        }
-        if (dynamicHeadingCalibrator.calibrateAligned(trueHeading, pose, "重新标定")) {
-            dynamicHeadingCalibrator.save(getPreferences(MODE_PRIVATE));
-            if (calibrateAlignedButton != null) {
-                calibrateAlignedButton.setVisibility(View.GONE);
-            }
-        }
+        dynamicHeadingCalibrator.startAutoAligned();
         renderDynamicHeadingCalibration();
         resetLocalPlanning();
         requestLocalPlanRefresh();
     }
 
-    /**
-     * Automatically snapshot the phone compass against the settled VINS world frame.
-     * Only valid for the entry-time initialization, when the user deliberately holds
-     * the phone top aligned with the D455F optical forward direction. After a
-     * mid-session VINS restart the devices are held separately, so this must not
-     * run again; the restart path shows the manual button instead.
-     */
-    private void autoCalibrateHeadingIfNeeded() {
-        boolean calibrated = false;
-        synchronized (autoCalibrateLock) {
-            if (manualCalibrationAfterRestart) return;
-            if (dynamicHeadingCalibrator.isReady()) return;
-            long nowNanos = SystemClock.elapsedRealtimeNanos();
-            VinsMono.Pose pose = latestVinsPose;
-            if (pose == null || !pose.initialized
-                    || latestVinsPoseNanos == 0L
-                    || nowNanos - latestVinsPoseNanos > AUTO_CALIBRATE_POSE_SETTLE_NANOS) {
-                vinsReadySinceNanos = 0L;
-                return;
-            }
-            if (vinsReadySinceNanos == 0L) {
-                vinsReadySinceNanos = nowNanos;
-                return;
-            }
-            if (nowNanos - vinsReadySinceNanos < AUTO_CALIBRATE_POSE_SETTLE_NANOS) return;
-            if (!Float.isFinite(currentHeading)
-                    || latestHeadingNanos == 0L
-                    || nowNanos - latestHeadingNanos > AUTO_CALIBRATE_HEADING_STABLE_NANOS) {
-                headingStableSinceNanos = 0L;
-                previousStabilityHeading = Float.NaN;
-                return;
-            }
-            if (Float.isFinite(previousStabilityHeading)
-                    && Math.abs(DynamicHeadingCalibrator.normalizeDegrees(
-                            currentHeading - previousStabilityHeading))
-                            > AUTO_CALIBRATE_HEADING_JITTER_DEGREES) {
-                headingStableSinceNanos = 0L;
-            }
-            if (headingStableSinceNanos == 0L) {
-                headingStableSinceNanos = nowNanos;
-                previousStabilityHeading = currentHeading;
-                return;
-            }
-            previousStabilityHeading = currentHeading;
-            if (nowNanos - headingStableSinceNanos < AUTO_CALIBRATE_HEADING_STABLE_NANOS) return;
-
-            float trueHeading = currentHeading;
-            Location location = lastLocation;
-            if (location != null) {
-                GeomagneticField magneticField = new GeomagneticField(
-                        (float) location.getLatitude(), (float) location.getLongitude(),
-                        location.hasAltitude() ? (float) location.getAltitude() : 0f,
-                        System.currentTimeMillis());
-                trueHeading = (float) DynamicHeadingCalibrator.normalizeDegrees(
-                        trueHeading + magneticField.getDeclination());
-            }
-            calibrated = dynamicHeadingCalibrator.calibrateAligned(
-                    trueHeading, pose, "自动标定");
-            if (calibrated) {
-                dynamicHeadingCalibrator.save(getPreferences(MODE_PRIVATE));
-                vinsReadySinceNanos = 0L;
-                headingStableSinceNanos = 0L;
-                previousStabilityHeading = Float.NaN;
-            }
-        }
-        if (calibrated) {
-            runOnUiThread(() -> {
-                renderDynamicHeadingCalibration();
-                resetLocalPlanning();
-                requestLocalPlanRefresh();
-            });
-        }
-    }
-
-    private void resetAutoCalibrationState() {
-        synchronized (autoCalibrateLock) {
-            vinsReadySinceNanos = 0L;
-            headingStableSinceNanos = 0L;
-            previousStabilityHeading = Float.NaN;
-        }
-    }
-
     private void updateDynamicHeadingCalibration(Location location) {
-        if (!LocationManager.GPS_PROVIDER.equals(location.getProvider())) return;
-        long ageMillis = Math.max(0L, System.currentTimeMillis() - location.getTime());
-        if (ageMillis > 5_000L) {
-            dynamicHeadingCalibrator.waitForFreshGps();
+        tryAutoAlignedCalibration();
+    }
+
+    private void tryAutoAlignedCalibration() {
+        if(dynamicHeadingCalibrator.isReady())return;
+        long age=latestHeadingNanos==0?Long.MAX_VALUE:SystemClock.elapsedRealtimeNanos()-latestHeadingNanos;
+        if(dynamicHeadingCalibrator.updateAutoAligned(currentTrueNorthHeading(),latestVinsPose,
+                age,System.currentTimeMillis())){
+            NavigationAudit.log("CALIBRATION_AUTO_ALIGNED ready=true "+dynamicHeadingCalibrator.status());
+            requestLocalPlanRefresh();
             renderDynamicHeadingCalibration();
-            return;
         }
-        VinsMono.Pose pose = calibrationVinsPoseHistory.atOrNearest(
-                location.getTime() / 1000.0, 0.75);
-        if (pose == null) {
-            dynamicHeadingCalibrator.waitForTimeAlignedVinsPose();
-            renderDynamicHeadingCalibration();
-            return;
+    }
+
+    private static String describeGnssDirection(Location location){
+        String bearing=location.hasBearing()&&Float.isFinite(location.getBearing())
+                ?String.format(Locale.CHINA,"%.1f°",location.getBearing()):"未提供";
+        String accuracy="未提供";
+        String speedAccuracy="未提供";
+        if(android.os.Build.VERSION.SDK_INT>=26){
+            if(location.hasBearingAccuracy()&&Float.isFinite(location.getBearingAccuracyDegrees()))
+                accuracy=String.format(Locale.CHINA,"±%.1f°",location.getBearingAccuracyDegrees());
+            if(location.hasSpeedAccuracy()&&Float.isFinite(location.getSpeedAccuracyMetersPerSecond()))
+                speedAccuracy=String.format(Locale.CHINA,"±%.2fm/s",location.getSpeedAccuracyMetersPerSecond());
         }
-        dynamicHeadingCalibrator.update(
-                location.getLatitude(), location.getLongitude(),
-                location.hasAccuracy() ? location.getAccuracy() : Float.POSITIVE_INFINITY,
-                pose.x, pose.y, pose.initialized);
-        if (dynamicHeadingCalibrator.isReady()) {
-            dynamicHeadingCalibrator.save(getPreferences(MODE_PRIVATE));
-        }
-        renderDynamicHeadingCalibration();
+        String speed=location.hasSpeed()&&Float.isFinite(location.getSpeed())
+                ?String.format(Locale.CHINA,"%.2fm/s",location.getSpeed()):"未提供";
+        return "GNSS 行进方向："+bearing+" · 方向精度 "+accuracy
+                +"\n速度 "+speed+" · 速度精度 "+speedAccuracy+"（仅记录，不参与标定）";
     }
 
     private void renderDynamicHeadingCalibration() {
-        if (calibrationStatusText == null || calibrateAlignedButton == null) return;
+        if (calibrationStatusText == null) return;
         boolean ready = dynamicHeadingCalibrator.isReady();
-        calibrationStatusText.setText(dynamicHeadingCalibrator.status());
+        String panelText=dynamicHeadingCalibrator.status()+"\n"+dynamicHeadingCalibrator.qualityDetails();
+        if(!ready)panelText+="\n"+(declinationPosition.fresh(SystemClock.elapsedRealtimeNanos())
+                ?"真北修正位置已就绪（"+declinationPosition.provider+"）"
+                :"等待真北修正位置：可使用网络定位，无需高精度 GPS");
+        if(!panelText.contentEquals(calibrationStatusText.getText()))calibrationStatusText.setText(panelText);
         calibrationStatusText.setTextColor(ContextCompat.getColor(this,
-                ready ? R.color.nav_safe : R.color.nav_muted));
+                ready ? R.color.nav_safe : R.color.nav_warning));
     }
 
     private void scheduleDestinationSearch(String keyword) {
@@ -816,20 +789,45 @@ public class MainActivity extends AppCompatActivity {
         searchHandler.postDelayed(pendingDestinationSearch, 500L);
     }
 
+    private boolean usableForPlaceSearch(Location location){
+        return location!=null && PlaceSearchPosition.usable(location.getLatitude(),location.getLongitude(),
+                location.hasAccuracy()?location.getAccuracy():Float.NaN,
+                location.getElapsedRealtimeNanos(),SystemClock.elapsedRealtimeNanos());
+    }
+
+    private Location placeSearchOrigin(){
+        if(lastLocation!=null)return new Location(lastLocation);
+        return usableForPlaceSearch(placeSearchLocation)?new Location(placeSearchLocation):null;
+    }
+
+    private void updatePlaceSearchLocation(Location location){
+        if(!usableForPlaceSearch(location))return;
+        if(placeSearchLocation!=null && location.getElapsedRealtimeNanos()
+                <=placeSearchLocation.getElapsedRealtimeNanos())return;
+        placeSearchLocation=new Location(location);
+        if(waitingForPlaceSearchLocation && selectedDestination==null){
+            waitingForPlaceSearchLocation=false;
+            scheduleDestinationSearch(destinationInput.getText().toString().trim());
+        }
+    }
+
     private void searchDestinationSuggestions(String keyword) {
         String key = amapKeyInput.getText().toString().trim();
         if (key.isEmpty()) {
             showSuggestionStatus("输入高德 Key 后显示附近地点");
             return;
         }
-        if (lastLocation == null) {
+        Location searchOrigin=placeSearchOrigin();
+        if (searchOrigin == null) {
+            waitingForPlaceSearchLocation=true;
             showSuggestionStatus("等待手机定位后显示附近地点");
             return;
         }
 
+        waitingForPlaceSearchLocation=false;
         final long searchGeneration = destinationGeneration;
         showSuggestionStatus("正在搜索附近地点…");
-        amapRouteClient.searchNearby(key, lastLocation, keyword, new AmapRouteClient.SearchCallback() {
+        amapRouteClient.searchNearby(key, searchOrigin, keyword, new AmapRouteClient.SearchCallback() {
             @Override
             public void onSuccess(List<AmapRouteClient.PlaceSuggestion> suggestions) {
                 runOnUiThread(() -> {
@@ -1023,6 +1021,7 @@ public class MainActivity extends AppCompatActivity {
                             colorStride = color.getStride();
                             rgb = new byte[color.getDataSize()];
                             color.getData(rgb);
+                            updateColorPreview(rgb, colorWidth, colorHeight, colorStride, frameCount);
                             if (BuildConfig.DEBUG) {
                                 writeDiagnosticRgbOnce(
                                         rgb, colorWidth, colorHeight, colorStride);
@@ -1030,6 +1029,12 @@ public class MainActivity extends AppCompatActivity {
                             imageTime = vinsTimestampMapper.toSystemTimeMilliseconds(
                                     color.getTimestamp(), color.getTimestampDomain(),
                                     System.currentTimeMillis());
+                            VisionHintPanel panel=visionHintPanel;
+                            if(panel!=null){
+                                long age=(long)(System.currentTimeMillis()-imageTime);
+                                if(age>=-100&&age<1000)panel.offer(rgb,colorWidth,colorHeight,colorStride,
+                                        SystemClock.elapsedRealtime()-Math.max(0,age));
+                            }
                             vinsInput.addImage(imageTime, rgb, colorWidth,
                                     colorHeight, colorStride, intrinsic);
                             requestVinsProcessing();
@@ -1107,6 +1112,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+    /** Uses the existing RGB stream even before VINS is ready; at most one UI frame is queued. */
+    private void updateColorPreview(byte[] rgb, int width, int height, int stride, long frame) {
+        if (!activityResumed || frame % PREVIEW_FRAME_INTERVAL != 0
+                || !colorPreviewPending.compareAndSet(false,true)) return;
+        long generation=colorPreviewGeneration;
+        // Each incoming RGB buffer is owned by its frame and is not subsequently modified.
+        runOnUiThread(() -> {
+            try {
+                if (!activityResumed || colorPreview==null || generation!=colorPreviewGeneration) return;
+                int step=2;
+                int[] pixels=RgbPreviewPixels.convert(rgb,width,height,stride,step);
+                Bitmap bitmap=Bitmap.createBitmap(pixels,(width+step-1)/step,
+                        (height+step-1)/step,Bitmap.Config.ARGB_8888);
+                colorPreview.setImageBitmap(bitmap);
+            } finally {
+                colorPreviewPending.set(false);
+            }
+        });
+    }
+
     private void processNavigationFrame(FrameSet frames, Frame colorFrame, byte[] rgb,
             int colorWidth, int colorHeight, int colorStride, Intrinsic intrinsic,
             double imageTime, long frameCount, boolean navigationFrame, boolean semanticFrame,
@@ -1115,9 +1140,22 @@ public class MainActivity extends AppCompatActivity {
         long alignStartedNanos = SystemClock.elapsedRealtimeNanos();
         try (Frame rawDepthFrame = frames.first(StreamType.DEPTH)) {
             DepthFrame rawDepth = rawDepthFrame.as(Extension.DEPTH_FRAME);
+            boolean sameClock=rawDepthFrame.getTimestampDomain()==colorFrame.getTimestampDomain();
+            double skewMs=Math.abs(rawDepthFrame.getTimestamp()-colorFrame.getTimestamp());
+            if(!FramePairTiming.valid(sameClock,skewMs)){
+                NavigationAudit.log("CAPTURE_REJECT rgb="+colorFrame.getNumber()+" depth="
+                        +rawDepthFrame.getNumber()+" skew_ms="+skewMs);
+                return;
+            }
+            if(semanticFrame)NavigationAudit.log("CAPTURE_AUDIT frame="+imageTime/1000.0
+                    +" rgb="+colorFrame.getNumber()+" depth="+rawDepthFrame.getNumber()
+                    +" same_clock="+sameClock+" skew_ms="+skewMs);
             DepthImage alignedDepth = verifiedAlign.process(frames, rawDepth,
                     colorFrame, align);
             long alignedNanos = SystemClock.elapsedRealtimeNanos();
+            if(semanticFrame)NavigationAudit.log("ALIGN_AUDIT frame="+imageTime/1000.0
+                    +" align_ms="+(alignedNanos-alignStartedNanos)/1e6
+                    +" capture_to_aligned_ms="+(System.currentTimeMillis()-imageTime));
             long semanticCopiedNanos = alignedNanos;
             if (semanticFrame) {
                 byte[] semanticDepth = alignedDepth.data;
@@ -1357,7 +1395,8 @@ public class MainActivity extends AppCompatActivity {
             if (!wasInitialized) vinsInitialized = pose.initialized;
             latestVinsPose = pose;
             latestVinsPoseNanos = SystemClock.elapsedRealtimeNanos();
-            autoCalibrateHeadingIfNeeded();
+            latestPoseCaptureMillis=new FrameEvidence(pose.timestamp,0,System.currentTimeMillis(),
+                    SystemClock.elapsedRealtime()).captureElapsedMillis;
             calibrationVinsPoseHistory.add(pose);
             if (semanticSegmenter != null) semanticSegmenter.updateVinsPose(pose);
         }
@@ -1374,25 +1413,20 @@ public class MainActivity extends AppCompatActivity {
         vinsInitialized = false;
         latestVinsPose = null;
         latestVinsPoseNanos = 0L;
-        // After the restart the user is walking with one device in each hand; the
-        // automatic entry-time snapshot must never fire again in this session.
-        manualCalibrationAfterRestart = true;
         resetVinsDependents();
     }
 
     private void resetVinsDependents() {
+        latestPlanEvidence=null;
         calibrationVinsPoseHistory.clear();
         dynamicHeadingCalibrator.resetForVinsRestart();
-        resetAutoCalibrationState();
         latestSemanticResult = SemanticSegmenter.Result.waiting();
         latestSemanticResultNanos = 0L;
         SemanticSegmenter segmenter = semanticSegmenter;
         if (segmenter != null) segmenter.resetVinsState();
         runOnUiThread(() -> {
             resetLocalPlanning();
-            if (manualCalibrationAfterRestart && calibrateAlignedButton != null) {
-                calibrateAlignedButton.setVisibility(View.VISIBLE);
-            }
+            if (calibrateAlignedButton != null) calibrateAlignedButton.setVisibility(View.GONE);
             renderDynamicHeadingCalibration();
             renderVinsStatus(vinsInput.status());
         });
@@ -1620,42 +1654,74 @@ public class MainActivity extends AppCompatActivity {
         renderSemanticStatus(semantic);
         renderLocalPlanStatus(semantic);
 
+        renderDirectionGuidance();
+    }
+
+    private boolean hasNavigationLocation(){
+        return lastLocation!=null;
+    }
+
+    private void renderDirectionGuidance(){
+        if(guidanceText==null)return;
         String guidance;
+        String reason="";
         int color;
+        long now=SystemClock.elapsedRealtime();
+        PlanObservation published=planObservation;
+        LocalPlanner.PathResult cuePlan=published.plan;
+        FrameEvidence evidence=published.evidence;
+        boolean observationFresh=evidence!=null && evidence.fresh(now);
+        boolean poseFresh=latestVinsPose!=null && latestVinsPose.initialized
+                && now-latestPoseCaptureMillis>=0 && now-latestPoseCaptureMillis<1500;
         if (!navigationActive) {
             guidance = "";
             color = R.color.nav_muted;
-        } else if (latestLocalPlan.planned) {
-            guidance = NavigationCue.fromPlan(latestLocalPlan.planned,
-                    latestLocalPlan.success, latestLocalPlan.blocked,
-                    latestLocalPlan.steeringDegrees);
+        } else if (cuePlan.planned && observationFresh && poseFresh && hasNavigationLocation()
+                && dynamicHeadingCalibrator.isReady()) {
+            if (cuePlan != lastCuePlan) {
+                lastPlanCue = navigationCueTracker.update(true, cuePlan.success,
+                        cuePlan.blocked, cuePlan.steeringDegrees);
+                lastCuePlan = cuePlan;
+            }
+            guidance = lastPlanCue;
+            cueEvidence=evidence;
+            if("停止".equals(guidance))reason=cuePlan.blocked?"纯跟踪前方受阻":"A* 未找到安全路径";
             color = "停止".equals(guidance) ? R.color.nav_danger
                     : "直走".equals(guidance) ? R.color.nav_safe : R.color.nav_warning;
-        } else if (isCloserThan(distances.center, STOP_METERS)
-                && isCloserThan(distances.left, STOP_METERS)
-                && isCloserThan(distances.right, STOP_METERS)) {
-            guidance = "停止";
-            color = R.color.nav_danger;
-        } else if (!isCloserThan(distances.center, OBSTACLE_METERS)) {
-            guidance = "直走";
-            color = R.color.nav_safe;
-        } else if (clearance(distances.left) >= clearance(distances.right)) {
-            guidance = "左转";
-            color = R.color.nav_warning;
         } else {
-            guidance = "右转";
-            color = R.color.nav_warning;
+            // Waiting for GPS/map/VINS/calibration is not proof of a blocked path.
+            // GuidanceStabilizer briefly retains the last confirmed-safe instruction,
+            // then stops if fresh safety evidence does not return in time.
+            reason=!poseFresh?"等待新鲜 VINS 位姿":!observationFresh?"等待新鲜语义地图":
+                    !hasNavigationLocation()?"等待手机定位":!dynamicHeadingCalibrator.isReady()?"等待地理方向对齐":
+                    cuePlan.waitingReason;
+            guidance = cueEvidence!=null && !cueEvidence.fresh(now) ? "停止" : "";
+            color = R.color.nav_muted;
         }
 
-        guidance = guidanceStabilizer.update(guidance, navigationActive,
-                SystemClock.elapsedRealtime());
+        guidance = guidanceStabilizer.updateValidated(guidance, navigationActive,
+                SystemClock.elapsedRealtime(),cueEvidence);
+        if(!navigationActive)cueEvidence=null;
+        if(navigationActive && (!guidance.equals(lastAuditCue)||!reason.equals(lastAuditReason)
+                || SystemClock.elapsedRealtimeNanos()-lastAuditNanos>TimeUnit.SECONDS.toNanos(1))){
+            lastAuditCue=guidance;lastAuditReason=reason;lastAuditNanos=SystemClock.elapsedRealtimeNanos();
+            NavigationAudit.log("CUE_AUDIT cue="+guidance+" reason="+reason+" frame="
+                    +(evidence==null?"none":evidence.cameraSeconds)+" frame_age_ms="
+                    +(evidence==null?-1:evidence.ageMillis(now))+" raw="+lastPlanCue);
+        }
+        if(navigationActive && reason.isEmpty() && "停止".equals(guidance)
+                && !"停止".equals(lastPlanCue))reason="安全路径恢复确认中（1.5秒）";
+        if(navigationActive && !reason.isEmpty())localPlanMetricsText.setText(
+                ("停止".equals(guidance)?"安全停止：":"等待：")+reason);
         color = "停止".equals(guidance) ? R.color.nav_danger
                 : "直走".equals(guidance) ? R.color.nav_safe
                 : guidance.isEmpty() ? R.color.nav_muted : R.color.nav_warning;
-        if (!guidance.contentEquals(guidanceText.getText())) {
-            guidanceText.setText(guidance);
-            guidanceText.setTextColor(ContextCompat.getColor(this, color));
+        String speechText=guidanceTextComposer.update(guidance,
+                visionHintPanel==null?VisionHintSnapshot.EMPTY:visionHintPanel.snapshot(),now);
+        if (!speechText.contentEquals(guidanceText.getText())) {
+            guidanceText.setText(speechText);
         }
+        guidanceText.setTextColor(ContextCompat.getColor(this, color));
     }
 
     private LocalPlanner.PathResult computeLocalPlan(SemanticSegmenter.Result semantic) {
@@ -1663,7 +1729,9 @@ public class MainActivity extends AppCompatActivity {
         if (!navigationActive) {
             return LocalPlanner.PathResult.waitingForTarget();
         }
-        if (lastLocation == null) return LocalPlanner.PathResult.waiting("等待手机定位");
+        if (!hasNavigationLocation()) return LocalPlanner.PathResult.waiting("等待手机定位");
+        if(semantic.evidence==null || !semantic.evidence.fresh(SystemClock.elapsedRealtime()))
+            return LocalPlanner.PathResult.waiting("语义观测过期");
         if (!routeFollower.hasRoute()) return LocalPlanner.PathResult.waiting("等待全局路线");
         if (semantic.localCostGrid == null
                 || semantic.localCostGrid.length != MapTransform.WIDTH * MapTransform.HEIGHT) {
@@ -1674,23 +1742,35 @@ public class MainActivity extends AppCompatActivity {
             System.arraycopy(semantic.localCostGrid, r * MapTransform.WIDTH,
                     grid[r], 0, MapTransform.WIDTH);
         }
+        Location location=lastLocation;
         RouteFollower.Guidance guidance = routeFollower.update(
-                lastLocation.getLatitude(), lastLocation.getLongitude(),
-                lastLocation.hasAccuracy() ? lastLocation.getAccuracy() : 0f,
-                currentTrueNorthHeading());
+                location.getLatitude(), location.getLongitude(),
+                location.hasAccuracy() ? location.getAccuracy() : Float.NaN,
+                Float.NaN, location.getElapsedRealtimeNanos());
         if (guidance == null) {
-            return LocalPlanner.PathResult.waiting("等待全局路线目标");
+            return LocalPlanner.PathResult.waiting(routeFollower.waitingReason());
         }
+        VinsMono.Pose mapPose = semantic.mapPose;
+        if (mapPose == null || !mapPose.initialized)
+            return LocalPlanner.PathResult.waiting("等待与地图同步的 VINS 位姿");
+        if (!dynamicHeadingCalibrator.isReady())
+            return LocalPlanner.PathResult.waiting("等待地理方向对齐");
         float relativeTarget = dynamicHeadingCalibrator.relativeTargetDegrees(
-                guidance.targetBearingDegrees, latestVinsPose);
+                guidance.targetBearingDegrees, mapPose);
         if (!Float.isFinite(relativeTarget)) {
             return LocalPlanner.PathResult.waiting("等待有效 VINS 位姿");
         }
         float radians = (float) Math.toRadians(relativeTarget);
         float targetRow = (float) Math.cos(radians);
         float targetCol = (float) Math.sin(radians);
+        NavigationAudit.log("TARGET_AUDIT frame="+semantic.evidence.cameraSeconds+" pose="+mapPose.timestamp
+                +" gps_ns="+location.getElapsedRealtimeNanos()+" gps_to_frame_ms="
+                +(semantic.evidence.captureElapsedMillis-location.getElapsedRealtimeNanos()/1_000_000L)+" geo="+guidance.targetBearingDegrees
+                +" camera_relative="+relativeTarget+" pose_xy="+mapPose.x+","+mapPose.y
+                +" map_yaw="+mapPose.egoRightAxisYawRadians()+" cross_track="+guidance.crossTrackMeters
+                +" calibration="+dynamicHeadingCalibrator.status());
         return localPlanner.plan(grid, MapTransform.RESOLUTION, -7.9f, -7.9f,
-                0f, 0f, targetCol, targetRow);
+                0f, 0f, targetCol, targetRow, mapPose);
     }
 
     private void requestLocalPlanRefresh() {
@@ -1742,13 +1822,13 @@ public class MainActivity extends AppCompatActivity {
             // A temporary pose/map synchronization miss must not erase the last valid
             // costmap. The planner still waits for a fresh input; this only keeps the UI
             // from flashing an empty map between two valid projections.
+            planObservation=new PlanObservation(waiting,latestPlanEvidence);
             latestLocalPlan = waiting;
             recordLocalPlanMetrics(refreshStartedNanos, -1L);
             runOnUiThread(() -> {
                 if (generation != localPlanGeneration.get()
                         || sequence < latestRenderedLocalPlanSequence) return;
                 latestRenderedLocalPlanSequence = sequence;
-                recordRenderedLocalPlanRefresh();
                 renderSemanticStatus(latestSemanticResult);
                 renderLocalPlanStatus(latestSemanticResult);
                 renderLocalPlanMetrics();
@@ -1762,8 +1842,15 @@ public class MainActivity extends AppCompatActivity {
         LocalPlanner.PathResult plan = computeLocalPlan(projected);
         if (generation != localPlanGeneration.get()) return;
         long planDurationNanos = SystemClock.elapsedRealtimeNanos() - planStartedNanos;
+        if(!projected.evidence.fresh(SystemClock.elapsedRealtime())){
+            NavigationAudit.log("PLAN_EXPIRED frame="+projected.evidence.cameraSeconds
+                    +" plan_ms="+planDurationNanos/1e6);
+            return;
+        }
         long sequence = localPlanSequence.incrementAndGet();
         latestSemanticResult = projected;
+        planObservation=new PlanObservation(plan,projected.evidence);
+        latestPlanEvidence=projected.evidence;
         latestLocalPlan = plan;
         recordLocalPlanMetrics(refreshStartedNanos, planDurationNanos);
         if (sequence % 30L == 0L) {
@@ -1774,26 +1861,37 @@ public class MainActivity extends AppCompatActivity {
         }
         runOnUiThread(() -> {
             if (generation != localPlanGeneration.get()
-                    || sequence < latestRenderedLocalPlanSequence) return;
+                    || sequence != localPlanSequence.get()) return;
+            if(!projected.evidence.fresh(SystemClock.elapsedRealtime()))return;
             latestRenderedLocalPlanSequence = sequence;
-            recordRenderedLocalPlanRefresh();
+            recordRenderedLocalPlanRefresh(projected.evidence);
             renderSemanticStatus(projected);
             renderLocalPlanStatus(projected);
             renderLocalPlanMetrics();
-            localPlanView.setPlan(plan);
+            localPlanView.setPlan(plan,projected.evidence);
             hasValidLocalPlanDisplay = true;
             updateNavigationGuidance();
+            renderDirectionGuidance();
+            NavigationAudit.log("PLAN_AUDIT frame="+(projected.evidence==null?"none":projected.evidence.cameraSeconds)
+                    +" plan_ms="+planDurationNanos/1e6
+                    +" ui_queue_ms="+(SystemClock.elapsedRealtimeNanos()-planStartedNanos-planDurationNanos)/1e6
+                    +" map_to_plan_ms="+(planStartedNanos-refreshStartedNanos)/1e6
+                    +" capture_to_display_ms="+(projected.evidence==null?-1:projected.evidence.ageMillis(SystemClock.elapsedRealtime()))
+                    +" planned="+plan.planned+" success="+plan.success+" blocked="+plan.blocked);
         });
     }
 
     private void recordLocalPlanMetrics(long refreshStartedNanos, long planDurationNanos) {
         latestLocalPlanDurationNanos = planDurationNanos;
-        long semanticNanos = latestSemanticResultNanos;
+        FrameEvidence evidence=latestPlanEvidence;
+        long semanticNanos = evidence==null?0:evidence.captureElapsedMillis*1_000_000L;
         latestLocalPlanInputAgeNanos = semanticNanos > 0L
                 ? Math.max(0L, refreshStartedNanos - semanticNanos) : -1L;
     }
 
-    private void recordRenderedLocalPlanRefresh() {
+    private final ObservationRefreshTracker renderedObservations=new ObservationRefreshTracker();
+    private void recordRenderedLocalPlanRefresh(FrameEvidence evidence) {
+        if(!renderedObservations.observe(evidence,SystemClock.elapsedRealtime()))return;
         long renderedNanos = SystemClock.elapsedRealtimeNanos();
         long previousNanos = latestLocalPlanCompletedNanos;
         latestLocalPlanCompletedNanos = renderedNanos;
@@ -1876,7 +1974,7 @@ public class MainActivity extends AppCompatActivity {
                 result.startCost, result.targetCost, result.obstacleCount));
         if (latestRenderedLocalPlanSequence > 0) {
             semanticStatusText.append(String.format(
-                    Locale.CHINA, " · 更新 #%,d", latestRenderedLocalPlanSequence));
+                    Locale.CHINA, " · 新观测 #%,d", renderedObservations.count));
         }
     }
 
@@ -1934,8 +2032,8 @@ public class MainActivity extends AppCompatActivity {
                 ? String.format(Locale.CHINA, "%.1f 秒", latestLocalPlanInputAgeNanos / 1_000_000_000f)
                 : "--";
         localPlanMetricsText.setText(String.format(Locale.CHINA,
-                "A*单次 %s · 刷新间隔 %s\n代价图输入年龄 %s · 更新 #%,d",
-                duration, refresh, inputAge, latestRenderedLocalPlanSequence));
+                "规划处理 %s · 新观测显示间隔 %s\n代价图输入年龄 %s · 新观测 #%,d",
+                duration, refresh, inputAge, renderedObservations.count));
         localPlanMetricsText.setTextColor(ContextCompat.getColor(this,
                 latestLocalPlanDurationNanos >= 0L ? R.color.nav_safe : R.color.nav_warning));
     }
@@ -1946,12 +2044,21 @@ public class MainActivity extends AppCompatActivity {
         pendingLocalPlanMap.set(null);
         localPlanner.clearTargetPath();
         latestLocalPlan = LocalPlanner.PathResult.waitingForTarget();
+        planObservation=new PlanObservation(latestLocalPlan,null);
+        latestPlanEvidence=null;
+        cueEvidence=null;
+        guidanceStabilizer.reset();
+        guidanceTextComposer.reset();
         latestRenderedLocalPlanSequence = 0L;
+        renderedObservations.reset();
         latestLocalPlanDurationNanos = -1L;
         latestLocalPlanRefreshNanos = -1L;
         latestLocalPlanCompletedNanos = 0L;
         latestLocalPlanInputAgeNanos = -1L;
         hasValidLocalPlanDisplay = false;
+        navigationCueTracker.reset();
+        lastCuePlan = null;
+        lastPlanCue = "";
         if (localPlanView != null) localPlanView.setPlan(latestLocalPlan);
         renderLocalPlanMetrics();
     }

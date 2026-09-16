@@ -3,228 +3,254 @@ package com.elabrador.mobilenavigation;
 import android.content.SharedPreferences;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-/**
- * Aligns the arbitrary horizontal VINS world axes to geographic north. The
- * outdoor mode compares co-moving GPS/VINS displacement; the indoor mode uses
- * the phone heading only at the instant the phone top and D455 optical forward
- * direction are deliberately aligned.
- */
+/** Source GPS-to-VINS rigid fit with additional outdoor quality gates. */
 final class DynamicHeadingCalibrator {
     private static final double EARTH_RADIUS_METERS = 6371000.0;
-    private static final float MAX_GPS_ACCURACY_METERS = 8f;
-    private static final double MIN_GPS_SEGMENT_METERS = 4.0;
-    private static final double MIN_VINS_SEGMENT_METERS = 1.5;
-    private static final double MIN_SCALE_RATIO = 0.15;
-    private static final double MAX_SCALE_RATIO = 5.0;
-    private static final int REQUIRED_SAMPLES = 3;
-    private static final int SAMPLE_WINDOW_SIZE = 6;
-    private static final double MAX_SAMPLE_DEVIATION_DEGREES = 15.0;
+    private static final int MIN_TRANSFORM_SIZE = 16;
+    static final int MIN_READY_SAMPLES = MIN_TRANSFORM_SIZE + 1;
+    // Use a bounded recent trajectory, so bad startup samples do not remain until
+    // 64 new observations. Never select arbitrary inliers to make a fit pass.
+    private static final int MAX_BUFFER_SIZE = MIN_READY_SAMPLES;
+    private static final double MIN_DELTA_DISTANCE_METERS = 1.5;
+    static final float MAX_GPS_ACCURACY_METERS = 8f;
+    private final List<Point> gpsPoints = new ArrayList<>();
+    private final List<Point> vinsPoints = new ArrayList<>();
+    private double initialLatitude, initialLongitude;
+    private Point lastVinsPoint;
+    private boolean collecting, ready;
+    private boolean automaticAligned;
+    private double r00, r01, r10, r11;
+    private String fitQuality = "";
+    private String fitFailure = "";
+    private double sampledDistance;
+    private int totalSamples;
+    private final CalibrationMotionGate motionGate=new CalibrationMotionGate();
+    private String lastWindowRestart="";
+    private long lastPairedFixNanos;
+    private String status = "源码轨迹标定：等待 GPS 与 VINS";
 
-    private final List<Double> offsetsDegrees = new ArrayList<>();
-    private Sample anchor;
-    private boolean collecting;
-    private boolean ready;
-    private double northOffsetDegrees = Double.NaN;
-    private String status = "请将手机与 D455F 对齐，正在初始化和标定…";
-
-    synchronized void save(SharedPreferences prefs) {
-        if (!ready || !Double.isFinite(northOffsetDegrees)) return;
-        prefs.edit().putBoolean("heading_calibration_ready", true)
-                .putFloat("heading_calibration_offset", (float) northOffsetDegrees).apply();
+    synchronized void save(SharedPreferences preferences) {
+        // The transform belongs to the current arbitrary VINS frame.
+        preferences.edit().remove("heading_calibration_ready")
+                .remove("heading_calibration_offset").apply();
     }
 
     synchronized void start() {
-        offsetsDegrees.clear();
-        anchor = null;
-        collecting = true;
-        ready = false;
-        northOffsetDegrees = Double.NaN;
-        status = "动态标定中：请带着手机和 D455F 一起直线走动";
+        automaticAligned=false;
+        clearSamples(); collecting=true; ready=false;
+        motionGate.reset();lastWindowRestart="";lastPairedFixNanos=0;
+        status="采集最近 17 个同期 GPS/VINS 点；失败后随行走逐点替换旧点";
     }
 
     synchronized void resetForVinsRestart() {
-        offsetsDegrees.clear();
-        anchor = null;
-        collecting = false;
-        // A reset creates arbitrary new world axes; an old offset is not valid here.
-        ready = false;
-        northOffsetDegrees = Double.NaN;
-        status = "VINS 已重启：请对齐手机与 D455F，初始化完成后点击「重新标定」";
+        if(automaticAligned){
+            startAutoAligned();
+            status="VINS 已重启：请保持手机顶部与镜头同向，等待自动重新对齐";
+            return;
+        }
+        start(); status="VINS 已重启，方向轨迹需要重新采集（0/17）";
     }
 
-    synchronized boolean calibrateAligned(float phoneTrueHeadingDegrees, VinsMono.Pose pose) {
-        return calibrateAligned(phoneTrueHeadingDegrees, pose, "室内同向标定");
+    synchronized void startAutoAligned(){
+        start();automaticAligned=true;
+        status="自动同向标定：请保持手机顶部与 D455F 镜头朝向一致";
     }
 
-    /** Same math for both entry points; the label only distinguishes who triggered it
-     *  (automatic entry snapshot or manual restart button) in the status text. */
-    synchronized boolean calibrateAligned(float phoneTrueHeadingDegrees, VinsMono.Pose pose,
-                                          String sourceLabel) {
-        offsetsDegrees.clear();
-        anchor = null;
-        collecting = false;
-        if (!Float.isFinite(phoneTrueHeadingDegrees)) {
-            status = sourceLabel + "失败：等待手机方向传感器";
+    /** Same alignment as the former manual button, locked for this VINS frame. */
+    synchronized boolean updateAutoAligned(float trueHeading,VinsMono.Pose pose,
+                                          long headingAgeNanos,long nowWallMillis){
+        if(!automaticAligned||!collecting||ready)return false;
+        if(pose==null||!pose.initialized){
+            status="自动同向标定：等待 VINS 初始化";return false;
+        }
+        double poseAge=nowWallMillis-pose.timestamp*1000.;
+        if(!Double.isFinite(poseAge)||poseAge< -100||poseAge>=1500){
+            status="自动同向标定：等待新鲜 VINS 位姿";return false;
+        }
+        if(!Float.isFinite(trueHeading)||headingAgeNanos<0||headingAgeNanos>2_000_000_000L){
+            status=(!Float.isFinite(trueHeading)&&headingAgeNanos>=0&&headingAgeNanos<=2_000_000_000L)
+                    ?"自动同向标定：等待真北修正位置"
+                    :"自动同向标定：等待新鲜手机方向";
             return false;
         }
-        if (pose == null || !pose.initialized) {
-            status = sourceLabel + "失败：等待 VINS 初始化";
-            return false;
+        double yaw=pose.egoRightAxisYawRadians();
+        if(!Double.isFinite(yaw)){
+            status="自动同向标定：相机朝向无效";return false;
         }
-        double cameraForwardVinsBearing = -Math.toDegrees(pose.egoRightAxisYawRadians());
-        northOffsetDegrees = normalizeDegrees(
-                phoneTrueHeadingDegrees - cameraForwardVinsBearing);
-        ready = true;
-        status = String.format(java.util.Locale.CHINA,
-                sourceLabel + "成功：北向偏角 %+.1f°", northOffsetDegrees);
+        // GPS axes are north / west. Camera forward in VINS is (-sin(yaw), cos(yaw)).
+        // Rotate the geographic heading vector onto that camera-forward vector.
+        double angle=yaw+Math.PI/2+Math.toRadians(trueHeading);
+        double c=Math.cos(angle),s=Math.sin(angle);
+        r00=c;r01=-s;r10=s;r11=c;
+        ready=true;collecting=false;
+        status=String.format(Locale.CHINA,"自动同向标定完成并锁定 · 手机真北航向 %.1f°",trueHeading);
         return true;
+    }
+
+    synchronized void updateTimed(double latitude,double longitude,float accuracyMeters,
+                                  double vinsX,double vinsY,boolean initialized,long fixNanos){
+        if(automaticAligned||!collecting||ready)return;
+        if(fixNanos<=0||fixNanos<=lastPairedFixNanos){status="忽略重复或倒序的定位时间";return;}
+        lastPairedFixNanos=fixNanos;
+        if(initialized && Double.isFinite(latitude)&&Math.abs(latitude)<=90
+                && Double.isFinite(longitude)&&Math.abs(longitude)<=180
+                && Double.isFinite(vinsX)&&Double.isFinite(vinsY)
+                && Float.isFinite(accuracyMeters)&&accuracyMeters>0
+                && accuracyMeters<=MAX_GPS_ACCURACY_METERS){
+            String discontinuity=motionGate.observe(latitude,longitude,accuracyMeters,vinsX,vinsY,fixNanos);
+            if(!discontinuity.isEmpty()){
+                int total=totalSamples;double distance=sampledDistance;
+                clearSamples();totalSamples=total;sampledDistance=distance;
+                lastWindowRestart=discontinuity;
+            }
+        }
+        update(latitude,longitude,accuracyMeters,vinsX,vinsY,initialized);
     }
 
     synchronized void update(double latitude, double longitude, float accuracyMeters,
                              double vinsX, double vinsY, boolean vinsInitialized) {
-        if (!collecting || ready) return;
-        if (!vinsInitialized) {
-            status = "动态标定中：等待 VINS 初始化";
-            return;
+        if (automaticAligned || !collecting || ready) return;
+        if (!vinsInitialized || !Double.isFinite(vinsX) || !Double.isFinite(vinsY)) {
+            status="源码轨迹标定：等待 VINS 初始化"; return;
         }
-        if (!Float.isFinite(accuracyMeters) || accuracyMeters > MAX_GPS_ACCURACY_METERS) {
-            status = "动态标定中：等待 GPS 精度优于 8 m";
-            return;
+        if (!Double.isFinite(latitude) || !Double.isFinite(longitude)
+                || Math.abs(latitude)>90 || Math.abs(longitude)>180
+                || !Float.isFinite(accuracyMeters) || accuracyMeters<=0 || accuracyMeters>MAX_GPS_ACCURACY_METERS) {
+            status="等待 GPS 精度达到 8 米以内"; return;
         }
-        Sample current = new Sample(latitude, longitude, vinsX, vinsY);
-        if (anchor == null) {
-            anchor = current;
-            status = "动态标定中：已记录起点，请共同直线移动至少 4 m";
-            return;
+        Point currentVins=new Point(vinsX,vinsY);
+        if(lastVinsPoint==null) {
+            initialLatitude=latitude; initialLongitude=longitude;
+            append(new Point(0,0),currentVins); status=progressStatus(); return;
         }
-
-        double gpsEast = longitudeDeltaMeters(anchor.longitude, current.longitude, anchor.latitude);
-        double gpsNorth = latitudeDeltaMeters(anchor.latitude, current.latitude);
-        double gpsDistance = Math.hypot(gpsEast, gpsNorth);
-        double vinsXDelta = current.vinsX - anchor.vinsX;
-        double vinsYDelta = current.vinsY - anchor.vinsY;
-        double vinsDistance = Math.hypot(vinsXDelta, vinsYDelta);
-        if (gpsDistance < MIN_GPS_SEGMENT_METERS || vinsDistance < MIN_VINS_SEGMENT_METERS) {
-            status = "动态标定中：共同移动 " + Math.round(Math.min(gpsDistance, vinsDistance))
-                    + " m / 4 m";
-            return;
+        if(currentVins.distance(lastVinsPoint)<MIN_DELTA_DISTANCE_METERS) {
+            status=progressStatus(); return;
         }
-        double scaleRatio = vinsDistance / gpsDistance;
-        if (scaleRatio < MIN_SCALE_RATIO || scaleRatio > MAX_SCALE_RATIO) {
-            anchor = current;
-            status = "动态标定中：GPS 与 VINS 位移不一致，已重取采样起点";
-            return;
-        }
-
-        double gpsBearing = Math.toDegrees(Math.atan2(gpsEast, gpsNorth));
-        double vinsBearing = Math.toDegrees(Math.atan2(vinsXDelta, vinsYDelta));
-        offsetsDegrees.add(normalizeDegrees(gpsBearing - vinsBearing));
-        while (offsetsDegrees.size() > SAMPLE_WINDOW_SIZE) offsetsDegrees.remove(0);
-        anchor = current;
-        List<Double> consistentSamples = mostConsistentSamples(offsetsDegrees);
-        double mean = circularMean(consistentSamples);
-        double worstDeviation = 0.0;
-        for (double offset : consistentSamples) {
-            worstDeviation = Math.max(worstDeviation, Math.abs(normalizeDegrees(offset - mean)));
-        }
-        if (consistentSamples.size() >= REQUIRED_SAMPLES
-                && worstDeviation <= MAX_SAMPLE_DEVIATION_DEGREES) {
-            ready = true;
-            collecting = false;
-            northOffsetDegrees = mean;
-            status = String.format(java.util.Locale.CHINA,
-                    "动态标定完成：北向偏角 %+.1f°，样本 %d", northOffsetDegrees,
-                    consistentSamples.size());
-        } else {
-            status = String.format(java.util.Locale.CHINA,
-                    "动态标定中：一致样本 %d/%d（窗口 %d），偏差 %.1f°",
-                    consistentSamples.size(), REQUIRED_SAMPLES, offsetsDegrees.size(),
-                    worstDeviation);
-        }
+        double north=latitudeDeltaMeters(initialLatitude,latitude);
+        double east=longitudeDeltaMeters(initialLongitude,longitude,initialLatitude);
+        // Source calibration.py: distance*[cos(-azimuth), sin(-azimuth)].
+        append(new Point(north,-east),currentVins);
+        if(vinsPoints.size()<=MIN_TRANSFORM_SIZE) { status=progressStatus(); return; }
+        if(estimateSourceRigidRotation()) {
+            ready=true; collecting=false;
+            status=String.format(Locale.CHINA,
+                    "方向标定完成并锁定：%d 组，北向偏角 %.1f°",
+                    vinsPoints.size(),northOffsetDegrees());
+        } else status="方向尚未通过检查，请查看下方具体原因";
     }
 
-    synchronized void waitForTimeAlignedVinsPose() {
-        if (collecting && !ready) status = "动态标定中：等待 GPS 时刻对应的 VINS 位姿";
+    synchronized void waitForTimeAlignedVinsPose(){if(collecting)status="源码轨迹标定：等待 GPS 时刻对应的 VINS 位姿";}
+    synchronized void waitForFreshGps(){if(collecting)status="源码轨迹标定：等待新鲜 GPS 定位";}
+    synchronized boolean isReady(){return ready;}
+    synchronized int sampleCount(){return vinsPoints.size();}
+    synchronized int totalSampleCount(){return totalSamples;}
+    synchronized double sampledDistanceMeters(){return sampledDistance;}
+    synchronized String qualityDetails(){
+        if(automaticAligned)return ready
+                ?"已按同向假设完成对齐；之后可分别转动手机和相机。VINS 重启后需再次保持同向。"
+                :"无需采集 17 点或行走标定；完成前请让手机顶部与镜头前方保持同向。";
+        String warning=!ready && sampledDistance>=30
+                ? "\n已采集超过 30 米仍未通过；请到开阔处。当前只检查最近 17 点，不应在此无限来回走" : "";
+        if(!lastWindowRestart.isEmpty())warning+="\n最近窗口重建原因："+lastWindowRestart;
+        if(fitQuality.isEmpty())return "达到 17 个有效点后开始拟合，不再等待三次确认"+warning;
+        return (fitFailure.isEmpty()?"拟合检查通过":("上次未通过："+fitFailure))
+                +"\n"+fitQuality+warning;
+    }
+    synchronized String status(){return status;}
+    synchronized double northOffsetDegrees(){
+        return ready?normalizeDegrees(Math.toDegrees(Math.atan2(r00,r10))):Double.NaN;
     }
 
-    synchronized void waitForFreshGps() {
-        if (collecting && !ready) status = "动态标定中：等待新鲜的 GPS 定位";
+    synchronized float relativeTargetDegrees(float geographicBearingDegrees,VinsMono.Pose pose){
+        if(!ready||pose==null||!pose.initialized||!Float.isFinite(geographicBearingDegrees))return Float.NaN;
+        double bearing=Math.toRadians(geographicBearingDegrees);
+        double gpsX=Math.cos(bearing),gpsY=-Math.sin(bearing);
+        double worldX=r00*gpsX+r01*gpsY,worldY=r10*gpsX+r11*gpsY;
+        double yaw=pose.egoRightAxisYawRadians();
+        double right=Math.cos(yaw)*worldX+Math.sin(yaw)*worldY;
+        double forward=-Math.sin(yaw)*worldX+Math.cos(yaw)*worldY;
+        return (float)normalizeDegrees(Math.toDegrees(Math.atan2(right,forward)));
     }
 
-    synchronized boolean isReady() { return ready; }
+    static double normalizeDegrees(double degrees){return ((degrees+540.0)%360.0)-180.0;}
 
-    synchronized String status() { return status; }
-
-    synchronized double northOffsetDegrees() { return northOffsetDegrees; }
-
-    synchronized float relativeTargetDegrees(float geographicBearingDegrees, VinsMono.Pose pose) {
-        if (pose == null || !pose.initialized) return Float.NaN;
-        // No north reference exists yet: allow camera-forward local avoidance, without
-        // pretending that a geographic bearing can be transformed into this frame.
-        if (!ready) return 0f;
-        // VINS bearing convention used above: +Y is 0 degrees and +X is +90 degrees.
-        double targetVinsBearing = normalizeDegrees(geographicBearingDegrees - northOffsetDegrees);
-        double cameraForwardVinsBearing = -Math.toDegrees(pose.egoRightAxisYawRadians());
-        return (float) normalizeDegrees(targetVinsBearing - cameraForwardVinsBearing);
+    private void append(Point gps,Point vins){
+        if(lastVinsPoint!=null)sampledDistance+=vins.distance(lastVinsPoint);
+        totalSamples++;
+        gpsPoints.add(gps);vinsPoints.add(vins);lastVinsPoint=vins;
+        while(gpsPoints.size()>MAX_BUFFER_SIZE){gpsPoints.remove(0);vinsPoints.remove(0);}
     }
+    private String progressStatus(){return String.format(Locale.CHINA,
+            "有效轨迹点 %d/%d；每个新点需让 D455F 移动至少 1.5 米",
+            vinsPoints.size(),MIN_READY_SAMPLES);}
 
-    static double normalizeDegrees(double degrees) {
-        return ((degrees + 540.0) % 360.0) - 180.0;
-    }
-
-    private static double circularMean(List<Double> angles) {
-        double sin = 0.0, cos = 0.0;
-        for (double angle : angles) {
-            double radians = Math.toRadians(angle);
-            sin += Math.sin(radians);
-            cos += Math.cos(radians);
+    /** Closed-form 2-D Kabsch fit; this always produces det(R)=+1. */
+    private boolean estimateSourceRigidRotation(){
+        int count=gpsPoints.size();if(count!=vinsPoints.size()||count<=MIN_TRANSFORM_SIZE)return false;
+        double gsx=0,gsy=0,vsx=0,vsy=0;
+        for(int i=0;i<count;i++){gsx+=gpsPoints.get(i).x;gsy+=gpsPoints.get(i).y;vsx+=vinsPoints.get(i).x;vsy+=vinsPoints.get(i).y;}
+        gsx/=count;gsy/=count;vsx/=count;vsy/=count;
+        double dot=0,cross=0,spread=0,vinsSpread=0;
+        for(int i=0;i<count;i++){
+            double sx=gpsPoints.get(i).x-gsx,sy=gpsPoints.get(i).y-gsy;
+            double tx=vinsPoints.get(i).x-vsx,ty=vinsPoints.get(i).y-vsy;
+            dot+=sx*tx+sy*ty;cross+=sx*ty-sy*tx;spread+=sx*sx+sy*sy;vinsSpread+=tx*tx+ty*ty;
         }
-        return Math.toDegrees(Math.atan2(sin, cos));
-    }
-
-    private static List<Double> mostConsistentSamples(List<Double> samples) {
-        List<Double> best = new ArrayList<>();
-        double bestDeviation = Double.POSITIVE_INFINITY;
-        int combinations = 1 << samples.size();
-        for (int mask = 1; mask < combinations; mask++) {
-            List<Double> candidate = new ArrayList<>();
-            for (int index = 0; index < samples.size(); index++) {
-                if ((mask & (1 << index)) != 0) candidate.add(samples.get(index));
-            }
-            double mean = circularMean(candidate);
-            double worstDeviation = 0.0;
-            for (double value : candidate) {
-                worstDeviation = Math.max(worstDeviation,
-                        Math.abs(normalizeDegrees(value - mean)));
-            }
-            if (worstDeviation <= MAX_SAMPLE_DEVIATION_DEGREES
-                    && (candidate.size() > best.size()
-                    || (candidate.size() == best.size() && worstDeviation < bestDeviation))) {
-                best = candidate;
-                bestDeviation = worstDeviation;
-            }
+        fitFailure="";
+        double gpsBaseline=baseline(gpsPoints,0,count),vinsBaseline=baseline(vinsPoints,0,count);
+        fitQuality=String.format(Locale.CHINA,"轨迹跨度 GPS %.1fm / VINS %.1fm（均需 ≥12m）",gpsBaseline,vinsBaseline);
+        if(spread<1e-6){fitFailure="GPS 轨迹几乎没有移动";return false;}
+        if(Math.hypot(dot,cross)<1e-6){fitFailure="GPS 与 VINS 轨迹无法确定旋转方向";return false;}
+        if(gpsBaseline<12 || vinsBaseline<12){fitFailure="有效空间跨度不足，来回走的累计距离不等于跨度";return false;}
+        double angle=Math.atan2(cross,dot),c=Math.cos(angle),s=Math.sin(angle);
+        double scale=Math.sqrt(vinsSpread/spread), squaredError=0;
+        for(int i=0;i<count;i++){
+            double sx=gpsPoints.get(i).x-gsx,sy=gpsPoints.get(i).y-gsy;
+            double ex=c*sx-s*sy-(vinsPoints.get(i).x-vsx);
+            double ey=s*sx+c*sy-(vinsPoints.get(i).y-vsy);
+            squaredError+=ex*ex+ey*ey;
         }
-        return best;
+        double rmse=Math.sqrt(squaredError/count);
+        int mid=count/2;
+        double a=segmentAngle(0,mid),b=segmentAngle(mid,count);
+        double disagreement=Math.abs(normalizeDegrees(Math.toDegrees(a-b)));
+        double normalizedError=rmse/Math.sqrt(vinsSpread/count);
+        fitQuality=String.format(Locale.CHINA,
+                "残差 %.2fm（≤2.5）· 相对残差 %.0f%%（≤20%%）\n尺度 %.2f（0.70～1.30）· 前后半段方向差 %s（≤10°）",
+                rmse,normalizedError*100,scale,Double.isFinite(disagreement)
+                ?String.format(Locale.CHINA,"%.1f°",disagreement):"无法估计");
+        List<String> failures=new ArrayList<>();
+        if(!Double.isFinite(scale)||scale<0.7||scale>1.3)failures.add("GPS 与 VINS 位移尺度不符");
+        if(!Double.isFinite(rmse)||rmse>2.5)failures.add("轨迹拟合误差过大");
+        if(!Double.isFinite(normalizedError)||normalizedError>0.20)failures.add("误差相对有效位移过大");
+        if(!Double.isFinite(disagreement))failures.add("半段轨迹跨度不足或方向不可观测");
+        else if(disagreement>10)failures.add("前后半段算出的方向不一致");
+        if(!failures.isEmpty()){fitFailure=String.join("；",failures);return false;}
+        r00=c;r01=-s;r10=s;r11=c;return true;
     }
-
-    private static double latitudeDeltaMeters(double firstLatitude, double secondLatitude) {
-        return Math.toRadians(secondLatitude - firstLatitude) * EARTH_RADIUS_METERS;
-    }
-
-    private static double longitudeDeltaMeters(double firstLongitude, double secondLongitude,
-                                               double referenceLatitude) {
-        return Math.toRadians(secondLongitude - firstLongitude) * EARTH_RADIUS_METERS
-                * Math.cos(Math.toRadians(referenceLatitude));
-    }
-
-    private static final class Sample {
-        final double latitude, longitude, vinsX, vinsY;
-        Sample(double latitude, double longitude, double vinsX, double vinsY) {
-            this.latitude = latitude;
-            this.longitude = longitude;
-            this.vinsX = vinsX;
-            this.vinsY = vinsY;
+    private double segmentAngle(int from,int to){
+        if(baseline(gpsPoints,from,to)<5 || baseline(vinsPoints,from,to)<5)return Double.NaN;
+        double gx=0,gy=0,vx=0,vy=0;
+        for(int i=from;i<to;i++){gx+=gpsPoints.get(i).x;gy+=gpsPoints.get(i).y;vx+=vinsPoints.get(i).x;vy+=vinsPoints.get(i).y;}
+        int n=to-from;gx/=n;gy/=n;vx/=n;vy/=n;
+        double dot=0,cross=0;
+        for(int i=from;i<to;i++){
+            double x=gpsPoints.get(i).x-gx,y=gpsPoints.get(i).y-gy;
+            double u=vinsPoints.get(i).x-vx,v=vinsPoints.get(i).y-vy;
+            dot+=x*u+y*v;cross+=x*v-y*u;
         }
+        return Math.hypot(dot,cross)<1e-6?Double.NaN:Math.atan2(cross,dot);
     }
+    private static double baseline(List<Point> points,int from,int to){
+        double max=0;
+        for(int i=from;i<to;i++)for(int j=i+1;j<to;j++)max=Math.max(max,points.get(i).distance(points.get(j)));
+        return max;
+    }
+    private void clearSamples(){gpsPoints.clear();vinsPoints.clear();lastVinsPoint=null;
+        r00=r01=r10=r11=0;sampledDistance=0;totalSamples=0;fitQuality="";fitFailure="";}
+    private static double latitudeDeltaMeters(double first,double second){return Math.toRadians(second-first)*EARTH_RADIUS_METERS;}
+    private static double longitudeDeltaMeters(double first,double second,double referenceLatitude){return Math.toRadians(second-first)*EARTH_RADIUS_METERS*Math.cos(Math.toRadians(referenceLatitude));}
+    private static final class Point{final double x,y;Point(double x,double y){this.x=x;this.y=y;}double distance(Point other){return Math.hypot(x-other.x,y-other.y);}}
 }

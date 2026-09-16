@@ -41,6 +41,28 @@
         android:textSize="15sp"
         android:textStyle="bold" />
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="D455F 彩色画面（实时）"
+        android:textColor="@color/nav_text" />
+
+    <ImageView
+        android:id="@+id/colorPreview"
+        android:layout_width="match_parent"
+        android:layout_height="240dp"
+        android:background="#000000"
+        android:contentDescription="D455F 实时彩色摄像头画面"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="深度画面"
+        android:textColor="@color/nav_text" />
+
     <ImageView
         android:id="@+id/depthPreview"
         android:layout_width="match_parent"
@@ -53,14 +75,15 @@
     <TextView
         android:id="@+id/guidanceText"
         android:layout_width="match_parent"
-        android:layout_height="96dp"
+        android:layout_height="wrap_content"
+        android:minHeight="96dp"
         android:layout_marginTop="16dp"
         android:background="@color/nav_surface"
         android:gravity="center"
         android:padding="16dp"
         android:text=""
         android:textColor="@color/nav_text"
-        android:textSize="30sp"
+        android:textSize="26sp"
         android:textStyle="bold" />
 
     <LinearLayout
@@ -108,27 +131,7 @@
             android:textSize="19sp" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/frameStatusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="18dp"
-        android:text="尚未收到深度帧"
-        android:textColor="@color/nav_muted"
-        android:textSize="14sp" />
 
-    <TextView
-        android:id="@+id/semanticStatusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:ellipsize="end"
-        android:gravity="center_vertical"
-        android:maxLines="6"
-        android:minLines="6"
-        android:text="语义预检：等待彩色流"
-        android:textColor="@color/nav_muted"
-        android:textSize="14sp" />
 
     <com.elabrador.mobilenavigation.LocalPlanView
         android:id="@+id/localPlanView"
@@ -138,52 +141,8 @@
         android:background="@color/nav_surface"
         android:contentDescription="局部代价图和 A 星路径" />
 
-    <TextView
-        android:id="@+id/localPlanMetricsText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:background="@color/nav_surface"
-        android:minHeight="48dp"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="10dp"
-        android:text="A*诊断：等待开始导航"
-        android:textColor="@color/nav_muted"
-        android:textSize="13sp" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="112dp"
-        android:layout_marginTop="16dp"
-        android:orientation="horizontal"
-        android:weightSum="2">
 
-        <TextView
-            android:id="@+id/headingText"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginEnd="5dp"
-            android:layout_weight="1"
-            android:background="@color/nav_surface"
-            android:gravity="center"
-            android:text="朝向\n--°"
-            android:textColor="@color/nav_text"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/locationText"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="5dp"
-            android:layout_weight="1"
-            android:background="@color/nav_surface"
-            android:gravity="center"
-            android:padding="8dp"
-            android:text="位置\n--"
-            android:textColor="@color/nav_text"
-            android:textSize="14sp" />
-    </LinearLayout>
 
     <TextView
         android:id="@+id/locationStatusText"
@@ -208,25 +167,16 @@
         android:id="@+id/calibrationStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:background="@color/nav_surface"
-        android:padding="10dp"
-        android:text="请将手机与 D455F 对齐，正在初始化和标定…"
-        android:textColor="@color/nav_muted"
-        android:textSize="14sp" />
-
-    <EditText
-        android:id="@+id/amapKeyInput"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
         android:layout_marginTop="8dp"
-        android:background="@color/nav_surface"
-        android:hint="高德 Web 服务 Key"
-        android:inputType="textPassword"
-        android:paddingHorizontal="14dp"
-        android:singleLine="true"
-        android:textColor="@color/nav_text"
-        android:textColorHint="@color/nav_muted" />
+        android:background="@drawable/calibration_status_panel"
+        android:elevation="2dp"
+        android:minHeight="116dp"
+        android:padding="12dp"
+        android:text="自动同向标定\n请保持手机顶部与 D455F 镜头朝向一致\n等待 VINS 就绪和手机方向，满足条件后自动完成"
+        android:textColor="@color/nav_danger"
+        android:textSize="15sp"
+        android:lineSpacingExtra="3dp" />
+
 
     <EditText
         android:id="@+id/destinationInput"
@@ -280,7 +230,90 @@
         android:textAllCaps="false"
         android:visibility="gone" />
 
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="24dp" android:orientation="vertical" android:padding="12dp"
+        android:background="@color/nav_surface">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="更多信息与设置" android:textSize="14sp" android:textColor="@color/nav_muted" />
+        <Switch android:id="@+id/visionHintEnabled" android:layout_width="match_parent" android:layout_height="48dp"
+            android:checked="true" android:text="大模型视觉提示（上传彩色画面）" android:textSize="14sp" />
+    <Switch android:id="@+id/perceptionDebugToggle" android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="显示感知与 A* 调试信息" android:textSize="14sp" />
+    <LinearLayout android:id="@+id/perceptionDebugContent" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="10dp" android:visibility="gone">
     <TextView
+        android:id="@+id/frameStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="尚未收到深度帧"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+    <TextView
+        android:id="@+id/semanticStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:ellipsize="end"
+        android:gravity="center_vertical"
+        android:maxLines="6"
+        android:minLines="6"
+        android:text="语义预检：等待彩色流"
+        android:textColor="@color/nav_muted"
+        android:textSize="14sp" />
+    <TextView
+        android:id="@+id/localPlanMetricsText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@color/nav_surface"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="10dp"
+        android:text="A*诊断：等待开始导航"
+        android:textColor="@color/nav_muted"
+        android:textSize="13sp" />
+
+    </LinearLayout>
+
+    <Switch android:id="@+id/locationDebugToggle" android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="显示定位与朝向详情" android:textSize="14sp" />
+    <LinearLayout android:id="@+id/locationDebugContent" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="10dp" android:visibility="gone">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="112dp"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="2">
+
+        <TextView
+            android:id="@+id/headingText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:text="朝向\n--°"
+            android:textColor="@color/nav_text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/locationText"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="5dp"
+            android:layout_weight="1"
+            android:background="@color/nav_surface"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="位置\n--"
+            android:textColor="@color/nav_text"
+            android:textSize="14sp" />
+    </LinearLayout>    <TextView
         android:id="@+id/navigationStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -293,6 +326,52 @@
         android:textColor="@color/nav_text"
         android:textSize="16sp"
         android:visibility="gone" />
+
+    </LinearLayout>
+
+    <Switch android:id="@+id/visionDetailsToggle" android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="显示大模型五方向详情" android:textSize="14sp" />
+    <LinearLayout android:id="@+id/visionDetailsContent" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="10dp" android:visibility="gone">
+            <TextView android:id="@+id/visionHintText" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="120dp" android:paddingTop="6dp"
+                android:text="左侧：无\n左前方：无\n正前方：无\n右前方：无\n右侧：无"
+                android:textSize="18sp" android:textStyle="bold" android:textColor="@color/nav_text" />
+    </LinearLayout>
+
+    <Switch android:id="@+id/visionDebugToggle" android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="显示大模型调试信息" android:textSize="14sp" />
+    <LinearLayout android:id="@+id/visionDebugContent" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="10dp" android:visibility="gone">
+            <TextView android:id="@+id/visionHintDiagnosticText" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="48dp" android:paddingTop="6dp" android:text="已关闭"
+                android:textSize="13sp" android:textColor="@color/nav_muted" />
+    </LinearLayout>
+
+    <Switch android:id="@+id/serviceSettingsToggle" android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="显示接口设置" android:textSize="14sp" />
+    <LinearLayout android:id="@+id/serviceSettingsContent" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="10dp" android:visibility="gone">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="大模型方位按镜头画面划分，仅补充描述，不决定导航方向。" android:textSize="13sp" android:textColor="@color/nav_muted" />
+        <Button android:id="@+id/visionHintSettings" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="视觉提示设置" />
+    <EditText
+        android:id="@+id/amapKeyInput"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="8dp"
+        android:background="@color/nav_surface"
+        android:hint="高德 Web 服务 Key"
+        android:inputType="textPassword"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:textColor="@color/nav_text"
+        android:textColorHint="@color/nav_muted" />
+
+    </LinearLayout>
+
+    </LinearLayout>
 
 </LinearLayout>
 </ScrollView>

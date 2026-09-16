@@ -101,7 +101,7 @@
       "readable": "Bike Lane", 
       "name": "construction--flat--bike-lane", 
       "evaluate": true,
-      "degree": 0.05,
+      "degree": 0.1,
       "height_independent": true
     }, 
     {
@@ -179,7 +179,7 @@
       "readable": "Road", 
       "name": "construction--flat--road", 
       "evaluate": true,
-      "degree": 0.2,
+      "degree": 0.6,
       "height_independent": true
     }, 
     {
@@ -192,7 +192,7 @@
       "readable": "Service Lane", 
       "name": "construction--flat--service-lane", 
       "evaluate": true,
-      "degree": 0.1,
+      "degree": 0.4,
       "height_independent": true
     }, 
     {

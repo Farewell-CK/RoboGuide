@@ -64,6 +64,7 @@ public final class SemanticBenchmarkInstrumentation extends Instrumentation {
 
     private void runBenchmarks() throws Exception {
         String mode = arguments == null ? null : arguments.getString("mode");
+        if("planner-audit".equals(mode)){PlannerDeviceBenchmark.run();return;}
         if ("decode-parallel".equals(mode)) {
             int plane = 128 * 128;
             ByteBuffer logits = ByteBuffer.allocateDirect(19 * plane * 4).order(ByteOrder.nativeOrder());

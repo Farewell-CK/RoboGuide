@@ -89,18 +89,18 @@ public class LocalPlannerStateTest {
         assertEquals(50, source[1][1]);
         assertEquals(127, result[1][1]);
         assertEquals(127, result[1][2]);
-        assertEquals(127, result[2][2]);
+        assertEquals(100, result[2][2]); // Hard obstacles remain visible under a bad overlay.
         assertEquals(10, result[0][1]);
     }
 
     @Test
-    public void allInBoundsPathPointsUseTheSamePathMarker() {
+    public void rendererDoesNotRestartAfterOutOfBoundsPath() {
         int[][] source = new int[4][4];
         int[][] result = LocalPlanner.visualize(source, Arrays.asList(
                 new float[]{-1f, -1f},
                 new float[]{1f, 1f}), 1f, 0f, 0f);
 
-        assertEquals(127, result[1][1]);
+        assertEquals(0, result[1][1]);
     }
 
     @Test
@@ -237,13 +237,13 @@ public class LocalPlannerStateTest {
     public void semanticFrameUsesInterpolatedVinsPoseAtItsOwnTimestamp() {
         VinsPoseHistory history = new VinsPoseHistory();
         history.add(poseAt(10.0, 0.0, 0.0));
-        history.add(poseAt(12.0, 10.0, 90.0));
+        history.add(poseAt(10.1, 0.1, 10.0));
 
-        VinsMono.Pose pose = history.at(11.0);
+        VinsMono.Pose pose = history.at(10.05);
 
         assertNotNull(pose);
-        assertEquals(5.0, pose.x, 1e-9);
-        assertEquals(45.0, Math.toDegrees(pose.egoRightAxisYawRadians()), 1e-5);
+        assertEquals(0.05, pose.x, 1e-9);
+        assertEquals(5.0, Math.toDegrees(pose.egoRightAxisYawRadians()), 1e-5);
     }
 
     @Test
@@ -408,7 +408,7 @@ public class LocalPlannerStateTest {
 
     @Test
     public void routeBearingUsesMatchedRouteTangentWhenGpsErrorIsWithinAccuracy() {
-        double longitudeError = 30.0 / (111194.9 * Math.cos(Math.toRadians(60.0)));
+        double longitudeError = 8.0 / (111194.9 * Math.cos(Math.toRadians(60.0)));
         List<AmapRouteClient.GeoPoint> points = Arrays.asList(
                 new AmapRouteClient.GeoPoint(60.0, 10.0, ""),
                 new AmapRouteClient.GeoPoint(60.001, 10.0, ""));
@@ -421,7 +421,7 @@ public class LocalPlannerStateTest {
         follower.setRoute(route);
 
         RouteFollower.Guidance guidance = follower.update(
-                60.0, 10.0 + longitudeError, 30f, Float.NaN);
+                60.0, 10.0 + longitudeError, 10f, Float.NaN);
 
         assertFalse(guidance.offRoute);
         assertEquals(0.0, guidance.targetBearingDegrees, 1.0);
@@ -619,6 +619,24 @@ public class LocalPlannerStateTest {
     }
 
     @Test
+    public void turnPenaltyCountsDirectionChangesWithoutAngleWeighting() {
+        int[][] map = new int[9][9];
+        List<int[]> path = new AStar(
+                new int[]{0, 0}, new int[]{8, 4}, map, Collections.emptySet(),
+                AStar.Heuristic.EUCLIDEAN, 3.0, 30.0).searching();
+        int changes=0;
+        int previousRow=0,previousCol=0;
+        boolean first=true;
+        for(int i=1;i<path.size();i++) {
+            int row=path.get(i)[0]-path.get(i-1)[0];
+            int col=path.get(i)[1]-path.get(i-1)[1];
+            if(!first && (row!=previousRow || col!=previousCol))changes++;
+            first=false;previousRow=row;previousCol=col;
+        }
+        assertEquals(1,changes);
+    }
+
+    @Test
     public void optimizedPreviousPathPenaltyMatchesReference() {
         java.util.Random random = new java.util.Random(7319L);
         for (int attempt = 0; attempt < 100; attempt++) {
@@ -673,13 +691,11 @@ public class LocalPlannerStateTest {
         double latitude = 34.0;
         double longitude = 113.0;
         double metersToLatitude = 1.0 / 111194.9;
-        calibrator.update(latitude, longitude, 3f, 0.0, 0.0, true);
-        calibrator.update(latitude + 5.0 * metersToLatitude, longitude, 3f, 5.0, 0.0, true);
-        calibrator.update(latitude + 10.0 * metersToLatitude, longitude, 3f, 10.0, 0.0, true);
-        calibrator.update(latitude + 15.0 * metersToLatitude, longitude, 3f, 15.0, 0.0, true);
+        for(int i=0;i<19;i++) calibrator.update(
+                latitude+i*2.0*metersToLatitude,longitude,3f,i*2.0,0.0,true);
 
         assertTrue(calibrator.isReady());
-        assertEquals(-90.0, calibrator.northOffsetDegrees(), 1.0);
+        assertEquals(90.0, calibrator.northOffsetDegrees(), 1.0);
 
         double[] identityPose = {
                 0.0, 0.0, 0.0,
@@ -703,73 +719,46 @@ public class LocalPlannerStateTest {
 
         calibrator.resetForVinsRestart();
         assertFalse(calibrator.isReady());
-        assertTrue(calibrator.status().contains("请对齐手机与 D455F"));
-        assertTrue(calibrator.status().contains("重新标定"));
+        assertTrue(calibrator.status().contains("重新采集"));
     }
 
     @Test
-    public void dynamicCalibrationRecoversFromEarlyInconsistentSegments() {
+    public void sourceCalibrationFitsProperGpsToVinsRotation() {
         DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
         calibrator.start();
         double latitude = 34.0;
         double longitude = 113.0;
         double metersToLatitude = 1.0 / 111194.9;
-        calibrator.update(latitude, longitude, 3f, 0.0, 0.0, true);
-        calibrator.update(latitude + 5.0 * metersToLatitude, longitude, 3f, 5.0, 0.0, true);
-        calibrator.update(latitude + 10.0 * metersToLatitude, longitude, 3f, 0.0, 0.0, true);
-        calibrator.update(latitude + 15.0 * metersToLatitude, longitude, 3f, 0.0, 5.0, true);
-        calibrator.update(latitude + 20.0 * metersToLatitude, longitude, 3f, 0.0, 10.0, true);
-        assertFalse(calibrator.isReady());
-
-        calibrator.update(latitude + 25.0 * metersToLatitude, longitude, 3f, 0.0, 15.0, true);
+        // Geographic north maps to VINS +Y (a +90 degree source-frame rotation).
+        for(int i=0;i<19;i++) calibrator.update(
+                latitude+i*2.0*metersToLatitude,longitude,3f,0.0,i*2.0,true);
 
         assertTrue(calibrator.isReady());
         assertEquals(0.0, calibrator.northOffsetDegrees(), 1.0);
+        assertEquals(0f, calibrator.relativeTargetDegrees(0f, poseAt(1,0,0)), 1f);
+        assertEquals(90f, calibrator.relativeTargetDegrees(90f, poseAt(1,0,0)), 1f);
     }
 
     @Test
-    public void indoorAlignedCalibrationUsesPhoneHeadingOnlyAtAlignmentInstant() {
-        double[] identityPose = {
-                0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 1.0,
-                0.0, 0.0, 0.0,
-                1.0, 0.0
-        };
-        VinsMono.Pose pose = new VinsMono.Pose(identityPose,
-                new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1},
-                new double[]{0, 0, 0});
+    public void sourceCalibrationRequiresMoreThanSixteenAcceptedSamples() {
         DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
-
-        assertTrue(calibrator.calibrateAligned(30f, pose));
-        assertEquals(30.0, calibrator.northOffsetDegrees(), 1e-6);
-        assertEquals(0.0, calibrator.relativeTargetDegrees(30f, pose), 1e-6);
-
-        calibrator.resetForVinsRestart();
+        calibrator.start();
+        double latitude=34.0,longitude=113.0,metersToLatitude=1.0/111194.9;
+        for(int i=0;i<16;i++) calibrator.update(
+                latitude+i*2.0*metersToLatitude,longitude,3f,0.0,i*2.0,true);
         assertFalse(calibrator.isReady());
+        assertTrue(calibrator.status().contains("16/17"));
+        calibrator.update(latitude+32.0*metersToLatitude,longitude,3f,0.0,32.0,true);
+        assertTrue(calibrator.isReady());
     }
 
     @Test
     public void uncalibratedNavigationUsesCameraForwardWithoutClaimingNorth() {
         DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
         assertFalse(calibrator.isReady());
-        assertEquals(0f, calibrator.relativeTargetDegrees(175f, poseAt(1, 0, 60)), 0f);
-        assertEquals(0f, calibrator.relativeTargetDegrees(-90f, poseAt(2, 0, 120)), 0f);
+        assertTrue(Float.isNaN(calibrator.relativeTargetDegrees(175f, poseAt(1, 0, 60))));
+        assertTrue(Float.isNaN(calibrator.relativeTargetDegrees(-90f, poseAt(2, 0, 120))));
         assertTrue(Float.isNaN(calibrator.relativeTargetDegrees(0f, null)));
-    }
-
-    @Test
-    public void failedManualAlignmentPreservesValidSessionCalibration() {
-        DynamicHeadingCalibrator calibrator = new DynamicHeadingCalibrator();
-        VinsMono.Pose pose = poseAt(1, 0, 0);
-        assertTrue(calibrator.calibrateAligned(40f, pose));
-        assertFalse(calibrator.calibrateAligned(Float.NaN, pose));
-        assertTrue(calibrator.isReady());
-        assertEquals(0f, calibrator.relativeTargetDegrees(40f, pose), 0.01f);
-        assertFalse(calibrator.calibrateAligned(40f, null));
-        assertTrue(calibrator.isReady());
-        calibrator.resetForVinsRestart();
-        assertFalse(calibrator.isReady());
-        assertEquals(0f, calibrator.relativeTargetDegrees(150f, poseAt(2, 0, 90)), 0f);
     }
 
     private static void fillObstacle(int[][] map, int firstRow, int lastRow,

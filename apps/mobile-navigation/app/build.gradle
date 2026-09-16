@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+// Optional local demo credentials; never commit this file or a configured APK.
+def visionConfig = new Properties()
+def visionConfigFile = file(System.getenv('QWEN_CONFIG') ?: rootProject.file('qwen.private.properties').path)
+if (visionConfigFile.isFile()) visionConfigFile.withInputStream { visionConfig.load(it) }
+def visionLiteral = { String name, String fallback -> groovy.json.JsonOutput.toJson(visionConfig.getProperty(name, fallback)) }
+
 def buildNativeFromSource = providers.gradleProperty('buildNativeFromSource')
         .orElse(providers.gradleProperty('buildVinsFromSource'))
         .map { it.toBoolean() }
@@ -15,8 +21,11 @@ android {
         applicationId 'com.elabrador.mobilenavigation'
         minSdk 24
         targetSdk 35
-        versionCode 88
-        versionName '0.9.63'
+        versionCode 121
+        versionName '0.9.96-aligned-location'
+        buildConfigField 'String', 'QWEN_KEY', visionLiteral('key', '')
+        buildConfigField 'String', 'QWEN_ENDPOINT', visionLiteral('endpoint', '')
+        buildConfigField 'String', 'QWEN_MODEL', visionLiteral('model', 'qwen3-vl-flash')
         testInstrumentationRunner 'com.elabrador.mobilenavigation.SemanticBenchmarkInstrumentation'
 
         externalNativeBuild {
@@ -186,6 +195,7 @@ dependencies {
     npuImplementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'
     implementation project(':librealsense')
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }
 
 def verifyNativeLibraries = tasks.register('verifyNativeLibraries') {

@@ -16,6 +16,12 @@ public final class LocalPlanView extends View {
     private final Paint personPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint personOutlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private Bitmap gridBitmap;
+    private FrameEvidence evidence;
+    private final ObservationRefreshTracker draws=new ObservationRefreshTracker();
+
+    void setPlan(LocalPlanner.PathResult result,FrameEvidence frame){
+        evidence=frame;setPlan(result);
+    }
     private int bitmapRows;
     private int bitmapCols;
     private LocalPlanner.PathResult result = LocalPlanner.PathResult.waitingForTarget();
@@ -74,6 +80,9 @@ public final class LocalPlanView extends View {
                 new android.graphics.RectF(left, top, left + cols * cell, top + rows * cell),
                 cellPaint);
         drawPersonMarker(canvas, left + cols * cell / 2f, top + rows * cell / 2f, cell);
+        long drawn=android.os.SystemClock.elapsedRealtime();
+        if(draws.observe(evidence,drawn))NavigationAudit.log("MAP_DRAW_AUDIT frame="+evidence.cameraSeconds
+                +" capture_to_draw_ms="+evidence.ageMillis(drawn)+" new_observation_interval_ms="+draws.intervalMillis);
     }
 
     private void drawPersonMarker(Canvas canvas, float centerX, float centerY, float cell) {

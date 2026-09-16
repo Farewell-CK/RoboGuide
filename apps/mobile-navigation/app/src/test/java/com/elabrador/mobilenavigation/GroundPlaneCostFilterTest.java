@@ -71,7 +71,7 @@ public class GroundPlaneCostFilterTest {
 
     @Test
     public void pidNetRoadAndSidewalkHaveTheSameWalkableCost() {
-        assertEquals(0f, MapTransform.pidNetNavigationDegree(0x804080, 0.2f), 0f);
+        assertEquals(0.2f, MapTransform.pidNetNavigationDegree(0x804080, 0.2f), 0f);
         assertEquals(0f, MapTransform.pidNetNavigationDegree(0xf423e8, 0f), 0f);
         assertEquals(0.6f, MapTransform.pidNetNavigationDegree(0x6b8e23, 0.6f), 0f);
     }

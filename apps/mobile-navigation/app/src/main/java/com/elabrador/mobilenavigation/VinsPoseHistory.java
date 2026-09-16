@@ -29,6 +29,8 @@ final class VinsPoseHistory {
         for (VinsMono.Pose pose : poses) {
             if (pose.timestamp == timestamp) return pose;
             if (pose.timestamp > timestamp) {
+                // Do not interpolate across an estimator outage.
+                if(before==null || pose.timestamp-before.timestamp>0.20)return null;
                 return VinsMono.Pose.interpolate(before, pose, timestamp);
             }
             before = pose;
