@@ -18,12 +18,18 @@ _SHUTDOWN_TIMEOUT_S = 30.0
 class HabitatProcessBackend:
     """Keep Habitat in one reusable child process while the HTTP bridge stays responsive."""
 
-    def __init__(self, config: HabitatBackendConfig, startup_timeout_s: float) -> None:
+    def __init__(
+        self,
+        config: HabitatBackendConfig,
+        startup_timeout_s: float,
+        backend_class: type[HabitatMobilityBackend] = HabitatMobilityBackend,
+    ) -> None:
         """Retain immutable deployment config without importing Habitat in the HTTP process."""
         if startup_timeout_s <= 0:
             raise IntegrationError("startup_timeout_s must be positive")
         self._config = config
         self._startup_timeout_s = startup_timeout_s
+        self._backend_class = backend_class
         self._connection: Connection | None = None
         self._process: BaseProcess | None = None
         self._readiness_detail = "Habitat simulator process is not initialized"
@@ -36,7 +42,7 @@ class HabitatProcessBackend:
         parent_connection, child_connection = context.Pipe()
         process = context.Process(
             target=_run_habitat_process,
-            args=(child_connection, self._config),
+            args=(child_connection, self._config, self._backend_class),
             name="habitat-local-eaios-simulator",
         )
         process.start()
@@ -115,9 +121,13 @@ class HabitatProcessBackend:
         return self._connection, self._process
 
 
-def _run_habitat_process(connection: Connection, config: HabitatBackendConfig) -> None:
-    """Own the Habitat environment and execute sequential commands in one child process."""
-    backend = HabitatMobilityBackend(config)
+def _run_habitat_process(
+    connection: Connection,
+    config: HabitatBackendConfig,
+    backend_class: type[HabitatMobilityBackend],
+) -> None:
+    """Own the configured backend environment and execute commands in one child process."""
+    backend = backend_class(config)
     close_requested = False
     try:
         try:
