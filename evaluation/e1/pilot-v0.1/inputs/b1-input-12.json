@@ -1,0 +1,36 @@
+{
+  "schema": "roboguide.e1.b1-input/v0.1",
+  "purpose": "Frozen high-level Protocol B1 input: official benchmark objective and goal semantics only. No task decomposition, no agent/Node assignment, no DAG, no oracle solution, no pre-authored MissionPlan.",
+  "benchmark": "habitat-mas",
+  "task": "spot_fetch_mobility",
+  "episode_id": "12",
+  "seed": 18,
+  "dataset_revision": "mobility_episodes_1",
+  "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+  "scene_id": "data/scene_datasets/mp3d/E9uDoFAP3SH/E9uDoFAP3SH.glb",
+  "world_context": {
+    "scene_dataset": "mp3d",
+    "same_floor": false,
+    "geodesic_distance_m": 42.83376,
+    "target_goal_height_difference_m": 5.37422,
+    "object_labels": {
+      "065-e_cups_:0000": "any_targets|0"
+    },
+    "robots": [
+      "SpotRobot (agent_0)",
+      "FetchRobot (agent_1)"
+    ]
+  },
+  "goal_predicates": [
+    "any_at(any_targets|0)",
+    "any_at(TARGET_any_targets|0)"
+  ],
+  "instruction": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+  "forbidden_content": [
+    "per-task decomposition",
+    "node/agent assignment",
+    "hand-written MissionPlan DAG",
+    "pre-split navigate tasks",
+    "oracle solution steps"
+  ]
+}

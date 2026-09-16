@@ -1,0 +1,1 @@
+{"classification": "INVALID_INFRA (scenario barrier race: 420s pair window vs multi-minute MI planning latency)", "fix": "pair-wait-s 1200 in run-b1-roboguide.sh"}

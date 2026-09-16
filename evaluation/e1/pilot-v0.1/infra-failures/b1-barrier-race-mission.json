@@ -1,0 +1,1 @@
+{"group_id":"group-mission-5082d8057cf1462c9291903ac59ccc02","mission_id":"mission-5082d8057cf1462c9291903ac59ccc02","peer_channels":[],"relations":[],"status":"Running","tasks":[{"context_id":"shared_multifloor_scene","status":"Active","task_id":"reach_object"},{"context_id":"shared_multifloor_scene","status":"Ready","task_id":"reach_receptacle"}]}

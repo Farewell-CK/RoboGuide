@@ -1,0 +1,127 @@
+{
+  "schema": "roboguide.e1.pilot-episodes/v0.1",
+  "planned_pairs": 12,
+  "selection_policy": "episode 51 forced as reference; cross-floor (same_floor=false) representation; distinct-scene median-geodesic-distance episodes; seeds are the smallest positive seed whose np.random.RandomState(seed).choice(file_order_episodes, 1) resolves to the episode (mechanism validated: seed 40 -> episode 51 matches the EMOS paired run banner)",
+  "episodes": [
+    {
+      "episode_id": "51",
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 7.77636,
+      "seed": 40,
+      "selection_reason": "known reference case (paired smoke + B1 smoke baseline)"
+    },
+    {
+      "episode_id": "69",
+      "scene_id": "data/scene_datasets/mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 15.72748,
+      "seed": 293,
+      "selection_reason": "cross-floor representation (same_floor=false, median distance)"
+    },
+    {
+      "episode_id": "4",
+      "scene_id": "data/scene_datasets/mp3d/5q7pvUzZiYa/5q7pvUzZiYa.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 23.01351,
+      "seed": 118,
+      "selection_reason": "cross-floor representation (same_floor=false, median distance)"
+    },
+    {
+      "episode_id": "88",
+      "scene_id": "data/scene_datasets/mp3d/759xd9YjKW5/759xd9YjKW5.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 27.89772,
+      "seed": 86,
+      "selection_reason": "cross-floor representation (same_floor=false, median distance)"
+    },
+    {
+      "episode_id": "54",
+      "scene_id": "data/scene_datasets/mp3d/7y3sRwLe3Va/7y3sRwLe3Va.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 23.79534,
+      "seed": 25,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "12",
+      "scene_id": "data/scene_datasets/mp3d/E9uDoFAP3SH/E9uDoFAP3SH.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 42.83376,
+      "seed": 18,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "81",
+      "scene_id": "data/scene_datasets/mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 19.58929,
+      "seed": 121,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "67",
+      "scene_id": "data/scene_datasets/mp3d/S9hNv5qa7GM/S9hNv5qa7GM.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 20.05697,
+      "seed": 528,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "14",
+      "scene_id": "data/scene_datasets/mp3d/V2XKFyX4ASd/V2XKFyX4ASd.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 33.2219,
+      "seed": 34,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "70",
+      "scene_id": "data/scene_datasets/mp3d/VFuaQ6m2Qom/VFuaQ6m2Qom.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 23.76563,
+      "seed": 17,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "39",
+      "scene_id": "data/scene_datasets/mp3d/VLzqgDo317F/VLzqgDo317F.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 11.25778,
+      "seed": 134,
+      "selection_reason": "scene diversity (median-distance episode)"
+    },
+    {
+      "episode_id": "97",
+      "scene_id": "data/scene_datasets/mp3d/WYY7iVyf5p8/WYY7iVyf5p8.glb",
+      "dataset_revision": "mobility_episodes_1",
+      "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "same_floor": false,
+      "geodesic_distance_m": 30.87224,
+      "seed": 102,
+      "selection_reason": "scene diversity (median-distance episode)"
+    }
+  ]
+}

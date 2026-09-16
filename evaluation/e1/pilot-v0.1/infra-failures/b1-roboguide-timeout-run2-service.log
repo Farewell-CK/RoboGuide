@@ -1,0 +1,4 @@
+2026-09-17 00:41:09,104 INFO roboguide.mission_service listening on 127.0.0.1:8070
+2026-09-17 00:41:09,793 INFO roboguide.mission_service 127.0.0.1 - "GET /v1/mission-requests HTTP/1.1" 404 -
+2026-09-17 00:42:55,409 INFO roboguide.mission_service 127.0.0.1 - "POST /v1/mission-requests HTTP/1.1" 201 -
+2026-09-17 00:42:55,467 INFO roboguide.mission_service 127.0.0.1 - "GET /v1/mission-requests/request-5a564773d0db41dc851a65bbefc88409 HTTP/1.1" 200 -

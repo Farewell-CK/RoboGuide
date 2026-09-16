@@ -1,0 +1,36 @@
+{
+  "checks": {
+    "assign_admitted_once_each": false,
+    "both_agents_moved": false,
+    "both_goals_satisfied": true,
+    "both_running_observed": false,
+    "canonical_intents_preserved": false,
+    "controller_alive": true,
+    "mission_completed": false,
+    "no_recovery_storm": false,
+    "no_stage1_reassignment": false,
+    "node_a_exactly_once": true,
+    "node_b_exactly_once": false,
+    "official_pddl_success": false,
+    "one_episode_reset": false,
+    "one_simulator_world": false,
+    "original_stage2_active": true,
+    "post_202": false,
+    "two_distinct_local_handles": false,
+    "two_nodes_registered": true,
+    "two_tasks_bound": false
+  },
+  "context": {
+    "identity": {},
+    "mission_status": "Running",
+    "outcomes": {},
+    "peer_communication": {},
+    "task_statuses": {
+      "reach-goal-receptacle": "Ready",
+      "reach-object": "Active"
+    }
+  },
+  "mode": "paired",
+  "schema": "roboguide.e1-shared-world-verdict/v0.1",
+  "verdict": "FAIL"
+}

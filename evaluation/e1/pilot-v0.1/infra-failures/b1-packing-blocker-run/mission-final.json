@@ -1,0 +1,1 @@
+{"group_id":"group-mission-bef0c1f7fa244721bf7d3231aa064983","mission_id":"mission-bef0c1f7fa244721bf7d3231aa064983","peer_channels":[],"relations":[],"status":"Running","tasks":[{"context_id":"shared-multi-floor-scene","status":"Ready","task_id":"reach-goal-receptacle"},{"context_id":"shared-multi-floor-scene","status":"Active","task_id":"reach-object"}]}
