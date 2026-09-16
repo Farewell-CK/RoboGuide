@@ -1,0 +1,364 @@
+{
+  "schema": "roboguide.e1-dataset-inventory/v0.1",
+  "census_method": "task-spec defaults chains + inline habitat.dataset.data_path overrides resolved; episode/scene counts from actual .json.gz contents (not READMEs); sha256 over the gzip bytes",
+  "emos_checkout": "/data/workspace/code/emos-baseline",
+  "task_spec_files": 13,
+  "task_specs_referenced_by_configs": 9,
+  "task_spec_files_unreferenced": [
+    "pddl/multi_agent_social_nav.yaml",
+    "pddl/multi_agent_tidy_house.yaml",
+    "pddl/drone_spot_rearrange.yaml",
+    "pddl/drone_spot_rearrange_default.yaml"
+  ],
+  "benchmark_configs": 14,
+  "datasets": {
+    "mp3d/mobility_episodes_1.json.gz": {
+      "episodes": 99,
+      "scenes": 18,
+      "split": "eval",
+      "sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+      "episode_ids_verified": true
+    },
+    "mp3d/mp3d_episodes_1.json.gz": {
+      "episodes": 100,
+      "scenes": 27,
+      "split": "eval",
+      "sha256": "adf79c99d15d6fe39a99aa93a9deb8fe37a6b98774016356ca686d3bbd15fcd9",
+      "episode_ids_verified": true
+    },
+    "hssd/0/hssd_dist_man.json.gz": {
+      "episodes": 89,
+      "scenes": 32,
+      "split": "eval",
+      "sha256": "affc048d98abe4d59286a624aa729eb60365b4923c57e83fa1c33c0ca0c790ce",
+      "episode_ids_verified": true
+    },
+    "hssd/0/hssd_height_man.json.gz": {
+      "episodes": 166,
+      "scenes": 34,
+      "split": "eval",
+      "sha256": "acaa4adade19dc876e0e543cc78c8e61dc69f7f2814218b9f2b9ed1f800df363",
+      "episode_ids_verified": true
+    },
+    "hssd/0/hssd_height_per.json.gz": {
+      "episodes": 113,
+      "scenes": 31,
+      "split": "eval",
+      "sha256": "1cea0469bbbdd5b3e57122db9daf726fb7df69393dd587501d12cb6a85b6c081",
+      "episode_ids_verified": true
+    },
+    "replica_cad/two_agent_manipulation_eval.json.gz": {
+      "episodes": 180,
+      "scenes": 79,
+      "split": "eval",
+      "sha256": "27052c9db0e99edda0e93ae0db7f4b34a1c7cc053253455e84a3e18d299d4d19",
+      "episode_ids_verified": true
+    },
+    "replica_cad/two_agent_perception_eval.json.gz": {
+      "episodes": 154,
+      "scenes": 69,
+      "split": "eval",
+      "sha256": "e8d6456f64c4e5c4f62b85be21be1420eece998c8f190d6f823e0c5f1e4da69b",
+      "episode_ids_verified": true
+    },
+    "replica_cad/multi_agent_eval.json.gz": {
+      "episodes": 30,
+      "scenes": 26,
+      "split": "eval",
+      "sha256": "85202fbc3c9069578eab3bb175c97dc07e18f26ed90a29dcb4caee85b2f86720",
+      "episode_ids_verified": true
+    }
+  },
+  "missing_datasets": {
+    "data/datasets/hssd_dist.json.gz": [
+      "config_dist_man_reverse",
+      "config_height_man_reverse",
+      "config_height_per_reverse"
+    ],
+    "data/datasets/hssd_man_fig.json.gz": [
+      "config_fourth_man"
+    ],
+    "data/datasets/hssd_per_fig.json.gz": [
+      "config_fourth_per"
+    ]
+  },
+  "shared_datasets": {
+    "replica_cad/multi_agent_eval.json.gz": [
+      "config_multi_agent_man",
+      "config_multi_agent_per"
+    ]
+  },
+  "unused_alias_note": "habitat-lab dataset_mobility.yaml points at mp3d/mp3d_episodes.json.gz (500 eps, split=eval) but every mobility config overrides data_path inline; mp3d_episodes.json.gz is not used by any of the 14 configs and is excluded from totals",
+  "configs": {
+    "config_spot_fetch_mobility": {
+      "task_spec": "pddl/pddl_spot_fetch_mobility",
+      "dataset": "mp3d/mobility_episodes_1.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "FetchRobot"
+      },
+      "max_episode_steps": 3000,
+      "goal_predicates": [
+        "any_at(any_targets|0)",
+        "any_at(TARGET_any_targets|0)"
+      ],
+      "assignment_constraint": "swappable (any_at is agent-agnostic)",
+      "coupling": "Independent",
+      "protocol_b": "ready",
+      "missing_skills": [],
+      "runnable_episodes": 99
+    },
+    "config_multi_agent_mobility": {
+      "task_spec": "pddl/pddl_multi_agent_mobility",
+      "dataset": "mp3d/mp3d_episodes_1.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "FetchRobot",
+        "agent_2": "DJIDrone"
+      },
+      "max_episode_steps": 5000,
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "assignment_constraint": "swappable per object (at() is object-to-goal, any robot may carry)",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "pick",
+        "place"
+      ],
+      "runnable_episodes": 100
+    },
+    "config_dist_man": {
+      "task_spec": "pddl/pddl_dist_man",
+      "dataset": "hssd/0/hssd_dist_man.json.gz",
+      "agents": {
+        "agent_0": "FetchRobot",
+        "agent_1": "StretchRobot"
+      },
+      "max_episode_steps": 4000,
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "assignment_constraint": "swappable per object",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "pick",
+        "place"
+      ],
+      "runnable_episodes": 89
+    },
+    "config_height_man": {
+      "task_spec": "pddl/pddl_height_man",
+      "dataset": "hssd/0/hssd_height_man.json.gz",
+      "agents": {
+        "agent_0": "FetchRobot",
+        "agent_1": "StretchRobot"
+      },
+      "max_episode_steps": 4000,
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)"
+      ],
+      "assignment_constraint": "swappable per object",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "pick",
+        "place"
+      ],
+      "runnable_episodes": 166,
+      "notes": "multi-floor height scenes"
+    },
+    "config_height_per": {
+      "task_spec": "pddl/pddl_height_per",
+      "dataset": "hssd/0/hssd_height_per.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "DJIDrone"
+      },
+      "max_episode_steps": 4000,
+      "goal_predicates": [
+        "any_at(any_targets|0)",
+        "any_at(any_targets|1)",
+        "is_detected(any_targets|0)",
+        "is_detected(any_targets|1)"
+      ],
+      "assignment_constraint": "swappable (any_at) + detection is per-agent sensing",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "perception"
+      ],
+      "runnable_episodes": 113
+    },
+    "config_fetch_stretch_man": {
+      "task_spec": "pddl/pddl_fetch_stretch_man",
+      "dataset": "replica_cad/two_agent_manipulation_eval.json.gz",
+      "agents": {
+        "agent_0": "FetchRobot",
+        "agent_1": "StretchRobot"
+      },
+      "max_episode_steps": 750,
+      "goal_predicates": [
+        "at(any_targets|0, TARGET_any_targets|0)",
+        "at(any_targets|1, TARGET_any_targets|1)",
+        "not_holding(agent_0)",
+        "not_holding(agent_1)"
+      ],
+      "assignment_constraint": "swappable per object",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "pick",
+        "place"
+      ],
+      "runnable_episodes": 180
+    },
+    "config_spot_drone_per": {
+      "task_spec": "pddl/pddl_spot_drone_per",
+      "dataset": "replica_cad/two_agent_perception_eval.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "DJIDrone"
+      },
+      "max_episode_steps": 750,
+      "goal_predicates": [
+        "is_detected(any_targets|1)",
+        "is_detected(any_targets|0)"
+      ],
+      "assignment_constraint": "swappable (either agent may detect)",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "perception"
+      ],
+      "runnable_episodes": 154
+    },
+    "config_multi_agent_man": {
+      "task_spec": "pddl/pddl_multi_agent_man",
+      "dataset": "replica_cad/multi_agent_eval.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "DJIDrone",
+        "agent_2": "FetchRobot",
+        "agent_3": "StretchRobot"
+      },
+      "max_episode_steps": 750,
+      "goal_predicates": [
+        "robot_at(TARGET_any_targets|1, agent_1)",
+        "robot_at(TARGET_any_targets|3, agent_3)",
+        "at(any_targets|0, TARGET_any_targets|0) + others (see spec)"
+      ],
+      "assignment_constraint": "agent-bound (robot_at predicates pin goals to specific agents)",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "pick",
+        "place"
+      ],
+      "runnable_episodes": 30
+    },
+    "config_multi_agent_per": {
+      "task_spec": "pddl/pddl_multi_agent_per",
+      "dataset": "replica_cad/multi_agent_eval.json.gz",
+      "agents": {
+        "agent_0": "SpotRobot",
+        "agent_1": "DJIDrone",
+        "agent_2": "FetchRobot",
+        "agent_3": "StretchRobot"
+      },
+      "max_episode_steps": 750,
+      "goal_predicates": [
+        "robot_at(any_targets|0, agent_0)",
+        "robot_at(any_targets|1, agent_1)",
+        "robot_at(any_targets|2, agent_2)",
+        "robot_at(any_targets|3, agent_3)"
+      ],
+      "assignment_constraint": "agent-bound (robot_at pins every goal)",
+      "coupling": "Independent",
+      "protocol_b": "partial",
+      "missing_skills": [
+        "perception"
+      ],
+      "runnable_episodes": 30
+    },
+    "config_dist_man_reverse": {
+      "task_spec": "pddl/pddl_dist_man",
+      "dataset": "data/datasets/hssd_dist.json.gz",
+      "missing_dataset": true,
+      "agents": {
+        "agent_0": "StretchRobot",
+        "agent_1": "FetchRobot"
+      },
+      "max_episode_steps": 1300,
+      "coupling": "Independent",
+      "protocol_b": "unsupported (dataset absent locally)",
+      "runnable_episodes": 0
+    },
+    "config_height_man_reverse": {
+      "task_spec": "pddl/pddl_height_man",
+      "dataset": "data/datasets/hssd_height.json.gz",
+      "missing_dataset": true,
+      "agents": {
+        "agent_0": "StretchRobot",
+        "agent_1": "FetchRobot"
+      },
+      "max_episode_steps": 1300,
+      "coupling": "Independent",
+      "protocol_b": "unsupported (dataset absent locally)",
+      "runnable_episodes": 0
+    },
+    "config_height_per_reverse": {
+      "task_spec": "pddl/pddl_height_per",
+      "dataset": "data/datasets/hssd_height.json.gz",
+      "missing_dataset": true,
+      "agents": {
+        "agent_0": "DJIDrone",
+        "agent_1": "SpotRobot"
+      },
+      "max_episode_steps": 1000,
+      "coupling": "Independent",
+      "protocol_b": "unsupported (dataset absent locally)",
+      "runnable_episodes": 0
+    },
+    "config_fourth_man": {
+      "task_spec": "pddl/pddl_height_man",
+      "dataset": "data/datasets/hssd_man_fig.json.gz",
+      "missing_dataset": true,
+      "agents": {
+        "agent_0": "FetchRobot",
+        "agent_1": "StretchRobot"
+      },
+      "max_episode_steps": 1300,
+      "coupling": "Independent",
+      "protocol_b": "unsupported (dataset absent locally)",
+      "runnable_episodes": 0
+    },
+    "config_fourth_per": {
+      "task_spec": "pddl/pddl_height_per",
+      "dataset": "data/datasets/hssd_per_fig.json.gz",
+      "missing_dataset": true,
+      "agents": {
+        "agent_0": "DJIDrone",
+        "agent_1": "SpotRobot"
+      },
+      "max_episode_steps": 1000,
+      "coupling": "Independent",
+      "protocol_b": "unsupported (dataset absent locally)",
+      "runnable_episodes": 0
+    }
+  },
+  "totals": {
+    "raw_sum_over_configs": 961,
+    "unique_evaluation_episodes_present": 931,
+    "unique_datasets_present": 8,
+    "protocol_b_directly_runnable": 99,
+    "protocol_b_needs_perception": 297,
+    "protocol_b_needs_manipulation": 565,
+    "configs_blocked_by_missing_dataset": 5
+  }
+}

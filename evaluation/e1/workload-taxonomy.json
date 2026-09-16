@@ -38,12 +38,14 @@
       "confidence": "high",
       "evidence_source": "pddl_spot_fetch_mobility.yaml + evaluation/e1/shared_world (proven)",
       "protocol_a": true,
-      "protocol_b": "ready (navigation integrated, 2/2 shared-world PASS)"
+      "protocol_b": "ready (navigation integrated, 2/2 shared-world PASS)",
+      "dataset": "mp3d/mobility_episodes_1.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "height_per",
       "task_spec": "pddl/pddl_height_per",
-      "episode_count": null,
+      "episode_count": 113,
       "robot_types": [
         "SpotRobot",
         "FetchRobot"
@@ -67,12 +69,14 @@
       "confidence": "high",
       "evidence_source": "pddl_height_per.yaml",
       "protocol_a": true,
-      "protocol_b": "partial (perception skills not integrated)"
+      "protocol_b": "partial (perception skills not integrated)",
+      "dataset": "hssd/0/hssd_height_per.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "spot_drone_per",
       "task_spec": "pddl/pddl_spot_drone_per",
-      "episode_count": null,
+      "episode_count": 154,
       "robot_types": [
         "SpotRobot",
         "DJIDrone"
@@ -91,12 +95,14 @@
       "confidence": "medium",
       "evidence_source": "pddl_spot_drone_per.yaml",
       "protocol_a": true,
-      "protocol_b": "partial (perception not integrated)"
+      "protocol_b": "partial (perception not integrated)",
+      "dataset": "replica_cad/two_agent_perception_eval.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "multi_agent_per",
       "task_spec": "pddl/pddl_multi_agent_per",
-      "episode_count": null,
+      "episode_count": 30,
       "robot_types": [
         "multi"
       ],
@@ -114,12 +120,14 @@
       "confidence": "high",
       "evidence_source": "pddl_multi_agent_per.yaml",
       "protocol_a": true,
-      "protocol_b": "partial"
+      "protocol_b": "partial",
+      "dataset": "replica_cad/multi_agent_eval.json.gz (shared with multi_agent_man)",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "dist_man",
       "task_spec": "pddl/pddl_dist_man",
-      "episode_count": null,
+      "episode_count": 89,
       "robot_types": [
         "SpotRobot",
         "FetchRobot"
@@ -146,12 +154,14 @@
       "confidence": "medium-high",
       "evidence_source": "pddl_dist_man.yaml",
       "protocol_a": true,
-      "protocol_b": "requires pick/place skill integration"
+      "protocol_b": "requires pick/place skill integration",
+      "dataset": "hssd/0/hssd_dist_man.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "height_man",
       "task_spec": "pddl/pddl_height_man",
-      "episode_count": null,
+      "episode_count": 166,
       "robot_types": [
         "SpotRobot",
         "FetchRobot"
@@ -176,12 +186,14 @@
       "confidence": "medium-high",
       "evidence_source": "pddl_height_man.yaml",
       "protocol_a": true,
-      "protocol_b": "requires pick/place integration; multi-floor"
+      "protocol_b": "requires pick/place integration; multi-floor",
+      "dataset": "hssd/0/hssd_height_man.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "multi_agent_mobility",
       "task_spec": "pddl/pddl_multi_agent_mobility",
-      "episode_count": null,
+      "episode_count": 100,
       "robot_types": [
         "2 robots"
       ],
@@ -205,12 +217,14 @@
       "confidence": "medium",
       "evidence_source": "pddl_multi_agent_mobility.yaml (name says mobility but solution includes pick/place)",
       "protocol_a": true,
-      "protocol_b": "requires pick/place integration"
+      "protocol_b": "requires pick/place integration",
+      "dataset": "mp3d/mp3d_episodes_1.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "fetch_stretch_man",
       "task_spec": "pddl/pddl_fetch_stretch_man",
-      "episode_count": null,
+      "episode_count": 180,
       "robot_types": [
         "FetchRobot",
         "StretchRobot"
@@ -231,7 +245,9 @@
       "confidence": "medium",
       "evidence_source": "pddl_fetch_stretch_man.yaml",
       "protocol_a": true,
-      "protocol_b": "requires manipulation integration"
+      "protocol_b": "requires manipulation integration",
+      "dataset": "replica_cad/two_agent_manipulation_eval.json.gz",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "multi_agent_social_nav",
@@ -252,7 +268,9 @@
       "confidence": "medium",
       "evidence_source": "multi_agent_social_nav.yaml",
       "protocol_a": true,
-      "protocol_b": "requires manipulation integration"
+      "protocol_b": "requires manipulation integration",
+      "dataset": "no config references this spec",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "multi_agent_tidy_house",
@@ -273,7 +291,9 @@
       "confidence": "medium",
       "evidence_source": "multi_agent_tidy_house.yaml",
       "protocol_a": true,
-      "protocol_b": "requires manipulation integration"
+      "protocol_b": "requires manipulation integration",
+      "dataset": "no config references this spec",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "drone_spot_rearrange",
@@ -301,12 +321,14 @@
       "confidence": "medium",
       "evidence_source": "drone_spot_rearrange.yaml",
       "protocol_a": true,
-      "protocol_b": "requires manipulation integration"
+      "protocol_b": "requires manipulation integration",
+      "dataset": "no config references this spec (both variants)",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     },
     {
       "benchmark": "multi_agent_man",
       "task_spec": "pddl/pddl_multi_agent_man",
-      "episode_count": null,
+      "episode_count": 30,
       "robot_types": [
         "4 agents"
       ],
@@ -325,8 +347,27 @@
       "confidence": "medium",
       "evidence_source": "pddl_multi_agent_man.yaml",
       "protocol_a": true,
-      "protocol_b": "partial + manipulation"
+      "protocol_b": "partial + manipulation",
+      "dataset": "replica_cad/multi_agent_eval.json.gz (shared with multi_agent_per)",
+      "inventory_ref": "evaluation/e1/dataset-inventory.json"
     }
   ],
-  "schema": "roboguide.e1-workload-taxonomy/v0.1"
+  "schema": "roboguide.e1-workload-taxonomy/v0.1",
+  "census": {
+    "census_date": "2026-09-16",
+    "task_spec_files": 13,
+    "task_specs_referenced_by_configs": 9,
+    "unreferenced_spec_files": [
+      "multi_agent_social_nav",
+      "multi_agent_tidy_house",
+      "drone_spot_rearrange",
+      "drone_spot_rearrange_default"
+    ],
+    "unique_datasets_present": 8,
+    "unique_evaluation_episodes": 931,
+    "raw_sum_over_configs": 961,
+    "protocol_b_directly_runnable_episodes": 99,
+    "configs_blocked_by_missing_local_dataset": 5,
+    "correction_note": "the v0.1 taxonomy over-counted 12 task specs and left episode counts null; this revision is grounded in evaluation/e1/DATASET-INVENTORY.md (inline data_path overrides resolved, episode counts from file contents)"
+  }
 }

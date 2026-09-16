@@ -1,5 +1,5 @@
 schema = "roboguide.node-config/v0.7"
-node_id = "e1-shared-spot-b"
+node_id = "e1-shared-node-b"
 server_endpoint = "http://127.0.0.1:25060"
 state_directory = "NODE_STATE_PLACEHOLDER"
 reconnect_delay_ms = 500

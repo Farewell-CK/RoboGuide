@@ -42,3 +42,20 @@
    分类时标注 assignment-constrained。
 
 机器可读版本：`workload-taxonomy.json`。
+
+## Census 修订（2026-09-16）
+
+依据 `DATASET-INVENTORY.md`（dataset-inventory.json）对本表做如下修正：
+
+- task spec 文件共 13 个，但**仅 9 个被实际 config 引用**；
+  `multi_agent_social_nav`、`multi_agent_tidy_house`、`drone_spot_rearrange`
+  （含 `_default` 变体）无任何 config 使用，不进入 episode 统计。
+- 本机存在的 evaluation datasets 共 **8** 个，unique evaluation episodes
+  **931**（14 个 config 的 raw sum 为 961——`multi_agent_eval.json.gz` 30 集
+  被 multi_agent_man 与 multi_agent_per 共享，只计一次）。
+- **dataset 缺失**：`hssd_dist.json.gz`、`hssd_man_fig.json.gz`、
+  `hssd_per_fig.json.gz` 本机不存在 → 3 个 reverse 变体与 2 个 fourth 变体
+  （共 5 config）本地不可运行。
+- Protocol B：直接可跑 **99**（spot_fetch_mobility，已实证）；仅缺 perception
+  **297**；仅缺 manipulation（pick/place）**565**。
+- 原 "12 个 task spec" 的说法以此修订为准。

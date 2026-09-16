@@ -146,8 +146,8 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
     if mode == "single":
         checks = {
             "post_202": (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
-            "single_node_registered": '"e1-shared-spot-a"' in inventory,
-            "second_node_absent": '"e1-shared-spot-b"' not in inventory,
+            "single_node_registered": '"e1-shared-node-a"' in inventory,
+            "second_node_absent": '"e1-shared-node-b"' not in inventory,
             "pair_never_assembled_fail_closed": bridge_a
             and bridge_a[0]["state"] == "FAILED"
             and "pair never assembled" in bridge_a[0]["detail"],
@@ -164,8 +164,8 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
 
     checks: dict[str, Any] = {
         "post_202": (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
-        "two_nodes_registered": '"e1-shared-spot-a"' in inventory
-        and '"e1-shared-spot-b"' in inventory,
+        "two_nodes_registered": '"e1-shared-node-a"' in inventory
+        and '"e1-shared-node-b"' in inventory,
         "two_tasks_bound": bound_tasks == set(expected_tasks),
         "two_distinct_local_handles": (
             len(bridge_a) == 1

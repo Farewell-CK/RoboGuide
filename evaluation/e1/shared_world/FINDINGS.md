@@ -116,3 +116,21 @@ Global（RoboGuide 侧 0 LLM）与 local（EMOS CrabAgent）成本分离记录�
    natural-objective 变体未在本轮 paired 跑（列为后续 fairness 消融）。
 4. `both_tasks_completed→pddl_success` 的强耦合依赖 agent 正确解析实体；
    negative run 展示了失败侧的正确行为。
+
+## Hygiene note（2026-09-16）
+
+Node ID 已改为 embodiment 中性命名：`e1-shared-spot-a/b` →
+`e1-shared-node-a/b`（node-a→agent_0 Spot、node-b→agent_1 Fetch 的 Local How
+映射不变）。本目录 `runs/*` 归档证据产生于改名前，其 verdict/inventory 中保留
+旧 id——历史记录不改写；`verify-shared-world.py` 自本次起以新 id 校验未来 run。
+
+__zcode_status=$?
+if [ "$__zcode_status" -eq 0 ]; then pwd -P > '/tmp/zcode-3bbfd6ac-052b-445e-a083-1f2bde9d95eb-cwd'; fi
+exit "$__zcode_status"
+
+## Hygiene note（2026-09-16）
+
+Node ID 已改为 embodiment 中性命名：`e1-shared-spot-a/b` →
+`e1-shared-node-a/b`（node-a→agent_0 Spot、node-b→agent_1 Fetch 的 Local How
+映射不变）。本目录 `runs/*` 归档证据产生于改名前，其 verdict/inventory 中保留
+旧 id——历史记录不改写；`verify-shared-world.py` 自本次起以新 id 校验未来 run。

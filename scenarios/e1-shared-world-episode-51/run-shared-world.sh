@@ -89,13 +89,13 @@ fi
 PLAN="$SCENARIO/mission-plan.json"
 PAIR_WAIT=420
 MISSION_BUDGET=480
-NODES_TO_WAIT=(e1-shared-spot-a e1-shared-spot-b)
+NODES_TO_WAIT=(e1-shared-node-a e1-shared-node-b)
 if [[ "$MODE" == "negative" ]]; then
     PLAN="$SCENARIO/mission-plan-negative.json"
     MISSION_ID="mission-e1-i-shared-world-negative"
 elif [[ "$MODE" == "single" ]]; then
     PAIR_WAIT=45
-    NODES_TO_WAIT=(e1-shared-spot-a)
+    NODES_TO_WAIT=(e1-shared-node-a)
 fi
 
 rm -rf -- "$RUN"

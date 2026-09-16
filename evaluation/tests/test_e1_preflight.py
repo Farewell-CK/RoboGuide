@@ -52,8 +52,9 @@ def test_controlled_workload_admission_matches_goal_coverage() -> None:
     if admission["status"] == "ready":
         # The admitted state requires equal goal coverage plus an evidence anchor.
         assert roboguide_goals == emos_goals
-        assert isinstance(admission.get("evidence"), str)
-        assert admission["evidence"].endswith("summary.json")
+        evidence = admission.get("evidence")
+        assert isinstance(evidence, str)
+        assert evidence.endswith("summary.json")
     else:
         assert admission["status"] == "blocked"
         assert roboguide_goals != emos_goals
