@@ -1,0 +1,1 @@
+case=F5b rule=refuse-window:40

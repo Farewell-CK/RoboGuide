@@ -1,0 +1,1 @@
+case=F1 rule=fail-status:1

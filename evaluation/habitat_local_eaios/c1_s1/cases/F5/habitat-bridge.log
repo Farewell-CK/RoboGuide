@@ -1,0 +1,1142 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/tensorboard/compat/tensorflow_stub/dtypes.py:326: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  np.bool8: (False, True),
+2026-09-16 01:03:10,761 Initializing dataset RearrangeDataset-v0
+2026-09-16 01:03:10,767 initializing sim RearrangeSim-v0
+2026-09-16 01:03:19,609 Initializing task RearrangePddlTask-v0
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/core.py:317: DeprecationWarning: [33mWARN: Initializing wrapper in old step API which returns one bool instead of two. It is recommended to set `new_step_api=True` to use new step API. This will be the default behaviour in future.[0m
+  deprecation(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/spaces/box.py:128: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+2026-09-16 01:03:20,226 INFO Habitat Local EAIOS ready at http://127.0.0.1:28100
+2026-09-16 01:03:21,044 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:03:38,282 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:03:38,286 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:03:38,364 INFO accepted local execution habitat-820baa2cba19b6d314f6465a
+2026-09-16 01:03:38,364 INFO 127.0.0.1 - "POST /v1/executions HTTP/1.1" 200 -
+2026-09-16 01:03:38,380 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,380 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,436 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,436 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,492 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,492 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,548 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,548 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,603 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,603 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,659 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,659 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,714 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,715 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,770 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,770 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,826 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,826 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,881 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,882 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,937 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,938 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:38,993 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:38,993 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,048 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,049 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,103 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,103 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,159 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,159 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,215 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,215 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,270 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,270 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,326 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,326 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,382 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,382 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,438 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,438 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,492 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,492 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,548 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,548 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,601 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,602 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,656 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,656 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,711 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,711 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,767 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,767 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,824 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,825 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,881 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,881 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,938 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,938 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:39,997 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:39,997 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,054 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,055 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,112 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,113 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,169 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,169 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,225 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,225 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,283 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,283 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,339 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,339 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,396 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,397 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,454 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,454 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,510 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,510 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,567 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,567 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,623 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,623 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,680 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,680 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,736 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,737 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,793 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,793 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,849 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,849 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,905 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,905 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:40,961 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:40,961 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,018 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,018 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,074 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,074 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,130 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,130 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,186 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,187 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,244 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,244 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,301 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,301 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,357 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,357 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,414 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,415 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,471 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,472 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,528 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,528 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,586 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,586 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,643 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,643 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,700 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,700 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,757 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,758 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,813 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,813 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,869 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,869 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,925 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,925 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:41,981 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:41,981 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,038 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,039 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,094 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,094 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,151 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,151 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,207 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,207 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,263 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,263 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,319 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,319 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,377 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,377 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,434 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,434 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,490 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,491 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,548 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,549 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,606 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,606 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,663 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,663 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,721 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,721 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,777 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,777 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,833 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,834 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,890 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,890 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:42,946 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:42,946 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,003 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,003 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,059 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,059 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,117 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,117 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,173 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,174 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,230 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,230 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,282 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:03:43,285 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:03:43,287 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,287 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,344 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,344 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,401 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,401 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,458 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,458 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,515 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,515 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,572 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,573 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,629 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,630 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,686 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,687 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,743 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,744 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,800 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,800 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,856 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,856 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,913 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,913 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:43,969 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:43,969 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,025 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,025 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,083 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,083 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,138 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,139 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,194 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,195 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,249 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,250 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,305 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,305 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,361 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,361 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,415 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,415 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,469 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,469 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,523 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,523 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,579 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,579 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,633 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,633 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,689 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,689 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,745 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,746 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,802 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,802 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,858 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,859 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,915 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,915 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:44,972 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:44,973 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,029 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,029 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,086 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,086 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,143 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,143 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,200 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,200 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,257 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,257 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,313 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,313 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,369 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,369 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,426 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,426 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,484 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,484 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,540 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,541 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,597 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,597 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,654 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,654 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,710 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,710 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,765 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,766 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,821 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,822 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,877 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,878 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,934 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,934 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:45,990 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:45,991 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,048 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,048 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,105 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,105 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,161 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,161 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,217 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,217 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,274 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,275 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,330 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,330 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,387 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,387 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,443 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,443 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,500 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,500 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,558 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,558 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,614 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,614 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,670 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,670 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,726 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,726 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,783 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,784 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,841 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,841 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,897 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,897 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:46,953 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:46,953 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,009 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,009 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,065 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,065 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,123 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,123 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,180 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,181 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,238 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,239 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,295 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,296 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,353 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,353 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,410 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,411 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,468 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,468 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,524 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,525 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,581 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,582 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,639 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,639 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,696 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,696 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,752 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,752 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,810 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,810 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,867 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,867 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,923 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,924 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:47,981 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:47,981 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,037 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,037 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,094 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,094 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,150 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,150 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,206 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,206 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,261 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,261 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,281 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:03:48,284 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:03:48,317 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,317 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,373 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,373 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,430 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,430 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,487 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,487 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,542 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,542 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,599 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,599 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,656 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,656 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,712 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,712 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,768 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,768 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,824 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,824 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,882 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,882 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,939 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,939 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:48,997 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:48,998 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,054 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,054 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,109 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,109 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,164 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,164 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,220 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,220 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,275 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,275 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,330 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,331 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,387 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,387 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,442 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,442 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,498 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,498 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,555 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,556 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,611 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,611 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,668 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,668 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,725 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,725 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,781 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,782 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,839 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,839 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,896 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,896 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:49,952 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:49,952 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,008 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,008 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,064 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,064 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,121 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,121 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,176 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,177 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,232 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,232 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,289 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,289 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,345 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,346 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,401 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,402 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,456 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,457 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,513 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,513 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,570 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,571 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,628 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,628 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,684 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,684 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,740 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,741 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,797 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,798 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,854 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,855 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,911 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,911 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:50,967 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:50,967 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,026 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,026 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,083 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,083 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,140 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,140 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,196 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,197 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,254 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,254 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,311 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,311 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,368 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,368 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,424 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,425 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,479 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,479 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,534 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,534 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,590 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,590 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,648 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,648 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,705 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,705 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,762 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,762 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,819 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,819 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,875 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,875 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,933 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,933 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:51,989 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:51,990 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,046 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,046 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,103 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,103 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,160 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,160 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,216 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,217 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+pybullet build time: Sep  8 2026 08:34:54
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_hr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_fngr2026-09-16 01:03:52,274 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,274 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,330 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,330 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,386 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,387 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,442 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,443 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,499 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,499 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,556 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,556 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,613 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,614 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,671 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,671 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,728 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,728 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,785 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,785 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,842 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,842 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,899 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,899 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:52,955 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:52,956 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,012 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,012 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,070 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,070 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,125 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,125 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,181 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,181 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,237 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,237 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,281 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+2026-09-16 01:03:53,284 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:03:53,292 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,292 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,348 INFO status observed for habitat-820baa2cba19b6d314f6465a: ACCEPTED
+2026-09-16 01:03:53,348 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,404 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,405 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,467 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,468 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,524 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,524 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,579 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,580 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,635 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,636 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,692 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,692 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,748 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,748 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,805 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,805 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,862 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,862 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,918 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,918 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:53,974 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:53,975 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,031 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,031 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,088 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,088 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,144 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,144 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,201 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,201 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,258 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,258 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,314 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,314 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,370 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,370 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,427 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,427 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,483 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,483 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,540 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,540 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,596 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,597 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,653 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,654 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,710 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,711 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,766 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,766 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,823 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,823 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,879 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,880 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,936 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,936 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:54,992 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:54,992 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,047 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,048 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,103 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,103 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,158 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,159 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,215 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,215 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,270 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,271 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,327 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,327 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,383 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,383 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,440 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,440 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,496 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,496 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,553 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,553 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,610 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,610 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,666 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,666 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,722 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,723 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,778 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,778 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,833 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,833 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,894 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,895 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:55,952 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:55,952 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,008 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,008 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,065 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,065 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,119 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,120 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,175 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,175 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,232 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,232 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,288 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,288 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,344 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,344 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,400 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,400 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,456 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,456 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,512 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,512 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,568 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,568 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,625 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,626 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,682 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,683 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,738 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,739 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,795 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,796 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,852 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,853 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,908 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,908 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:56,964 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:56,964 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,020 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,020 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,077 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,077 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,133 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,133 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,188 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,188 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,245 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,246 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,302 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,302 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,359 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,359 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,415 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,415 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,471 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,471 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,527 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,527 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,583 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,584 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,640 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,641 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,697 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,697 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,752 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,753 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,809 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,809 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,866 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,866 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,922 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,922 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:57,978 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:57,978 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,035 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,035 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,091 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,091 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,147 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,147 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,204 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,204 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,260 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,261 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,281 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:03:58,284 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:03:58,316 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,316 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,371 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,372 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,427 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,427 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,484 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,485 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,541 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,541 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,598 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,598 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,655 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,655 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,712 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,712 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,767 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,767 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,822 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,822 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,878 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,879 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,934 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,935 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:58,989 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:58,990 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,046 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,046 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,102 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,103 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,158 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,158 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,214 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,214 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,270 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,271 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,326 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,326 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,382 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,382 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,438 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,438 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,494 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,494 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,550 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,550 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,606 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,606 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,663 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,664 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,720 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,720 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,776 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,776 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,832 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,833 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,889 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,889 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:03:59,946 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:03:59,946 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,002 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,003 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,059 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,059 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,116 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,116 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,173 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,173 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,229 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,230 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,286 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,286 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,342 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,342 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,398 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,399 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,455 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,455 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,512 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,513 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,568 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,568 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,624 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,624 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,680 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,680 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,736 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,737 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,792 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,792 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,848 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,848 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,903 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,903 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:00,958 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:00,958 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,014 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,014 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,070 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,070 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,126 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,126 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,181 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,182 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,236 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,236 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,291 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,292 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,348 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,348 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,404 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,404 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,461 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,461 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,515 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,515 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,570 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,570 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,625 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,625 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,681 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,681 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,737 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,737 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,794 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,794 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,849 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,849 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,906 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,906 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:01,962 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:01,962 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,016 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,016 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,071 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,071 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,127 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,127 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,184 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,184 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,239 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,239 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,295 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,295 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,352 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,352 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,408 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,408 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,466 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,466 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,523 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,524 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,581 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,581 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,637 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,638 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,694 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,694 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,749 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,750 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,805 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,805 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,859 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,859 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,915 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,915 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:02,971 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:02,971 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,027 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,027 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,083 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,083 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,139 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,139 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,194 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,194 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,250 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,250 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,280 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:04:03,283 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:04:03,305 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,305 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,361 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,361 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,417 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,417 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,473 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,473 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,529 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,529 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,585 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,586 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,642 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,642 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,698 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,698 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,753 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,754 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,810 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,810 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,867 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,867 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,923 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,923 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:03,979 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:03,979 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,034 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,035 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,091 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,091 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,148 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,148 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,204 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,204 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,259 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,260 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,315 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,315 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,371 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,371 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,427 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,427 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,483 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,483 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,540 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,540 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,597 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,597 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,653 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,653 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,709 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,709 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,766 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,766 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,822 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,822 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,880 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,880 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,936 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,936 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:04,992 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:04,992 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,048 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,048 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,105 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,105 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,161 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,161 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,216 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,216 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,272 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,272 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,329 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,330 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,385 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,385 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,441 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,441 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,497 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,497 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,555 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,555 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,611 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,611 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,666 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,666 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,721 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,721 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,776 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,776 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,833 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,834 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,890 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,890 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:05,945 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:05,946 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,001 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,002 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,059 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,059 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,114 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,115 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,170 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,170 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,226 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,227 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,283 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,283 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,339 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,340 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,396 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,396 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,452 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,453 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,510 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,510 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,566 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,566 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,622 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,623 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,679 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,679 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,734 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,734 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,791 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,791 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,848 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,848 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,904 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,904 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:06,960 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:06,961 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,018 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,018 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,074 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,074 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,129 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,129 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,184 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,184 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,239 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,240 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,296 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,297 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,353 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,353 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,409 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,409 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,465 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,465 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,521 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,521 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,577 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,577 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,633 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,633 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,689 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,690 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,745 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,745 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,801 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,801 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,857 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,857 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,913 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,913 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:07,968 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:07,969 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,024 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,024 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,080 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,080 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,137 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,137 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,193 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,193 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,249 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,249 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,281 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:04:08,284 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:04:08,304 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,304 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,360 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,360 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,416 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,417 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,473 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,473 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,530 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,530 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,586 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,586 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,642 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,642 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,699 INFO status observed for habitat-820baa2cba19b6d314f6465a: RUNNING
+2026-09-16 01:04:08,699 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-16 01:04:08,742 INFO local execution habitat-820baa2cba19b6d314f6465a terminated: COMPLETED
+2026-09-16 01:04:08,755 INFO status observed for habitat-820baa2cba19b6d314f6465a: COMPLETED
+2026-09-16 01:04:08,755 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -

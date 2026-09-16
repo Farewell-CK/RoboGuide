@@ -1,0 +1,1 @@
+case=F3 rule=timeout-status:1

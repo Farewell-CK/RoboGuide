@@ -1,0 +1,104 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/tensorboard/compat/tensorflow_stub/dtypes.py:326: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  np.bool8: (False, True),
+2026-09-16 01:13:22,150 Initializing dataset RearrangeDataset-v0
+2026-09-16 01:13:22,157 initializing sim RearrangeSim-v0
+2026-09-16 01:13:31,276 Initializing task RearrangePddlTask-v0
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/core.py:317: DeprecationWarning: [33mWARN: Initializing wrapper in old step API which returns one bool instead of two. It is recommended to set `new_step_api=True` to use new step API. This will be the default behaviour in future.[0m
+  deprecation(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/spaces/box.py:128: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+2026-09-16 01:13:31,908 INFO Habitat Local EAIOS ready at http://127.0.0.1:28100
+2026-09-16 01:13:32,456 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:34,679 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:34,683 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:13:34,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:34,702 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:13:35,586 INFO accepted local execution habitat-820baa2cba19b6d314f6465a
+2026-09-16 01:13:35,586 INFO 127.0.0.1 - "POST /v1/executions HTTP/1.1" 200 -
+2026-09-16 01:13:36,652 INFO cancellation request accepted for habitat-820baa2cba19b6d314f6465a while local state is ACCEPTED
+2026-09-16 01:13:36,652 INFO 127.0.0.1 - "POST /v1/executions/cancel HTTP/1.1" 200 -
+2026-09-16 01:13:39,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:39,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:13:44,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:44,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+pybullet build time: Sep  8 2026 08:34:54
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_sh1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_hr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_el1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_wr1b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+arm0.link_fngr2026-09-16 01:13:49,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:49,705 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: r_gripper_finger_link
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,467]:
+Bad inertia tensor properties, setting inertia to zero for link: l_gripper_finger_link
+2026-09-16 01:13:50,085 INFO local execution habitat-820baa2cba19b6d314f6465a terminated: CANCELLED
+2026-09-16 01:13:54,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:54,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:13:59,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:13:59,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:04,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:04,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:09,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:09,705 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:14,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:14,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:19,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:19,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:24,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:24,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:29,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:29,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:34,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:34,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:39,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:39,704 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:44,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:44,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:49,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:49,702 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:54,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:54,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:14:59,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:14:59,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:04,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:04,702 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:09,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:09,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:14,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:14,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:19,700 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:19,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:24,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:24,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:29,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:29,703 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:34,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:34,702 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-16 01:15:39,699 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-16 01:15:39,702 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -

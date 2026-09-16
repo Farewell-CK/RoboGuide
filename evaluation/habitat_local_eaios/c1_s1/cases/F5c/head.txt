@@ -1,0 +1,1 @@
+case=F5c rule=refuse-window:150

@@ -1,0 +1,1 @@
+{"group_id":"group-mission-c1-s0-habitat-navigation","mission_id":"mission-c1-s0-habitat-navigation","peer_channels":[],"relations":[],"status":"Running","tasks":[{"context_id":"habitat-navigation-context","status":"Active","task_id":"navigate-to-target"}]}
