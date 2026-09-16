@@ -1,5 +1,9 @@
 # C1-S0B Design Trace — CrabAgent-backed Local How（PHASE 1 输出）
 
+> Superseded implementation trace: Formal E1 preflight removed this copied
+> driver loop. The current adapter replaces only Stage1 assignment and runs
+> original EMOS Stage2 plus its configured skills unchanged.
+
 Baseline `c29f384`。全部条目为本轮源码重读确认（file:line），非沿用旧 FINDINGS。
 
 ## EMOS 关键事实（wrapper 设计输入）

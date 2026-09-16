@@ -10,7 +10,8 @@ DEFAULT_EMOS_ROOT="$(dirname "$REPO")/emos-baseline"
 EMOS_ROOT="${ROBOGUIDE_EMOS_ROOT:-$DEFAULT_EMOS_ROOT}"
 HABITAT_ENV="${ROBOGUIDE_HABITAT_CONDA_ENV:-habitat}"
 MODE="${1:?usage: run-controlled.sh <subtask-mode> <run-dir>}"
-RUN="${2:?usage: run-controlled.sh <subtask-mode> <run-dir>}"
+RUN_INPUT="${2:?usage: run-controlled.sh <subtask-mode> <run-dir>}"
+RUN="$(realpath -m -- "$RUN_INPUT")"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 PIDS=()
@@ -85,14 +86,26 @@ if [[ ! -d "$EMOS_ROOT" ]]; then
     echo "EMOS checkout does not exist: $EMOS_ROOT" >&2
     exit 1
 fi
-rm -rf -- "$RUN"
+mkdir -p "$RUN"
+if [[ -e "$RUN/controller.sqlite3" || -e "$RUN/habitat-bridge.sqlite3" || -e "$RUN/node-state" ]]; then
+    echo "run directory already contains scenario state: $RUN" >&2
+    exit 1
+fi
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
 # The node journal must be fresh per run and private to this run directory;
 # a shared journal replays prior attempts and poisons dispatch identity.
 sed "s|state_directory = .*|state_directory = \"$RUN/node-state\"|" \
     "$SCENARIO/node.toml" > "$RUN/node.toml"
 
-HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
+# Resolve from CONDA_PREFIX rather than PATH: `uv run` prepends RoboGuide's
+# `.venv/bin`, which otherwise shadows the Habitat interpreter inside
+# `conda run`.
+HABITAT_PREFIX="$(conda run -n "$HABITAT_ENV" bash -c 'printf %s "$CONDA_PREFIX"')"
+HABITAT_PYTHON="$HABITAT_PREFIX/bin/python"
+if [[ ! -x "$HABITAT_PYTHON" ]]; then
+    echo "Habitat interpreter does not exist: $HABITAT_PYTHON" >&2
+    exit 1
+fi
 (
     cd "$EMOS_ROOT"
     exec env \
@@ -105,7 +118,6 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --port 28100 \
         --backend emos-crabagent \
         --subtask-mode "$MODE" \
-        --robot-type SpotRobot \
         --evidence-dir "$RUN/evidence" \
         --state-db "$RUN/habitat-bridge.sqlite3" \
         --habitat-config \

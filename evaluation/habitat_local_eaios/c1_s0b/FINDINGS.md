@@ -1,5 +1,11 @@
 # C1-S0B + C1-S1 Overnight FINDINGS
 
+> Historical evidence note: the wrapper-owned prompt/dispatch/retry
+> implementation evaluated below was replaced during Formal E1 preflight.
+> The current backend injects only the committed Stage1 assignment and runs
+> the original EMOS `MultiLLMPolicy`/`HierarchicalPolicy` stack. See
+> [`../../e1/FAIRNESS_LEDGER.md`](../../e1/FAIRNESS_LEDGER.md).
+
 - Baseline: `c29f3840e610e6c60b5ab0d723bf5b8a4d067849`（本轮未改 Core；二进制
   `cargo clean -p` 强制重建）。`experiments/` 未触碰。
 

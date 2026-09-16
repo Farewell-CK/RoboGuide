@@ -92,7 +92,12 @@ if [[ ! -d "$EMOS_ROOT" ]]; then
     echo "EMOS checkout does not exist: $EMOS_ROOT" >&2
     exit 1
 fi
-HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
+HABITAT_PREFIX="$(conda run -n "$HABITAT_ENV" bash -c 'printf %s "$CONDA_PREFIX"')"
+HABITAT_PYTHON="$HABITAT_PREFIX/bin/python"
+if [[ ! -x "$HABITAT_PYTHON" ]]; then
+    echo "Habitat interpreter does not exist: $HABITAT_PYTHON" >&2
+    exit 1
+fi
 
 (
     cd "$EMOS_ROOT"

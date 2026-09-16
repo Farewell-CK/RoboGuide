@@ -12,6 +12,7 @@ prints the outcome JSON.  Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,8 @@ EMOS_ROOT = Path("/data/workspace/code/emos-baseline")
 
 def main() -> None:
     """Run one isolated real-CrabAgent smoke against the adapter API."""
+    # Spawned simulator children must resolve EMOS-relative data from this checkout.
+    os.chdir(EMOS_ROOT)
     run_dir = Path(sys.argv[1]).resolve()
     subtask_mode = sys.argv[2]
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -44,7 +47,6 @@ def main() -> None:
         max_steps=1000,
         step_period_ms=20,
         subtask_mode=subtask_mode,
-        robot_type="SpotRobot",
         evidence_dir=run_dir / "evidence",
     )
     started = time.monotonic()

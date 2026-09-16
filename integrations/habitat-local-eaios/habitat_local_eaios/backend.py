@@ -35,17 +35,39 @@ class LocalExecutionOutcome:
     simulator_steps: int
     initial_position: tuple[float, float, float]
     final_position: tuple[float, float, float]
+    local_skill_completed: bool = False
+    benchmark_task_achieved: bool = False
+    episode_terminated: bool = False
+    skill_sequence: tuple[str, ...] = ()
+    local_llm_calls: int = 0
+    local_tokens: int = 0
+    local_replans: int = 0
+    invalid_outputs: int = 0
+    send_request_count: int = 0
+    message_pipe_activity_count: int = 0
+    terminal_basis: str = "unspecified"
 
     def as_dict(self) -> dict[str, object]:
         """Return a stable JSON-shaped local outcome for status evidence."""
         return {
+            "benchmark_task_achieved": self.benchmark_task_achieved,
             "destination": self.destination,
             "episode_id": self.episode_id,
+            "episode_terminated": self.episode_terminated,
             "final_position": list(self.final_position),
             "initial_position": list(self.initial_position),
+            "local_llm_calls": self.local_llm_calls,
+            "local_replans": self.local_replans,
+            "local_skill_completed": self.local_skill_completed,
+            "local_tokens": self.local_tokens,
+            "invalid_outputs": self.invalid_outputs,
+            "message_pipe_activity_count": self.message_pipe_activity_count,
             "scene_id": self.scene_id,
             "simulator_steps": self.simulator_steps,
+            "send_request_count": self.send_request_count,
+            "skill_sequence": list(self.skill_sequence),
             "state": self.state,
+            "terminal_basis": self.terminal_basis,
         }
 
 
@@ -260,6 +282,9 @@ class HabitatMobilityBackend:
         initial: tuple[float, float, float],
     ) -> LocalExecutionOutcome:
         """Capture one terminal local outcome with initial and final physical positions."""
+        episode_terminated = (
+            bool(self._habitat_env.episode_over) if self._habitat_env is not None else False
+        )
         return LocalExecutionOutcome(
             state=state,
             detail=detail,
@@ -269,7 +294,25 @@ class HabitatMobilityBackend:
             simulator_steps=steps,
             initial_position=initial,
             final_position=self._agent_position(),
+            local_skill_completed=state == "COMPLETED",
+            benchmark_task_achieved=self._benchmark_task_achieved(),
+            episode_terminated=episode_terminated,
+            skill_sequence=("direct-oracle-nav",),
+            terminal_basis=(
+                "oracle-nav-skill"
+                if state == "COMPLETED"
+                else "cancellation"
+                if state == "CANCELLED"
+                else "local-failure"
+            ),
         )
+
+    def _benchmark_task_achieved(self) -> bool:
+        """Read the independent Habitat PDDL success measure when available."""
+        if self._habitat_env is None:
+            return False
+        metrics = self._habitat_env.get_metrics()
+        return bool(metrics.get("pddl_success", False))
 
 
 def _observation_true(observations: object, key: str) -> bool:

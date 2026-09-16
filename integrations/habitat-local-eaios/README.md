@@ -43,6 +43,20 @@ conda run --no-capture-output -n habitat python -m habitat_local_eaios \
   --episode-id 51
 ```
 
-The backend currently supports one active simulator execution and one deployment-selected episode
-and robot. That is an intentional C1-S0 scope bound, not a canonical operation constraint. Transient
-status-query recovery remains C1-S1 debt.
+The `emos-crabagent` backend does not carry a copied RoboGuide decision loop. It injects the
+Control-committed assignment at the output boundary of EMOS Stage1, then calls the original EMOS
+`MultiLLMPolicy`, `LLMHighLevelPolicy`, `CrabAgent`, `HierarchicalPolicy`, and configured skill
+implementations. Consequently invalid output, wait, peer requests, skill entry/termination,
+replanning, and skill step budgets remain the EMOS Stage2 implementation. The direct-Oracle backend
+remains a separate native protocol path.
+
+The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
+and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
+`terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat
+reported semantic task success and ended the assigned operation first. Mission completion never
+fabricates either local fact, and local skill completion never implies benchmark success.
+
+The bridge currently supports one active simulator execution and one deployment-selected episode
+and robot. That is an intentional C1 scope bound, not a canonical operation constraint. Node Service
+performs bounded status reacquisition for transient observation failures without redispatching the
+physical attempt.

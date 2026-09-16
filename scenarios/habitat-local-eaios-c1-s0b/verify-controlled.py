@@ -29,7 +29,8 @@ def _bridge_row(database: Path) -> dict[str, Any]:
         raise AssertionError(f"expected one local execution, found {len(rows)}")
     row = dict(rows[0])
     row["invocation"] = json.loads(row.pop("invocation_json"))
-    row["local_outcome"] = json.loads(row.pop("local_outcome_json"))
+    local_outcome = row.pop("local_outcome_json")
+    row["local_outcome"] = json.loads(local_outcome) if isinstance(local_outcome, str) else None
     return row
 
 
@@ -39,25 +40,21 @@ def verify(run: Path, mode: str) -> dict[str, object]:
     events = _events(run / "events.json")
     kinds = [next(iter(event["payload"])) for event in events]
     bridge = _bridge_row(run / "habitat-bridge.sqlite3")
-    outcome = bridge["local_outcome"]
+    raw_outcome = bridge["local_outcome"]
+    outcome = raw_outcome if isinstance(raw_outcome, dict) else {}
 
-    trace = [
-        json.loads(line)
-        for line in (run / "evidence/action_trace.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    decisions = [record["decision"] for record in trace if record.get("decision")]
-    nav_calls = [
-        decision
-        for decision in decisions
-        if isinstance(decision, dict) and decision.get("name") == "nav_to_obj"
-    ]
-    usage_lines = (
-        (run / "evidence/token_usage_details.jsonl").read_text(encoding="utf-8").splitlines()
+    trace_path = run / "evidence/action_trace.jsonl"
+    trace = (
+        [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        if trace_path.is_file()
+        else []
     )
-    usage = [json.loads(line) for line in usage_lines if line.strip()]
-    pipe_hits = [
-        record for record in trace if record.get("message_pipe_entries")
-    ]
+    controlled_path = run / "evidence/controlled-outcome.json"
+    controlled = (
+        json.loads(controlled_path.read_text(encoding="utf-8")) if controlled_path.is_file() else {}
+    )
+    raw_skill_sequence = controlled.get("skill_sequence", outcome.get("skill_sequence", []))
+    skill_sequence = list(raw_skill_sequence) if isinstance(raw_skill_sequence, list) else []
 
     connection = sqlite3.connect(
         f"file:{run / 'node-state/execution-journal.sqlite3'}?mode=ro", uri=True
@@ -70,67 +67,87 @@ def verify(run: Path, mode: str) -> dict[str, object]:
     finally:
         connection.close()
 
-    initial = outcome["initial_position"]
-    final = outcome["final_position"]
-    moved = any(
-        abs(float(before) - float(after)) > 0.05
-        for before, after in zip(initial, final, strict=True)
+    initial = outcome.get("initial_position")
+    final = outcome.get("final_position")
+    moved = (
+        any(
+            abs(float(before) - float(after)) > 0.05
+            for before, after in zip(initial, final, strict=True)
+        )
+        if isinstance(initial, list) and isinstance(final, list) and len(initial) == len(final)
+        else False
     )
-    nav_targets = [
-        arguments.get("target_obj")
-        for decision in nav_calls
-        if isinstance((arguments := decision.get("arguments")), dict)
-    ]
+    local_state = outcome.get("state", bridge.get("state"))
+    local_outcome_present = bool(outcome)
     checks = {
         "post_202": (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
         "mission_terminal": mission["status"] in {"Completed", "Failed", "Cancelled"},
-        "real_crabagent_called": bool(trace),
-        "nav_to_obj_selected": bool(nav_calls),
-        "nav_target_recorded": bool(nav_targets),
-        "running_observed": "status observed for" in (run / "habitat-bridge.log").read_text(
-            encoding="utf-8"
-        )
+        "original_stage2_called": controlled.get("policy", {}).get("stage2_policy")
+        == "original EMOS MultiLLMPolicy/HierarchicalPolicy",
+        "nav_to_obj_selected": any("nav_to_obj" in item for item in skill_sequence),
+        "running_observed": "status observed for"
+        in (run / "habitat-bridge.log").read_text(encoding="utf-8")
         and ": RUNNING" in (run / "habitat-bridge.log").read_text(encoding="utf-8"),
-        "simulator_stepped": int(outcome["simulator_steps"]) > 0,
+        "simulator_stepped": int(outcome.get("simulator_steps", 0)) > 0,
         "physical_position_changed": moved,
-        "local_terminal": outcome["state"] in {"COMPLETED", "FAILED", "CANCELLED"},
+        "local_terminal": local_state in {"COMPLETED", "FAILED", "CANCELLED"},
         "exactly_once": len(node_rows) == 1 and int(authorizations) == 1,
         "no_recovery": "RuntimeExecutionRecoveryRequired" not in kinds,
-        "controller_alive": "Error:" not in (run / "integration-server.log").read_text(
-            encoding="utf-8"
-        ),
-        "node_connected": "session ended" not in (run / "roboguide-node.log").read_text(
-            encoding="utf-8"
-        ),
-        "bridge_responsive": "Traceback" not in (run / "habitat-bridge.log").read_text(
-            encoding="utf-8"
-        ),
-        "llm_calls_recorded": len(usage) > 0,
-        "mission_matches_local": (mission["status"] == "Completed")
-        == (outcome["state"] == "COMPLETED"),
-        "send_request_absent": all(not record.get("message_pipe_entries") for record in trace),
+        "controller_alive": "Error:"
+        not in (run / "integration-server.log").read_text(encoding="utf-8"),
+        "node_connected": "session ended"
+        not in (run / "roboguide-node.log").read_text(encoding="utf-8"),
+        "bridge_responsive": "Traceback"
+        not in (run / "habitat-bridge.log").read_text(encoding="utf-8"),
+        "llm_calls_recorded": int(outcome.get("local_llm_calls", 0)) > 0,
+        "local_skill_completed": outcome.get("local_skill_completed") is True,
+        "mission_matches_local": (mission["status"] == "Completed") == (local_state == "COMPLETED"),
         "subtask_mode": mode,
-        "nav_targets": nav_targets,
-        "decision_count": len(trace),
-        "llm_calls": len(usage),
-        "local_model_tokens": sum(int(entry["usage"]["total_tokens"]) for entry in usage),
-        "local_outcome_state": outcome["state"],
+        "skill_sequence": skill_sequence,
+        "simulator_trace_count": len(trace),
+        "llm_calls": int(outcome.get("local_llm_calls", 0)),
+        "local_replans": int(outcome.get("local_replans", 0)),
+        "local_model_tokens": int(outcome.get("local_tokens", 0)),
+        "invalid_outputs": int(outcome.get("invalid_outputs", 0)),
+        "send_request_count": int(outcome.get("send_request_count", 0)),
+        "message_pipe_activity_count": int(outcome.get("message_pipe_activity_count", 0)),
+        "physical_execution_record_count": len(node_rows),
+        "physical_dispatch_count": int(authorizations),
+        "benchmark_task_achieved": outcome.get("benchmark_task_achieved"),
+        "episode_terminated": outcome.get("episode_terminated"),
+        "local_outcome_present": local_outcome_present,
+        "local_outcome_state": local_state,
+        "local_terminal_basis": outcome.get("terminal_basis"),
+        "local_execution_completed": local_state == "COMPLETED",
         "mission_status": mission["status"],
     }
     hard_keys = [
-        key
-        for key, value in checks.items()
-        if isinstance(value, bool)
+        "post_202",
+        "mission_terminal",
+        "original_stage2_called",
+        "nav_to_obj_selected",
+        "running_observed",
+        "simulator_stepped",
+        "physical_position_changed",
+        "local_terminal",
+        "exactly_once",
+        "no_recovery",
+        "controller_alive",
+        "node_connected",
+        "bridge_responsive",
+        "llm_calls_recorded",
+        "local_execution_completed",
+        "mission_matches_local",
     ]
     passed = all(checks[key] for key in hard_keys)
     return {
         "checks": checks,
         "local_execution": {
             "execution_id": bridge["execution_id"],
-            "outcome": outcome,
+            "outcome": outcome if local_outcome_present else None,
         },
         "mission_id": MISSION_ID,
-        "schema": "roboguide.c1-s0b-controlled-verdict/v0.1",
+        "schema": "roboguide.c1-s0b-controlled-verdict/v0.2",
         "verdict": "PASS" if passed else "FAIL",
     }
 

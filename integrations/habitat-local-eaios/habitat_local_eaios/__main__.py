@@ -41,11 +41,6 @@ def _arguments() -> argparse.Namespace:
         help="CrabAgent backend only: natural-objective (Protocol B) or entity-grounded (ablation)",
     )
     parser.add_argument(
-        "--robot-type",
-        default="SpotRobot",
-        help="CrabAgent backend only: EMOS robot resume identity for the local agent",
-    )
-    parser.add_argument(
         "--evidence-dir",
         type=Path,
         default=None,
@@ -73,7 +68,6 @@ def main() -> None:
         config: HabitatBackendConfig = CrabAgentBackendConfig(
             **common,
             subtask_mode=arguments.subtask_mode,
-            robot_type=arguments.robot_type,
             evidence_dir=arguments.evidence_dir,
         )
         backend_class: type = CrabAgentMobilityBackend

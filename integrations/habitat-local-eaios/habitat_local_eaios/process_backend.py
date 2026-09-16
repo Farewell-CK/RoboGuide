@@ -7,8 +7,9 @@ import time
 from collections.abc import Callable
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
+from typing import Any
 
-from .backend import HabitatBackendConfig, HabitatMobilityBackend, LocalExecutionOutcome
+from .backend import HabitatBackendConfig, LocalExecutionOutcome
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 _POLL_INTERVAL_S = 0.02
@@ -22,7 +23,7 @@ class HabitatProcessBackend:
         self,
         config: HabitatBackendConfig,
         startup_timeout_s: float,
-        backend_class: type[HabitatMobilityBackend] = HabitatMobilityBackend,
+        backend_class: type[Any],
     ) -> None:
         """Retain immutable deployment config without importing Habitat in the HTTP process."""
         if startup_timeout_s <= 0:
@@ -124,7 +125,7 @@ class HabitatProcessBackend:
 def _run_habitat_process(
     connection: Connection,
     config: HabitatBackendConfig,
-    backend_class: type[HabitatMobilityBackend],
+    backend_class: type[Any],
 ) -> None:
     """Own the configured backend environment and execute commands in one child process."""
     backend = backend_class(config)
