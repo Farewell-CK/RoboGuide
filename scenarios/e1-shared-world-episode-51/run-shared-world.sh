@@ -10,6 +10,10 @@ EMOS_ROOT="${ROBOGUIDE_EMOS_ROOT:-$DEFAULT_EMOS_ROOT}"
 HABITAT_ENV="${ROBOGUIDE_HABITAT_CONDA_ENV:-habitat}"
 MODE="${1:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}"
 RUN="${2:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}"
+# The harness may render {output_dir} relative to its own CWD; pin the run
+# directory to an absolute path so later `cd` (EMOS checkout) cannot move it.
+mkdir -p "$RUN"
+RUN="$(cd "$RUN" && pwd)"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 MISSION_ID="mission-e1-i-shared-world-episode-51"

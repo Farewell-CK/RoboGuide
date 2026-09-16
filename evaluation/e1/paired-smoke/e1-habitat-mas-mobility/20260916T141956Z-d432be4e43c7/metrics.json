@@ -1,0 +1,204 @@
+{
+  "details": {
+    "benchmark_success_source": "Habitat pddl_success (official shared-world summary)",
+    "identity": {
+      "episode_id": "51",
+      "episode_reset_count": 1,
+      "episode_started_unix": 1789568435.6682959,
+      "episode_terminated": true,
+      "pid": 1598857,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "simulator_steps": 3000,
+      "simulator_worlds": 1
+    },
+    "mission_outcome": "Failed",
+    "peer_communication": {
+      "0": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      },
+      "1": {
+        "message_pipe_activity_count": 0,
+        "send_request_count": 0
+      }
+    },
+    "per_agent_outcomes": {
+      "0": {
+        "benchmark_task_achieved": false,
+        "destination": "any_targets|0",
+        "episode_id": "51",
+        "episode_terminated": false,
+        "final_position": [
+          -0.4185841977596283,
+          2.91664981842041,
+          -1.4727776050567627
+        ],
+        "initial_position": [
+          -0.16678085923194885,
+          2.3214714527130127,
+          3.768552780151367
+        ],
+        "invalid_outputs": 0,
+        "local_llm_calls": 2,
+        "local_replans": 0,
+        "local_skill_completed": true,
+        "local_tokens": 2758,
+        "message_pipe_activity_count": 0,
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+        "send_request_count": 0,
+        "simulator_steps": 101,
+        "skill_sequence": [
+          "nav_to_obj|nav_to_obj"
+        ],
+        "state": "COMPLETED",
+        "terminal_basis": "oracle-nav-skill"
+      },
+      "1": {
+        "benchmark_task_achieved": false,
+        "destination": "TARGET_any_targets|0",
+        "episode_id": "51",
+        "episode_terminated": true,
+        "final_position": [
+          1.3818612098693848,
+          2.833804130554199,
+          -3.162310838699341
+        ],
+        "initial_position": [
+          2.932368516921997,
+          2.8338050842285156,
+          -0.5269778370857239
+        ],
+        "invalid_outputs": 0,
+        "local_llm_calls": 6,
+        "local_replans": 4,
+        "local_skill_completed": false,
+        "local_tokens": 11221,
+        "message_pipe_activity_count": 0,
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+        "send_request_count": 0,
+        "simulator_steps": 3000,
+        "skill_sequence": [
+          "nav_to_obj|nav_to_obj",
+          "wait|nav_to_obj",
+          "wait|wait"
+        ],
+        "state": "FAILED",
+        "terminal_basis": "episode-terminated-before-success"
+      }
+    },
+    "shared_world_checks": {
+      "assign_admitted_once_each": true,
+      "both_agents_moved": true,
+      "both_goals_satisfied": false,
+      "both_running_observed": true,
+      "canonical_intents_preserved": true,
+      "controller_alive": true,
+      "mission_completed": false,
+      "no_recovery_storm": true,
+      "no_stage1_reassignment": true,
+      "node_a_exactly_once": true,
+      "node_b_exactly_once": true,
+      "official_pddl_success": false,
+      "one_episode_reset": true,
+      "one_simulator_world": true,
+      "original_stage2_active": true,
+      "post_202": true,
+      "two_distinct_local_handles": true,
+      "two_nodes_registered": true,
+      "two_tasks_bound": true
+    },
+    "task_statuses": {
+      "task-navigate-goal-a": "Completed",
+      "task-navigate-goal-b": "Failed"
+    },
+    "unavailable_metrics": {
+      "model_failure": "the local stack does not emit a distinct model-failure fact"
+    },
+    "verdict": "FAIL",
+    "wall_time_source": "harness_process_duration"
+  },
+  "raw_evidence": [
+    {
+      "description": "persisted process stdout",
+      "media_type": "text/plain",
+      "path": "stdout.log"
+    },
+    {
+      "description": "persisted process stderr",
+      "media_type": "text/plain",
+      "path": "stderr.log"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "application/json",
+      "path": "verdict.json"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "application/json",
+      "path": "mission.json"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "application/json",
+      "path": "events.json"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "application/json",
+      "path": "execution-attempts.json"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "application/x-ndjson",
+      "path": "evidence/action_trace.jsonl"
+    },
+    {
+      "description": "RoboGuide controlled production evidence",
+      "media_type": "text/plain",
+      "path": "evidence/scene_description.txt"
+    },
+    {
+      "description": "RoboGuide E1-I shared-world production evidence",
+      "media_type": "application/json",
+      "path": "evidence/shared-world-summary.json"
+    },
+    {
+      "description": "RoboGuide E1-I shared-world production evidence",
+      "media_type": "application/x-ndjson",
+      "path": "evidence/assignment-arrival.jsonl"
+    },
+    {
+      "description": "RoboGuide E1-I shared-world production evidence",
+      "media_type": "application/json",
+      "path": "evidence/subtask-agent-0.txt"
+    },
+    {
+      "description": "RoboGuide E1-I shared-world production evidence",
+      "media_type": "application/json",
+      "path": "evidence/subtask-agent-1.txt"
+    }
+  ],
+  "schema": "roboguide-eval.metrics/v0.3",
+  "values": {
+    "episode_terminated": true,
+    "global_llm_calls": 0,
+    "global_token_usage": 0,
+    "infrastructure_failure": false,
+    "invalid_output_count": 0,
+    "local_agent_failure": true,
+    "local_llm_calls": 8,
+    "local_replan_count": 4,
+    "local_skill_completed": false,
+    "local_token_usage": 13979,
+    "message_pipe_activity_count": 0,
+    "mission_completed": false,
+    "physical_dispatch_count": 2,
+    "send_request_count": 0,
+    "simulation_steps": 3000,
+    "success": false,
+    "system_failure": true,
+    "token_usage": 13979,
+    "wall_time": 336.292
+  }
+}

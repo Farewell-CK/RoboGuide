@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 from roboguide_eval.metrics import MetricsPayload, RawEvidenceRef
 from roboguide_eval.models import JSONObject, JSONValue
@@ -19,6 +19,7 @@ from roboguide_eval.runner import PreparedSystem, ProcessSystemRunner
 
 CONTROLLED_VERDICT = "verdict.json"
 CONTROLLED_VERDICT_SCHEMA = "roboguide.c1-s0b-controlled-verdict/v0.2"
+SHARED_WORLD_VERDICT_SCHEMA = "roboguide.e1-shared-world-verdict/v0.1"
 CONTROLLED_EVIDENCE = (
     "verdict.json",
     "mission.json",
@@ -28,6 +29,17 @@ CONTROLLED_EVIDENCE = (
     "evidence/action_trace.jsonl",
     "evidence/scene_description.txt",
     "evidence/subtask.txt",
+)
+SHARED_WORLD_EVIDENCE = (
+    "verdict.json",
+    "mission.json",
+    "events.json",
+    "execution-attempts.json",
+    "evidence/shared-world-summary.json",
+    "evidence/assignment-arrival.jsonl",
+    "evidence/scene_description.txt",
+    "evidence/subtask-agent-0.txt",
+    "evidence/subtask-agent-1.txt",
 )
 
 
@@ -60,9 +72,19 @@ def read_controlled_verdict(path: Path) -> dict[str, object] | None:
     except (OSError, json.JSONDecodeError):
         return None
     verdict = _object(document)
-    if verdict is None or verdict.get("schema") != CONTROLLED_VERDICT_SCHEMA:
+    if verdict is None or verdict.get("schema") not in {
+        CONTROLLED_VERDICT_SCHEMA,
+        SHARED_WORLD_VERDICT_SCHEMA,
+    }:
         return None
     return verdict
+
+
+def _is_shared_world_verdict(
+    verdict: dict[str, object] | None,
+) -> TypeGuard[dict[str, object]]:
+    """Return whether one verdict came from the E1-I shared-world scenario."""
+    return verdict is not None and verdict.get("schema") == SHARED_WORLD_VERDICT_SCHEMA
 
 
 class RoboGuideRunner(ProcessSystemRunner):
@@ -115,6 +137,8 @@ class RoboGuideRunner(ProcessSystemRunner):
                 "controlled_outcomes": "no supported controlled verdict was produced"
             }
             return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
+        if _is_shared_world_verdict(verdict):
+            return self._collect_shared_world(verdict, values, details, evidence, run_directory)
 
         checks = _object(verdict.get("checks"))
         local_execution = _object(verdict.get("local_execution"))
@@ -204,6 +228,121 @@ class RoboGuideRunner(ProcessSystemRunner):
         )
         return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
 
+    def _collect_shared_world(
+        self,
+        verdict: dict[str, object],
+        values: dict[str, bool | int | float],
+        details: dict[str, JSONObject | JSONValue],
+        evidence: list[RawEvidenceRef],
+        run_directory: Path,
+    ) -> MetricsPayload:
+        """Reduce one E1-I shared-world verdict into the canonical contract.
+
+        Both agents' local outcomes are summed into per-run totals; benchmark
+        success stays the official shared ``pddl_success`` and Mission state
+        never substitutes for it.
+        """
+        checks = _object(verdict.get("checks"))
+        context = _object(verdict.get("context"))
+        if checks is None or context is None:
+            details["unavailable_metrics"] = {
+                "controlled_outcomes": "shared-world verdict lacks checks or context"
+            }
+            return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
+
+        known_paths = {item.path for item in evidence}
+        for relative_path in SHARED_WORLD_EVIDENCE:
+            if relative_path not in known_paths and (run_directory / relative_path).is_file():
+                evidence.append(
+                    RawEvidenceRef(
+                        path=relative_path,
+                        description="RoboGuide E1-I shared-world production evidence",
+                        media_type=(
+                            "application/x-ndjson"
+                            if relative_path.endswith(".jsonl")
+                            else "application/json"
+                        ),
+                    )
+                )
+
+        identity = _object(context.get("identity")) or {}
+        outcomes = {
+            agent: outcome
+            for agent, raw in (_object(context.get("outcomes")) or {}).items()
+            if (outcome := _object(raw)) is not None
+        }
+        raw_mission_status = context.get("mission_status")
+        mission_status = raw_mission_status if isinstance(raw_mission_status, str) else None
+
+        success = checks.get("official_pddl_success")
+        self._copy_boolean(values, "success", success)
+        if isinstance(mission_status, str):
+            values["mission_completed"] = mission_status == "Completed"
+            values["system_failure"] = mission_status == "Failed"
+        local_skill_values = [outcome.get("local_skill_completed") for outcome in outcomes.values()]
+        if all(isinstance(value, bool) for value in local_skill_values):
+            values["local_skill_completed"] = all(bool(value) for value in local_skill_values)
+        episode_terminated = identity.get("episode_terminated")
+        self._copy_boolean(values, "episode_terminated", episode_terminated)
+        steps = _integer(identity.get("simulator_steps"))
+        if steps is not None:
+            values["simulation_steps"] = steps
+        local_states = [outcome.get("state") for outcome in outcomes.values()]
+        if all(isinstance(state, str) for state in local_states):
+            values["local_agent_failure"] = any(state == "FAILED" for state in local_states)
+
+        def _sum_outcome(field: str) -> int | None:
+            """Sum one numeric outcome field across both agents."""
+            raw_values = [outcome.get(field) for outcome in outcomes.values()]
+            if all(isinstance(value, int) and not isinstance(value, bool) for value in raw_values):
+                return sum(int(value) for value in raw_values if isinstance(value, int))
+            return None
+
+        for metric, field in (
+            ("local_llm_calls", "local_llm_calls"),
+            ("local_token_usage", "local_tokens"),
+            ("local_replan_count", "local_replans"),
+            ("invalid_output_count", "invalid_outputs"),
+            ("send_request_count", "send_request_count"),
+            ("message_pipe_activity_count", "message_pipe_activity_count"),
+        ):
+            total = _sum_outcome(field)
+            if total is not None:
+                values[metric] = total
+        tokens = _sum_outcome("local_tokens")
+        if tokens is not None:
+            values["token_usage"] = tokens
+        values["global_llm_calls"] = 0
+        values["global_token_usage"] = 0
+
+        dispatches = [
+            checks.get("node_a_exactly_once"),
+            checks.get("node_b_exactly_once"),
+        ]
+        if all(isinstance(value, bool) for value in dispatches):
+            values["physical_dispatch_count"] = sum(1 for value in dispatches if value)
+        controller_alive = checks.get("controller_alive")
+        if isinstance(controller_alive, bool):
+            values["infrastructure_failure"] = not controller_alive
+
+        unavailable_metrics: JSONObject = {
+            "model_failure": "the local stack does not emit a distinct model-failure fact"
+        }
+        details.update(
+            {
+                "benchmark_success_source": "Habitat pddl_success (official shared-world summary)",
+                "identity": cast(JSONValue, identity),
+                "mission_outcome": mission_status,
+                "task_statuses": cast(JSONValue, context.get("task_statuses")),
+                "per_agent_outcomes": cast(JSONValue, context.get("outcomes")),
+                "peer_communication": cast(JSONValue, context.get("peer_communication")),
+                "shared_world_checks": cast(JSONValue, checks),
+                "verdict": cast(JSONValue, verdict.get("verdict")),
+                "unavailable_metrics": unavailable_metrics,
+            }
+        )
+        return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
+
     def resolve_episode_identity(
         self,
         prepared: PreparedSystem,
@@ -224,7 +363,31 @@ class RoboGuideRunner(ProcessSystemRunner):
         """
         del prepared, outcome
         verdict = read_controlled_verdict(run_directory / CONTROLLED_VERDICT)
+        if _is_shared_world_verdict(verdict):
+            context = _object(verdict.get("context")) or {}
+            outcomes = _object(context.get("outcomes")) or {}
+            for raw in outcomes.values():
+                if not isinstance(raw, dict):
+                    continue
+                outcome_object = _object(raw)
+                if outcome_object is None:
+                    continue
+                episode_id = outcome_object.get("episode_id")
+                scene_id = outcome_object.get("scene_id")
+                if isinstance(episode_id, str) and isinstance(scene_id, str):
+                    return {
+                        "status": "resolved",
+                        "resolved_episode_id": episode_id,
+                        "resolved_scene_id": scene_id,
+                        "dataset_index": None,
+                        "evidence_source": ["RoboGuide shared-world local outcomes"],
+                    }
+            return {
+                "status": "unresolved",
+                "reason": "shared-world verdict lacks agent episode identity",
+            }
         local_execution = _object(verdict.get("local_execution")) if verdict else None
+
         local_outcome = (
             _object(local_execution.get("outcome")) if local_execution is not None else None
         )

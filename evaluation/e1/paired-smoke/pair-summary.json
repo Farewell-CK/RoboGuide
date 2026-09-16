@@ -1,0 +1,90 @@
+{
+  "schema": "roboguide.e1-paired-smoke-summary/v0.1",
+  "pair_id": "e1-i-episode-51-paired-20260916",
+  "workload": {
+    "benchmark": "habitat-mas",
+    "task": "spot_fetch_mobility",
+    "episode": "51",
+    "seed": 40,
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "goal_predicates": [
+      "any_at(any_targets|0)",
+      "any_at(TARGET_any_targets|0)"
+    ],
+    "max_episode_steps": 3000,
+    "benchmark_success_authority": "habitat.pddl_success"
+  },
+  "assignment_wording": {
+    "emos": "original EMOS Stage1 Leader group discussion; full chat histories retained in the emos run dir",
+    "roboguide": "two RoboGuide MissionPlan natural-objective subtasks, control-committed (original group_discussion symbol replaced); full texts in evidence/subtask-agent-*.txt",
+    "note": "wording differs by design (different global organization); both retained for evidence"
+  },
+  "identity_gates": {
+    "dataset_digest_equal": true,
+    "dataset_file_equal": true,
+    "episode_id_equal": true,
+    "scene_id_equal": true,
+    "seed_equal": true,
+    "goal_predicate_set_equal": true,
+    "robot_agent_set_equal": true,
+    "max_step_policy_recorded": true,
+    "local_model_identity_recorded": true,
+    "local_policy_stack_recorded": true,
+    "benchmark_success_authority": true,
+    "metrics_schema_match": true
+  },
+  "metrics_schema": "roboguide-eval.metrics/v0.3",
+  "emos": {
+    "run_dir": "e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a",
+    "benchmark_success": true,
+    "simulator_steps": 130,
+    "wall_time_s": 97,
+    "global_llm_calls": 6,
+    "global_tokens": 3708,
+    "local_llm_tokens": 10823,
+    "local_policy_stack": "original EMOS Stage2 (MultiLLMPolicy + CrabAgent + OracleNavPolicy)",
+    "failure_category": null
+  },
+  "roboguide": {
+    "run_dir": "e1-habitat-mas-mobility/20260916T141956Z-d432be4e43c7",
+    "benchmark_success": false,
+    "simulator_steps": 3000,
+    "wall_time_s": 336,
+    "global_llm_calls": 0,
+    "global_tokens": 0,
+    "local_llm_calls": 8,
+    "local_tokens": 13979,
+    "local_policy_stack": "original EMOS Stage2 behind the shared-world Local EAIOS (same CrabAgent/skills)",
+    "failure_category": "LOCAL_AGENT_REASONING/model: agent_1 replan churn exhausted the official 3000-step episode budget before its goal predicate; infrastructure_failure=false; terminal_basis=episode-terminated-before-success"
+  },
+  "timing_boundaries": {
+    "roboguide": {
+      "submission_start_utc": "2026-09-16T14:19:56+00:00",
+      "assignments_committed": "at mission acceptance; per-assignment arrival timestamps in runs/.../evidence/assignment-arrival.jsonl",
+      "episode_execution_start_unix": 1789568435.6682959,
+      "benchmark_terminal_utc": "2026-09-16T14:25:32+00:00",
+      "note": "wall covers Mission/Control overhead; not hidden"
+    },
+    "emos": {
+      "submission_start_utc": "2026-09-16T14:26:36+00:00",
+      "organization_ready": "group_discussion completes inside the first policy act; chat history retained",
+      "episode_execution_start": "Episode Step Info banner in stdout.log (episode 51)",
+      "benchmark_terminal_utc": "2026-09-16T14:28:13+00:00"
+    }
+  },
+  "pipeline_verdict": {
+    "both_arms_ran_fresh": true,
+    "no_evidence_reuse": true,
+    "no_hidden_fallback": true,
+    "identity_gates_pass": true,
+    "metrics_schema_match": true,
+    "UNIFIED_PAIRED_SMOKE": "PASS"
+  },
+  "benchmark_outcomes": {
+    "emos_pddl_success": true,
+    "roboguide_pddl_success": false,
+    "note": "RoboGuide arm benchmark failure is a recorded real local-agent/model outcome (LOCAL_AGENT_REASONING), not a pipeline failure; pipeline PASS != benchmark success"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "details": {
+    "emos_average_metrics": {
+      "did_collide": 0.0,
+      "num_agents_collide": 0.0,
+      "num_steps": 130.0,
+      "object_to_goal_distance.0": 1.6754,
+      "pddl_subgoal_reward": 1.0,
+      "rearrange_cooperate_reward": 5.0,
+      "reward": 19.935
+    },
+    "emos_episode_batch_size": 1,
+    "emos_episode_ids": [
+      "51"
+    ],
+    "emos_pddl_success_average": 1.0,
+    "emos_stage_goal_success": {
+      "pddl_stage_goals.robot_at_object_0_success": 1.0,
+      "pddl_stage_goals.robot_at_receptacle_0_success": 1.0
+    },
+    "emos_token_breakdown_by_agent": {
+      "FetchRobot": {
+        "completion_tokens": 14,
+        "prompt_tokens": 2210
+      },
+      "SpotRobot": {
+        "completion_tokens": 176,
+        "prompt_tokens": 2313
+      },
+      "agent_0": {
+        "completion_tokens": 396,
+        "prompt_tokens": 13273
+      },
+      "agent_1": {
+        "completion_tokens": 139,
+        "prompt_tokens": 7716
+      },
+      "leader": {
+        "completion_tokens": 406,
+        "prompt_tokens": 2346
+      }
+    },
+    "emos_token_call_latency_ms": {
+      "avg": 3268.1,
+      "max": 5912.6
+    },
+    "emos_token_calls": 16,
+    "emos_token_details_source_path": "chat_history_output/2026-09-16/llm_spot_fetch_mobility/FULL/51/token_usage_details.jsonl",
+    "emos_token_usage_by_agent": {
+      "FetchRobot": 1112,
+      "SpotRobot": 1246,
+      "agent_0": 6890,
+      "agent_1": 3933,
+      "leader": 1350
+    },
+    "emos_token_usage_source_path": "chat_history_output/2026-09-16/llm_spot_fetch_mobility/FULL/51/token_usage.json",
+    "unavailable_metrics": {
+      "coordination_latency": "measurement boundary frozen in evaluation/README.md; collection gated on explicit protocol agreement before formal E1 runs"
+    },
+    "wall_time_source": "harness_process_duration"
+  },
+  "raw_evidence": [
+    {
+      "description": "persisted process stdout",
+      "media_type": "text/plain",
+      "path": "stdout.log"
+    },
+    {
+      "description": "persisted process stderr",
+      "media_type": "text/plain",
+      "path": "stderr.log"
+    },
+    {
+      "description": "EMOS official per-agent token totals for episode 51",
+      "media_type": "application/json",
+      "path": "raw-evidence/token_usage-51.json"
+    },
+    {
+      "description": "EMOS per-call LLM usage records for episode 51",
+      "media_type": "application/x-ndjson",
+      "path": "raw-evidence/token_usage_details-51.jsonl"
+    }
+  ],
+  "schema": "roboguide-eval.metrics/v0.3",
+  "values": {
+    "cached_prompt_tokens": 2816,
+    "episode_terminated": true,
+    "global_llm_calls": 6,
+    "global_token_usage": 3708,
+    "local_llm_calls": 10,
+    "local_token_usage": 10823,
+    "reasoning_tokens": 796,
+    "simulation_steps": 130,
+    "subgoal_success_rate": 1.0,
+    "success": true,
+    "token_input_usage": 27858,
+    "token_output_usage": 1131,
+    "token_usage": 14531,
+    "wall_time": 96.982
+  }
+}

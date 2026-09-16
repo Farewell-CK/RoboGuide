@@ -1,0 +1,11 @@
+Here are the descriptions of the scene: 
+There are 2 objects in the scene.
+The object "TARGET_any_targets|0" is located in hallway_7 on 1 floor. The height of object "TARGET_any_targets|0" from the floor is -0.7. 
+The object "any_targets|0" is located in hallway_18 on 2 floor. The height of object "any_targets|0" from the floor is 0.2. 
+
+There are 2 agents in the scene.
+"agent_0" is in living room_21 on 3 floor.
+"agent_1" is in kitchen_23 on 3 floor.
+
+There are 29 regions in the scene. The regions are grouped into 1 connected components. Within each component, all regions are connected, while regions from different components have no connections to each other. 
+ Component 1: [entryway/foyer/lobby_0, stairs_1, stairs_9, stairs_19, hallway_24, dining room_22, kitchen_23, living room_21, stairs_8, balcony_20, stairs_28, balcony_27, hallway_18, bedroom_10, bathroom_11, closet_12, stairs_17, bedroom_14, bathroom_5, closet_13, toilet_6, closet_16, porch/terrace/deck_15, bathroom_25, hallway_7, bedroom_2, bathroom_3, laundryroom/mudroom_4, other room_26] are all connected. 
