@@ -419,6 +419,111 @@ struct TimeoutDriver {
     calls: Arc<AtomicUsize>,
 }
 
+/// Failure shape injected into one or more read-only status calls.
+#[derive(Clone, Copy)]
+enum StatusFault {
+    /// Local transport could not produce a response.
+    Transport,
+    /// Local transport produced malformed structured data.
+    InvalidResponse,
+    /// Local response decoded but lacks the configured state field.
+    MissingState,
+}
+
+/// Driver that proves status reacquisition never repeats physical Execute.
+struct FlakyStatusDriver {
+    /// Number of initial status reads that fail.
+    failures: usize,
+    /// Failure shape returned during the initial window.
+    fault: StatusFault,
+    /// Terminal state returned after one recovered Running observation.
+    terminal_state: &'static str,
+    /// Number of physical dispatch calls.
+    dispatch_calls: Arc<AtomicUsize>,
+    /// Number of status observation calls.
+    status_calls: Arc<AtomicUsize>,
+    /// Whether the local cancel route accepted a request.
+    cancellation_requested: Arc<AtomicBool>,
+}
+
+impl FlakyStatusDriver {
+    /// Builds a scripted status driver with shared counters for assertions.
+    fn new(failures: usize, fault: StatusFault, terminal_state: &'static str) -> Self {
+        Self {
+            failures,
+            fault,
+            terminal_state,
+            dispatch_calls: Arc::new(AtomicUsize::new(0)),
+            status_calls: Arc::new(AtomicUsize::new(0)),
+            cancellation_requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl LocalDriver for FlakyStatusDriver {
+    /// Uses the generic HTTP workflow family.
+    fn kind(&self) -> DriverKind {
+        DriverKind::Http
+    }
+
+    /// Scripts execute, status, and cancel without retrying Execute inside the driver.
+    fn invoke<'a>(&'a self, request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
+        Box::pin(async move {
+            let CompiledDriverRequest::Http { path, .. } = request else {
+                return Err(DriverError::KindMismatch);
+            };
+            let payload = match path.as_str() {
+                "/health" => serde_json::json!({ "state": "ONLINE", "detail": "ready" }),
+                "/readiness" => {
+                    serde_json::json!({ "state": "READY", "detail": "ready" })
+                }
+                "/dispatch" => {
+                    self.dispatch_calls.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({ "execution_id": "local-flaky" })
+                }
+                "/cancel" => {
+                    self.cancellation_requested.store(true, Ordering::SeqCst);
+                    serde_json::json!({ "accepted": true })
+                }
+                "/status" => {
+                    let call = self.status_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                    if call <= self.failures {
+                        match self.fault {
+                            StatusFault::Transport => {
+                                return Err(DriverError::Transport(
+                                    "scripted status outage".to_string(),
+                                ));
+                            }
+                            StatusFault::InvalidResponse => {
+                                return Err(DriverError::InvalidResponse(
+                                    "scripted malformed status".to_string(),
+                                ));
+                            }
+                            StatusFault::MissingState => serde_json::json!({ "detail": "missing" }),
+                        }
+                    } else if self.cancellation_requested.load(Ordering::SeqCst) {
+                        serde_json::json!({ "state": "CANCELLED", "detail": "cancelled" })
+                    } else if call == self.failures + 1 {
+                        serde_json::json!({ "state": "RUNNING", "detail": "reacquired" })
+                    } else {
+                        serde_json::json!({ "state": self.terminal_state, "detail": "terminal" })
+                    }
+                }
+                _ => return Err(DriverError::InvalidResponse("unknown mock path".into())),
+            };
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            let _ = sender
+                .send(Ok(DriverEvent {
+                    sequence: 1,
+                    payload,
+                    terminal: true,
+                }))
+                .await;
+            Ok(DriverResponse { events: receiver })
+        })
+    }
+}
+
 impl LocalDriver for TimeoutDriver {
     /// This mock uses the configured HTTP workflow family.
     fn kind(&self) -> DriverKind {

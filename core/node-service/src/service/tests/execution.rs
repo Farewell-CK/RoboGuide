@@ -427,3 +427,206 @@ async fn handle_bearing_dispatch_resumes_status_only_recovery_after_restart() {
         Err(crate::EngineError::LocalLockConflict { .. })
     ));
 }
+
+/// Builds one canonical invocation accepted by the status-reacquisition fixture.
+fn flaky_status_invocation() -> integration::grpc::v0_4::CanonicalInvocation {
+    integration::grpc::v0_4::CanonicalInvocation {
+        mission_id: "mission-status-reacquisition".to_string(),
+        task_id: "navigate".to_string(),
+        group_id: "group-status-reacquisition".to_string(),
+        role_id: "navigator".to_string(),
+        intent: Some(integration::grpc::v0_4::ExecutionIntent {
+            operation: Some(integration::grpc::v0_4::OperationRef {
+                namespace: "mobility".to_string(),
+                name: "reach_region".to_string(),
+                version: "v1".to_string(),
+            }),
+            objective: "reach the configured region".to_string(),
+            parameters: Default::default(),
+        }),
+        ..Default::default()
+    }
+}
+
+/// Waits until one local execution emits the requested phase and rejects false ambiguity.
+async fn wait_for_local_phase(
+    events: &mut tokio::sync::broadcast::Receiver<crate::LocalExecutionEvent>,
+    expected: integration::grpc::v0_4::ExecutionPhase,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let event = events.recv().await.expect("local event stream stays open");
+            assert_ne!(
+                event.phase,
+                integration::grpc::v0_4::ExecutionPhase::Unknown,
+                "temporary status loss must not fabricate physical ambiguity"
+            );
+            if event.phase == expected {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("expected local phase arrives within the bounded retry window");
+}
+
+/// Transport status failures are reacquired and a duplicate Execute never redispatches work.
+#[tokio::test]
+async fn status_transport_failure_reacquires_completed_without_redispatch() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        3,
+        StatusFault::Transport,
+        "COMPLETED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    let invocation = flaky_status_invocation();
+    assert_eq!(
+        engine
+            .execute(
+                "execution-status-transport".to_string(),
+                invocation.clone(),
+                vec!["base".to_string()],
+            )
+            .expect("first Execute starts"),
+        crate::ExecuteDisposition::Started
+    );
+    assert!(matches!(
+        engine
+            .execute(
+                "execution-status-transport".to_string(),
+                invocation,
+                vec!["base".to_string()],
+            )
+            .expect("exact duplicate is idempotent"),
+        crate::ExecuteDisposition::DispatchPending | crate::ExecuteDisposition::Existing(_)
+    ));
+    wait_for_local_phase(
+        &mut events,
+        integration::grpc::v0_4::ExecutionPhase::Completed,
+    )
+    .await;
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(driver.status_calls.load(Ordering::SeqCst), 5);
+}
+
+/// Malformed status payloads are reacquired and preserve a true Failed terminal fact.
+#[tokio::test]
+async fn malformed_status_reacquires_true_failed_terminal() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        1,
+        StatusFault::MissingState,
+        "FAILED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    engine
+        .execute(
+            "execution-status-malformed".to_string(),
+            flaky_status_invocation(),
+            vec!["base".to_string()],
+        )
+        .expect("Execute starts");
+    wait_for_local_phase(&mut events, integration::grpc::v0_4::ExecutionPhase::Failed).await;
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+}
+
+/// Cancellation remains responsive while status observations are being reacquired.
+#[tokio::test]
+async fn cancellation_during_status_reacquisition_waits_for_true_cancelled_fact() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        3,
+        StatusFault::InvalidResponse,
+        "COMPLETED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    engine
+        .execute(
+            "execution-status-cancel".to_string(),
+            flaky_status_invocation(),
+            vec!["base".to_string()],
+        )
+        .expect("Execute starts");
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while driver.status_calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first failed status read occurs");
+    engine
+        .cancel("execution-status-cancel")
+        .expect("cancel request is admitted independently");
+    wait_for_local_phase(
+        &mut events,
+        integration::grpc::v0_4::ExecutionPhase::Cancelled,
+    )
+    .await;
+    assert!(driver.cancellation_requested.load(Ordering::SeqCst));
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+}
+
+/// A permanently unavailable status route eventually enters explicit reconciliation.
+#[tokio::test]
+async fn exhausted_status_reacquisition_is_bounded_and_fenced() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        10,
+        StatusFault::Transport,
+        "COMPLETED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    engine
+        .execute(
+            "execution-status-exhausted".to_string(),
+            flaky_status_invocation(),
+            vec!["base".to_string()],
+        )
+        .expect("Execute starts");
+    let event = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let event = events.recv().await.expect("local event stream stays open");
+            if event.phase == integration::grpc::v0_4::ExecutionPhase::Unknown {
+                return event;
+            }
+        }
+    })
+    .await
+    .expect("bounded status budget eventually fences the attempt");
+    assert!(event.reason.contains("5 consecutive attempt"));
+    assert_eq!(driver.status_calls.load(Ordering::SeqCst), 5);
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+}

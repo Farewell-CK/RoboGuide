@@ -1,6 +1,12 @@
 //! Local execution, artifact finalization, fact reduction, and resource locking.
 
 use super::*;
+use std::time::Duration;
+
+/// Maximum consecutive read-only status observation failures before the attempt is fenced.
+const MAX_CONSECUTIVE_STATUS_OBSERVATION_FAILURES: u32 = 5;
+/// Upper bound for process-local status reacquisition backoff.
+const MAX_STATUS_REACQUISITION_DELAY_MS: u64 = 1_000;
 
 impl LocalIntegrationEngine {
     /// Starts the one permitted local dispatch and then status polling.
@@ -73,6 +79,7 @@ impl LocalIntegrationEngine {
     ) {
         let engine = self.clone();
         tokio::spawn(async move {
+            let mut consecutive_observation_failures = 0_u32;
             loop {
                 if engine
                     .inner
@@ -82,22 +89,37 @@ impl LocalIntegrationEngine {
                 {
                     let _ = engine.cancel(&execution_id);
                 }
-                let mut context = WorkflowContext::new(invocation.clone());
-                context.set_local_handle(handle.clone());
-                if let Err(error) = engine
-                    .run_steps(capability.workflow().status(), &mut context)
+                let fact = match engine
+                    .observe_execution_status(&invocation, &handle, &capability)
                     .await
                 {
-                    engine.record_ambiguous(&execution_id, error.to_string());
-                    return;
-                }
-                let fact = match capability.workflow().map_execution_state(&context) {
                     Ok(fact) => fact,
                     Err(error) => {
-                        engine.record_ambiguous(&execution_id, error.to_string());
-                        return;
+                        consecutive_observation_failures =
+                            consecutive_observation_failures.saturating_add(1);
+                        if !status_observation_is_reacquirable(&error)
+                            || consecutive_observation_failures
+                                >= MAX_CONSECUTIVE_STATUS_OBSERVATION_FAILURES
+                        {
+                            engine.record_ambiguous(
+                                &execution_id,
+                                format!(
+                                    "status observation unavailable after {} consecutive \
+                                     attempt(s): {error}",
+                                    consecutive_observation_failures
+                                ),
+                            );
+                            return;
+                        }
+                        tokio::time::sleep(status_reacquisition_delay(
+                            capability.workflow().poll_interval_ms(),
+                            consecutive_observation_failures,
+                        ))
+                        .await;
+                        continue;
                     }
                 };
+                consecutive_observation_failures = 0;
                 let phase = fact.phase;
                 if phase == MappedExecutionPhase::Completed {
                     if let Err(error) = engine.prepare_artifact_finalization(
@@ -145,6 +167,23 @@ impl LocalIntegrationEngine {
                 .await;
             }
         });
+    }
+
+    /// Reads one status fact for a known local handle without redispatching physical work.
+    async fn observe_execution_status(
+        &self,
+        invocation: &serde_json::Value,
+        handle: &str,
+        capability: &CompiledOperation,
+    ) -> Result<MappedExecutionFact, EngineError> {
+        let mut context = WorkflowContext::new(invocation.clone());
+        context.set_local_handle(handle.to_string());
+        self.run_steps(capability.workflow().status(), &mut context)
+            .await?;
+        capability
+            .workflow()
+            .map_execution_state(&context)
+            .map_err(EngineError::Mapping)
     }
 
     /// Executes ordered fixed-route steps and retains each final structured response.
@@ -758,4 +797,30 @@ impl LocalIntegrationEngine {
             owners.retain(|_, owner| owner != execution_id);
         }
     }
+}
+
+/// Classifies errors produced after a durable local handle exists.
+///
+/// Transport and response-shape failures say only that this read could not observe the attempt.
+/// Retrying the fixed status route cannot repeat Execute. Configuration, journal, identity, and
+/// lock failures remain immediate reconciliation boundaries.
+fn status_observation_is_reacquirable(error: &EngineError) -> bool {
+    matches!(
+        error,
+        EngineError::Driver(
+            crate::DriverError::Transport(_) | crate::DriverError::InvalidResponse(_)
+        ) | EngineError::Mapping(_)
+            | EngineError::Protocol(_)
+    )
+}
+
+/// Returns deterministic bounded exponential backoff for one failed status read.
+fn status_reacquisition_delay(poll_interval_ms: u64, consecutive_failures: u32) -> Duration {
+    let exponent = consecutive_failures.saturating_sub(1).min(10);
+    let multiplier = 1_u64 << exponent;
+    Duration::from_millis(
+        poll_interval_ms
+            .saturating_mul(multiplier)
+            .min(MAX_STATUS_REACQUISITION_DELAY_MS),
+    )
 }
