@@ -239,6 +239,8 @@ class OutdoorNavController(
     private val dynamicHeadingCalibrator = DynamicHeadingCalibrator()
     private var currentRoute: AmapRouteClient.RouteResult? = null
     @Volatile private var navigationActive = false
+    /** 附近地点搜索可使用网络粗定位；正式导航仍只使用通过严格检查的 [lastLocation]。 */
+    @Volatile private var destinationSearchLocation: Location? = null
     @Volatile private var lastLocation: Location? = null
     @Volatile private var currentHeading = Float.NaN
     @Volatile private var latestHeadingNanos = 0L
@@ -382,6 +384,11 @@ class OutdoorNavController(
             }
 
             override fun onLocation(location: Location) {
+                destinationSearchLocation = Location(location)
+                pendingLocationSearchKeyword?.let { keyword ->
+                    pendingLocationSearchKeyword = null
+                    searchDestinationSuggestions(keyword)
+                }
                 if (LocationManager.GPS_PROVIDER != location.provider) return
                 latestGpsAccuracyMeters =
                     if (location.hasAccuracy()) location.accuracy else Float.NaN
@@ -416,10 +423,6 @@ class OutdoorNavController(
                         if (location.hasAccuracy()) location.accuracy else 0f))
                 updateDynamicHeadingCalibration(location)
                 updateNavigationGuidance()
-                pendingLocationSearchKeyword?.let { keyword ->
-                    pendingLocationSearchKeyword = null
-                    searchDestinationSuggestions(keyword)
-                }
             }
 
             override fun onLocationStatus(status: String) {
@@ -601,7 +604,7 @@ class OutdoorNavController(
             listener.onRouteStatus("输入高德 Key 后显示附近地点")
             return
         }
-        val location = lastLocation
+        val location = destinationSearchLocation
         if (location == null) {
             listener.onRouteStatus("等待手机定位后显示附近地点")
             pendingLocationSearchKeyword = keyword
