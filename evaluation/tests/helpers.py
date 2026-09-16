@@ -222,6 +222,93 @@ with open(os.path.join(output_dir, "raw-metrics.json"), "w", encoding="utf-8") a
 print("wrote invalid raw metrics")
 """
 
+FIXTURE_ROBOGUIDE_CONTROLLED_SCRIPT: str = """\
+import json
+import os
+import sys
+
+output_dir = sys.argv[1]
+os.makedirs(os.path.join(output_dir, "evidence"), exist_ok=True)
+checks = {
+    "benchmark_task_achieved": False,
+    "bridge_responsive": True,
+    "controller_alive": True,
+    "episode_terminated": False,
+    "invalid_outputs": 1,
+    "llm_calls": 4,
+    "local_model_tokens": 5509,
+    "local_outcome_state": "COMPLETED",
+    "local_replans": 1,
+    "local_skill_completed": True,
+    "message_pipe_activity_count": 1,
+    "mission_status": "Completed",
+    "node_connected": True,
+    "physical_dispatch_count": 1,
+    "send_request_count": 1,
+    "skill_sequence": ["nav_to_obj|wait"],
+}
+outcome = {
+    "benchmark_task_achieved": False,
+    "destination": "any_targets|0",
+    "episode_id": "51",
+    "episode_terminated": False,
+    "local_llm_calls": 4,
+    "local_skill_completed": True,
+    "local_tokens": 5509,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "simulator_steps": 101,
+    "skill_sequence": ["nav_to_obj|wait"],
+    "state": "COMPLETED",
+}
+verdict = {
+    "checks": checks,
+    "local_execution": {"execution_id": "execution-1", "outcome": outcome},
+    "mission_id": "mission-1",
+    "schema": "roboguide.c1-s0b-controlled-verdict/v0.2",
+    "verdict": "PASS",
+}
+with open(os.path.join(output_dir, "verdict.json"), "w", encoding="utf-8") as handle:
+    json.dump(verdict, handle)
+with open(os.path.join(output_dir, "mission.json"), "w", encoding="utf-8") as handle:
+    json.dump({"status": "Completed"}, handle)
+with open(
+    os.path.join(output_dir, "evidence", "controlled-outcome.json"),
+    "w",
+    encoding="utf-8",
+) as handle:
+    json.dump(outcome, handle)
+print("controlled fixture completed")
+"""
+
+FIXTURE_ROBOGUIDE_FAILED_SCRIPT: str = """\
+import json
+import os
+import sys
+
+output_dir = sys.argv[1]
+checks = {
+    "benchmark_task_achieved": None,
+    "bridge_responsive": True,
+    "controller_alive": True,
+    "episode_terminated": None,
+    "local_outcome_present": False,
+    "local_outcome_state": "FAILED",
+    "mission_status": "Failed",
+    "node_connected": True,
+    "physical_dispatch_count": 1,
+}
+verdict = {
+    "checks": checks,
+    "local_execution": {"execution_id": "execution-1", "outcome": None},
+    "mission_id": "mission-1",
+    "schema": "roboguide.c1-s0b-controlled-verdict/v0.2",
+    "verdict": "FAIL",
+}
+with open(os.path.join(output_dir, "verdict.json"), "w", encoding="utf-8") as handle:
+    json.dump(verdict, handle)
+print("failed controlled fixture recorded")
+"""
+
 
 def interpreter() -> str:
     """Return the current Python interpreter path for child processes.
@@ -257,18 +344,20 @@ def write_fixture_dataset(
 def local_config_yaml(
     working_directory: Path,
     *,
+    system: str = "emos",
     executable: str | None = None,
     arguments: list[str] | None = None,
     extra_lines: str = "",
     environment_variables: dict[str, str] | None = None,
 ) -> str:
-    """Build local configuration YAML text for the fixture ``emos`` system.
+    """Build local configuration YAML text for one fixture system.
 
     The document is rendered with ``yaml.safe_dump`` so multi-line argument
     strings (fixture child scripts) stay valid YAML.
 
     Args:
         working_directory: Existing directory used as the system workdir.
+        system: System runner name receiving the fixture process config.
         executable: Executable override; defaults to the test interpreter.
         arguments: Argument override; defaults to the fixture metrics script.
         extra_lines: Additional raw YAML lines appended inside the emos
@@ -283,15 +372,18 @@ def local_config_yaml(
     resolved_arguments = (
         arguments if arguments is not None else ["-u", "-c", FIXTURE_METRICS_SCRIPT, "{output_dir}"]
     )
-    emos: dict[str, object] = {
+    configured_system: dict[str, object] = {
         "working_directory": working_directory.as_posix(),
         "executable": resolved_executable,
         "arguments": resolved_arguments,
         "version_probe_command": [interpreter(), "-c", "print('v-fixture-1.2.3')"],
     }
     if environment_variables:
-        emos["environment_variables"] = environment_variables
-    document = {"schema": "roboguide-eval.local-config/v0.1", "environments": {"emos": emos}}
+        configured_system["environment_variables"] = environment_variables
+    document = {
+        "schema": "roboguide-eval.local-config/v0.1",
+        "environments": {system: configured_system},
+    }
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False, width=1000)
     return rendered + extra_lines
 

@@ -13,8 +13,8 @@ E1（Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。
   逻辑；外部系统只通过进程边界（subprocess）访问。
 - 不把 Habitat/EMOS 依赖加入 RoboGuide Python 环境；Harness 与 EMOS 各自
   保留独立环境。
-- `RoboGuideRunner` 后续必须经由真实 Controller / Node Protocol / Runtime
-  路径执行，不允许绕过 RoboGuide 直接调用 Habitat skill 拿结果。
+- `RoboGuideRunner` 只接纳真实 Controller / Node Protocol / Runtime / Local
+  EAIOS production-path evidence，不允许绕过 RoboGuide 直接调用 Habitat skill。
 - Harness 不定义 Habitat-MAS 如何判定 task success；各系统 runner 只把各自
   原始输出转换为 canonical metrics，并保留 raw evidence。
 - 真实 results、本机 `local.yaml`、数据集与模型文件不提交 Git。
@@ -24,6 +24,8 @@ E1（Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。
 ```text
 evaluation/
 ├── specs/e1/mobility-smoke.yaml   # E1 smoke 实验定义（可移植、无机器信息）
+├── e1/controlled-workload-v0.1.yaml # Formal E1 candidate + fail-closed admission
+├── e1/PREFLIGHT-CLOSURE.md        # preflight checks + exact remaining blocker
 ├── local.yaml.example             # 本机配置模板（复制为 local.yaml，不入库）
 ├── src/roboguide_eval/
 │   ├── models.py                  # ExperimentSpec 领域模型与 canonical 序列化
@@ -51,20 +53,23 @@ evaluation/
   argv 自动包装为 `conda run --no-capture-output -n <env> ...`，不需要交互式
   `conda activate`。
 - **SystemRunner**：统一生命周期 `prepare -> run_episode -> collect_result ->
-  cleanup`。当前 `EmosRunner` / `RoboGuideRunner` 是真实进程执行 +
-  fixture 命令映射：启动/观察由本机配置提供的命令，尚未接官方 EMOS 命令映射
-  与 RoboGuide Controller 路径。
+  cleanup`。`EmosRunner` 启动官方 EMOS entry point；`RoboGuideRunner` 启动
+  `POST /v1/missions -> Control -> Node -> Local EAIOS` production scenario 并归约
+  其持久证据。两者均只跨进程观察，不 import 对方运行时。
 - **RunManifest**（`roboguide-eval.run-manifest/v0.1`）：每个 run 的唯一完整
   身份 —— experiment/system/benchmark/task/episode/seed、LLM 配置
   （含预留的 `reported_model`，用于记录 API 实际返回的 model identifier）、
   run id、RoboGuide git SHA、外部系统版本、数据集身份/digest、config digest、
   起止时间、完整命令、退出状态、失败原因与环境信息。
-- **Canonical metrics**（`roboguide-eval.metrics/v0.2`）：注册表当前包含 E1
+- **Canonical metrics**（`roboguide-eval.metrics/v0.3`）：注册表当前包含 E1
   核心指标（success、subgoal_success_rate、simulation_steps、token_usage、
   wall_time、coordination_latency）与预留指标（assignment 三项、scheduling/
   recovery latency、resource conflicts、deadline miss、state freshness、
-  control-plane overhead）。runner 产出的 `metrics.json` 保留 raw evidence
-  引用；未知指标名拒绝入库。**v0.1 → v0.2 迁移**（尚无正式论文数据）：
+  control-plane overhead），并独立表达 benchmark success、local skill completion、
+  episode termination、RoboGuide Mission completion、global/local calls/tokens、
+  physical dispatch、message activity 与 failure categories。runner 产出的
+  `metrics.json` 保留 raw evidence 引用；未知指标名拒绝入库。v0.2 历史证据仍可读，
+  新输出使用 v0.3。**v0.1 → v0.2 迁移**（尚无正式论文数据）：
   `subgoal_success`（boolean）改为 `subgoal_success_rate`（number，[0,1]，
   带范围校验）——布尔无法表达部分 subgoal 完成；`invalid_assignment_count`
   移除，由 reserved 的 assignment 三指标替代（定义见下）。
@@ -83,6 +88,13 @@ RoboGuide 执行。因此 manifest 的 `episode_selection` 区分两层：
 回答"EMOS run X 和 RoboGuide run Y 是否同一 benchmark episode"看
 `resolved_episode_id` + `dataset_record`（配合 spec 的 dataset digest）。
 **不伪造**：解析不到就 unresolved/partial 并记录原因。
+
+相同 episode 仍不足以形成 paired workload。两侧还必须覆盖同一 semantic goal
+predicates。当前 episode 51 的官方任务要求两个 agent 分别满足两个 `any_at`
+谓词，而 C1-S0B RoboGuide Mission 只覆盖其中一个导航谓词；因此
+[`e1/controlled-workload-v0.1.yaml`](e1/controlled-workload-v0.1.yaml) 明确保持
+`admission.status: blocked`。这条 smoke 可以验证 Local boundary，但不能产生
+Formal E1 comparative score。
 
 **scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
 `dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不

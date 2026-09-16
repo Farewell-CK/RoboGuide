@@ -495,6 +495,11 @@ facade 持续响应 Node workflow，将既有
 `mobility.navigate@v1` 的 semantic destination 映射到 EMOS 所用的 Habitat Oracle navigation
 action，并通过稳定 local handle 上报 `ACCEPTED → RUNNING → terminal`。Habitat/EMOS 依赖、
 PDDL entity、agent selection、path 与 pose control 均不进入 RoboGuide Core。
+Controlled deployment 只在 EMOS Stage1→Stage2 边界注入 Control 已 Commit 的 assignment，
+之后直接运行原始 `MultiLLMPolicy`、`CrabAgent`、`HierarchicalPolicy` 和 Oracle skill stack；
+它不再维护 RoboGuide-specific 的 prompt、invalid-output retry 或 skill dispatcher 副本。
+Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
+作为四类独立证据记录，彼此不得推导。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。

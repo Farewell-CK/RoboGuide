@@ -419,6 +419,37 @@ def read_token_file(path: Path) -> dict[str, int] | None:
     return totals or None
 
 
+def partition_token_totals(totals: dict[str, int]) -> tuple[int, int]:
+    """Split original EMOS accounting into global and Stage2 local tokens.
+
+    Original EMOS names Stage2 actors ``agent_<n>``; Leader and reflection
+    participants use other names. This classification records the existing
+    implementation boundary and does not alter either policy.
+
+    Args:
+        totals: EMOS ``token_usage.json`` per-agent totals.
+
+    Returns:
+        ``(global_tokens, local_tokens)``.
+    """
+    local = sum(value for name, value in totals.items() if name.startswith("agent_"))
+    return sum(totals.values()) - local, local
+
+
+def partition_call_counts(records: list[dict[str, object]]) -> tuple[int, int]:
+    """Split per-call usage records at the EMOS Stage1/Stage2 name boundary.
+
+    Args:
+        records: Original EMOS per-call usage records.
+
+    Returns:
+        ``(global_calls, local_calls)``; unnamed records remain global because
+        they cannot be attributed to a Stage2 actor.
+    """
+    local = sum(1 for record in records if str(record.get("agent_name", "")).startswith("agent_"))
+    return len(records) - local, local
+
+
 def sampled_episode_count(argv: tuple[str, ...]) -> int | None:
     """Return the per-run episode count from EMOS iterator override args.
 
@@ -652,6 +683,8 @@ class EmosRunner(ProcessSystemRunner):
         resolved_ids: list[JSONValue] = [str(episode) for episode in sorted(episodes)]
         details["emos_episode_ids"] = resolved_ids
         details["emos_episode_batch_size"] = sampled_episode_count(prepared.process_spec.argv)
+        if len(episodes) == 1 and outcome.succeeded:
+            values["episode_terminated"] = True
 
         if len(episodes) == 1 and next(iter(episodes.values())) > 0:
             values["simulation_steps"] = next(iter(episodes.values()))
@@ -674,6 +707,9 @@ class EmosRunner(ProcessSystemRunner):
             token_totals = read_token_file(token_path) if token_path is not None else None
             if token_totals is not None and token_path is not None:
                 values["token_usage"] = sum(token_totals.values())
+                global_tokens, local_tokens = partition_token_totals(token_totals)
+                values["global_token_usage"] = global_tokens
+                values["local_token_usage"] = local_tokens
                 details["emos_token_usage_by_agent"] = dict(token_totals)
                 details["emos_token_usage_source_path"] = token_path.relative_to(
                     working_directory
@@ -703,6 +739,9 @@ class EmosRunner(ProcessSystemRunner):
             )
             if detail_records is not None and details_path is not None:
                 breakdown = aggregate_token_details(detail_records)
+                global_calls, local_calls = partition_call_counts(detail_records)
+                values["global_llm_calls"] = global_calls
+                values["local_llm_calls"] = local_calls
                 input_tokens = breakdown["input_tokens"]
                 output_tokens = breakdown["output_tokens"]
                 cached_tokens = breakdown["cached_tokens"]

@@ -147,6 +147,37 @@ def run_emos_once(
     return results[0]
 
 
+def run_roboguide_once(
+    tmp_path: Path,
+    spec: ExperimentSpec,
+    local_config_path: Path,
+    environment: dict[str, str],
+) -> RunResult:
+    """Run one fixture through the production-evidence RoboGuide reducer.
+
+    Args:
+        tmp_path: Per-test repository and results root.
+        spec: Experiment declaring the RoboGuide system.
+        local_config_path: Fixture process configuration.
+        environment: Deterministic child environment.
+
+    Returns:
+        The single produced run result.
+    """
+    runner = build_runner("roboguide", environment=environment, repository_root=tmp_path)
+    results = run_experiment_spec(
+        spec,
+        runner,
+        results_root=tmp_path / "results",
+        local_config_path=local_config_path,
+        episodes=("episode-51",),
+        seeds=(40,),
+        environment=environment,
+    )
+    assert len(results) == 1
+    return results[0]
+
+
 def test_full_lifecycle_produces_complete_run_evidence(
     tmp_path: Path,
     fixture_spec: ExperimentSpec,
@@ -579,6 +610,10 @@ def test_emos_runner_collects_official_token_usage(
     assert result.succeeded
     values = result.metrics.values
     assert values["token_usage"] == 3000  # fresh totals, not the 999999 stale one
+    assert values["global_token_usage"] == 0
+    assert values["local_token_usage"] == 3000
+    assert values["global_llm_calls"] == 0
+    assert values["local_llm_calls"] == 3
     assert values["token_input_usage"] == 2300  # from per-call usage records
     assert values["token_output_usage"] == 700
     assert values["cached_prompt_tokens"] == 400  # detail present on one call
@@ -613,6 +648,128 @@ def test_emos_runner_collects_official_token_usage(
     evidence_paths = {ref.path for ref in result.metrics.raw_evidence}
     assert "raw-evidence/token_usage-42.json" in evidence_paths
     assert "raw-evidence/token_usage_details-42.jsonl" in evidence_paths
+
+
+def test_roboguide_runner_keeps_benchmark_and_mission_outcomes_separate(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """RoboGuide Mission completion never fabricates Habitat benchmark success."""
+    spec = load_experiment_spec(
+        make_spec(
+            """\
+schema: roboguide-eval.experiment-spec/v0.1
+experiment_id: controlled-fixture
+benchmark: habitat-mas
+task: mobility
+episodes: [episode-51]
+systems: [roboguide]
+llm:
+  provider: openai
+  model: fixture-model
+seeds: [40]
+metrics:
+  - success
+  - mission_completed
+  - local_skill_completed
+  - episode_terminated
+  - simulation_steps
+  - token_usage
+  - global_llm_calls
+  - local_llm_calls
+  - global_token_usage
+  - local_token_usage
+  - local_replan_count
+  - invalid_output_count
+  - send_request_count
+  - message_pipe_activity_count
+  - physical_dispatch_count
+  - infrastructure_failure
+  - system_failure
+  - local_agent_failure
+timeout_seconds: 60
+"""
+        )
+    )
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            system="roboguide",
+            arguments=["-u", "-c", helpers.FIXTURE_ROBOGUIDE_CONTROLLED_SCRIPT, "{output_dir}"],
+        )
+    )
+    result = run_roboguide_once(tmp_path, spec, config_path, fixed_environment)
+    values = result.metrics.values
+    assert values["success"] is False
+    assert values["mission_completed"] is True
+    assert values["local_skill_completed"] is True
+    assert values["episode_terminated"] is False
+    assert values["simulation_steps"] == 101
+    assert values["global_llm_calls"] == 0
+    assert values["local_llm_calls"] == 4
+    assert values["global_token_usage"] == 0
+    assert values["local_token_usage"] == 5509
+    assert values["physical_dispatch_count"] == 1
+    assert values["infrastructure_failure"] is False
+    assert values["system_failure"] is False
+    assert values["local_agent_failure"] is False
+    resolution = require_object(require_object(result.manifest.episode_selection)["resolution"])
+    assert resolution["resolved_episode_id"] == "51"
+    assert resolution["resolved_scene_id"] == (
+        "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+    )
+
+
+def test_roboguide_runner_does_not_misclassify_missing_local_outcome(
+    tmp_path: Path,
+    fixture_workdir: Path,
+    make_spec: SpecFactory,
+    make_local_config: LocalConfigFactory,
+    fixed_environment: dict[str, str],
+) -> None:
+    """Bridge execution failure stays unavailable instead of becoming agent failure."""
+    spec = load_experiment_spec(
+        make_spec(
+            """\
+schema: roboguide-eval.experiment-spec/v0.1
+experiment_id: controlled-failure-fixture
+benchmark: habitat-mas
+task: mobility
+episodes: [episode-51]
+systems: [roboguide]
+llm:
+  provider: openai
+  model: fixture-model
+seeds: [40]
+metrics:
+  - mission_completed
+  - physical_dispatch_count
+  - infrastructure_failure
+  - system_failure
+  - local_agent_failure
+timeout_seconds: 60
+"""
+        )
+    )
+    config_path = make_local_config(
+        helpers.local_config_yaml(
+            fixture_workdir,
+            system="roboguide",
+            arguments=["-u", "-c", helpers.FIXTURE_ROBOGUIDE_FAILED_SCRIPT, "{output_dir}"],
+        )
+    )
+    result = run_roboguide_once(tmp_path, spec, config_path, fixed_environment)
+    values = result.metrics.values
+    assert values["mission_completed"] is False
+    assert values["system_failure"] is True
+    assert values["physical_dispatch_count"] == 1
+    assert values["infrastructure_failure"] is False
+    assert "local_agent_failure" not in values
+    unavailable = require_object(result.metrics.details["unavailable_metrics"])
+    assert "local_execution_outcome" in unavailable
 
 
 def test_emos_runner_parses_stderr_evaluator_summary_and_stage_goals(

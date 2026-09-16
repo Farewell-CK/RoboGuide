@@ -43,11 +43,30 @@ seeds:
   - 7
   - 11
   - 13
+  # Controlled preflight candidate: resolves to episode 51. Its paired
+  # workload remains blocked by e1/controlled-workload-v0.1.yaml.
+  - 40
 metrics:
   - success
+  - local_skill_completed
+  - episode_terminated
+  - mission_completed
   - subgoal_success_rate
   - simulation_steps
   - token_usage
+  - global_llm_calls
+  - local_llm_calls
+  - global_token_usage
+  - local_token_usage
+  - local_replan_count
+  - invalid_output_count
+  - send_request_count
+  - message_pipe_activity_count
+  - physical_dispatch_count
+  - infrastructure_failure
+  - system_failure
+  - local_agent_failure
+  - model_failure
   - wall_time
   - coordination_latency
 # Measured: one mobility episode runs ~800s wall (3000 sim steps + LLM

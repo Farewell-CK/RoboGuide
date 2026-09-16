@@ -1,32 +1,68 @@
 # E1 Fairness Ledger
 
-Purpose: enumerate exactly what is held constant vs intentionally different in
-each E1 protocol, and the unresolved confounders — never a bare "same
-conditions". Evidence anchors: `emos_local_agent_boundary/TRACE.md`,
-`habitat_local_eaios/c1_s0b/FINDINGS.md`, EMOS checkout sources.
+This ledger freezes what is held constant, what intentionally differs, and
+what prevents a run from entering a paired Formal E1 comparison. It never
+uses a common episode id as a substitute for a common semantic workload.
 
-## Protocol A — Native
+## Protocol A: Native
 
-| Item | Status |
+| Dimension | Contract |
 | --- | --- |
-| Held constant | Habitat simulator build, MP3D dataset, scene/episode pool, Spot/Fetch embodiments, Oracle skill layer (`OracleNavAction`), termination measures (`has_finished_oracle_nav`), success metric definitions |
-| Intentionally different | **The entire system**: EMOS = Leader discussion → CrabAgent → Oracle skills; RoboGuide = Mission Intelligence → Control (Match/Schedule/Proposal/Commit/Bind) → roboguide-node → direct-Oracle Local EAIOS (current C1-S0 bridge) |
-| Local layer | intentionally different (EMOS has local LLM loop; RoboGuide native adapter is deterministic) |
-| Token accounting | EMOS global (leader+discussion) + local (per-tick) vs RoboGuide 0 LLM |
-| Unresolved confounders | local-agent LLM variance counted into EMOS's score; cancellation/recovery semantics differ at system level (by design in Native) |
+| Held constant | Habitat/EMOS checkout, dataset digest, episode/scene, embodiments, benchmark measures |
+| Intentionally different | Complete systems: EMOS uses Leader plus Stage2; RoboGuide uses MissionPlan/Control plus deployment-selected Local EAIOS |
+| Local policy | May differ by design; direct Oracle is a RoboGuide native deployment option |
+| Claim boundary | End-to-end system comparison, not an organization-only ablation |
 
-## Protocol B — Controlled
+## Protocol B: Controlled
 
-| Item | Status |
+| Dimension | Contract |
 | --- | --- |
-| Held constant | simulator, dataset, episode IDs, robot, scene, Oracle skills, termination, success metric, model endpoint/name (`emos.env` relay + `EMOS_LLM_MODEL`), **local policy = same EMOS CrabAgent** (via `--backend emos-crabagent`), same scene_description source (`get_task_text_context`), same EMOS prompt templates (hashes frozen per run) |
-| Intentionally different | **mission organization only**: EMOS Leader (`group_discussion`) vs RoboGuide MissionPlan v0.7 + Control pipeline; global planning LLM calls exist only on the organization side |
-| Local subtask boundary | `subtask_mode=natural-objective` (main): RoboGuide `objective` text plays the role of EMOS Leader's assigned subtask; `entity-grounded` kept as ablation |
-| Unresolved confounders | 1. subtask wording level — RoboGuide objective is not Leader-authored; phrasing differences shift local interpretation (observed: `TARGET_any_targets\|0` entity choice, 223 vs 101 steps) 2. `message_pipe` peer-help: never triggered in single-robot runs; policy for multi-robot Controlled tasks undecided 3. model sampling parameters not exposed by EMOS `OpenAIModel` (temperature/top_p "not explicitly controlled") 4. model version drift on the shared relay 5. episode termination: RoboGuide satisfaction/cancel semantics can end episodes earlier than EMOS's own wait-termination — Controlled protocol must pin the terminal predicate 6. local retry behavior: CrabAgent invalid-output budget (5) is wrapper-owned, EMOS has none |
+| Held constant | Dataset digest, exact episode and scene, embodiments, semantic benchmark task, original EMOS Stage2 policy, CrabAgent, skill dispatcher, Oracle skills/actions, local model endpoint/name condition, and benchmark success predicates |
+| Intentionally different | Global organization and assignment: EMOS Leader discussion versus RoboGuide MissionPlan/Match/Schedule/Proposal/Commit/Bind |
+| RoboGuide injection boundary | The committed assignment replaces only EMOS `group_discussion()` output (`AgentArguments`); the original `MultiLLMPolicy`, `LLMHighLevelPolicy`, `CrabAgent`, `HierarchicalPolicy`, and configured skills run afterward |
+| Success authority | Habitat `pddl_success` is benchmark success. Local skill completion, episode termination, RoboGuide Mission outcome, and process success are separate evidence |
+| Sampling | Both arms use the original EMOS `OpenAIModel` provider defaults. Parameters that EMOS does not expose are not invented; endpoint, requested model, source versions, and run time are recorded |
+| Messaging | Original CrabAgent `send_request` and class-level `message_pipe` semantics remain inside Stage2 and are measured when observed |
+| Cancellation | RoboGuide cancellation is a system-level lifecycle difference; cancel acceptance never fabricates local `CANCELLED` |
 
-## Freeze requirements before any Controlled comparison run
+The Controlled adapter does not copy prompts, impose an invalid-output budget,
+dispatch Oracle actions itself, or implement a second skill state machine.
+Unsupported output, wait, finish, skill entry/exit, pre/post conditions, maximum
+skill steps, local replanning, and failure propagation are therefore the
+behavior of the checked-out EMOS source.
 
-1. pin relay endpoint + model name + record `prompt_freeze.json` per run (done by bridge)
-2. pin episode list from the frozen E1 workload (no cherry-picking)
-3. fix terminal predicate to `has_finished_oracle_nav` + pddl_success on both sides
-4. record global vs local token accounting separately (harness already separates them)
+## Paired-workload admission
+
+A pair is admissible only when both runners prove all of the following:
+
+1. exact dataset digest, episode id, scene id, and embodiment set match;
+2. the same benchmark semantic goal predicates are assigned to the systems;
+3. the held-constant Stage2 and skill source versions match;
+4. the same official benchmark predicate defines `success`;
+5. neither arm uses an unrecorded fallback backend;
+6. required raw evidence is complete enough to classify infrastructure,
+   system, local-agent, and model failures without guessing.
+
+Episode 51 currently exposes two official predicates:
+`any_at(any_targets|0)` and `any_at(TARGET_any_targets|0)`. The present
+RoboGuide C1-S0B production Mission commits only one navigation operation to
+`any_targets|0`. It is valid boundary evidence but is not an admissible paired
+Formal E1 workload because it covers only one of the two benchmark goals.
+
+The exact admission state and candidate identity are frozen in
+[`controlled-workload-v0.1.yaml`](controlled-workload-v0.1.yaml). Formal runs
+must not start while its admission state is `blocked`.
+
+## Recorded versus unresolved variables
+
+| Item | Treatment |
+| --- | --- |
+| Dataset/episode/scene/embodiment | fixed and verified |
+| Local Stage2 and skill source | fixed by external checkout version; source path/version recorded |
+| Model endpoint/name | fixed per local configuration/spec; secrets excluded |
+| Relay implementation version | record when the provider exposes it; otherwise unresolved infrastructure provenance |
+| Sampling parameters | common original EMOS defaults; explicitly marked not exposed |
+| System-produced subtask wording | intentional organization output; preserve verbatim as run evidence |
+| Local action/skill sequence | record as evidence and metric detail |
+| Global versus local calls/tokens | report separately and in total |
+| Benchmark, local skill, episode, Mission outcomes | report independently |

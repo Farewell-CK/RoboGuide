@@ -227,11 +227,16 @@ action 和逐步 simulator lifecycle，独立 HTTP facade 在执行期间保持�
 durable local handle，status 是终态唯一来源，cancel accepted
 只记录请求而不合成 `CANCELLED`。
 
+Node Service 对 bounded transient status observation failure 使用同一个 durable handle
+重新 acquire observation；它不重新 Execute，也不创建第二个 handle。Controlled Habitat
+backend 仅替换 EMOS Stage1 assignment，Stage2 policy、CrabAgent、HierarchicalPolicy 与 skills
+均来自原始 EMOS checkout。Local skill、benchmark PDDL、episode 与 Mission 终态分别保留。
+
 对应 production smoke 位于
 [`scenarios/habitat-local-eaios-c1-s0/`](../../scenarios/habitat-local-eaios-c1-s0/)。它必须从
 `POST /v1/missions` 开始并保留 Controller、Node journal、bridge outcome 与物理位置变化证据；
-直接调用 backend 不能替代 E2E 结论。Transient status-query failure 后恢复 polling 仍属于
-C1-S1，不在本 slice 中扩展。
+直接调用 backend 不能替代 E2E 结论。Status reacquisition budget 耗尽或 local
+semantic/identity disagreement 仍进入明确 ambiguity/reconciliation。
 
 每个 canonical capability profile 在 Node 配置内只有一个 local-system owner；operation workflow
 mapping 独立于 profile。endpoint、method、

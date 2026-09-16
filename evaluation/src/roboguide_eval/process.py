@@ -124,7 +124,21 @@ def conda_run_prefix(conda_command: str, conda_environment: str) -> tuple[str, .
     Returns:
         The argv prefix to place before the child executable.
     """
-    return (conda_command, "run", "--no-capture-output", "-n", conda_environment)
+    # `uv run` prepends its virtualenv to PATH. Some Conda releases preserve
+    # that prefix inside `conda run`, causing a bare `python` to escape the
+    # requested environment. Resolve every configured executable with the
+    # target CONDA_PREFIX first while passing argv as positional parameters.
+    return (
+        conda_command,
+        "run",
+        "--no-capture-output",
+        "-n",
+        conda_environment,
+        "bash",
+        "-c",
+        'unset VIRTUAL_ENV PYTHONHOME; PATH="$CONDA_PREFIX/bin:$PATH"; export PATH; exec "$@"',
+        "roboguide-conda-run",
+    )
 
 
 def referenced_environment_names(values: Mapping[str, str]) -> tuple[str, ...]:

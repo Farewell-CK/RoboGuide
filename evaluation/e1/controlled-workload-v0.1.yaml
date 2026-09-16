@@ -1,0 +1,47 @@
+schema: roboguide-e1.controlled-workload/v0.1
+workload_id: habitat-mas-mobility-episode-51
+admission:
+  status: blocked
+  blocker_code: roboguide-semantic-goal-coverage
+  reason: >-
+    The official episode has two simultaneous navigation goal predicates,
+    while the current RoboGuide C1-S0B Mission and bridge cover only the
+    agent-0 navigation to any_targets|0.
+dataset:
+  name: habitat-mas-mp3d-mobility
+  revision: mobility_episodes_1
+  sha256: 5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca
+episode:
+  id: "51"
+  seed: 40
+  scene_id: data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb
+  task_spec: pddl/pddl_spot_fetch_mobility
+embodiments:
+  - agent_0
+  - agent_1
+semantic_task:
+  goal_predicates:
+    - any_at(any_targets|0)
+    - any_at(TARGET_any_targets|0)
+  stage_goal_predicates:
+    - any_at(any_targets|0)
+    - any_at(TARGET_any_targets|0)
+  benchmark_success: habitat.pddl_success
+controlled_local_policy:
+  stage2: original-emos-multi-llm-policy
+  local_agent: original-emos-crabagent
+  skill_dispatcher: original-emos-hierarchical-policy
+  navigation_skill: original-emos-oracle-nav-policy
+  sampling: original-emos-provider-defaults
+current_runner_coverage:
+  emos:
+    process_boundary: official-habitat-baselines-run
+    goal_predicates:
+      - any_at(any_targets|0)
+      - any_at(TARGET_any_targets|0)
+  roboguide:
+    process_boundary: controller-node-local-eaios
+    canonical_operation: mobility.navigate@v1
+    goal_predicates:
+      - any_at(any_targets|0)
+metrics_contract: roboguide-eval.metrics/v0.3

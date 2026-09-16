@@ -40,6 +40,7 @@ from roboguide_eval.process import (
     ProcessConfigError,
     ProcessManager,
     ProcessSpec,
+    conda_run_prefix,
     expand_environment_values,
     read_text_output,
     referenced_environment_names,
@@ -275,15 +276,8 @@ def _check_conda(
             )
             env_outcome = manager.run(
                 ProcessSpec(
-                    argv=(
-                        conda_command,
-                        "run",
-                        "--no-capture-output",
-                        "-n",
-                        conda_environment,
-                        "python",
-                        "--version",
-                    ),
+                    argv=conda_run_prefix(conda_command, conda_environment)
+                    + ("python", "--version"),
                     working_directory=process_spec.working_directory,
                     environment_overrides=process_spec.environment_overrides,
                     timeout_seconds=_CONDA_ENVIRONMENT_TIMEOUT_SECONDS,

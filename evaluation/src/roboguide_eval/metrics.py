@@ -11,6 +11,11 @@ Raw evidence always travels beside the summarized numbers: a
 :class:`MetricsPayload` references the untouched artifact files inside the run
 directory instead of replacing them.
 
+v0.3 adds explicit Controlled-protocol layers and accounting while retaining
+v0.2 as a readable historical input. New runs always write v0.3. The added
+fields prevent benchmark success, local skill completion, episode termination,
+and RoboGuide Mission completion from being collapsed into one boolean.
+
 v0.2 migration (no formal paper data exists on v0.1):
 
 - ``subgoal_success`` (boolean) became ``subgoal_success_rate`` (number in
@@ -33,7 +38,10 @@ from typing import Final, Literal
 
 from roboguide_eval.models import JSONObject, JSONValue
 
-METRICS_SCHEMA: Final = "roboguide-eval.metrics/v0.2"
+METRICS_SCHEMA: Final = "roboguide-eval.metrics/v0.3"
+READABLE_METRICS_SCHEMAS: Final[frozenset[str]] = frozenset(
+    {"roboguide-eval.metrics/v0.2", METRICS_SCHEMA}
+)
 METRICS_FILE_NAME: Final = "metrics.json"
 
 type MetricValueKind = Literal["boolean", "integer", "number"]
@@ -66,6 +74,24 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
         "episode-level task success judged by the official benchmark evaluator",
     ),
     MetricDefinition(
+        "local_skill_completed",
+        "boolean",
+        None,
+        "the assigned Local EAIOS skill reached its own successful terminal condition",
+    ),
+    MetricDefinition(
+        "episode_terminated",
+        "boolean",
+        None,
+        "the benchmark episode reached a terminal boundary, independent of success",
+    ),
+    MetricDefinition(
+        "mission_completed",
+        "boolean",
+        None,
+        "RoboGuide reported Mission Completed; absent for systems without a Mission lifecycle",
+    ),
+    MetricDefinition(
         "subgoal_success_rate",
         "number",
         "ratio",
@@ -84,6 +110,84 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
         "integer",
         "tokens",
         "total LLM tokens consumed by the episode, from actual provider usage records",
+    ),
+    MetricDefinition(
+        "global_llm_calls",
+        "integer",
+        "calls",
+        "LLM calls made by the system organization or global planning layer",
+    ),
+    MetricDefinition(
+        "local_llm_calls",
+        "integer",
+        "calls",
+        "LLM calls made by the held-constant local execution policy",
+    ),
+    MetricDefinition(
+        "global_token_usage",
+        "integer",
+        "tokens",
+        "tokens consumed by the system organization or global planning layer",
+    ),
+    MetricDefinition(
+        "local_token_usage",
+        "integer",
+        "tokens",
+        "tokens consumed by the held-constant local execution policy",
+    ),
+    MetricDefinition(
+        "local_replan_count",
+        "integer",
+        "count",
+        "local policy action-selection calls after each agent's initial action selection",
+    ),
+    MetricDefinition(
+        "invalid_output_count",
+        "integer",
+        "count",
+        "local model outputs treated as invalid or no-action by the original local policy",
+    ),
+    MetricDefinition(
+        "send_request_count",
+        "integer",
+        "count",
+        "local-agent send_request tool selections observed in execution evidence",
+    ),
+    MetricDefinition(
+        "message_pipe_activity_count",
+        "integer",
+        "count",
+        "accepted cross-agent message-pipe writes observed in execution evidence",
+    ),
+    MetricDefinition(
+        "physical_dispatch_count",
+        "integer",
+        "count",
+        "authoritative physical/local execution dispatch authorizations",
+    ),
+    MetricDefinition(
+        "infrastructure_failure",
+        "boolean",
+        None,
+        "the run failed because required processes, transports, or services were unavailable",
+    ),
+    MetricDefinition(
+        "system_failure",
+        "boolean",
+        None,
+        "the system-under-test lifecycle reached a failed outcome",
+    ),
+    MetricDefinition(
+        "local_agent_failure",
+        "boolean",
+        None,
+        "the local execution policy or skill reported a failed terminal outcome",
+    ),
+    MetricDefinition(
+        "model_failure",
+        "boolean",
+        None,
+        "the run has explicit evidence of an LLM provider or model-response failure",
     ),
     MetricDefinition("wall_time", "number", "s", "wall-clock duration of the episode run"),
     MetricDefinition(
@@ -343,7 +447,7 @@ class MetricsPayload:
         if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
             raise MetricsError("metrics payload must be an object")
         schema = value.get("schema")
-        if schema != METRICS_SCHEMA:
+        if schema not in READABLE_METRICS_SCHEMAS:
             raise MetricsError(f"unsupported metrics schema: {schema!r}")
         raw_values = value.get("values", {})
         if not isinstance(raw_values, dict) or not all(isinstance(key, str) for key in raw_values):

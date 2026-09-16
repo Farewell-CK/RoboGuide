@@ -169,7 +169,9 @@ def test_conda_prefix_shape_and_explicit_spec_field() -> None:
     of being parsed back out of the argv.
     """
     prefix = conda_run_prefix("conda", "emos-env")
-    assert prefix == ("conda", "run", "--no-capture-output", "-n", "emos-env")
+    assert prefix[:5] == ("conda", "run", "--no-capture-output", "-n", "emos-env")
+    assert prefix[-1] == "roboguide-conda-run"
+    assert any('PATH="$CONDA_PREFIX/bin:$PATH"' in item for item in prefix)
     plain = ProcessSpec(
         argv=(interpreter(), "-u", "-c", "print('ok')", "-n", "looks-like-conda"),
         working_directory=None,

@@ -75,14 +75,30 @@ def test_committed_e1_smoke_spec_loads_with_expected_shape() -> None:
     assert spec.llm.provider == "openai"
     assert spec.llm.model == "gpt-5.6-luna"
     assert spec.llm.reasoning_effort == "medium"
-    assert spec.seeds == (7, 11, 13)
+    assert spec.seeds == (7, 11, 13, 40)
     assert spec.dataset.identity() == "habitat-mas-mp3d-mobility@mobility_episodes_1"
     assert spec.dataset.digest is not None and len(spec.dataset.digest) == 64
     assert spec.metrics == (
         "success",
+        "local_skill_completed",
+        "episode_terminated",
+        "mission_completed",
         "subgoal_success_rate",
         "simulation_steps",
         "token_usage",
+        "global_llm_calls",
+        "local_llm_calls",
+        "global_token_usage",
+        "local_token_usage",
+        "local_replan_count",
+        "invalid_output_count",
+        "send_request_count",
+        "message_pipe_activity_count",
+        "physical_dispatch_count",
+        "infrastructure_failure",
+        "system_failure",
+        "local_agent_failure",
+        "model_failure",
         "wall_time",
         "coordination_latency",
     )
@@ -203,8 +219,9 @@ def test_environment_variable_overrides_local_config(
     overrides = load_local_config(config_path, environment=merged_environment)["emos"]
     resolved = resolve_process_spec(spec, "emos", overrides, environment=merged_environment)
     assert resolved.working_directory == other_dir
-    assert resolved.argv[:5] == conda_run_prefix("conda", "emos-env")
-    assert resolved.argv[5] == "python99"
+    prefix = conda_run_prefix("conda", "emos-env")
+    assert resolved.argv[: len(prefix)] == prefix
+    assert resolved.argv[len(prefix)] == "python99"
 
 
 def test_resolve_process_spec_builds_direct_and_conda_argv(
@@ -228,8 +245,9 @@ def test_resolve_process_spec_builds_direct_and_conda_argv(
     )
     conda_overrides = load_local_config(make_local_config(conda_text))["emos"]
     wrapped = resolve_process_spec(spec, "emos", conda_overrides, environment={})
-    assert wrapped.argv[:5] == conda_run_prefix("/opt/conda/bin/conda", "emos-env")
-    assert wrapped.argv[5] == interpreter()
+    prefix = conda_run_prefix("/opt/conda/bin/conda", "emos-env")
+    assert wrapped.argv[: len(prefix)] == prefix
+    assert wrapped.argv[len(prefix)] == interpreter()
     assert wrapped.conda_environment == "emos-env"
 
 

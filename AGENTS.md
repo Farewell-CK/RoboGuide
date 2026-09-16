@@ -146,8 +146,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process
   behind a responsive loopback HTTP facade, and reports terminal state only from the local execution
-  outcome. Cancel acceptance is not
-  `CANCELLED`; transient status-query recovery remains a later robustness slice.
+  outcome. Cancel acceptance is not `CANCELLED`. Node Service reacquires bounded transient status
+  observation failures using the durable local handle and never redispatches Execute; budget
+  exhaustion remains explicit physical ambiguity. The Controlled backend injects only the
+  Control-owned assignment at the EMOS Stage1-to-Stage2 boundary, then runs the original EMOS
+  `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack. Local skill completion,
+  benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
@@ -209,8 +213,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   (machine-specific Conda/working-directory/credential configuration stays in Git-ignored
   `evaluation/local.yaml` or `ROBOGUIDE_EVAL_*` variables), never modifies Core contracts or
   Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
-  RoboGuide system runner must later drive the real Controller/Node/Runtime path instead of
-  bypassing RoboGuide.
+  RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces
+  persisted evidence; it never bypasses RoboGuide to call a simulator skill.
 - `console/` contains the experimental read-only Mission Journey visualizer
   (early development; layout and features are still evolving): a zero-dependency
   static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static

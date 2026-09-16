@@ -58,8 +58,17 @@ environments:
     # measurement (config-store name vs uuid differ) — no override needed
     # and no KeyError occurs at episode reset.
   roboguide:
-    # Placeholder until the habitat bridge drives the real Controller path.
+    # Real Controlled path: this command starts Integration Server,
+    # roboguide-node, and the Habitat Local EAIOS, then submits through
+    # POST /v1/missions. It never calls a Habitat skill from the harness.
     working_directory: /data/workspace/code/RoboGuide
-    executable: uv
-    arguments: ["run", "..."]
+    executable: bash
+    arguments:
+      - scenarios/habitat-local-eaios-c1-s0b/run-controlled.sh
+      - natural-objective
+      - "{output_dir}"
+    environment_variables:
+      ROBOGUIDE_EMOS_ROOT: /data/workspace/code/emos-baseline
+      ROBOGUIDE_HABITAT_CONDA_ENV: habitat
+      ROBOGUIDE_HABITAT_CUDA_DEVICE: "1"
     version_probe_command: ["git", "rev-parse", "HEAD"]

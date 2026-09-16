@@ -19,6 +19,18 @@ E1_CORE_METRICS: tuple[str, ...] = (
     "token_usage",
     "wall_time",
     "coordination_latency",
+    "local_skill_completed",
+    "episode_terminated",
+    "mission_completed",
+    "global_llm_calls",
+    "local_llm_calls",
+    "global_token_usage",
+    "local_token_usage",
+    "physical_dispatch_count",
+    "infrastructure_failure",
+    "system_failure",
+    "local_agent_failure",
+    "model_failure",
 )
 
 
@@ -129,9 +141,17 @@ def test_payload_enforces_rate_bounds() -> None:
 
 
 def test_payload_rejects_superseded_schema_version() -> None:
-    """v0.1 payloads (boolean subgoal_success) are rejected under v0.2."""
+    """v0.1 payloads (boolean subgoal_success) remain unsupported."""
     with pytest.raises(MetricsError, match="unsupported metrics schema"):
         MetricsPayload.from_json({"schema": "roboguide-eval.metrics/v0.1", "values": {}})
+
+
+def test_payload_reads_historical_v02_metrics() -> None:
+    """Historical v0.2 evidence remains readable after the v0.3 extension."""
+    payload = MetricsPayload.from_json(
+        {"schema": "roboguide-eval.metrics/v0.2", "values": {"success": True}}
+    )
+    assert payload.values == {"success": True}
 
 
 def test_payload_accepts_integer_for_number_metrics() -> None:
