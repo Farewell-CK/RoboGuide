@@ -6,7 +6,10 @@
 
 ## 决策
 
-每台节点机器只部署一个 RoboGuide 进程 `roboguide-node`。它内部包含通用 Local
+每台节点机器只部署一个 RoboGuide 进程 `roboguide-node`。
+（2026-09-16 澄清：本决策约束的是"节点上唯一的 RoboGuide 守护进程类型"；
+Node 是独立的 execution/capability/liveness authority boundary，仿真等特殊部署
+可在同一物理机承载多个逻辑 Node 实例，不改变本决策的进程/边界模型。）它内部包含通用 Local
 Integration Engine，通过用户维护的本地配置连接一个或多个 Local EAIOS/runtime。
 Adapter 不再是独立服务、动态库或 Rust 泛型实现；新增 EAIOS 不得修改或重新编译
 RoboGuide。

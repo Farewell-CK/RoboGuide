@@ -1,0 +1,293 @@
+{
+  "schema": "roboguide.e1-rns-semantic-coverage/v0.1",
+  "baseline_sha": "110cb3fedca1c0c90ded76569bd29a0abb08fc11",
+  "rns_model": {
+    "definition": "node-side substrate projecting heterogeneous Local EAIOS/Runtime into a RoboGuide Node",
+    "projections_verified": {
+      "execution": [
+        "capability_profile",
+        "capability_readiness",
+        "operation_support",
+        "operation_binding",
+        "resource",
+        "execute_status_cancel",
+        "local_handle",
+        "durable_execution_journal"
+      ],
+      "state": [
+        "local_system_health",
+        "sensors",
+        "state_exports",
+        "freshness_validity"
+      ],
+      "coordination": [
+        "peer_channel_readiness",
+        "group_context_scoped_facts"
+      ],
+      "memory": [
+        "memory_providers",
+        "artifact_staging"
+      ],
+      "common": [
+        "node_identity",
+        "local_system_identity",
+        "node_protocol",
+        "session_heartbeat_lease",
+        "reconnect",
+        "durable_command_receipt",
+        "reconciliation"
+      ]
+    },
+    "owns": [
+      "semantic_projection",
+      "local_integration_workflow",
+      "durable_node_side_execution_boundary"
+    ],
+    "does_not_own": [
+      "global_matching",
+      "scheduling",
+      "proposal_commit",
+      "recovery_authority",
+      "mission_semantics",
+      "local_planning",
+      "motion_control",
+      "hardware_control",
+      "final_safety"
+    ],
+    "discrepancies_vs_adr": []
+  },
+  "capability_operation_boundary": {
+    "verdict": "SOUND",
+    "note": "mobility.navigate@v1 appears in both catalog sections; capability=provider feasibility evidence (zero attributes, currently faithful), operation=canonical semantic What gated at Proposal, binding=deployment-private Local How mapping. Same name, two contract layers (ADR-0035/0036)."
+  },
+  "requirements": [
+    {
+      "id": "R1",
+      "requirement": "two robots navigate to semantic checkpoints (any_at)",
+      "source": "spot_fetch_mobility (99 eps)",
+      "needed_abstraction": "operation+capability",
+      "current_representation": "catalog capability+operation+support+binding; E1-I 2/2",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "contracts/capability/v0.3/catalog.json; evaluation/e1/shared_world/runs/run1"
+    },
+    {
+      "id": "R2",
+      "requirement": "cross-floor/stairs reachability differences",
+      "source": "episode 51 same_floor=false, height delta 2.87m",
+      "needed_abstraction": "none global (any agent suffices); floor is LOCAL_HOW",
+      "current_representation": "zero-attribute mobility.navigate@v1 (faithful)",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "pddl_sim_state.py:412-424 is_any_robot_at loops all robots; agent yaml has no locomotion deltas"
+    },
+    {
+      "id": "R3",
+      "requirement": "official solution agent split",
+      "source": "pddl solution field",
+      "needed_abstraction": "NOT_NEEDED (reference only)",
+      "current_representation": "free Matching (cross assignment observed run1)",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "shared-world run1 assignment arrival log"
+    },
+    {
+      "id": "R4",
+      "requirement": "detection goals (is_detected)",
+      "source": "height_per/spot_drone_per/multi_agent_per (297 eps)",
+      "needed_abstraction": "OPERATION(observe/detect) + success fact as STATE",
+      "current_representation": "no perception.* canonical capability/operation in catalog",
+      "coverage": "PARTIAL",
+      "e1_blocking": false,
+      "severity": "P1",
+      "evidence": "catalog.json (no perception section); pddl_sim_state.py:402-410"
+    },
+    {
+      "id": "R5",
+      "requirement": "manipulation goals (at = pick+place)",
+      "source": "dist_man/height_man/fetch_stretch_man/multi_agent_mobility/multi_agent_man (565 eps)",
+      "needed_abstraction": "OPERATION(object.relocate@v1) + CAPABILITY(manipulation.grasp@v1)",
+      "current_representation": "catalog entries exist; no declarative pick/place Local How workflow",
+      "coverage": "PARTIAL",
+      "e1_blocking": false,
+      "severity": "P1",
+      "evidence": "catalog.json; agent yaml ik_arm_urdf"
+    },
+    {
+      "id": "R6",
+      "requirement": "holding constraints (not_holding/holding)",
+      "source": "manipulation specs",
+      "needed_abstraction": "LOCAL_HOW + benchmark judgment",
+      "current_representation": "inside object.relocate integration sequence",
+      "coverage": "PARTIAL",
+      "e1_blocking": false,
+      "severity": "P1",
+      "evidence": "pddl yaml sub_exprs"
+    },
+    {
+      "id": "R7",
+      "requirement": "agent-bound goals (robot_at(x, agent_i))",
+      "source": "multi_agent_man/per",
+      "needed_abstraction": "mission actor placement",
+      "current_representation": "deployment-owned actor placement narrows first-use matching",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "pddl_multi_agent_man.yaml; AGENTS.md actor placement"
+    },
+    {
+      "id": "R8",
+      "requirement": "drone flight vs ground locomotion",
+      "source": "per families",
+      "needed_abstraction": "LOCAL_HOW/metadata",
+      "current_representation": "no robot_type enum (correct); coarse kind string only",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "any-semantics predicates; agent configs"
+    },
+    {
+      "id": "R9",
+      "requirement": "exclusive holding of one object",
+      "source": "manipulation specs",
+      "needed_abstraction": "RESOURCE (object mutex) for handoff; LOCAL_HOW for Independent",
+      "current_representation": "node-local locks suffice for official Independent set",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "node.toml local_locks; census coupling=all Independent"
+    },
+    {
+      "id": "R10",
+      "requirement": "compute resources",
+      "source": "none",
+      "needed_abstraction": "NOT_NEEDED",
+      "current_representation": "compute.* exists unused",
+      "coverage": "NOT_NEEDED",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "dataset-inventory goals"
+    },
+    {
+      "id": "R11",
+      "requirement": "cross-agent shared view/relations",
+      "source": "all official sets are Independent",
+      "needed_abstraction": "COORDINATION: none required",
+      "current_representation": "peer channel/relations mechanisms present",
+      "coverage": "NOT_NEEDED",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "workload-taxonomy.json; PeerChannelReadiness proto"
+    },
+    {
+      "id": "R12",
+      "requirement": "episode success authority",
+      "source": "all",
+      "needed_abstraction": "BENCHMARK_ONLY",
+      "current_representation": "habitat.pddl_success kept in harness",
+      "coverage": "EXPRESSIBLE",
+      "e1_blocking": false,
+      "severity": null,
+      "evidence": "verify-shared-world.py negative case"
+    }
+  ],
+  "episode51_validation_boundary": {
+    "validated": [
+      "logical node abstraction",
+      "two node identities",
+      "node protocol session",
+      "local system health",
+      "capability readiness basic path",
+      "operation support",
+      "operation binding",
+      "canonical intent routing",
+      "execute/status/cancel",
+      "stable local handle",
+      "durable journal",
+      "exactly-once dispatch",
+      "multi-node shared-world execution",
+      "atomic submit",
+      "cancel",
+      "official pddl_success authority separation"
+    ],
+    "not_validated": [
+      "heterogeneous typed capability differentiation",
+      "multi-local-system aggregation",
+      "multiple operations per node",
+      "dynamic readiness transitions",
+      "state projection",
+      "memory projection",
+      "peer channel",
+      "real spatial resource coordination",
+      "compute scheduling",
+      "real hardware"
+    ]
+  },
+  "resource_semantics": {
+    "habitat_navigation_slot": "synthetic/bootstrap execution-concurrency slot, not a physical space resource",
+    "required_resources_vs_local_locks": "required_resources = control-committed; local_locks = node-local concurrency protection, must not be described as global scheduling evidence"
+  },
+  "node_vs_host": {
+    "definition": "A RoboGuide Node is an independent execution/capability/liveness authority boundary; typical physical deployment runs one RNS per device; simulation may host multiple logical Nodes on one host (E1-I proven)",
+    "docs_updated": [
+      "docs/architecture/v2/README.md",
+      "docs/decisions/0010-single-node-service-local-integration-engine.md"
+    ]
+  },
+  "multi_local_system": "DESIGN SUPPORTED / EXPERIMENTALLY UNVALIDATED",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "P1",
+      "finding": "no perception canonical capability/operation in catalog"
+    },
+    {
+      "id": "F2",
+      "severity": "P1",
+      "finding": "pick/place Local How workflow not implemented/validated (abstraction exists)"
+    },
+    {
+      "id": "F3",
+      "severity": "P2",
+      "finding": "habitat-navigation-slot is a synthetic bootstrap resource; label it"
+    },
+    {
+      "id": "F4",
+      "severity": "P2",
+      "finding": "capability attributes all empty (faithful today; structured attrs future)"
+    },
+    {
+      "id": "F5",
+      "severity": "P2",
+      "finding": "state/memory/peer projections lack E1 evidence"
+    },
+    {
+      "id": "F6",
+      "severity": "P2",
+      "finding": "multi-local-system unvalidated experimentally"
+    },
+    {
+      "id": "F7",
+      "severity": "P2",
+      "finding": "node==physical-machine doc phrasing (clarified docs-only)"
+    },
+    {
+      "id": "F8",
+      "severity": "P3",
+      "finding": "5 reverse/fourth configs blocked by author-unpublished datasets (not an RNS issue)"
+    }
+  ],
+  "p0_blockers": 0,
+  "answers": {
+    "rns_core_abstraction": "SOUND",
+    "formal_e1_i_valid": true,
+    "families_fully_expressible": 1,
+    "families_total": 3,
+    "families_partial": 2,
+    "families_missing": 0,
+    "recommendation": "run E1 now (E1-I scope); F1 needs a future Catalog/contract upgrade decision (owner Codex), F2 is integration work (owner ZCode); neither blocks the first pilot"
+  }
+}

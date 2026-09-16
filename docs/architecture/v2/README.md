@@ -118,8 +118,10 @@ MissionPlan shape、Runtime/Control authority 和 generic verifier ingress 均�
 可被发现、能够执行任务或提供资源的系统参与者。节点类型可以包括 Robot、
 Perception、Interaction、Compute 和 Infrastructure Node。Node 不等同于 Robot。
 
-每台参与节点机器运行一个通用 `roboguide-node`，作为 RoboGuide Runtime 在该机器上的
-接入端。它通过 Node Protocol 主动连接 RoboGuide Server，并在进程内部使用声明式
+每个参与节点运行一个通用 `roboguide-node`，作为 RoboGuide Runtime 在该节点上的
+接入端。Node 是独立的 execution/capability/liveness authority boundary，与物理机
+不是一一绑定：典型物理部署为每台设备一个 Node Service，仿真或特殊部署可在同一
+物理机上承载多个逻辑 Node（E1-I 已实证）。它通过 Node Protocol 主动连接 RoboGuide Server，并在进程内部使用声明式
 Local Integration Engine 连接一个或多个 Local Embodied Systems。配置与通用 driver 属于
 Node Service；具体 EAIOS 的 facade 在部署侧维护，不是每种 EAIOS 各自部署的 RoboGuide 服务
 或编译期插件。
