@@ -57,7 +57,7 @@ class HabitatBridgeHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/health":
             self._respond(HTTPStatus.OK, self.server.adapter.health())
             return
-        if self.path == "/v1/capabilities/mobility.navigate":
+        if self.path.startswith("/v1/capabilities/"):
             self._respond(HTTPStatus.OK, self.server.adapter.readiness())
             return
         self._respond(HTTPStatus.NOT_FOUND, {"error": "route not found"})

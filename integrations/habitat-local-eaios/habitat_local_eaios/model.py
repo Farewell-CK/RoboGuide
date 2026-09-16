@@ -11,6 +11,9 @@ from typing import Union
 # Runtime compatibility is Python 3.9 because this module executes in the EMOS environment.
 ScalarValue = Union[bool, int, float, str]  # noqa: UP007
 SUPPORTED_OPERATION = "mobility.navigate@v1"
+# The shared-world Local EAIOS executes both canonical navigation operations with the
+# same original EMOS Stage2 stack; the MI organization may emit either one.
+SUPPORTED_OPERATIONS = ("mobility.navigate@v1", "mobility.move@v1")
 
 
 class IntegrationError(RuntimeError):
@@ -50,7 +53,7 @@ class CanonicalMobilityInvocation:
         if set(invocation) != expected:
             raise IntegrationError("canonical invocation fields do not match the C1-S0 contract")
         operation = _non_empty_string(invocation["operation"], "operation")
-        if operation != SUPPORTED_OPERATION:
+        if operation not in SUPPORTED_OPERATIONS:
             raise IntegrationError(f"unsupported canonical operation {operation!r}")
         parameters = _parameters(invocation["parameters"])
         if set(parameters) != {"destination"}:

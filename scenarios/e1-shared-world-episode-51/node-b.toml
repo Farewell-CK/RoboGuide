@@ -59,6 +59,30 @@ path = "/v1/capabilities/mobility.navigate"
 [capability_profiles.readiness.step.request]
 base = {}
 
+[[capability_profiles]]
+contract = "mobility.move@v1"
+kind = "mobility"
+owner = "habitat-local-eaios"
+attributes = {}
+
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capability_profiles.readiness.step]
+id = "move-readiness"
+connection = "habitat-http"
+
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/mobility.move"
+
+[capability_profiles.readiness.step.request]
+base = {}
+
 [[resources]]
 id = "habitat-navigation-slot-b"
 kind = "space"
@@ -69,6 +93,85 @@ owner = "habitat-local-eaios"
 operation = "mobility.navigate@v1"
 owner = "habitat-local-eaios"
 required_resources = ["habitat-navigation-slot-b"]
+local_locks = ["habitat-simulator-b"]
+
+[operations.workflow]
+poll_interval_ms = 50
+
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[operations.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[operations.workflow.execute]]
+id = "dispatch"
+connection = "habitat-http"
+
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[operations.workflow.execute.request]
+base = {}
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[operations.workflow.status]]
+id = "status"
+connection = "habitat-http"
+
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[operations.workflow.status.request]
+base = {}
+
+[[operations.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations.workflow.cancel]]
+id = "cancel"
+connection = "habitat-http"
+
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[operations.workflow.cancel.request]
+base = {}
+
+[[operations.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations]]
+operation = "mobility.move@v1"
+owner = "habitat-local-eaios"
 local_locks = ["habitat-simulator-b"]
 
 [operations.workflow]

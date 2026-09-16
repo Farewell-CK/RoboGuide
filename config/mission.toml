@@ -27,7 +27,7 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"
 max_output_tokens = 4096
-timeout_seconds = 90
+timeout_seconds = 600
 
 [model_providers.OpenAI]
 name = "OpenAI"

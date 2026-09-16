@@ -42,20 +42,15 @@ def _bridge_rows(database: Path) -> list[dict[str, Any]]:
         item = dict(row)
         item["invocation"] = json.loads(item.pop("invocation_json"))
         outcome_raw = item.pop("local_outcome_json")
-        item["local_outcome"] = (
-            json.loads(outcome_raw) if outcome_raw is not None else None
-        )
+        item["local_outcome"] = json.loads(outcome_raw) if outcome_raw is not None else None
         decoded.append(item)
     return decoded
 
 
-def _intents_match_mission(
-    rows: list[dict[str, Any]], mission: dict[str, Any]
-) -> bool:
+def _intents_match_mission(rows: list[dict[str, Any]], mission: dict[str, Any]) -> bool:
     """Check each endpoint invocation preserves its mission task's canonical intent."""
     plan_tasks = {
-        task["id"]: task["roles"][0]["execution_intent"]
-        for task in _mission_plan_tasks(mission)
+        task["id"]: task["roles"][0]["execution_intent"] for task in _mission_plan_tasks(mission)
     }
     intents = {}
     for row in rows:
@@ -79,7 +74,11 @@ def _mission_plan_tasks(mission: dict[str, Any]) -> list[dict[str, Any]]:
     plan = json.loads(
         (
             Path(__file__).parent
-            / ("mission-plan-negative.json" if "negative" in mission["mission_id"] else "mission-plan.json")
+            / (
+                "mission-plan-negative.json"
+                if "negative" in mission["mission_id"]
+                else "mission-plan.json"
+            )
         ).read_text(encoding="utf-8")
     )
     return list(plan["tasks"])
@@ -105,25 +104,23 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
     kinds = _kinds(events)
     expected_tasks = NEGATIVE_TASKS if mode == "negative" else MISSION_TASKS
     summary_path = run / "evidence/shared-world-summary.json"
-    shared = (
-        json.loads(summary_path.read_text(encoding="utf-8"))
-        if summary_path.exists()
-        else {}
-    )
+    shared = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
     identity = shared.get("identity", {})
-    outcomes = {
-        int(key): value for key, value in shared.get("outcomes", {}).items()
-    }
-    arrivals = [
-        json.loads(line)
-        for line in (run / "evidence/assignment-arrival.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    bridge_a = _bridge_rows(run / "bridge-a.sqlite3")
-    bridge_b = _bridge_rows(run / "bridge-b.sqlite3")
+    outcomes = {int(key): value for key, value in shared.get("outcomes", {}).items()}
+    arrival_path = run / "evidence/assignment-arrival.jsonl"
+    arrivals = (
+        [json.loads(line) for line in arrival_path.read_text(encoding="utf-8").splitlines()]
+        if arrival_path.exists()
+        else []
+    )
+    bridge_a = _bridge_rows(run / "bridge-a.sqlite3") if (run / "bridge-a.sqlite3").exists() else []
+    bridge_b = _bridge_rows(run / "bridge-b.sqlite3") if (run / "bridge-b.sqlite3").exists() else []
     journal_a = _node_journal(run / "node-state-a/execution-journal.sqlite3")
-    journal_b = _node_journal(run / "node-state-b/execution-journal.sqlite3") if (
-        run / "node-state-b/execution-journal.sqlite3"
-    ).exists() else (0, 0, [])
+    journal_b = (
+        _node_journal(run / "node-state-b/execution-journal.sqlite3")
+        if (run / "node-state-b/execution-journal.sqlite3").exists()
+        else (0, 0, [])
+    )
     inventory = (run / "inventory.json").read_text(encoding="utf-8")
     bridge_log = (run / "shared-bridge.log").read_text(encoding="utf-8")
     server_log = (run / "integration-server.log").read_text(encoding="utf-8")
@@ -145,7 +142,8 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
 
     if mode == "single":
         checks = {
-            "post_202": (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
+            "post_202": (run / "post-status.txt").exists()
+            and (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
             "single_node_registered": '"e1-shared-node-a"' in inventory,
             "second_node_absent": '"e1-shared-node-b"' not in inventory,
             "pair_never_assembled_fail_closed": bridge_a
@@ -156,14 +154,19 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
             or identity.get("episode_reset_count", 0) == 0,
             "mission_failed_not_success": mission["status"] == "Failed",
         }
-        return _verdict(mode, checks, {
-            "mission_status": mission["status"],
-            "lone_local_state": bridge_a[0]["state"] if bridge_a else None,
-            "lone_detail": bridge_a[0]["detail"] if bridge_a else None,
-        })
+        return _verdict(
+            mode,
+            checks,
+            {
+                "mission_status": mission["status"],
+                "lone_local_state": bridge_a[0]["state"] if bridge_a else None,
+                "lone_detail": bridge_a[0]["detail"] if bridge_a else None,
+            },
+        )
 
     checks: dict[str, Any] = {
-        "post_202": (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
+        "post_202": (run / "post-status.txt").exists()
+        and (run / "post-status.txt").read_text(encoding="utf-8").strip() == "202",
         "two_nodes_registered": '"e1-shared-node-a"' in inventory
         and '"e1-shared-node-b"' in inventory,
         "two_tasks_bound": bound_tasks == set(expected_tasks),
@@ -179,9 +182,7 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
         # may stop agents before either base moves.
         "both_agents_moved": mode != "paired"
         or (len(outcomes) == 2 and all(_moved(o) for o in outcomes.values())),
-        "canonical_intents_preserved": _intents_match_mission(
-            bridge_a + bridge_b, mission
-        ),
+        "canonical_intents_preserved": _intents_match_mission(bridge_a + bridge_b, mission),
         "original_stage2_active": all(
             outcome["local_llm_calls"] >= 1 for outcome in outcomes.values()
         ),
@@ -223,8 +224,7 @@ def verify(run: Path, mode: str) -> dict[str, Any]:
         ).strip() in {"200", "202"}
         checks["mission_cancelled"] = mission["status"] == "Cancelled"
         checks["local_outcomes_terminal"] = all(
-            row[0]["state"] in {"CANCELLED", "FAILED", "COMPLETED"}
-            for row in (bridge_a, bridge_b)
+            row[0]["state"] in {"CANCELLED", "FAILED", "COMPLETED"} for row in (bridge_a, bridge_b)
         )
     return _verdict(mode, checks, context)
 

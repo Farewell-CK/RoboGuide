@@ -1,0 +1,20 @@
+# B1 deployment config: Mission Service wired to the E1-I shared-world run.
+# Derives from config/mission-service.toml; only endpoints/state/approval differ.
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "STATE_DB_PLACEHOLDER"
+controller_endpoint = "http://127.0.0.1:28060"
+controller_timeout_seconds = 30
+artifact_endpoint = "http://127.0.0.1:28090"
+grounding_timeout_seconds = 5
+grounding_acquisition_attempts = 2
+max_grounding_state_evidence = 64
+max_grounding_memory_evidence = 32
+max_grounding_gaps = 32
+grounding_world_payload_schemas = []
+max_request_bytes = 1048576
+
+# Deployment decision for E1-I (simulation-only navigation): no approval risk gate;
+# accepted MissionPlans submit to Control automatically.
+approval_required_contracts = []

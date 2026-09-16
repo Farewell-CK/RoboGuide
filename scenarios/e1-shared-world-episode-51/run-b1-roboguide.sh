@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# E1-I shared-world production smoke: two RoboGuide Nodes over ONE Habitat world.
-# Usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir-abs-path>
+# E1 Protocol B1 RoboGuide arm: high-level text instruction through the real
+# production Mission Intelligence (Interpreter -> Planner -> Reviewer/Repair ->
+# approval) -> Controller -> shared-world RNS -> original EMOS Stage2.
+# No pre-authored MissionPlan is submitted; the static plan remains B2-only.
+# Usage: run-b1-roboguide.sh <run-dir-abs-or-rel>
 set -euo pipefail
 
 SCENARIO="$(cd "$(dirname "$0")" && pwd)"
@@ -8,15 +11,10 @@ REPO="$(cd "$SCENARIO/../.." && pwd)"
 DEFAULT_EMOS_ROOT="$(dirname "$REPO")/emos-baseline"
 EMOS_ROOT="${ROBOGUIDE_EMOS_ROOT:-$DEFAULT_EMOS_ROOT}"
 HABITAT_ENV="${ROBOGUIDE_HABITAT_CONDA_ENV:-habitat}"
-MODE="${1:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}"
-RUN="${2:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}"
-# The harness may render {output_dir} relative to its own CWD; pin the run
-# directory to an absolute path so later `cd` (EMOS checkout) cannot move it.
-mkdir -p "$RUN"
-RUN="$(cd "$RUN" && pwd)"
+RUN="${1:?usage: run-b1-roboguide.sh <run-dir> [input-json]}"
+INPUT_JSON="${2:-${ROBOGUIDE_B1_INPUT:-$SCENARIO/b1-input.json}}"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
-MISSION_ID="mission-e1-i-shared-world-episode-51"
 PIDS=()
 
 # Port hygiene: a previous run's server may survive its trap (SIGTERM is not
@@ -39,7 +37,7 @@ clean_port() {
 }
 
 cleanup() {
-    # Stop only the exact processes launched by this smoke.
+    # Stop only the exact processes launched by this B1 run.
     for pid in "${PIDS[@]:-}"; do
         kill "$pid" 2>/dev/null || true
     done
@@ -58,16 +56,14 @@ wait_http() {
 }
 
 wait_nodes() {
-    # Wait until the inventory contains every requested node id.
-    local -a ids=("$@")
+    # Wait until the inventory contains both shared-world node ids.
     for _ in $(seq 1 120); do
-        local missing=0
-        for id in "${ids[@]}"; do
-            if ! curl -sf http://127.0.0.1:28060/v1/inventory | grep -q "\"$id\""; then
-                missing=1
-            fi
-        done
-        if [[ "$missing" == "0" ]]; then return 0; fi
+        if curl -sf http://127.0.0.1:28060/v1/inventory \
+            | grep -q '"e1-shared-node-a"' \
+            && curl -sf http://127.0.0.1:28060/v1/inventory \
+            | grep -q '"e1-shared-node-b"'; then
+            return 0
+        fi
         sleep 1
     done
     echo "timeout waiting for node registration" >&2
@@ -75,10 +71,10 @@ wait_nodes() {
 }
 
 wait_mission_terminal() {
-    # Poll one mission id to any terminal status within the budget.
-    local mission="$1" output="$2" budget="$3"
+    # Poll the mission (once it exists) to any terminal status.
+    local output="$1" budget="$2"
     for _ in $(seq 1 "$budget"); do
-        curl -sf "http://127.0.0.1:28060/v1/missions/$mission" -o "$output" || true
+        curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$output" || true
         if python3 - "$output" <<'PYEOF'
 import json
 import sys
@@ -87,16 +83,14 @@ try:
     status = json.load(open(sys.argv[1], encoding="utf-8"))["status"]
 except (FileNotFoundError, KeyError, json.JSONDecodeError):
     raise SystemExit(1)
-if status in {"Completed", "Failed", "Cancelled"}:
-    raise SystemExit(0)
-raise SystemExit(1)
+raise SystemExit(0 if status in {"Completed", "Failed", "Cancelled"} else 1)
 PYEOF
         then
             return 0
         fi
         sleep 1
     done
-    echo "timeout waiting for mission $mission" >&2
+    echo "timeout waiting for mission $MISSION_ID" >&2
     return 1
 }
 
@@ -109,29 +103,22 @@ if [[ ! -d "$EMOS_ROOT" ]]; then
     exit 1
 fi
 
-PLAN="$SCENARIO/mission-plan.json"
-PAIR_WAIT=420
-MISSION_BUDGET=480
-NODES_TO_WAIT=(e1-shared-node-a e1-shared-node-b)
-if [[ "$MODE" == "negative" ]]; then
-    PLAN="$SCENARIO/mission-plan-negative.json"
-    MISSION_ID="mission-e1-i-shared-world-negative"
-elif [[ "$MODE" == "single" ]]; then
-    PAIR_WAIT=45
-    NODES_TO_WAIT=(e1-shared-node-a)
-fi
-
-rm -rf -- "$RUN"
+mkdir -p "$RUN"
+RUN="$(cd "$RUN" && pwd)"
+rm -rf -- "$RUN"/* 2>/dev/null || true
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
+sed "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
+    "$SCENARIO/mission-service-b1.toml" > "$RUN/mission-service-b1.toml"
 
 clean_port 25060
 clean_port 28060
 clean_port 28090
 clean_port 28100
 clean_port 28102
+clean_port 8070
 HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
 (
     cd "$EMOS_ROOT"
@@ -142,13 +129,13 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         "$HABITAT_PYTHON" -u -m habitat_local_eaios \
         --port 28100 \
         --backend shared-emos-stage2 \
-        --subtask-mode entity-grounded \
+        --subtask-mode natural-objective \
         --port-b 28102 \
         --state-db "$RUN/bridge-a.sqlite3" \
         --state-db-b "$RUN/bridge-b.sqlite3" \
         --agent-id 0 \
         --agent-b-id 1 \
-        --pair-wait-s "$PAIR_WAIT" \
+        --pair-wait-s 1200 \
         --evidence-dir "$RUN/evidence" \
         --habitat-config \
             "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \
@@ -167,61 +154,71 @@ wait_http http://127.0.0.1:28060/healthz 30
 
 "$NODE" "$RUN/node-a.toml" >"$RUN/node-a.log" 2>&1 &
 PIDS+=($!)
-if [[ "$MODE" != "single" ]]; then
-    "$NODE" "$RUN/node-b.toml" >"$RUN/node-b.log" 2>&1 &
-    PIDS+=($!)
-fi
-wait_nodes "${NODES_TO_WAIT[@]}"
+"$NODE" "$RUN/node-b.toml" >"$RUN/node-b.log" 2>&1 &
+PIDS+=($!)
+wait_nodes
 curl -sf http://127.0.0.1:28060/v1/inventory -o "$RUN/inventory.json"
 
-curl -sS -X POST http://127.0.0.1:28060/v1/missions \
+# Production Mission Intelligence ingress (no static plan anywhere in this path).
+cd "$REPO"
+# The frozen relay endpoint is plain HTTP on a remote host; the MI provider
+# config requires this explicit opt-out (same relay the EMOS arm uses).
+ROBOGUIDE_ALLOW_INSECURE_LLM_HTTP=1 uv run python "$REPO/apps/mission-service/main.py" \
+    --mission-config config/mission.toml \
+    --service-config "$RUN/mission-service-b1.toml" \
+    --repository-root "$REPO" >"$RUN/mission-service.log" 2>&1 &
+PIDS+=($!)
+cd "$RUN"
+# The collection GET returns 404 by design; connectivity alone proves readiness.
+for _ in $(seq 1 120); do
+    if curl -s -o /dev/null http://127.0.0.1:8070/v1/mission-requests; then break; fi
+    sleep 1
+done
+
+
+INSTRUCTION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["instruction"])' "$INPUT_JSON")
+SUBMITTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "submission_start_utc=$SUBMITTED_AT" > "$RUN/b1-timing.txt"
+REQUEST_JSON=$(curl -sS -X POST http://127.0.0.1:8070/v1/mission-requests \
     -H 'Content-Type: application/json' \
-    --data-binary @"$PLAN" \
-    -o "$RUN/post-body.json" -w '%{http_code}' >"$RUN/post-status.txt"
-
-if [[ "$MODE" == "cancel" ]]; then
-    # Cancel only after BOTH bridge endpoints report true local RUNNING; the
-    # mission-lifecycle Running label alone precedes task dispatch.
-    for _ in $(seq 1 240); do
-        STATE=$(curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' || echo unreachable)
-        echo "$STATE" >> "$RUN/cancel-pre-states.txt"
-        RUNNING_COUNT=$(python3 - "$RUN" <<'PYEOF'
-import sqlite3, sys
-
-count = 0
-for suffix in ("a", "b"):
-    try:
-        connection = sqlite3.connect(f"file:{sys.argv[1]}/bridge-{suffix}.sqlite3?mode=ro", uri=True)
-        rows = connection.execute("SELECT state FROM executions").fetchall()
-        connection.close()
-    except sqlite3.Error:
-        continue
-    if any(row[0] in {"RUNNING", "COMPLETED", "CANCELLED", "FAILED"} for row in rows):
-        count += 1
-print(count)
-PYEOF
-        )
-        if [[ "$RUNNING_COUNT" == "2" ]]; then
-            sleep 1
-            curl -sS -X POST "http://127.0.0.1:28060/v1/missions/$MISSION_ID/cancel" \
-                -H 'Content-Type: application/json' -d '{}' \
-                -o "$RUN/cancel-body.json" -w '%{http_code}' >"$RUN/cancel-status.txt" || true
-            break
-        fi
-        sleep 1
-    done
+    -d "{\"instruction\": $(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$INSTRUCTION")}")
+REQUEST_ID=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["request_id"])' "$REQUEST_JSON" 2>/dev/null || echo "")
+MISSION_ID=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["mission_id"])' "$REQUEST_JSON" 2>/dev/null || echo "")
+if [[ -z "$REQUEST_ID" ]]; then
+    echo "$REQUEST_JSON" > "$RUN/b1-request-record.json"
+    echo "B1 ingress failed before a request id was minted" >&2
+    exit 1
 fi
+echo "$REQUEST_JSON" > "$RUN/b1-request-record.json"
+echo "request_id=$REQUEST_ID" >> "$RUN/b1-timing.txt"
 
-wait_mission_terminal "$MISSION_ID" "$RUN/mission.json" "$MISSION_BUDGET"
-sleep 3
-curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
+# Wait for the pre-execution lifecycle to settle (accepted = submitted to Control).
+LIFECYCLE=""
+for _ in $(seq 1 240); do
+    curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
+        -o "$RUN/b1-request-record.json" || true
+    LIFECYCLE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["lifecycle"])' \
+        "$RUN/b1-request-record.json" 2>/dev/null || echo unknown)
+    case "$LIFECYCLE" in
+        Accepted|Blocked|Failed|NeedsClarification|AwaitingApproval|Cancelled)
+            break ;;
+    esac
+    sleep 2
+done
+echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
+
+if [[ "$LIFECYCLE" == "Accepted" ]]; then
+    wait_mission_terminal "$RUN/mission.json" 1800 || true
+    sleep 3
+    curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
+fi
 curl -sf http://127.0.0.1:28060/v1/events -o "$RUN/events.json" || true
 curl -sf http://127.0.0.1:28060/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
 
 for pid in "${PIDS[@]}"; do
-    kill -0 "$pid"
+    kill -0 "$pid" 2>/dev/null || true
 done
 
-python3 "$SCENARIO/verify-shared-world.py" "$RUN" "$MODE" >"$RUN/verdict.json"
-cat "$RUN/verdict.json"
+python3 "$SCENARIO/verify-shared-world.py" "$RUN" paired >"$RUN/verdict.json" || true
+python3 "$SCENARIO/verify-b1.py" "$RUN" >"$RUN/b1-verdict.json"
+cat "$RUN/b1-verdict.json"
