@@ -1,12 +1,13 @@
 schema: roboguide-e1.controlled-workload/v0.1
 workload_id: habitat-mas-mobility-episode-51
 admission:
-  status: blocked
-  blocker_code: roboguide-semantic-goal-coverage
+  status: ready
+  evidence: evaluation/e1/shared_world/summary.json
   reason: >-
-    The official episode has two simultaneous navigation goal predicates,
-    while the current RoboGuide C1-S0B Mission and bridge cover only the
-    agent-0 navigation to any_targets|0.
+    RoboGuide now covers both official goal predicates of episode 51 through
+    two independently committed Nodes executing in one shared Habitat world
+    with the original EMOS Stage2 stack over the production Control/Node
+    path; official pddl_success remains the only benchmark authority.
 dataset:
   name: habitat-mas-mp3d-mobility
   revision: mobility_episodes_1
@@ -40,8 +41,9 @@ current_runner_coverage:
       - any_at(any_targets|0)
       - any_at(TARGET_any_targets|0)
   roboguide:
-    process_boundary: controller-node-local-eaios
+    process_boundary: controller-node-local-eaios-shared-world
     canonical_operation: mobility.navigate@v1
     goal_predicates:
       - any_at(any_targets|0)
+      - any_at(TARGET_any_targets|0)
 metrics_contract: roboguide-eval.metrics/v0.3

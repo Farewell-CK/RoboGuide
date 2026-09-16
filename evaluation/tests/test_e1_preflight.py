@@ -41,14 +41,19 @@ def test_controlled_workload_freezes_episode_and_success_authority() -> None:
     assert semantic_task["benchmark_success"] == "habitat.pddl_success"
 
 
-def test_controlled_workload_blocks_mismatched_goal_coverage() -> None:
-    """Formal pairing stays blocked until both runners cover both predicates."""
+def test_controlled_workload_admission_matches_goal_coverage() -> None:
+    """Admission is ready only while both runners cover both official predicates."""
     workload = _workload()
     admission = _object(workload["admission"])
-    assert admission["status"] == "blocked"
     coverage = _object(workload["current_runner_coverage"])
     emos_goals = _text_list(_object(coverage["emos"])["goal_predicates"])
     roboguide_goals = _text_list(_object(coverage["roboguide"])["goal_predicates"])
     assert emos_goals == ["any_at(any_targets|0)", "any_at(TARGET_any_targets|0)"]
-    assert roboguide_goals == ["any_at(any_targets|0)"]
-    assert roboguide_goals != emos_goals
+    if admission["status"] == "ready":
+        # The admitted state requires equal goal coverage plus an evidence anchor.
+        assert roboguide_goals == emos_goals
+        assert isinstance(admission.get("evidence"), str)
+        assert admission["evidence"].endswith("summary.json")
+    else:
+        assert admission["status"] == "blocked"
+        assert roboguide_goals != emos_goals
