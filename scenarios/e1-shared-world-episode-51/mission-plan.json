@@ -1,0 +1,147 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-e1-i-shared-world-episode-51",
+    "objective": "Cover both official navigation goals of the shared episode.",
+    "actors": [
+      {
+        "id": "shared-robot-a"
+      },
+      {
+        "id": "shared-robot-b"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-goal-a",
+      "roles": [
+        {
+          "id": "ctx-role-a",
+          "actor": "shared-robot-a"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    },
+    {
+      "id": "ctx-goal-b",
+      "roles": [
+        {
+          "id": "ctx-role-b",
+          "actor": "shared-robot-b"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-navigate-goal-a",
+      "description": "Navigate one robot to any_targets|0.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-navigator-a",
+          "context_role": "ctx-role-a",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "Navigate the assigned robot to the first semantic target of the shared episode.",
+            "parameters": {
+              "destination": "any_targets|0"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-goal-a",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "The robot reached any_targets|0.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "task-navigate-goal-b",
+      "description": "Navigate the other robot to TARGET_any_targets|0.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-navigator-b",
+          "context_role": "ctx-role-b",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "Navigate the assigned robot to the goal semantic target of the shared episode.",
+            "parameters": {
+              "destination": "TARGET_any_targets|0"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "ctx-goal-b",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "The other robot reached TARGET_any_targets|0.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

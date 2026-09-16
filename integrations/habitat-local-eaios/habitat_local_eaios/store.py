@@ -113,6 +113,15 @@ class ExecutionStore:
             ).fetchone()
             return None if row is None else self._decode(row)
 
+    def all_executions(self) -> list[StoredExecution]:
+        """Return every durable execution row for endpoint idempotency indexes."""
+        connection = self._connect()
+        try:
+            rows = connection.execute("SELECT * FROM executions").fetchall()
+        finally:
+            connection.close()
+        return [self._decode(row) for row in rows]
+
     def active_execution(self) -> StoredExecution | None:
         """Return the sole accepted/running execution when one owns the simulator."""
         with self._lock, self._connect() as connection:

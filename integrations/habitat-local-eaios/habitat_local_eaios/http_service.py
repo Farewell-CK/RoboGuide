@@ -6,13 +6,34 @@ import json
 import logging
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Protocol
 
-from .adapter import HabitatLocalAdapter
 from .model import IntegrationError
 
 LOG = logging.getLogger("roboguide.habitat_local_eaios")
 MAX_REQUEST_BYTES = 1024 * 1024
+
+
+class WorkflowAdapter(Protocol):
+    """The Local EAIOS surface one bridge endpoint serves."""
+
+    def health(self) -> dict[str, object]:
+        """Report process-local backend health."""
+
+    def readiness(self) -> dict[str, object]:
+        """Report exact operation readiness."""
+
+    def accept(self, request: object) -> dict[str, object]:
+        """Durably accept one exact invocation."""
+
+    def dispatch(self, execution_id: str) -> None:
+        """Idempotently schedule one accepted handle."""
+
+    def status(self, request: object) -> dict[str, object]:
+        """Return the durable local fact for one handle."""
+
+    def cancel(self, request: object) -> dict[str, object]:
+        """Accept cancellation intent for one handle."""
 
 
 class HabitatBridgeServer(ThreadingHTTPServer):
@@ -20,7 +41,7 @@ class HabitatBridgeServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], adapter: HabitatLocalAdapter) -> None:
+    def __init__(self, address: tuple[str, int], adapter: WorkflowAdapter) -> None:
         """Bind one fixed local address and attach the persistent adapter."""
         self.adapter = adapter
         super().__init__(address, HabitatBridgeHandler)

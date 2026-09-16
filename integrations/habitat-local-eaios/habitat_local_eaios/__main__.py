@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import threading
 from pathlib import Path
 
 from .adapter import HabitatLocalAdapter
@@ -11,9 +12,14 @@ from .backend import HabitatBackendConfig, HabitatMobilityBackend
 from .crabagent_backend import SUBTASK_MODES, CrabAgentBackendConfig, CrabAgentMobilityBackend
 from .http_service import HabitatBridgeServer
 from .process_backend import HabitatProcessBackend
+from .shared_world import (
+    NodeEndpoint,
+    ProcessWorldService,
+    SharedWorldCoordinator,
+)
 from .store import ExecutionStore
 
-_BACKENDS = ("direct-oracle", "emos-crabagent")
+_BACKENDS = ("direct-oracle", "emos-crabagent", "shared-emos-stage2")
 
 
 def _arguments() -> argparse.Namespace:
@@ -38,15 +44,79 @@ def _arguments() -> argparse.Namespace:
         "--subtask-mode",
         choices=SUBTASK_MODES,
         default="natural-objective",
-        help="CrabAgent backend only: natural-objective (Protocol B) or entity-grounded (ablation)",
+        help="CrabAgent backends only: natural-objective (Protocol B) or entity-grounded",
     )
     parser.add_argument(
         "--evidence-dir",
         type=Path,
         default=None,
-        help="CrabAgent backend only: directory for scene/trace/token evidence",
+        help="LLM backends only: directory for scene/trace/token evidence",
+    )
+    parser.add_argument(
+        "--port-b",
+        type=int,
+        default=None,
+        help="shared backend only: second Node's loopback port",
+    )
+    parser.add_argument(
+        "--state-db-b",
+        type=Path,
+        default=None,
+        help="shared backend only: second Node's durable execution store",
+    )
+    parser.add_argument(
+        "--agent-b-id",
+        type=int,
+        default=None,
+        help="shared backend only: second Node's Habitat agent id",
+    )
+    parser.add_argument(
+        "--pair-wait-s",
+        type=float,
+        default=300.0,
+        help="shared backend only: bounded episode-start synchronization window",
     )
     return parser.parse_args()
+
+
+def _run_shared_world(arguments: argparse.Namespace) -> None:
+    """Serve two Node endpoints over exactly one shared Habitat world."""
+    if arguments.port_b is None or arguments.state_db_b is None or arguments.agent_b_id is None:
+        raise SystemExit(
+            "the shared-emos-stage2 backend requires --port-b, --state-db-b, --agent-b-id"
+        )
+    if arguments.evidence_dir is None:
+        raise SystemExit("the shared-emos-stage2 backend requires --evidence-dir")
+    if arguments.agent_id == arguments.agent_b_id:
+        raise SystemExit("shared-world endpoints must map to distinct Habitat agents")
+    config = CrabAgentBackendConfig(
+        config_path=arguments.habitat_config,
+        episode_id=arguments.episode_id,
+        agent_id=arguments.agent_id,
+        max_steps=arguments.max_steps,
+        step_period_ms=arguments.step_period_ms,
+        subtask_mode=arguments.subtask_mode,
+        evidence_dir=arguments.evidence_dir,
+    )
+    world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
+    coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
+    endpoint_a = NodeEndpoint(
+        "node-a", arguments.agent_id, ExecutionStore(arguments.state_db), coordinator
+    )
+    endpoint_b = NodeEndpoint(
+        "node-b", arguments.agent_b_id, ExecutionStore(arguments.state_db_b), coordinator
+    )
+    server_a = HabitatBridgeServer((arguments.host, arguments.port), endpoint_a)
+    server_b = HabitatBridgeServer((arguments.host, arguments.port_b), endpoint_b)
+    for server in (server_a, server_b):
+        threading.Thread(target=server.serve_forever, args=(0.2,), daemon=True).start()
+        logging.info("Habitat Local EAIOS ready at http://%s:%s", *server.server_address)
+    try:
+        threading.Event().wait()
+    finally:
+        server_a.server_close()
+        server_b.server_close()
+        coordinator.shutdown()
 
 
 def main() -> None:
@@ -57,6 +127,9 @@ def main() -> None:
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if arguments.backend == "shared-emos-stage2":
+        _run_shared_world(arguments)
+        return
     common = {
         "config_path": arguments.habitat_config,
         "episode_id": arguments.episode_id,
