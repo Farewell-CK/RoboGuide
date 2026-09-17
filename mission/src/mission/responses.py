@@ -11,7 +11,7 @@ from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
-from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.provider_mission_plan import (
@@ -92,10 +92,12 @@ def _validate_plan_output(
     grounded_intent: GroundedIntent,
     capability_catalog: CanonicalCapabilityCatalog,
     satisfaction_policy: MissionSatisfactionPolicy | None,
+    grounding_context: GroundingContextSnapshot,
 ) -> MissionPlan:
     """Validate one generated draft against identity, implementation, and Catalog boundaries."""
     plan = MissionPlan.from_json(value)
     plan.validate_implementation_support()
+    plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
     if plan.mission.mission_id != mission_id:
         raise MissionProviderError("model changed the requested mission id")
     if plan.mission.objective != grounded_intent.objective:
@@ -327,6 +329,7 @@ class ResponsesMissionPlanner:
             grounded_intent,
             capability_catalog,
             self._settings.satisfaction_policy,
+            grounding_context,
         )
 
 
@@ -420,6 +423,7 @@ class ResponsesMissionRepairer:
             grounded_intent,
             capability_catalog,
             self._settings.satisfaction_policy,
+            grounding_context,
         )
 
 

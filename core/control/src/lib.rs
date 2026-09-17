@@ -32,8 +32,8 @@ pub use scheduler::{
 
 use coordination::Reservation;
 use domain::{
-    ActorBinding, ActorId, ExecutionGroupId, LeaseId, MissionId, NodeId, NodeLease, ResourceId,
-    RoleId, TaskRef, TimestampMs,
+    ActorBinding, ActorId, CoordinationContextId, ExecutionGroupId, LeaseId, MissionId, NodeId,
+    NodeLease, PhysicalEntityId, ResourceId, RoleId, TaskRef, TimestampMs,
 };
 use ports::SharedStateError;
 use std::collections::BTreeMap;
@@ -64,6 +64,9 @@ pub struct ControlCheckpoint {
     /// Deployment-owned actor placement constraints represented as values for stable JSON.
     #[serde(default)]
     actor_node_constraints: Vec<ActorNodeConstraint>,
+    /// Mission binding semantics keyed by mission identity.
+    #[serde(default)]
+    mission_binding_semantics: Vec<(domain::MissionId, domain::MissionBindingSemantics)>,
     /// Execution Groups represented as values to avoid relying on map-key codecs.
     groups: Vec<ExecutionGroup>,
     /// Committed replacement assignments awaiting Rebind or Abort.
@@ -146,6 +149,26 @@ pub enum ControlError {
         /// Node required by the placement policy.
         node_id: NodeId,
     },
+    /// A grounded actor's deployment entity has no registry entry.
+    ActorGroundingUnresolved {
+        /// Mission containing the grounded actor.
+        mission_id: MissionId,
+        /// Actor whose grounding cannot be resolved.
+        actor_id: ActorId,
+        /// Deployment entity without a providing node.
+        entity_id: domain::PhysicalEntityId,
+    },
+    /// Distinct actor binding semantics cannot be satisfied by any candidate.
+    DistinctBindingUnsatisfiable {
+        /// Mission declaring the binding policy.
+        mission_id: MissionId,
+        /// Actor whose distinct occupancy cannot be honored.
+        actor_id: ActorId,
+        /// Peer actor already occupying the only remaining candidate node.
+        occupied_by_actor: ActorId,
+        /// Physical entity occupied by the peer actor.
+        physical_entity_id: PhysicalEntityId,
+    },
     /// A proposal or internal invariant was invalid.
     InvalidProposal(String),
     /// Control allocation authority could not be projected due to an invariant violation.
@@ -217,6 +240,25 @@ impl Display for ControlError {
                 formatter,
                 "mission actor {mission_id}/{actor_id} remains bound to unavailable node {node_id}; reconciliation required"
             ),
+            Self::ActorGroundingUnresolved {
+                mission_id,
+                actor_id,
+                entity_id,
+            } => write!(
+                formatter,
+                "actor {actor_id} of mission {mission_id} is grounded to entity {entity_id} \
+                 that the deployment registry does not provide"
+            ),
+            Self::DistinctBindingUnsatisfiable {
+                mission_id,
+                actor_id,
+                occupied_by_actor,
+                physical_entity_id,
+            } => write!(
+                formatter,
+                "actor {actor_id} of mission {mission_id} cannot use physical entity \
+                 {physical_entity_id}: peer actor {occupied_by_actor} already occupies it"
+            ),
             Self::ActorPlacementConstraintUnsatisfied {
                 mission_id,
                 actor_id,
@@ -279,6 +321,11 @@ pub struct ControlPlane {
     pub(crate) actor_bindings: BTreeMap<(MissionId, ActorId), ActorBinding>,
     /// Deployment-owned actor placement constraints applied before first successful binding.
     pub(crate) actor_node_constraints: BTreeMap<(MissionId, ActorId), ActorNodeConstraint>,
+    /// Current deployment topology, deliberately reacquired rather than checkpointed.
+    pub(crate) physical_entity_registry: Option<domain::PhysicalEntityRegistrySnapshot>,
+    /// Mission binding semantics registered from each accepted plan.
+    pub(crate) mission_binding_semantics:
+        BTreeMap<domain::MissionId, domain::MissionBindingSemantics>,
     /// Dynamic Execution Groups owned by Group Manager.
     pub(crate) groups: BTreeMap<ExecutionGroupId, ExecutionGroup>,
     /// Committed replacement assignments awaiting Consume or Abort.
@@ -310,6 +357,8 @@ impl ControlPlane {
             calendar_version: 0,
             actor_bindings: BTreeMap::new(),
             actor_node_constraints: BTreeMap::new(),
+            physical_entity_registry: None,
+            mission_binding_semantics: BTreeMap::new(),
             groups: BTreeMap::new(),
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
@@ -324,6 +373,11 @@ impl ControlPlane {
             calendar_version: self.calendar_version,
             actor_bindings: self.actor_bindings.values().cloned().collect(),
             actor_node_constraints: self.actor_node_constraints.values().cloned().collect(),
+            mission_binding_semantics: self
+                .mission_binding_semantics
+                .iter()
+                .map(|(mission_id, semantics)| (mission_id.clone(), semantics.clone()))
+                .collect(),
             groups: self.groups.values().cloned().collect(),
             pending_recovery_commitments: self
                 .pending_recovery_commitments
@@ -374,6 +428,45 @@ impl ControlPlane {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint actor placement conflicts with committed actor binding".to_string(),
                 ));
+            }
+        }
+        let mut mission_binding_semantics = BTreeMap::new();
+        for (mission_id, semantics) in checkpoint.mission_binding_semantics {
+            if mission_binding_semantics
+                .insert(mission_id.clone(), semantics.clone())
+                .is_some()
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "checkpoint contains duplicate mission binding semantics for {mission_id}"
+                )));
+            }
+            // Restored bindings can be checked against immutable Mission semantics here. The
+            // deployment topology is reacquired and revalidated separately after restart.
+            for (actor_id, entity_id) in semantics.grounded_actors() {
+                let Some(binding) = actor_bindings.get(&(mission_id.clone(), actor_id.clone()))
+                else {
+                    continue;
+                };
+                if binding.physical_entity_id() != Some(entity_id) {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "checkpoint actor {actor_id} binding violates its grounding entity"
+                    )));
+                }
+            }
+            for constraint in semantics.context_constraints() {
+                let mut occupied = BTreeMap::new();
+                for actor_id in constraint.actor_ids() {
+                    if let Some(binding) =
+                        actor_bindings.get(&(mission_id.clone(), actor_id.clone()))
+                        && let Some(entity_id) = binding.physical_entity_id()
+                        && let Some(previous) = occupied.insert(entity_id.clone(), actor_id.clone())
+                    {
+                        return Err(ControlError::InvalidProposal(format!(
+                            "checkpoint Context {} binds {previous} and {actor_id} to the same physical entity",
+                            constraint.context_id()
+                        )));
+                    }
+                }
             }
         }
         let mut pending_recovery_commitments = BTreeMap::new();
@@ -438,6 +531,8 @@ impl ControlPlane {
             calendar_version: checkpoint.calendar_version,
             actor_bindings,
             actor_node_constraints,
+            physical_entity_registry: None,
+            mission_binding_semantics,
             groups,
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
@@ -449,31 +544,117 @@ impl ControlPlane {
     }
 
     /// Records an actor binding after a successful committed task and Group binding.
+    #[cfg(test)]
     pub(crate) fn record_actor_binding(
         &mut self,
         mission_id: MissionId,
         actor_id: ActorId,
         node_id: NodeId,
     ) -> Result<(), ControlError> {
+        let physical = self.validate_actor_binding_intent(&mission_id, &actor_id, &node_id)?;
+        let key = (mission_id.clone(), actor_id.clone());
+        if let Some(existing) = self.actor_bindings.get(&key) {
+            if existing.node_id() != &node_id
+                || physical.as_ref().is_some_and(|(entity_id, _, _)| {
+                    existing.physical_entity_id() != Some(entity_id)
+                })
+            {
+                return Err(ControlError::InvalidProposal(
+                    "mission actor is already bound to another physical executor".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        let binding = match physical {
+            Some((entity_id, registry_id, revision)) => ActorBinding::new_physical(
+                mission_id,
+                actor_id,
+                node_id,
+                entity_id,
+                registry_id,
+                revision,
+            ),
+            None => ActorBinding::new(mission_id, actor_id, node_id),
+        };
+        self.actor_bindings.insert(key, binding);
+        Ok(())
+    }
+
+    /// Validates one intended actor binding against every binding invariant.
+    ///
+    /// A grounded actor must resolve its exact deployment entity to the proposed Node.
+    /// Context-specific physical distinctness is checked separately before Commit and Bind.
+    pub(crate) fn validate_actor_binding_intent(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+        node_id: &NodeId,
+    ) -> Result<
+        Option<(
+            domain::PhysicalEntityId,
+            domain::PhysicalEntityRegistryId,
+            u64,
+        )>,
+        ControlError,
+    > {
         let key = (mission_id.clone(), actor_id.clone());
         if let Some(constraint) = self.actor_node_constraints.get(&key)
-            && constraint.node_id() != &node_id
+            && constraint.node_id() != node_id
         {
             return Err(ControlError::InvalidProposal(
                 "actor binding violates deployment placement constraint".to_string(),
             ));
         }
-        if let Some(existing) = self.actor_bindings.get(&key) {
-            if existing.node_id() != &node_id {
-                return Err(ControlError::InvalidProposal(
-                    "mission actor is already bound to another node".to_string(),
-                ));
-            }
-            return Ok(());
+        let Some(semantics) = self.mission_binding_semantics.get(mission_id) else {
+            return Ok(None);
+        };
+        if !semantics.requires_physical_entities() {
+            return Ok(None);
         }
-        self.actor_bindings
-            .insert(key, ActorBinding::new(mission_id, actor_id, node_id));
-        Ok(())
+        let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
+            ControlError::InvalidProposal(
+                "physical entity registry is not installed for MissionPlan v0.8 binding"
+                    .to_string(),
+            )
+        })?;
+        let registration = if let Some(entity_id) = semantics.grounding(actor_id) {
+            match registry.entity(entity_id) {
+                Some(registration) if registration.node_id() == node_id => registration,
+                Some(registration) => {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "grounded actor {actor_id} may only bind node {} but intent is {node_id}",
+                        registration.node_id()
+                    )));
+                }
+                None => {
+                    return Err(ControlError::ActorGroundingUnresolved {
+                        mission_id: mission_id.clone(),
+                        actor_id: actor_id.clone(),
+                        entity_id: entity_id.clone(),
+                    });
+                }
+            }
+        } else {
+            registry.entity_for_node(node_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "node {node_id} has no routable physical entity in registry revision {}",
+                    registry.revision()
+                ))
+            })?
+        };
+        Ok(Some((
+            registration.entity_id().clone(),
+            registry.registry_id().clone(),
+            registry.revision(),
+        )))
+    }
+
+    /// Exposes the actor binding map for corruption-style tests.
+    #[cfg(test)]
+    pub(crate) fn actor_bindings_for_test(
+        &mut self,
+    ) -> &mut BTreeMap<(MissionId, ActorId), ActorBinding> {
+        &mut self.actor_bindings
     }
 
     /// Returns the authoritative binding for one mission actor, if any.
@@ -484,6 +665,194 @@ impl ControlPlane {
     ) -> Option<&ActorBinding> {
         self.actor_bindings
             .get(&(mission_id.clone(), actor_id.clone()))
+    }
+
+    /// Installs one complete current deployment topology and fences stale durable bindings.
+    ///
+    /// The snapshot is deliberately not restored from a Control checkpoint. A restart must supply
+    /// current deployment evidence, and a changed entity-to-Node association remains an explicit
+    /// reconciliation condition instead of silently migrating Actor authority.
+    pub fn install_physical_entity_registry(
+        &mut self,
+        snapshot: domain::PhysicalEntityRegistrySnapshot,
+    ) -> Result<(), ControlError> {
+        if let Some(current) = &self.physical_entity_registry {
+            if current.registry_id() != snapshot.registry_id() {
+                return Err(ControlError::InvalidProposal(
+                    "physical entity registry identity changed".to_string(),
+                ));
+            }
+            if snapshot.revision() < current.revision() {
+                return Err(ControlError::InvalidProposal(
+                    "physical entity registry revision moved backwards".to_string(),
+                ));
+            }
+            if snapshot.revision() == current.revision() && &snapshot != current {
+                return Err(ControlError::InvalidProposal(
+                    "physical entity registry changed without a new revision".to_string(),
+                ));
+            }
+        }
+        for binding in self.actor_bindings.values() {
+            let Some(entity_id) = binding.physical_entity_id() else {
+                continue;
+            };
+            let registration = snapshot.entity(entity_id).ok_or_else(|| {
+                ControlError::ActorBindingRequiresReconciliation {
+                    mission_id: binding.mission_id().clone(),
+                    actor_id: binding.actor_id().clone(),
+                    node_id: binding.node_id().clone(),
+                }
+            })?;
+            if registration.node_id() != binding.node_id()
+                || binding.registry_id() != Some(snapshot.registry_id())
+                || binding
+                    .registry_revision()
+                    .is_none_or(|revision| snapshot.revision() < revision)
+            {
+                return Err(ControlError::ActorBindingRequiresReconciliation {
+                    mission_id: binding.mission_id().clone(),
+                    actor_id: binding.actor_id().clone(),
+                    node_id: binding.node_id().clone(),
+                });
+            }
+        }
+        self.physical_entity_registry = Some(snapshot);
+        Ok(())
+    }
+
+    /// Requires deployment topology before serving restored physical ActorBindings.
+    ///
+    /// A checkpoint records bind-time evidence, never a current registry; missing deployment
+    /// evidence must not be interpreted as permission to route an existing physical binding.
+    pub fn validate_physical_entity_registry_on_restore(&self) -> Result<(), ControlError> {
+        if self.physical_entity_registry.is_none()
+            && self
+                .actor_bindings
+                .values()
+                .any(|binding| binding.physical_entity_id().is_some())
+        {
+            return Err(ControlError::InvalidProposal(
+                "restored physical ActorBindings require a current deployment registry".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the current physical entity registry snapshot, when composition installed one.
+    pub const fn physical_entity_registry(
+        &self,
+    ) -> Option<&domain::PhysicalEntityRegistrySnapshot> {
+        self.physical_entity_registry.as_ref()
+    }
+
+    /// Returns the Node currently routing one physical entity.
+    pub fn physical_entity_node(&self, entity_id: &domain::PhysicalEntityId) -> Option<&NodeId> {
+        self.physical_entity_registry
+            .as_ref()?
+            .entity(entity_id)
+            .map(domain::PhysicalEntityRegistration::node_id)
+    }
+
+    /// Registers one mission's binding semantics extracted from its accepted plan.
+    ///
+    /// Idempotent per mission; re-registering identical semantics is a no-op and
+    /// conflicting re-registration is rejected because a mission's binding
+    /// contract is immutable once accepted.
+    pub fn register_mission_binding_semantics(
+        &mut self,
+        mission_id: domain::MissionId,
+        semantics: domain::MissionBindingSemantics,
+    ) -> Result<(), ControlError> {
+        if let Some(existing) = self.mission_binding_semantics.get(&mission_id) {
+            if *existing == semantics {
+                return Ok(());
+            }
+            return Err(ControlError::InvalidProposal(format!(
+                "mission {mission_id} binding semantics conflict with the accepted plan"
+            )));
+        }
+        self.mission_binding_semantics.insert(mission_id, semantics);
+        Ok(())
+    }
+
+    /// Returns the registry node a not-yet-bound actor is grounded to.
+    ///
+    /// Grounding is the strongest pre-binding authority after an existing
+    /// binding: the actor can only ever be matched to the node its deployment
+    /// entity currently provides.
+    pub(crate) fn grounded_actor_node(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+    ) -> Option<NodeId> {
+        let semantics = self.mission_binding_semantics.get(mission_id)?;
+        let entity_id = semantics.grounding(actor_id)?;
+        self.physical_entity_registry
+            .as_ref()?
+            .entity(entity_id)
+            .map(domain::PhysicalEntityRegistration::node_id)
+            .cloned()
+    }
+
+    /// Removes candidate nodes occupied by an actor's distinct-occupancy peers.
+    ///
+    /// Returns the explicit unsatisfiable error naming the blocking peer when
+    /// the filter empties the candidate set, so callers surface the real
+    /// cardinality conflict instead of a generic no-candidate failure.
+    pub(crate) fn retain_distinct_binding_candidates(
+        &self,
+        mission_id: &MissionId,
+        context_id: &CoordinationContextId,
+        actor_id: &ActorId,
+        node_ids: &mut Vec<NodeId>,
+    ) -> Result<(), ControlError> {
+        let Some(semantics) = self.mission_binding_semantics.get(mission_id) else {
+            return Ok(());
+        };
+        let peers = semantics.distinct_peers(context_id, actor_id);
+        if peers.is_empty() {
+            return Ok(());
+        }
+        let mut occupied: BTreeMap<PhysicalEntityId, ActorId> = BTreeMap::new();
+        for peer in &peers {
+            if let Some(binding) = self.actor_bindings.get(&(mission_id.clone(), peer.clone()))
+                && let Some(entity_id) = binding.physical_entity_id()
+            {
+                occupied.insert(entity_id.clone(), peer.clone());
+            }
+        }
+        if occupied.is_empty() {
+            return Ok(());
+        }
+        let Some(registry) = &self.physical_entity_registry else {
+            return Err(ControlError::InvalidProposal(
+                "physical entity registry is not installed".to_string(),
+            ));
+        };
+        node_ids.retain(|node_id| {
+            registry
+                .entity_for_node(node_id)
+                .is_some_and(|registration| !occupied.contains_key(registration.entity_id()))
+        });
+        if node_ids.is_empty() {
+            let (physical_entity_id, occupied_by_actor) = occupied.pop_first().expect("nonempty");
+            return Err(ControlError::DistinctBindingUnsatisfiable {
+                mission_id: mission_id.clone(),
+                actor_id: actor_id.clone(),
+                occupied_by_actor,
+                physical_entity_id,
+            });
+        }
+        Ok(())
+    }
+
+    /// Returns one mission's registered binding semantics.
+    pub fn mission_binding_semantics(
+        &self,
+        mission_id: &MissionId,
+    ) -> Option<&domain::MissionBindingSemantics> {
+        self.mission_binding_semantics.get(mission_id)
     }
 
     /// Installs an idempotent deployment placement constraint for one mission actor.
@@ -542,12 +911,15 @@ impl ControlPlane {
         &self,
         mission_id: &MissionId,
         actor_id: &ActorId,
-    ) -> Option<&NodeId> {
+    ) -> Option<NodeId> {
         self.actor_binding(mission_id, actor_id)
             .map(ActorBinding::node_id)
+            .cloned()
+            .or_else(|| self.grounded_actor_node(mission_id, actor_id))
             .or_else(|| {
                 self.actor_node_constraint(mission_id, actor_id)
                     .map(ActorNodeConstraint::node_id)
+                    .cloned()
             })
     }
 

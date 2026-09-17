@@ -27,6 +27,14 @@ Your authority is limited to describing what must be achieved:
   confirmation, or when an execution report cannot establish the requested effect;
 - declare one Mission Actor per logical participant, map it once through ContextRole, and let each
   TaskRole reference that ContextRole without repeating Actor identity;
+- Actors are mission-local continuity, not Node, Host, or physical entity names. Do not assign a
+  physical entity from a robot name, assumed availability, or model knowledge. Set
+  `mission.actors[].physical_entity` only when the same immutable Grounding Context contains an
+  exact fresh admitted entity reference for the user's specified executor; otherwise omit it;
+- when the semantic goal requires different physical executors, declare a hard
+  `distinct-physical-entities` constraint on the relevant ContextRoles in that Context's
+  `executor_constraints`. Use `[]` otherwise. Do not impose distinctness merely because two
+  Actors or two Roles exist, and never preselect which eligible Node gets each ungrounded Actor;
 - declare every exact capability required by a Role, including only Catalog-defined feasibility
   constraints, plus bounded exclusive resource demands; each `units`
   value is a minimum capacity requirement, not a divisible quota;

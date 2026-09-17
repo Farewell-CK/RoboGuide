@@ -8,6 +8,7 @@ from enum import StrEnum
 
 from mission.contract_values import (
     CAPABILITIES,
+    MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
     MISSION_PLAN_VERSION,
@@ -283,7 +284,7 @@ class RoleRequirement:
     def from_json(cls, value: JSONValue, path: str, version: str) -> RoleRequirement:
         """Parse and validate one role requirement from contract JSON."""
         item = _object(value, path)
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
             _exact_keys(
                 item,
                 {"id", "requirements", "execution_intent", "context_role", "resource_scope"},
@@ -394,7 +395,7 @@ class RoleRequirement:
 
     def to_json(self, version: str) -> JSONObject:
         """Serialize the role requirement without provider-specific values."""
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
             if self.context_role is None:
                 raise MissionPlanError("normalized Role requires a ContextRole reference")
             return {

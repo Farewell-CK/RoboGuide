@@ -170,6 +170,7 @@ impl BoundedJointScheduler {
             }
             let mut selections = Vec::new();
             let mut selected = BTreeSet::new();
+            let mut actor_entities = BTreeMap::new();
             if search_roles(
                 state,
                 requirement,
@@ -180,6 +181,7 @@ impl BoundedJointScheduler {
                 0,
                 &mut selections,
                 &mut selected,
+                &mut actor_entities,
                 &mut expansions,
                 self.max_expansions,
             )? {
@@ -341,6 +343,7 @@ fn search_roles<S: SharedNodeStateReader>(
     role_index: usize,
     selections: &mut Vec<RoleSchedulingSelection>,
     selected_resources: &mut BTreeSet<ResourceId>,
+    selected_actor_entities: &mut BTreeMap<domain::ActorId, domain::PhysicalEntityId>,
     expansions: &mut u32,
     limit: u32,
 ) -> Result<bool, SchedulerError> {
@@ -357,6 +360,32 @@ fn search_roles<S: SharedNodeStateReader>(
     for node_id in nodes {
         let constraint = snapshot.role_constraint(role.role_id());
         if constraint.is_some_and(|constraint| constraint.node_id() != &node_id) {
+            continue;
+        }
+        if let Some(actor_id) = candidates.actor_for_role(role.role_id())
+            && let Some(entity_id) = candidates.physical_entity_for_node(&node_id)
+            && selected_actor_entities
+                .get(actor_id)
+                .is_some_and(|previous| previous != entity_id)
+        {
+            continue;
+        }
+        // Enforce physical, not transport, cardinality within this Context.
+        if let Some(actor_id) = candidates.actor_for_role(role.role_id())
+            && candidates
+                .distinct_actor_groups()
+                .iter()
+                .any(|group| group.contains(actor_id))
+            && let Some(entity_id) = candidates.physical_entity_for_node(&node_id)
+            && let Some(previous_actor) = selected_actor_entities.iter().find(|(other, entity)| {
+                *entity == entity_id
+                    && candidates
+                        .distinct_actor_groups()
+                        .iter()
+                        .any(|group| group.contains(other) && group.contains(actor_id))
+            })
+            && previous_actor.0 != actor_id
+        {
             continue;
         }
         let node = state
@@ -385,6 +414,14 @@ fn search_roles<S: SharedNodeStateReader>(
                 resource_ids.clone(),
                 resource_units,
             ));
+            let previous_actor_entity = candidates
+                .actor_for_role(role.role_id())
+                .cloned()
+                .zip(candidates.physical_entity_for_node(&node_id).cloned())
+                .map(|(actor_id, entity_id)| {
+                    let previous = selected_actor_entities.insert(actor_id.clone(), entity_id);
+                    (actor_id, previous)
+                });
             if search_roles(
                 state,
                 requirement,
@@ -395,10 +432,18 @@ fn search_roles<S: SharedNodeStateReader>(
                 role_index + 1,
                 selections,
                 selected_resources,
+                selected_actor_entities,
                 expansions,
                 limit,
             )? {
                 return Ok(true);
+            }
+            if let Some((actor_id, previous)) = previous_actor_entity {
+                if let Some(entity_id) = previous {
+                    selected_actor_entities.insert(actor_id, entity_id);
+                } else {
+                    selected_actor_entities.remove(&actor_id);
+                }
             }
             selections.pop();
             for resource_id in resource_ids {

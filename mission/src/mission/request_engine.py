@@ -15,7 +15,11 @@ from typing import Protocol
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionPlanSubmitter
-from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
+from mission.grounding_context import (
+    GroundingContextSnapshot,
+    admitted_physical_entity_ids,
+    dialogue_digest,
+)
 from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan
@@ -334,6 +338,9 @@ class MissionRequestEngine:
     ) -> MissionRequestRecord:
         """Validate and persist one immutable draft revision before semantic Review."""
         plan.validate_implementation_support()
+        plan.validate_physical_entity_grounding(
+            admitted_physical_entity_ids(self._require_grounding_context(record))
+        )
         if plan.mission.mission_id != record.mission_id:
             raise MissionRequestError("Planner changed the requested mission id")
         if plan.mission.objective != grounded_intent.objective:

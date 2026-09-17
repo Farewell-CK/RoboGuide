@@ -94,6 +94,15 @@ Draft/Review/Repair 属于单独的内部 deliberation trace。Planner 只声明
 candidate/runtime-specific duration estimate 由 Control 消费带 provenance 的 planning estimate。
 Approval 是 operation、intent、world context 与 policy 的风险判断，不由 contract 名单单独决定。
 
+MissionPlan v0.8 可引用由语义 grounding 明确承认的 PhysicalEntity，并在 Context 内对
+ContextRole 声明 `distinct-physical-entities` 硬约束。Actor 仍是 Mission 内的逻辑连续性，
+PhysicalEntity 是部署拥有的执行身份，Node 是路由/能力/存活 authority；物理 Host 与 Local
+EAIOS 又各自独立。Control 首次绑定时依据当前部署 registry 和 live Node evidence 选择实体，
+在 Commit/Bind 重验并持久化 ActorBinding；registry 是部署拓扑证据，不作为 checkpoint
+中的当前事实。现有 Node Protocol 不能对单个 Node 后的多个实体分别下发动作，因此当前
+可执行配置显式限制为一 Node 一可寻址实体，不能将其误写成 Mission distinct Node 语义。
+恢复不得隐式更换已绑定 Actor 的实体。详见 ADR-0040。
+
 Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
 声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
 `verifier-evidence` 要求 exact verifier contract/predicate，并由 State 保存相互独立、带 source、

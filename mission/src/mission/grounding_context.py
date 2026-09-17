@@ -14,6 +14,7 @@ from mission.models import JSONObject, JSONValue
 
 GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.1"
 GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2"
+PHYSICAL_ENTITY_REFERENCE_SCHEMA = "roboguide.world.physical-entity-reference/v0.1"
 MAX_GROUNDING_CONTEXT_BYTES = 512 * 1024
 EMPTY_GROUNDING_SELECTION_POLICY_REF = (
     f"{GROUNDING_SELECTION_POLICY}#world-payload-schemas="
@@ -487,6 +488,28 @@ class GroundingContextSnapshot:
             memory_evidence=tuple(MemoryGroundingEvidence.from_json(value) for value in memory),
             gaps=tuple(GroundingGap.from_json(value) for value in gaps),
         )
+
+
+def admitted_physical_entity_ids(snapshot: GroundingContextSnapshot) -> frozenset[str]:
+    """Return exact fresh physical entity references admitted into one immutable snapshot.
+
+    Arbitrary World payloads and stale observations never grant deployment identity authority.
+    The source/provenance envelope remains available in the snapshot for audit.
+    """
+    admitted: set[str] = set()
+    for evidence in snapshot.state_evidence:
+        if (
+            evidence.payload_schema != PHYSICAL_ENTITY_REFERENCE_SCHEMA
+            or evidence.freshness is not GroundingFreshness.FRESH
+        ):
+            continue
+        value = evidence.value
+        if not isinstance(value, dict) or set(value) != {"entity_id"}:
+            continue
+        entity_id = value["entity_id"]
+        if isinstance(entity_id, str) and entity_id.strip():
+            admitted.add(entity_id)
+    return frozenset(admitted)
 
 
 def dialogue_digest(dialogue: tuple[JSONObject, ...]) -> str:

@@ -201,6 +201,63 @@ fn v0_7_normalized_mission_round_trips_without_semantic_loss() {
     assert_eq!(restored, plan);
 }
 
+/// v0.8 keeps physical grounding and Context executor cardinality across HTTP and checkpoints.
+#[test]
+fn v0_8_physical_binding_contract_round_trips_without_node_identity_in_mission() {
+    let source = include_str!("../../../../../scenarios/mission-front-half-v0.7/mission-plan.json");
+    let mut document: serde_json::Value = serde_json::from_str(source).expect("fixture JSON");
+    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_8);
+    document["mission"]["actors"][0]["physical_entity"] = serde_json::json!("entity-courier");
+    document["contexts"][0]["executor_constraints"] = serde_json::json!([]);
+    let plan = decode_mission_plan(&document.to_string()).expect("v0.8 plan should validate");
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_8);
+    assert_eq!(
+        plan.actors()[0]
+            .physical_entity()
+            .expect("actor is grounded")
+            .as_str(),
+        "entity-courier"
+    );
+    let encoded = mission_plan_json(&plan);
+    assert_eq!(encoded, document);
+    assert_eq!(
+        decode_mission_plan(&encoded.to_string()).expect("v0.8 restore succeeds"),
+        plan
+    );
+    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_7);
+    assert!(decode_mission_plan(&document.to_string()).is_err());
+}
+
+/// Explicit v0.8 admission remains v0.8 across serialization with empty binding constraints.
+#[test]
+fn v0_8_empty_binding_contract_keeps_its_version_after_restore() {
+    let source = include_str!("../../../../../scenarios/mission-front-half-v0.7/mission-plan.json");
+    let mut document: serde_json::Value = serde_json::from_str(source).expect("fixture JSON");
+    document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_8);
+    document["contexts"][0]["executor_constraints"] = serde_json::json!([]);
+    let plan = decode_mission_plan(&document.to_string()).expect("v0.8 plan should validate");
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_8);
+    let checkpoint = serde_json::to_string(&plan).expect("domain checkpoint serializes");
+    let restored: MissionPlan = serde_json::from_str(&checkpoint).expect("checkpoint restores");
+    assert_eq!(restored, plan);
+    assert_eq!(mission_plan_json(&restored), document);
+}
+
+/// B2's frozen authored plan remains a valid v0.7 compatibility input without migration.
+#[test]
+fn b2_authored_mission_plan_still_decodes_as_v0_7() {
+    let source =
+        include_str!("../../../../../scenarios/e1-shared-world-episode-51/mission-plan.json");
+    let plan = decode_mission_plan(source).expect("existing B2 plan remains valid");
+    assert_eq!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_7);
+    assert!(plan.actors().iter().all(|actor| !actor.is_grounded()));
+    assert!(
+        plan.contexts()
+            .iter()
+            .all(|context| context.executor_constraints().is_empty())
+    );
+}
+
 /// An exact submission retry returns existing authority without creating a second Group.
 #[test]
 fn exact_mission_submission_retry_is_idempotent() {

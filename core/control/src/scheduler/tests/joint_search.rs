@@ -2,6 +2,78 @@
 
 use super::*;
 
+/// One logical Actor cannot occupy two physical executors to satisfy concurrent Role resources.
+#[test]
+fn same_actor_roles_cannot_split_across_physical_entities() {
+    let mut state = InMemorySharedNodeState::new();
+    for (node, resource) in [("node-a", "compute-a"), ("node-b", "compute-b")] {
+        record_node(
+            &mut state,
+            registration(
+                node,
+                CapabilityKind::Compute,
+                vec![(resource, ResourceKind::Compute)],
+            ),
+        )
+        .expect("node records");
+    }
+    let actor = domain::ActorId::new("continuous-actor").expect("actor valid");
+    let roles = ["role-first", "role-second"]
+        .map(|id| {
+            RoleRequirement::new_scheduled(
+                RoleId::new(id).expect("role valid"),
+                Some(actor.clone()),
+                CapabilityKind::Compute,
+                None,
+                vec![
+                    domain::ResourceRequirement::new(ResourceKind::Compute, 1)
+                        .expect("resource valid"),
+                ],
+            )
+            .expect("role valid")
+        })
+        .to_vec();
+    let task = requirement("mission-continuity", "task-continuity", roles.clone());
+    let nodes = ["node-a", "node-b"].map(|id| NodeId::new(id).expect("node valid"));
+    let candidates = CandidateSet::new(
+        task.task_ref().clone(),
+        roles
+            .iter()
+            .map(|role| RoleCandidates::new(role.role_id().clone(), nodes.to_vec()))
+            .collect(),
+    )
+    .with_actor_binding_metadata(
+        roles
+            .iter()
+            .map(|role| (role.role_id().clone(), actor.clone()))
+            .collect(),
+        Vec::new(),
+        [
+            (
+                nodes[0].clone(),
+                domain::PhysicalEntityId::new("entity-a").unwrap(),
+            ),
+            (
+                nodes[1].clone(),
+                domain::PhysicalEntityId::new("entity-b").unwrap(),
+            ),
+        ]
+        .into(),
+    );
+    let mut events = TestEvents::default();
+    assert!(matches!(
+        BoundedJointScheduler::new().schedule_task(
+            &state,
+            &task,
+            &candidates,
+            TimestampMs::new(0),
+            &correlation(),
+            &mut events,
+        ),
+        Err(SchedulerError::NoFeasibleSelection(_))
+    ));
+}
+
 /// Joint scheduling rejects Candidate Sets with duplicate or surplus Role entries.
 #[test]
 fn joint_scheduler_requires_exact_unique_candidate_roles() {

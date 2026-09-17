@@ -37,6 +37,19 @@ pub(super) struct MissionDocument {
 pub(super) struct MissionActorDocument {
     /// Stable Actor identity inside the Mission.
     pub(super) id: String,
+    /// Deployment physical entity grounding introduced by v0.8.
+    #[serde(default)]
+    pub(super) physical_entity: Option<String>,
+}
+
+/// Wire Context-scoped physical executor constraint.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ExecutorConstraintDocument {
+    /// Closed constraint kind.
+    pub(super) kind: String,
+    /// ContextRoles whose actors require pairwise distinct physical entities.
+    pub(super) context_roles: Vec<String>,
 }
 
 /// Wire semantic context.
@@ -47,6 +60,9 @@ pub(super) struct ContextDocument {
     pub(super) id: String,
     /// Semantic actor roles.
     pub(super) roles: Vec<ContextRoleDocument>,
+    /// Physical executor constraints introduced by v0.8.
+    #[serde(default)]
+    pub(super) executor_constraints: Option<Vec<ExecutorConstraintDocument>>,
     /// Execution-time constraints retained from MissionPlan v0.3.
     #[serde(default)]
     pub(super) relations: Option<Vec<RelationDocument>>,

@@ -18,6 +18,9 @@ impl ControlPlane {
             ));
         }
         let mission_id = plan.goal().mission_id().clone();
+        // Register the mission's binding semantics before any role can match so
+        // grounding and distinct-occupancy constraints bind every later decision.
+        self.register_mission_binding_semantics(mission_id.clone(), plan.binding_semantics())?;
         let initial_task_ref = plan
             .task_graph()
             .tasks()
@@ -235,7 +238,7 @@ impl ControlPlane {
             ));
         }
         validate_task_assignments(&execution, plan.assignments())?;
-        let actor_nodes = validate_authoritative_actor_assignments(self, group, plan)?;
+        let actor_bindings = validate_authoritative_actor_assignments(self, group, plan)?;
         if !execution.assignments().is_empty() {
             return Err(ControlError::InvalidProposal(
                 "Task execution already has committed bindings".to_string(),
@@ -340,12 +343,11 @@ impl ControlPlane {
                 task_ref: task_ref.clone(),
             },
         );
-        for (actor_id, node_id) in actor_nodes {
-            self.record_actor_binding(
-                plan.task_ref().mission_id().clone(),
-                actor_id.clone(),
-                node_id.clone(),
-            )?;
+        for (actor_id, binding) in actor_bindings {
+            let node_id = binding.node_id().clone();
+            self.actor_bindings
+                .entry((plan.task_ref().mission_id().clone(), actor_id.clone()))
+                .or_insert(binding);
             events.append(
                 timestamp,
                 correlation_id,

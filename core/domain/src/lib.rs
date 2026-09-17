@@ -26,6 +26,7 @@ mod mission_plan;
 mod node_health;
 mod node_registration;
 mod node_state;
+mod physical_entity;
 mod resource;
 mod role_assignment;
 mod spatial_memory;
@@ -36,7 +37,7 @@ mod task_requirement;
 mod task_satisfaction;
 mod time;
 
-pub use actor::{ActorBinding, MissionActor};
+pub use actor::{ActorBinding, MissionActor, MissionBindingSemantics};
 pub use allocation::{
     AllocationOwner, AllocationPhase, AllocationViewSnapshot, ResourceAllocation,
     ResourceBindingScope,
@@ -45,7 +46,9 @@ pub use capability::{Capability, CapabilityKind, LocalRuntime};
 pub use capability_requirement::{
     CapabilityConstraint, CapabilityConstraintOperator, CapabilityRequirement,
 };
-pub use context::{ContextRole, CoordinationContext, TaskContinuity};
+pub use context::{
+    ContextRole, CoordinationContext, DistinctPhysicalEntityConstraint, TaskContinuity,
+};
 pub use duration_estimate::TaskDurationEstimate;
 pub use error::DomainError;
 pub use event::{EventPayload, EventRecord};
@@ -62,7 +65,7 @@ pub use execution_relation::{
 pub use identity::{
     ActorId, ContextRoleId, CoordinationContextId, CorrelationId, EventId, ExecutionGroupId,
     ExecutionRelationId, LeaseId, LocalSystemId, MissionId, NodeContractVersion, NodeId,
-    ResourceId, RoleId, SensorId, TaskId, TaskRef,
+    PhysicalEntityId, PhysicalEntityRegistryId, ResourceId, RoleId, SensorId, TaskId, TaskRef,
 };
 pub use lease::NodeLease;
 pub use localization_evidence::{
@@ -87,6 +90,9 @@ pub use node_health::{
 };
 pub use node_registration::{LocalSystemDescriptor, OperationSupport, SensorDescriptor};
 pub use node_state::{NodeRegistration, NodeStateSnapshot};
+pub use physical_entity::{
+    PhysicalEntityRegistration, PhysicalEntityRegistrySnapshot, PhysicalEntityRoutingProfile,
+};
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
 pub use role_assignment::RoleAssignment;
 pub use spatial_memory::{
@@ -129,6 +135,8 @@ pub const MISSION_PLAN_SCHEMA_V0_6: &str = "roboguide.mission-plan/v0.6";
 
 /// Version identifier for normalized capability, operation, actor, timing, and satisfaction semantics.
 pub const MISSION_PLAN_SCHEMA_V0_7: &str = "roboguide.mission-plan/v0.7";
+/// Mission-plan schema that can declare actor binding semantics.
+pub const MISSION_PLAN_SCHEMA_V0_8: &str = "roboguide.mission-plan/v0.8";
 
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";

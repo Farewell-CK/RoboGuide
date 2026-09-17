@@ -422,6 +422,41 @@ fn actor_placement_file_rejects_unknown_schema() {
     assert!(error.to_string().contains("unsupported schema"));
 }
 
+/// Deployment registry loading rejects unversioned extras and ambiguous Node routing.
+#[test]
+fn physical_entity_registry_loader_fences_ambiguous_or_unknown_declarations() {
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let path = directory.path().join("physical-entities.json");
+    let document = serde_json::json!({
+        "schema": "roboguide.physical-entity-registry/v0.1",
+        "registry_id": "deployment-1",
+        "revision": 2,
+        "routing_profile": "one-routable-entity-per-node",
+        "entities": [{"entity_id": "robot-a", "node_id": "node-a"}]
+    });
+    std::fs::write(&path, document.to_string()).expect("write registry fixture");
+    let registry = load_physical_entity_registry_file(&path).expect("registry loads");
+    assert_eq!(registry.revision(), 2);
+
+    let mut extra = document.clone();
+    extra["entities"][0]["local_skill"] = serde_json::json!("should-not-be-admitted");
+    std::fs::write(&path, extra.to_string()).expect("write invalid fixture");
+    assert!(load_physical_entity_registry_file(&path).is_err());
+
+    let mut duplicated_node = document;
+    duplicated_node["entities"] = serde_json::json!([
+        {"entity_id": "robot-a", "node_id": "node-a"},
+        {"entity_id": "robot-b", "node_id": "node-a"}
+    ]);
+    std::fs::write(&path, duplicated_node.to_string()).expect("write ambiguous fixture");
+    assert!(
+        load_physical_entity_registry_file(&path)
+            .expect_err("current Node routing profile rejects ambiguous entity addressing")
+            .to_string()
+            .contains("invalid physical entity registry")
+    );
+}
+
 /// The experiment placement file exactly covers every Actor in all four submitted Missions.
 #[test]
 fn actor_placement_fixture_has_strict_four_mission_coverage() {

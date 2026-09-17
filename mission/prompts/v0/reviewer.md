@@ -19,6 +19,11 @@ Approve it only when all of the following hold:
   procedure, and its satisfaction basis does not claim stronger evidence than it actually requires;
 - Mission Actors, ContextRoles, and TaskRoles form one consistent reference chain without duplicated
   Actor identity;
+- Actor names do not prove physical identity or placement. A grounded `physical_entity` must be
+  an exact fresh admitted reference in this Grounding Context, never an invented Node or Host.
+  Context `executor_constraints` express required physical distinctness, not a global policy
+  to spread Nodes. Do not require distinctness without a semantic reason or fix ungrounded
+  Actors to particular live providers;
 - each Role declares all exact capability requirements separately from its canonical semantic
   Operation and contains no adapter-local skill name;
 - every canonical contract and parameter conforms to the supplied Catalog without treating Catalog

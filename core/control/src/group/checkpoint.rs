@@ -32,7 +32,7 @@ impl ControlPlane {
             if let Some(actor_id) = role.and_then(RoleRequirement::actor_id)
                 && self
                     .actor_authority_node(commitment.task_ref().mission_id(), actor_id)
-                    .is_none_or(|node_id| node_id != commitment.replacement_node_id())
+                    .is_none_or(|node_id| node_id != *commitment.replacement_node_id())
             {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint recovery commitment violates Actor authority".to_string(),
@@ -242,7 +242,7 @@ impl ControlPlane {
         };
         if self
             .actor_authority_node(task_ref.mission_id(), actor_id)
-            .is_none_or(|authority_node| authority_node != node_id)
+            .is_none_or(|authority_node| &authority_node != node_id)
         {
             return Err(ControlError::InvalidProposal(
                 "checkpoint assignment violates Actor binding or placement authority".to_string(),

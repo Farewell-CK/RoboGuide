@@ -329,6 +329,9 @@ pub struct MissionPlan {
     task_graph: TaskGraph,
     /// Mission Intelligence contexts available to every planned Task.
     contexts: Vec<CoordinationContext>,
+    /// Whether this plan was admitted under the explicit v0.8 binding contract.
+    #[serde(default)]
+    declared_binding_contract: bool,
 }
 
 impl MissionPlan {
@@ -371,7 +374,10 @@ impl MissionPlan {
                 reason: "Mission Plan has duplicate context ids".to_string(),
             });
         }
-        let actor_ids = actors.iter().map(MissionActor::id).collect::<BTreeSet<_>>();
+        let actor_ids = actors
+            .iter()
+            .map(|actor| actor.id().clone())
+            .collect::<BTreeSet<_>>();
         if actor_ids.len() != actors.len() {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "Mission Plan actors must be unique".to_string(),
@@ -481,17 +487,41 @@ impl MissionPlan {
                 }
             }
         }
+        let declared_binding_contract = actors.iter().any(MissionActor::is_grounded)
+            || contexts
+                .iter()
+                .any(|context| !context.executor_constraints().is_empty());
         Ok(Self {
             goal,
             actors,
             task_graph,
             contexts,
+            declared_binding_contract,
         })
     }
 
-    /// Returns the versioned adapter contract represented by this domain shape.
-    pub const fn schema_version(&self) -> &'static str {
-        MISSION_PLAN_SCHEMA_V0_7
+    /// Retains an explicitly admitted v0.8 wire contract even when its constraints are empty.
+    pub fn with_v0_8_contract(mut self) -> Self {
+        self.declared_binding_contract = true;
+        self
+    }
+
+    /// Returns the minimum wire schema able to represent this domain shape.
+    ///
+    /// Retains an admitted v0.8 version even when optional binding semantics are empty.
+    /// Legacy plans without them remain serializable as v0.7.
+    pub fn schema_version(&self) -> &'static str {
+        if self.declared_binding_contract
+            || self.actors.iter().any(MissionActor::is_grounded)
+            || self
+                .contexts
+                .iter()
+                .any(|context| !context.executor_constraints().is_empty())
+        {
+            MISSION_PLAN_SCHEMA_V0_8
+        } else {
+            MISSION_PLAN_SCHEMA_V0_7
+        }
     }
 
     /// Returns the original mission goal.
@@ -499,7 +529,12 @@ impl MissionPlan {
         &self.goal
     }
 
-    /// Returns logical Mission Actors in stable declaration order.
+    /// Returns the Control-facing binding semantics of this plan.
+    pub fn binding_semantics(&self) -> MissionBindingSemantics {
+        MissionBindingSemantics::collect(&self.actors, &self.contexts)
+    }
+
+    /// Returns declared logical actors.
     pub fn actors(&self) -> &[MissionActor] {
         &self.actors
     }

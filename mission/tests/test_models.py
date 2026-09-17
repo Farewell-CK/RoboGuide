@@ -33,6 +33,42 @@ def _v0_7_fixture_json() -> JSONObject:
     return cast(JSONObject, decoded)
 
 
+def test_old_plan_cannot_smuggle_physical_entity_grounding() -> None:
+    """v0.7 remains a strict compatibility input without v0.8 binding semantics."""
+    plan = _v0_7_fixture_json()
+    actor = cast(list[JSONObject], cast(JSONObject, plan["mission"])["actors"])[0]
+    actor["physical_entity"] = "robot-from-unsupported-version"
+    with pytest.raises(MissionPlanError, match="unknown"):
+        MissionPlan.from_json(plan)
+
+
+def test_v0_8_canonical_schema_scopes_physical_identity_to_actor_and_context() -> None:
+    """The public schema admits entity grounding and Context constraints without Node binding."""
+    schema = json.loads(
+        Path("contracts/mission/v0.8/mission-plan.schema.json").read_text(encoding="utf-8")
+    )
+    assert schema["properties"]["schema_version"]["const"] == "roboguide.mission-plan/v0.8"
+    definitions = schema["$defs"]
+    actor = schema["properties"]["mission"]["properties"]["actors"]["items"]
+    assert actor["additionalProperties"] is False
+    assert "physical_entity" in actor["properties"]
+    assert "node_id" not in actor["properties"]
+    context = definitions["context"]
+    assert "executor_constraints" in context["required"]
+    assert context["properties"]["executor_constraints"]["type"] == "array"
+
+
+def test_v0_8_context_constraint_round_trips_without_placing_nodes() -> None:
+    """A physical distinctness requirement targets ContextRole refs, never Node IDs."""
+    plan = _v0_7_fixture_json()
+    plan["schema_version"] = "roboguide.mission-plan/v0.8"
+    context = cast(list[JSONObject], plan["contexts"])[0]
+    context["executor_constraints"] = []
+    normalized = MissionPlan.from_json(plan)
+    assert normalized.to_json() == plan
+    assert not normalized.contexts[0].executor_constraints
+
+
 def _v0_4_fixture_json() -> JSONObject:
     """Build one v0.4 plan covering typed relations and selective Group State binding."""
     raw = _relation_fixture_json()

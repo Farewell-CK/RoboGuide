@@ -8,6 +8,7 @@ from mission.contract_values import (
     COUPLING_MODES,
     GROUP_VIEW_FIELDS,
     MAP_ID_PATTERN,
+    MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
@@ -58,6 +59,35 @@ class ContextRole:
     def to_json(self) -> JSONObject:
         """Serialize one semantic ContextRole."""
         return {"id": self.role_id, "actor": self.actor_id}
+
+
+@dataclass(frozen=True, slots=True)
+class DistinctPhysicalEntityConstraint:
+    """Require ContextRoles to use pairwise distinct physical execution entities."""
+
+    context_roles: tuple[str, ...]
+
+    @classmethod
+    def from_json(cls, value: JSONValue, path: str) -> DistinctPhysicalEntityConstraint:
+        """Parse the closed v0.8 Context executor constraint."""
+        item = _object(value, path)
+        _exact_keys(item, {"kind", "context_roles"}, path)
+        if _text(item["kind"], f"{path}.kind") != "distinct-physical-entities":
+            raise MissionPlanError(f"{path}.kind is unsupported")
+        roles = tuple(
+            _text(role, f"{path}.context_roles[{index}]")
+            for index, role in enumerate(_array(item["context_roles"], f"{path}.context_roles"))
+        )
+        if len(roles) < 2 or len(set(roles)) != len(roles):
+            raise MissionPlanError(f"{path}.context_roles must contain at least two unique ids")
+        return cls(roles)
+
+    def to_json(self) -> JSONObject:
+        """Serialize one Context-scoped hard executor constraint."""
+        return {
+            "kind": "distinct-physical-entities",
+            "context_roles": list(self.context_roles),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +352,7 @@ class MissionContext:
     context_id: str
     roles: tuple[ContextRole, ...]
     relations: tuple[ExecutionRelation, ...]
+    executor_constraints: tuple[DistinctPhysicalEntityConstraint, ...] = ()
     coupling_mode: str = "independent"
     shared_view: GroupSharedView | None = None
     peer_channel: PeerChannel | None = None
@@ -331,6 +362,8 @@ class MissionContext:
         """Parse one versioned Context and reject duplicate ContextRole identities."""
         item = _object(value, path)
         base_keys = {"id", "roles", "relations"}
+        if version == MISSION_PLAN_VERSION:
+            base_keys.add("executor_constraints")
         if version == MISSION_PLAN_COMPAT_VERSION:
             _exact_keys(item, base_keys, path)
         else:
@@ -341,6 +374,31 @@ class MissionContext:
         )
         if len({role.role_id for role in roles}) != len(roles):
             raise MissionPlanError(f"{path}.roles contains duplicate ids")
+        constraints = (
+            tuple(
+                DistinctPhysicalEntityConstraint.from_json(
+                    constraint, f"{path}.executor_constraints[{index}]"
+                )
+                for index, constraint in enumerate(
+                    _array(item["executor_constraints"], f"{path}.executor_constraints")
+                )
+            )
+            if version == MISSION_PLAN_VERSION
+            else ()
+        )
+        roles_by_id = {role.role_id: role for role in roles}
+        for constraint in constraints:
+            unknown = set(constraint.context_roles) - roles_by_id.keys()
+            if unknown:
+                raise MissionPlanError(
+                    f"{path}.executor_constraints references unknown ContextRoles {sorted(unknown)}"
+                )
+            actors = [roles_by_id[role_id].actor_id for role_id in constraint.context_roles]
+            if len(set(actors)) != len(actors):
+                raise MissionPlanError(
+                    f"{path}.executor_constraints cannot require one Actor "
+                    "to be physically distinct"
+                )
         relations = tuple(
             ExecutionRelation.from_json(relation, f"{path}.relations[{index}]", version)
             for index, relation in enumerate(_array(item["relations"], f"{path}.relations"))
@@ -371,6 +429,7 @@ class MissionContext:
             context_id=_text(item["id"], f"{path}.id"),
             roles=roles,
             relations=relations,
+            executor_constraints=constraints,
             coupling_mode=coupling_mode,
             shared_view=shared_view,
             peer_channel=peer_channel,
@@ -389,6 +448,7 @@ class MissionContext:
             MISSION_PLAN_COUPLING_VERSION,
             MISSION_PLAN_SCHEDULING_VERSION,
             MISSION_PLAN_SATISFACTION_VERSION,
+            MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
         }:
             result["coupling_mode"] = self.coupling_mode
@@ -396,4 +456,8 @@ class MissionContext:
                 result["shared_view"] = self.shared_view.to_json()
             if self.peer_channel is not None:
                 result["peer_channel"] = self.peer_channel.to_json()
+        if version == MISSION_PLAN_VERSION:
+            result["executor_constraints"] = [
+                constraint.to_json() for constraint in self.executor_constraints
+            ]
         return result

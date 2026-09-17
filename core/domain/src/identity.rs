@@ -50,6 +50,16 @@ define_identifier!(
     "Identifies a logical execution actor within a mission.",
     "actor"
 );
+define_identifier!(
+    PhysicalEntityId,
+    "Identifies one deployment-owned physical execution entity.",
+    "physical entity"
+);
+define_identifier!(
+    PhysicalEntityRegistryId,
+    "Identifies one deployment-owned physical entity registry.",
+    "physical entity registry"
+);
 define_identifier!(NodeId, "Identifies a logical execution node.", "node");
 define_identifier!(
     LocalSystemId,

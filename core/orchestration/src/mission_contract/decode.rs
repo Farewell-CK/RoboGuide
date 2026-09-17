@@ -4,12 +4,13 @@ use crate::OrchestrationError;
 use domain::{
     ActorId, CapabilityConstraint, CapabilityConstraintOperator, CapabilityContractRef,
     CapabilityRequirement, ContextRole, ContextRoleId, CoordinationContext, CoordinationContextId,
-    ExecutionCouplingMode, ExecutionIntent, ExecutionRelationId, ExecutionRelationSpec,
-    ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec, GroupViewBinding,
-    GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3, MISSION_PLAN_SCHEMA_V0_4,
-    MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6, MISSION_PLAN_SCHEMA_V0_7, MapId,
-    MapRevisionId, MapRevisionSelector, MissionActor, MissionGoal, MissionId, MissionPlan,
-    OperationRef, PeerChannelSpec, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
+    DistinctPhysicalEntityConstraint, ExecutionCouplingMode, ExecutionIntent, ExecutionRelationId,
+    ExecutionRelationSpec, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
+    GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
+    MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6,
+    MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MapId, MapRevisionId, MapRevisionSelector,
+    MissionActor, MissionGoal, MissionId, MissionPlan, OperationRef, PeerChannelSpec,
+    PhysicalEntityId, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
     ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference, TaskContinuity,
     TaskGraph, TaskId, TaskRequirement, TaskSatisfactionBasis, TaskTiming,
     VerifierSatisfactionSpec,
@@ -36,6 +37,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
             | MISSION_PLAN_SCHEMA_V0_5
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -49,6 +51,7 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
             | MISSION_PLAN_SCHEMA_V0_5
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
     );
     let mode_contract = matches!(
         document.schema_version.as_str(),
@@ -56,16 +59,24 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
             | MISSION_PLAN_SCHEMA_V0_5
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
     );
     let scheduling_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_5 | MISSION_PLAN_SCHEMA_V0_6 | MISSION_PLAN_SCHEMA_V0_7
+        MISSION_PLAN_SCHEMA_V0_5
+            | MISSION_PLAN_SCHEMA_V0_6
+            | MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
     );
     let satisfaction_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_6 | MISSION_PLAN_SCHEMA_V0_7
+        MISSION_PLAN_SCHEMA_V0_6 | MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8
     );
-    let normalized_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_7;
+    let normalized_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8
+    );
+    let binding_semantics_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_8;
     let MissionDocument {
         id,
         objective,
@@ -78,15 +89,36 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
     let contexts = document
         .contexts
         .into_iter()
-        .map(|context| context_from_document(context, relation_contract, mode_contract))
+        .map(|context| {
+            context_from_document(
+                context,
+                relation_contract,
+                mode_contract,
+                binding_semantics_contract,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let actors = match (normalized_contract, actor_documents) {
         (true, Some(actors)) if !actors.is_empty() => actors
             .into_iter()
             .map(|actor| {
-                ActorId::new(actor.id)
-                    .map(MissionActor::new)
-                    .map_err(|error| OrchestrationError::Mission(error.to_string()))
+                let id = ActorId::new(actor.id)
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
+                let grounded = actor
+                    .physical_entity
+                    .map(PhysicalEntityId::new)
+                    .transpose()
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
+                if grounded.is_some() && !binding_semantics_contract {
+                    return Err(OrchestrationError::Mission(
+                        "MissionPlan before v0.8 cannot declare actor physical grounding"
+                            .to_string(),
+                    ));
+                }
+                Ok(match grounded {
+                    Some(entity) => MissionActor::new_grounded(id, entity),
+                    None => MissionActor::new(id),
+                })
             })
             .collect::<Result<Vec<_>, _>>()?,
         (true, _) => {
@@ -120,6 +152,13 @@ pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     if normalized_contract {
         MissionPlan::new_with_actors(goal, actors, graph, contexts)
+            .map(|plan| {
+                if binding_semantics_contract {
+                    plan.with_v0_8_contract()
+                } else {
+                    plan
+                }
+            })
             .map_err(|error| OrchestrationError::Mission(error.to_string()))
     } else {
         MissionPlan::new(goal, graph, contexts)
@@ -132,6 +171,7 @@ fn context_from_document(
     context: ContextDocument,
     relation_contract: bool,
     mode_contract: bool,
+    binding_semantics_contract: bool,
 ) -> Result<CoordinationContext, OrchestrationError> {
     let context_id = CoordinationContextId::new(context.id)
         .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
@@ -147,6 +187,38 @@ fn context_from_document(
             ))
         })
         .collect::<Result<Vec<_>, OrchestrationError>>()?;
+    let constraints = match (binding_semantics_contract, context.executor_constraints) {
+        (true, Some(constraints)) => constraints
+            .into_iter()
+            .map(|constraint| {
+                if constraint.kind != "distinct-physical-entities" {
+                    return Err(OrchestrationError::Mission(format!(
+                        "unsupported executor constraint kind {}",
+                        constraint.kind
+                    )));
+                }
+                let roles = constraint
+                    .context_roles
+                    .into_iter()
+                    .map(ContextRoleId::new)
+                    .collect::<Result<std::collections::BTreeSet<_>, _>>()
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
+                DistinctPhysicalEntityConstraint::new(roles)
+                    .map_err(|error| OrchestrationError::Mission(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        (true, None) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan v0.8 Context must declare executor_constraints".to_string(),
+            ));
+        }
+        (false, None) => Vec::new(),
+        (false, Some(_)) => {
+            return Err(OrchestrationError::Mission(
+                "MissionPlan before v0.8 cannot declare executor constraints".to_string(),
+            ));
+        }
+    };
     let relations = match (relation_contract, context.relations) {
         (true, Some(relations)) => relations
             .into_iter()
@@ -190,6 +262,7 @@ fn context_from_document(
         shared_view,
         peer_channel,
     )
+    .and_then(|context| context.with_executor_constraints(constraints))
     .map_err(|error| OrchestrationError::Mission(error.to_string()))
 }
 

@@ -25,6 +25,11 @@ pub enum DomainError {
         /// Stable diagnostic reason suitable for adapter and test evidence.
         reason: String,
     },
+    /// A deployment-owned physical executor registry violated its routing profile.
+    InvalidPhysicalEntityRegistry {
+        /// Stable diagnostic reason suitable for deployment configuration checks.
+        reason: String,
+    },
     /// A Spatial Memory value or catalog transition violated an invariant.
     InvalidSpatialMemory {
         /// Stable diagnostic reason suitable for State and adapter evidence.
@@ -51,6 +56,9 @@ impl Display for DomainError {
             Self::LeaseExpired { kind } => write!(formatter, "{kind} lease has expired"),
             Self::InvalidMissionPlan { reason } => {
                 write!(formatter, "invalid mission plan: {reason}")
+            }
+            Self::InvalidPhysicalEntityRegistry { reason } => {
+                write!(formatter, "invalid physical entity registry: {reason}")
             }
             Self::InvalidSpatialMemory { reason } => {
                 write!(formatter, "invalid spatial memory value: {reason}")

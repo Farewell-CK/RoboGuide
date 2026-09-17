@@ -4,6 +4,7 @@ mod actor_placement;
 mod dispatch;
 mod outcomes;
 mod persistence;
+mod physical_entity_registry;
 mod recovery;
 mod timer;
 
@@ -18,6 +19,7 @@ pub(crate) use outcomes::{
     apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,
 };
 pub(crate) use persistence::{acquire_event_log_writer_lock, server_checkpoint_json};
+pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 #[cfg(test)]
 pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};
 pub(crate) use recovery::{

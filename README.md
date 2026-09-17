@@ -572,6 +572,15 @@ cargo run -p integration-server -- \
 配置必须恰好覆盖该 MissionPlan 的全部 Actor，MissionId/ActorId 拼写错误或漏配会
 fail-closed，不能悄悄退回通用 Matching。
 
+MissionPlan v0.8 可选择性声明 Actor 的 admitted `physical_entity`，并在 Context 内声明
+`distinct-physical-entities` 约束。当前 Node Protocol 只允许每个 Node 对应一个可独立寻址的
+物理执行体；对于需要此语义的部署，可在上述 placement 路径之后再传入第七个可选参数，
+即 `roboguide.physical-entity-registry/v0.1` JSON 文件路径。文件声明 `registry_id`、
+单调 `revision`、`routing_profile: "one-routable-entity-per-node"` 和
+`entities: [{"entity_id": "...", "node_id": "..."}]`。它不是 MissionPlan、Node inventory
+或第二套 reservation；重启时需要重新提供当前 registry，已绑定实体的路由若变化或
+registry 缺失，服务拒绝以旧绑定继续启动。没有此约束的 v0.7 Mission 仍可照常使用。
+
 Control HTTP 不绕过 Control 修改 reservation；独立 Artifact HTTP 只写不可变 CAS bytes 和
 Memory catalog/replica evidence，不驱动 Task/Group lifecycle。身份认证与传输安全不在当前切片
 范围内。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server

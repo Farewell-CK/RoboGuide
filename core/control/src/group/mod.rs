@@ -394,8 +394,12 @@ fn validate_authoritative_actor_assignments(
     control: &ControlPlane,
     group: &ExecutionGroup,
     plan: &CommittedPlan,
-) -> Result<BTreeMap<ActorId, NodeId>, ControlError> {
-    let mut actor_nodes = BTreeMap::<ActorId, NodeId>::new();
+) -> Result<BTreeMap<ActorId, domain::ActorBinding>, ControlError> {
+    let mut actor_bindings = BTreeMap::<ActorId, domain::ActorBinding>::new();
+    let mut actor_entities = BTreeMap::<ActorId, domain::PhysicalEntityId>::new();
+    let execution = group.task_execution(plan.task_ref()).ok_or_else(|| {
+        ControlError::InvalidProposal("Task is absent from the Mission Group".to_string())
+    })?;
     let roles = group
         .role_requirements
         .iter()
@@ -412,30 +416,92 @@ fn validate_authoritative_actor_assignments(
             .ok_or_else(|| {
                 ControlError::InvalidProposal(format!("missing role {}", role.role_id()))
             })?;
+        let physical = control.validate_actor_binding_intent(
+            plan.task_ref().mission_id(),
+            actor_id,
+            assignment.node_id(),
+        )?;
+        let committed_entity = plan.physical_entity_for_role(role.role_id());
+        let binding = match (physical, committed_entity) {
+            (Some((entity_id, registry_id, revision)), Some(committed_entity))
+                if &entity_id == committed_entity =>
+            {
+                actor_entities.insert(actor_id.clone(), entity_id.clone());
+                domain::ActorBinding::new_physical(
+                    plan.task_ref().mission_id().clone(),
+                    actor_id.clone(),
+                    assignment.node_id().clone(),
+                    entity_id,
+                    registry_id,
+                    revision,
+                )
+            }
+            (Some(_), Some(_)) => {
+                return Err(ControlError::InvalidProposal(
+                    "committed physical entity no longer matches current deployment routing"
+                        .to_string(),
+                ));
+            }
+            (Some(_), None) => {
+                return Err(ControlError::InvalidProposal(format!(
+                    "committed plan omits physical entity for role {}",
+                    role.role_id()
+                )));
+            }
+            (None, Some(_)) => {
+                return Err(ControlError::InvalidProposal(format!(
+                    "legacy Actor binding unexpectedly carries a physical entity for role {}",
+                    role.role_id()
+                )));
+            }
+            (None, None) => domain::ActorBinding::new(
+                plan.task_ref().mission_id().clone(),
+                actor_id.clone(),
+                assignment.node_id().clone(),
+            ),
+        };
         if let Some(existing) = control.actor_binding(plan.task_ref().mission_id(), actor_id)
-            && existing.node_id() != assignment.node_id()
+            && (existing.node_id() != binding.node_id()
+                || existing.physical_entity_id() != binding.physical_entity_id()
+                || existing.registry_id() != binding.registry_id())
         {
             return Err(ControlError::InvalidProposal(
-                "mission actor is already bound to another node".to_string(),
+                "mission actor is already bound to another physical executor".to_string(),
             ));
         }
-        if let Some(constraint) =
-            control.actor_node_constraint(plan.task_ref().mission_id(), actor_id)
-            && constraint.node_id() != assignment.node_id()
+        if let Some(previous) = actor_bindings.insert(actor_id.clone(), binding.clone())
+            && previous != binding
         {
             return Err(ControlError::InvalidProposal(
-                "actor assignment violates deployment placement constraint".to_string(),
-            ));
-        }
-        if let Some(previous) = actor_nodes.insert(actor_id.clone(), assignment.node_id().clone())
-            && previous != *assignment.node_id()
-        {
-            return Err(ControlError::InvalidProposal(
-                "one mission actor cannot bind multiple nodes in one Task".to_string(),
+                "one mission actor cannot bind multiple physical executors in one Task".to_string(),
             ));
         }
     }
-    Ok(actor_nodes)
+    // Recheck Context-scoped physical cardinality against both this Task and prior bindings.
+    let mission_id = plan.task_ref().mission_id();
+    if let Some(semantics) = control.mission_binding_semantics(mission_id) {
+        for (actor_id, entity_id) in &actor_entities {
+            for peer in semantics.distinct_peers(execution.context_id(), actor_id) {
+                let peer_entity = actor_entities.get(&peer).cloned().or_else(|| {
+                    control
+                        .actor_binding(mission_id, &peer)
+                        .and_then(domain::ActorBinding::physical_entity_id)
+                        .cloned()
+                });
+                if let Some(peer_entity) = peer_entity
+                    && &peer_entity == entity_id
+                {
+                    return Err(ControlError::DistinctBindingUnsatisfiable {
+                        mission_id: mission_id.clone(),
+                        actor_id: actor_id.clone(),
+                        occupied_by_actor: peer,
+                        physical_entity_id: peer_entity,
+                    });
+                }
+            }
+        }
+    }
+    Ok(actor_bindings)
 }
 
 /// A narrow role view used by recovery adapters without exposing the task object.

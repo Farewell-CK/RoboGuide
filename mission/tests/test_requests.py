@@ -66,6 +66,9 @@ def test_request_v04_contract_persists_grounding_and_review_context_identity() -
     )
 
     assert schema["properties"]["schema_version"]["const"] == ("roboguide.mission-request/v0.4")
+    assert {
+        option["$ref"] for option in schema["properties"]["plan"]["oneOf"] if "$ref" in option
+    } == {f"../v0.{version}/mission-plan.schema.json" for version in range(3, 9)}
     assert "grounding_context" in schema["required"]
     assert "grounding_context_digest" in schema["$defs"]["review_attempt"]["required"]
     grounding_schema = json.loads(

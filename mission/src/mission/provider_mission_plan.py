@@ -6,7 +6,12 @@ import math
 from copy import deepcopy
 from typing import cast
 
-from mission.contract_values import MISSION_PLAN_VERSION, JSONObject, JSONValue
+from mission.contract_values import (
+    MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_VERSION,
+    JSONObject,
+    JSONValue,
+)
 
 
 class ProviderMissionPlanError(ValueError):
@@ -77,15 +82,21 @@ def adapt_mission_plan_schema_for_provider(schema: JSONObject) -> JSONObject:
 
 
 def normalize_mission_plan_provider_output(value: JSONObject) -> JSONObject:
-    """Normalize provider parameter entries back to the canonical v0.7 map.
+    """Normalize provider parameter entries back to the canonical scalar map.
 
-    Provider output must target the current canonical contract. It fails closed
-    on other versions and malformed, duplicated, blank, or non-scalar entries.
+    Provider output must target the current canonical contract; the v0.7 actor
+    contract remains an accepted compatibility output because the DTO shape is
+    identical without binding semantics. It fails closed on other versions and
+    malformed, duplicated, blank, or non-scalar entries.
     """
     normalized = deepcopy(value)
-    if normalized.get("schema_version") != MISSION_PLAN_VERSION:
+    if normalized.get("schema_version") not in {
+        MISSION_PLAN_ACTOR_VERSION,
+        MISSION_PLAN_VERSION,
+    }:
         raise ProviderMissionPlanError(
-            f"provider MissionPlan output must use {MISSION_PLAN_VERSION}"
+            "provider MissionPlan output must use "
+            f"{MISSION_PLAN_ACTOR_VERSION} or {MISSION_PLAN_VERSION}"
         )
 
     tasks = _array(normalized.get("tasks"), "tasks")

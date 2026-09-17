@@ -451,8 +451,7 @@ impl ControlPlane {
 
         let actor_authority_node = role
             .actor_id()
-            .and_then(|actor_id| self.actor_authority_node(requirement.mission_id(), actor_id))
-            .cloned();
+            .and_then(|actor_id| self.actor_authority_node(requirement.mission_id(), actor_id));
         let candidate_node_ids = state
             .nodes()
             .into_iter()
@@ -635,7 +634,7 @@ impl ControlPlane {
         if let Some(actor_id) = role.actor_id()
             && let Some(authority_node) =
                 self.actor_authority_node(requirement.mission_id(), actor_id)
-            && proposal.replacement_node_id() != authority_node
+            && proposal.replacement_node_id() != &authority_node
         {
             return Err(ControlError::InvalidProposal(format!(
                 "recovery replacement {} violates actor {actor_id} authority on {authority_node}; explicit Actor rebind is required",

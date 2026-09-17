@@ -2,12 +2,17 @@
 
 use super::super::*;
 
-/// Serializes a validated domain MissionPlan into the normalized v0.7 wire shape.
+/// Serializes a validated domain MissionPlan into its minimal wire shape.
 pub(crate) fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
     if is_v0_6_compatible(plan) {
         return legacy_mission_plan_json(plan);
     }
     normalized_mission_plan_json(plan)
+}
+
+/// Returns whether the plan carries v0.8 actor binding semantics.
+fn has_binding_semantics(plan: &MissionPlan) -> bool {
+    plan.schema_version() == domain::MISSION_PLAN_SCHEMA_V0_8
 }
 
 /// Serializes Mission semantics that require the normalized v0.7 wire contract.
@@ -28,6 +33,25 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
             let object = value
                 .as_object_mut()
                 .expect("coordination Context JSON is an object");
+            if has_binding_semantics(plan) {
+                object.insert(
+                    "executor_constraints".to_string(),
+                    serde_json::json!(
+                        context
+                            .executor_constraints()
+                            .iter()
+                            .map(|constraint| serde_json::json!({
+                                "kind": "distinct-physical-entities",
+                                "context_roles": constraint
+                                    .context_role_ids()
+                                    .iter()
+                                    .map(|role_id| role_id.as_str())
+                                    .collect::<Vec<_>>(),
+                            }))
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
             if let Some(view) = context.shared_view() {
                 object.insert("shared_view".to_string(), shared_view_json(view));
             }
@@ -98,16 +122,46 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
             value
         })
         .collect::<Vec<_>>();
-    serde_json::json!({
-        "schema_version": domain::MISSION_PLAN_SCHEMA_V0_7,
-        "mission": {
-            "id": plan.goal().mission_id().as_str(),
-            "objective": plan.goal().objective(),
-            "actors": plan.actors().iter().map(|actor| serde_json::json!({"id": actor.id().as_str()})).collect::<Vec<_>>(),
-        },
-        "contexts": contexts,
-        "tasks": tasks,
-    })
+    let actors = plan
+        .actors()
+        .iter()
+        .map(|actor| {
+            let mut value = serde_json::json!({"id": actor.id().as_str()});
+            if let Some(entity) = actor.physical_entity() {
+                value
+                    .as_object_mut()
+                    .expect("actor JSON is an object")
+                    .insert(
+                        "physical_entity".to_string(),
+                        serde_json::json!(entity.as_str()),
+                    );
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+    if has_binding_semantics(plan) {
+        serde_json::json!({
+            "schema_version": domain::MISSION_PLAN_SCHEMA_V0_8,
+            "mission": {
+                "id": plan.goal().mission_id().as_str(),
+                "objective": plan.goal().objective(),
+                "actors": actors,
+            },
+            "contexts": contexts,
+            "tasks": tasks,
+        })
+    } else {
+        serde_json::json!({
+            "schema_version": domain::MISSION_PLAN_SCHEMA_V0_7,
+            "mission": {
+                "id": plan.goal().mission_id().as_str(),
+                "objective": plan.goal().objective(),
+                "actors": actors,
+            },
+            "contexts": contexts,
+            "tasks": tasks,
+        })
+    }
 }
 
 /// Returns whether the v0.6 compatibility contract can preserve every semantic field.

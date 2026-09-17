@@ -118,6 +118,12 @@ Interpreter 成功且无需 clarification 时，Engine 在进入 Planner provide
 provider-only MissionPlan DTO：canonical `ExecutionIntent.parameters` map 在 strict output schema 中
 表示为 closed key/value entries，接收后拒绝重复或 malformed entry，并还原为 canonical map；随后
 仍由原始 MissionPlan v0.7 parser、implementation validation 与 Capability Catalog 执行最终准入。
+当前 provider 输出的 v0.8 MissionPlan 经过同一 DTO 后，继续使用 v0.8 canonical parser；
+Planner/Repairer 的 `physical_entity` 只有在同一 immutable Grounding snapshot 含 exact、
+fresh、admitted 的实体引用时才能准入。Context 内的 distinct physical executor 约束属于
+Mission 语义；实际实体由 Control 经部署 registry 和 live Node evidence 在 Commit/Bind 重验。
+registry 不存入 Control checkpoint 作为当前拓扑，重启时必须重新安装。当前每 Node 一个
+可寻址实体只是 Node Protocol 的部署 profile，不是 Actor 与 Node 同一身份的公理。
 该适配不会改变 `contracts/mission/v0.7/`。
 `satisfaction_policy.py` 负责独立的生成草案 freshness policy 校验：
 `config/mission.toml` 显式声明 policy_ref 与 max_evidence_age_ms，启动后不可变，三个 Responses

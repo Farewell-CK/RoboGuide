@@ -10,3 +10,4 @@ include!("allocation_projection.rs");
 include!("actor_continuity.rs");
 include!("mission_execution_group.rs");
 include!("operation_support.rs");
+include!("actor_binding_semantics.rs");

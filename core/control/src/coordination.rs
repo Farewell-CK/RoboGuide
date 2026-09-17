@@ -6,6 +6,7 @@ use domain::{
     RoleAssignment, RoleId, TaskId, TaskRef, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
+use std::collections::BTreeMap;
 
 /// A proposal whose resources are now system-recognized commitments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,14 +15,31 @@ pub struct CommittedPlan {
     task_ref: TaskRef,
     /// Resource-checked assignments accepted by coordination.
     assignments: Vec<RoleAssignment>,
+    /// Exact physical executor selections committed for v0.8 Roles.
+    role_physical_entities: BTreeMap<RoleId, domain::PhysicalEntityId>,
 }
 
 impl CommittedPlan {
     /// Creates a committed plan after reservation checks succeed.
+    #[cfg(test)]
     pub(crate) fn new(task_ref: TaskRef, assignments: Vec<RoleAssignment>) -> Self {
         Self {
             task_ref,
             assignments,
+            role_physical_entities: BTreeMap::new(),
+        }
+    }
+
+    /// Creates a committed plan while preserving exact physical executor selections.
+    pub(crate) fn new_with_physical_entities(
+        task_ref: TaskRef,
+        assignments: Vec<RoleAssignment>,
+        role_physical_entities: BTreeMap<RoleId, domain::PhysicalEntityId>,
+    ) -> Self {
+        Self {
+            task_ref,
+            assignments,
+            role_physical_entities,
         }
     }
 
@@ -38,6 +56,14 @@ impl CommittedPlan {
     /// Returns committed role assignments.
     pub fn assignments(&self) -> &[RoleAssignment] {
         &self.assignments
+    }
+
+    /// Returns the physical entity committed for one Role, when required by Mission semantics.
+    pub(crate) fn physical_entity_for_role(
+        &self,
+        role_id: &RoleId,
+    ) -> Option<&domain::PhysicalEntityId> {
+        self.role_physical_entities.get(role_id)
     }
 }
 
@@ -83,6 +109,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if !proposal.role_physical_entities().is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "physical Actor assignments require Mission Group Commit".to_string(),
+            ));
+        }
         self.validate_current_assignment_support(state, proposal, timestamp)?;
         self.commit_validated(proposal, timestamp, correlation_id, events)
     }
@@ -136,7 +167,11 @@ impl ControlPlane {
             }
         }
 
-        let plan = CommittedPlan::new(proposal.task_ref().clone(), proposal.assignments().to_vec());
+        let plan = CommittedPlan::new_with_physical_entities(
+            proposal.task_ref().clone(),
+            proposal.assignments().to_vec(),
+            proposal.role_physical_entities().clone(),
+        );
         events.append(
             timestamp,
             correlation_id,
@@ -202,6 +237,7 @@ impl ControlPlane {
             ));
         }
         validate_task_assignments(execution, proposal.assignments())?;
+        self.validate_proposal_physical_bindings(group, execution, proposal)?;
         if let Some(scheduled) = self.scheduled_task(proposal.task_ref())
             && (scheduled.group_id() != group_id
                 || scheduled.phase() != crate::SchedulingReservationPhase::Scheduled
@@ -280,7 +316,11 @@ impl ControlPlane {
                     });
             }
         }
-        let plan = CommittedPlan::new(proposal.task_ref().clone(), proposal.assignments().to_vec());
+        let plan = CommittedPlan::new_with_physical_entities(
+            proposal.task_ref().clone(),
+            proposal.assignments().to_vec(),
+            proposal.role_physical_entities().clone(),
+        );
         events.append(
             timestamp,
             correlation_id,
@@ -302,6 +342,22 @@ impl ControlPlane {
         timestamp: TimestampMs,
     ) -> Result<(), ControlError> {
         for assignment in proposal.assignments() {
+            if let Some(entity_id) = proposal.physical_entity_for_role(assignment.role_id()) {
+                let current = self
+                    .physical_entity_registry()
+                    .and_then(|registry| registry.entity(entity_id))
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(format!(
+                            "physical entity {entity_id} is absent from current deployment registry"
+                        ))
+                    })?;
+                if current.node_id() != assignment.node_id() {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "physical entity {entity_id} no longer routes through proposed node {}",
+                        assignment.node_id()
+                    )));
+                }
+            }
             let Some(operation) = proposal.operation_for_role(assignment.role_id()) else {
                 continue;
             };
@@ -326,6 +382,86 @@ impl ControlPlane {
                     operation,
                     assignment.role_id()
                 )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Revalidates physical grounding, continuity, and Context cardinality before Commit mutation.
+    fn validate_proposal_physical_bindings(
+        &self,
+        group: &crate::ExecutionGroup,
+        execution: &domain::TaskExecution,
+        proposal: &AssignmentProposal,
+    ) -> Result<(), ControlError> {
+        let Some(semantics) = self.mission_binding_semantics(proposal.task_ref().mission_id())
+        else {
+            return Ok(());
+        };
+        if !semantics.requires_physical_entities() {
+            return Ok(());
+        }
+        let mut selected = BTreeMap::<domain::ActorId, domain::PhysicalEntityId>::new();
+        for assignment in proposal.assignments() {
+            let role = group
+                .role_requirement(proposal.task_ref(), assignment.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "Group omits role metadata for {}",
+                        assignment.role_id()
+                    ))
+                })?;
+            let Some(actor_id) = role.actor_id() else {
+                continue;
+            };
+            let entity_id = proposal
+                .physical_entity_for_role(assignment.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "proposal omits physical entity for role {}",
+                        assignment.role_id()
+                    ))
+                })?;
+            let resolved = self.validate_actor_binding_intent(
+                proposal.task_ref().mission_id(),
+                actor_id,
+                assignment.node_id(),
+            )?;
+            if resolved.as_ref().map(|(entity, _, _)| entity) != Some(entity_id) {
+                return Err(ControlError::InvalidProposal(format!(
+                    "proposal physical entity changed for role {}",
+                    assignment.role_id()
+                )));
+            }
+            if let Some(existing) = self.actor_binding(proposal.task_ref().mission_id(), actor_id)
+                && existing.physical_entity_id() != Some(entity_id)
+            {
+                return Err(ControlError::InvalidProposal(
+                    "committed Actor cannot silently change physical entity".to_string(),
+                ));
+            }
+            if let Some(previous) = selected.insert(actor_id.clone(), entity_id.clone())
+                && previous != *entity_id
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "actor {actor_id} selects multiple physical entities in one Task"
+                )));
+            }
+        }
+        for (actor_id, entity_id) in &selected {
+            for peer in semantics.distinct_peers(execution.context_id(), actor_id) {
+                let peer_entity = selected.get(&peer).or_else(|| {
+                    self.actor_binding(proposal.task_ref().mission_id(), &peer)
+                        .and_then(domain::ActorBinding::physical_entity_id)
+                });
+                if peer_entity == Some(entity_id) {
+                    return Err(ControlError::DistinctBindingUnsatisfiable {
+                        mission_id: proposal.task_ref().mission_id().clone(),
+                        actor_id: actor_id.clone(),
+                        occupied_by_actor: peer,
+                        physical_entity_id: entity_id.clone(),
+                    });
+                }
             }
         }
         Ok(())

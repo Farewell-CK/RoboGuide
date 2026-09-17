@@ -36,6 +36,31 @@ impl ContextRole {
     }
 }
 
+/// Context-scoped hard constraint requiring pairwise distinct physical executors.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DistinctPhysicalEntityConstraint {
+    /// ContextRoles whose current actor bindings must resolve to different physical entities.
+    context_role_ids: BTreeSet<ContextRoleId>,
+}
+
+impl DistinctPhysicalEntityConstraint {
+    /// Creates a constraint over at least two unique ContextRoles.
+    pub fn new(context_role_ids: BTreeSet<ContextRoleId>) -> Result<Self, DomainError> {
+        if context_role_ids.len() < 2 {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: "distinct physical entity constraint requires at least two ContextRoles"
+                    .to_string(),
+            });
+        }
+        Ok(Self { context_role_ids })
+    }
+
+    /// Returns the exact ContextRoles covered by this hard constraint.
+    pub const fn context_role_ids(&self) -> &BTreeSet<ContextRoleId> {
+        &self.context_role_ids
+    }
+}
+
 /// One Mission Intelligence semantic context spanning one or more Tasks.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CoordinationContext {
@@ -43,6 +68,9 @@ pub struct CoordinationContext {
     context_id: CoordinationContextId,
     /// Continuous actor roles declared by Mission Intelligence.
     roles: Vec<ContextRole>,
+    /// Hard physical executor constraints scoped to this collaboration Context.
+    #[serde(default)]
+    executor_constraints: Vec<DistinctPhysicalEntityConstraint>,
     /// Directional execution-time constraints scoped to this semantic Context.
     relations: Vec<ExecutionRelationSpec>,
     /// Default execution coupling mode for TaskExecutions in this Context.
@@ -74,6 +102,7 @@ impl CoordinationContext {
         Ok(Self {
             context_id,
             roles,
+            executor_constraints: Vec::new(),
             relations: Vec::new(),
             coupling_mode: ExecutionCouplingMode::Independent,
             shared_view: None,
@@ -145,6 +174,55 @@ impl CoordinationContext {
         Ok(context)
     }
 
+    /// Attaches validated physical executor constraints to this collaboration Context.
+    pub fn with_executor_constraints(
+        mut self,
+        constraints: Vec<DistinctPhysicalEntityConstraint>,
+    ) -> Result<Self, DomainError> {
+        for constraint in &constraints {
+            let actors = constraint
+                .context_role_ids()
+                .iter()
+                .map(|role_id| {
+                    self.role(role_id).ok_or_else(|| DomainError::InvalidMissionPlan {
+                        reason: format!(
+                            "context {} executor constraint references unknown ContextRole {role_id}",
+                            self.context_id
+                        ),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if actors
+                .iter()
+                .map(|role| role.actor_id())
+                .collect::<BTreeSet<_>>()
+                .len()
+                != actors.len()
+            {
+                return Err(DomainError::InvalidMissionPlan {
+                    reason: format!(
+                        "context {} cannot require one Actor to occupy distinct physical entities",
+                        self.context_id
+                    ),
+                });
+            }
+        }
+        let unique = constraints
+            .iter()
+            .map(DistinctPhysicalEntityConstraint::context_role_ids)
+            .collect::<BTreeSet<_>>();
+        if unique.len() != constraints.len() {
+            return Err(DomainError::InvalidMissionPlan {
+                reason: format!(
+                    "context {} contains duplicate executor constraints",
+                    self.context_id
+                ),
+            });
+        }
+        self.executor_constraints = constraints;
+        Ok(self)
+    }
+
     /// Returns this context identity.
     pub const fn context_id(&self) -> &CoordinationContextId {
         &self.context_id
@@ -153,6 +231,11 @@ impl CoordinationContext {
     /// Returns ContextRoles in declaration order.
     pub fn roles(&self) -> &[ContextRole] {
         &self.roles
+    }
+
+    /// Returns hard physical executor constraints in declaration order.
+    pub fn executor_constraints(&self) -> &[DistinctPhysicalEntityConstraint] {
+        &self.executor_constraints
     }
 
     /// Returns one ContextRole declaration when it belongs to this context.

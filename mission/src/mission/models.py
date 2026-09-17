@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mission.context import (
     ContextRole,
+    DistinctPhysicalEntityConstraint,
     ExecutionRelation,
     ExecutionRelationEndpoint,
     GroupSharedView,
@@ -21,6 +22,7 @@ from mission.contract_values import (
     EXECUTABLE_RELATION_KINDS,
     GROUP_VIEW_FIELDS,
     MAP_ID_PATTERN,
+    MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
@@ -35,6 +37,7 @@ from mission.contract_values import (
     JSONValue,
     MissionPlanError,
     _array,
+    _bounded_keys,
     _exact_keys,
     _object,
     _text,
@@ -65,6 +68,7 @@ __all__ = [
     "CapabilityContractRef",
     "CapabilityRequirement",
     "ContextRole",
+    "DistinctPhysicalEntityConstraint",
     "EXECUTABLE_RELATION_KINDS",
     "ExecutionIntent",
     "ExecutionRelation",
@@ -105,20 +109,44 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class MissionActor:
-    """Declare one Mission-scoped logical participant without physical placement."""
+    """Declare one Mission-scoped logical participant without physical placement.
+
+    An actor may optionally name one deployment-owned physical entity it is
+    grounded to; Control resolves the entity through its mission-independent
+    registry, so grounding never carries Node identities.
+    """
 
     actor_id: str
+    physical_entity: str | None = None
 
     @classmethod
-    def from_json(cls, value: JSONValue, path: str) -> MissionActor:
+    def from_json(cls, value: JSONValue, path: str, version: str) -> MissionActor:
         """Parse one logical Actor declaration."""
         item = _object(value, path)
-        _exact_keys(item, {"id"}, path)
-        return cls(_text(item["id"], f"{path}.id"))
+        _bounded_keys(
+            item,
+            {"id"},
+            {"physical_entity"} if version == MISSION_PLAN_VERSION else set(),
+            path,
+        )
+        entity = (
+            _text(item["physical_entity"], f"{path}.physical_entity")
+            if "physical_entity" in item
+            else None
+        )
+        return cls(_text(item["id"], f"{path}.id"), entity)
 
-    def to_json(self) -> JSONObject:
+    def to_json(self, version: str) -> JSONObject:
         """Serialize one logical Actor declaration."""
-        return {"id": self.actor_id}
+        result: JSONObject = {"id": self.actor_id}
+        if self.physical_entity is not None and version == MISSION_PLAN_VERSION:
+            result["physical_entity"] = self.physical_entity
+        return result
+
+
+def _actor_contract(version: str) -> bool:
+    """Return whether the version declares Mission actors (v0.7+)."""
+    return version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,22 +161,19 @@ class MissionSpec:
     def from_json(cls, value: JSONValue, version: str) -> MissionSpec:
         """Parse a mission specification from contract JSON."""
         item = _object(value, "mission")
-        _exact_keys(
-            item,
-            {"id", "objective", "actors"}
-            if version == MISSION_PLAN_VERSION
-            else {"id", "objective"},
-            "mission",
-        )
+        if _actor_contract(version):
+            _exact_keys(item, {"id", "objective", "actors"}, "mission")
+        else:
+            _exact_keys(item, {"id", "objective"}, "mission")
         actors = (
             tuple(
-                MissionActor.from_json(actor, f"mission.actors[{index}]")
+                MissionActor.from_json(actor, f"mission.actors[{index}]", version)
                 for index, actor in enumerate(_array(item["actors"], "mission.actors"))
             )
-            if version == MISSION_PLAN_VERSION
+            if _actor_contract(version)
             else ()
         )
-        if version == MISSION_PLAN_VERSION and not actors:
+        if _actor_contract(version) and not actors:
             raise MissionPlanError("mission.actors must not be empty")
         if len({actor.actor_id for actor in actors}) != len(actors):
             raise MissionPlanError("mission.actors contains duplicate ids")
@@ -161,8 +186,8 @@ class MissionSpec:
     def to_json(self, version: str) -> JSONObject:
         """Serialize the mission specification without planner metadata."""
         result: JSONObject = {"id": self.mission_id, "objective": self.objective}
-        if version == MISSION_PLAN_VERSION:
-            result["actors"] = [actor.to_json() for actor in self.actors]
+        if _actor_contract(version):
+            result["actors"] = [actor.to_json(version) for actor in self.actors]
         return result
 
 
@@ -186,6 +211,7 @@ class MissionPlan:
             MISSION_PLAN_COUPLING_VERSION,
             MISSION_PLAN_SCHEDULING_VERSION,
             MISSION_PLAN_SATISFACTION_VERSION,
+            MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
         }:
             raise MissionPlanError(f"unsupported schema_version: {version}")
@@ -292,6 +318,18 @@ class MissionPlan:
                         f"relation {relation.relation_id} uses {relation.kind}, which is valid "
                         "contract syntax but is not executable by this RoboGuide build"
                     )
+
+    def validate_physical_entity_grounding(self, admitted_entity_ids: frozenset[str]) -> None:
+        """Reject model-created deployment identities absent from admitted semantic evidence."""
+        for actor in self.mission.actors:
+            if (
+                actor.physical_entity is not None
+                and actor.physical_entity not in admitted_entity_ids
+            ):
+                raise MissionPlanError(
+                    f"actor {actor.actor_id} references unadmitted physical entity "
+                    f"{actor.physical_entity!r}"
+                )
 
     def _task_depends_on(self, task_id: str, candidate_dependency: str) -> bool:
         """Return whether one Task transitively depends on another Task."""

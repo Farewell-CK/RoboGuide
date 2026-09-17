@@ -9,7 +9,9 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
 
-MISSION_PLAN_VERSION: Final = "roboguide.mission-plan/v0.7"
+MISSION_PLAN_BINDING_VERSION: Final = "roboguide.mission-plan/v0.8"
+MISSION_PLAN_VERSION: Final = MISSION_PLAN_BINDING_VERSION
+MISSION_PLAN_ACTOR_VERSION: Final = "roboguide.mission-plan/v0.7"
 MISSION_PLAN_COMPAT_VERSION: Final = "roboguide.mission-plan/v0.3"
 MISSION_PLAN_COUPLING_VERSION: Final = "roboguide.mission-plan/v0.4"
 MISSION_PLAN_SCHEDULING_VERSION: Final = "roboguide.mission-plan/v0.5"

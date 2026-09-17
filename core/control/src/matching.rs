@@ -43,6 +43,12 @@ pub struct CandidateSet {
     roles: Vec<RoleCandidates>,
     /// Exact semantic operation associated with each normalized Mission role.
     role_operations: BTreeMap<RoleId, OperationRef>,
+    /// Mission actor behind each role, when the role declares one.
+    role_actors: BTreeMap<RoleId, domain::ActorId>,
+    /// Context-scoped actor groups requiring distinct physical entities.
+    distinct_actor_groups: Vec<std::collections::BTreeSet<domain::ActorId>>,
+    /// Current physical entity routed by each candidate Node.
+    candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId>,
 }
 
 impl CandidateSet {
@@ -52,6 +58,9 @@ impl CandidateSet {
             task_ref,
             roles,
             role_operations: BTreeMap::new(),
+            role_actors: BTreeMap::new(),
+            distinct_actor_groups: Vec::new(),
+            candidate_entities: BTreeMap::new(),
         }
     }
 
@@ -59,6 +68,34 @@ impl CandidateSet {
     fn with_role_operations(mut self, role_operations: BTreeMap<RoleId, OperationRef>) -> Self {
         self.role_operations = role_operations;
         self
+    }
+
+    /// Attaches mission actor binding metadata for scheduler cardinality.
+    pub(crate) fn with_actor_binding_metadata(
+        mut self,
+        role_actors: BTreeMap<RoleId, domain::ActorId>,
+        distinct_actor_groups: Vec<std::collections::BTreeSet<domain::ActorId>>,
+        candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId>,
+    ) -> Self {
+        self.role_actors = role_actors;
+        self.distinct_actor_groups = distinct_actor_groups;
+        self.candidate_entities = candidate_entities;
+        self
+    }
+
+    /// Returns the mission actor behind one role, when declared.
+    pub fn actor_for_role(&self, role_id: &RoleId) -> Option<&domain::ActorId> {
+        self.role_actors.get(role_id)
+    }
+
+    /// Returns the distinct-occupancy actor groups carried by this set.
+    pub fn distinct_actor_groups(&self) -> &[std::collections::BTreeSet<domain::ActorId>] {
+        &self.distinct_actor_groups
+    }
+
+    /// Returns the physical entity routed by one candidate Node in this decision snapshot.
+    pub fn physical_entity_for_node(&self, node_id: &NodeId) -> Option<&domain::PhysicalEntityId> {
+        self.candidate_entities.get(node_id)
     }
 
     /// Returns the complete mission-scoped task identity.
@@ -118,6 +155,31 @@ impl ControlPlane {
                     role.role_id().clone(),
                     vec![binding.node_id().clone()],
                 ));
+                continue;
+            }
+            if let Some(actor_id) = role.actor_id()
+                && let Some(entity_id) = self
+                    .mission_binding_semantics(requirement.mission_id())
+                    .and_then(|semantics| semantics.grounding(actor_id))
+                && self.physical_entity_node(entity_id).is_none()
+            {
+                return Err(ControlError::ActorGroundingUnresolved {
+                    mission_id: requirement.mission_id().clone(),
+                    actor_id: actor_id.clone(),
+                    entity_id: entity_id.clone(),
+                });
+            }
+            if let Some(actor_id) = role.actor_id()
+                && let Some(node_id) = self.grounded_actor_node(requirement.mission_id(), actor_id)
+            {
+                if !self.node_is_eligible_for_role(state, &node_id, role, timestamp) {
+                    return Err(ControlError::ActorPlacementConstraintUnsatisfied {
+                        mission_id: requirement.mission_id().clone(),
+                        actor_id: actor_id.clone(),
+                        node_id,
+                    });
+                }
+                roles.push(RoleCandidates::new(role.role_id().clone(), vec![node_id]));
                 continue;
             }
             if let Some(actor_id) = role.actor_id()
@@ -202,6 +264,7 @@ impl ControlPlane {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let actor_requirements = mission.actor_requirements();
+        let context_id = task.continuity().context_id();
         let mut candidates = self.match_capabilities_with_actor_bindings(
             state,
             requirement,
@@ -223,6 +286,14 @@ impl ControlPlane {
             });
             if role_candidates.node_ids.is_empty() {
                 return Err(ControlError::NoCandidate(role.role_id().clone()));
+            }
+            if let Some(actor_id) = role.actor_id() {
+                self.retain_distinct_binding_candidates(
+                    requirement.mission_id(),
+                    context_id,
+                    actor_id,
+                    &mut role_candidates.node_ids,
+                )?;
             }
             if role.actor_id().is_none()
                 || self
@@ -251,7 +322,48 @@ impl ControlPlane {
                 return Err(ControlError::NoCandidate(role.role_id().clone()));
             }
         }
-        Ok(candidates.with_role_operations(role_operations))
+        let role_actors = requirement
+            .roles()
+            .iter()
+            .filter_map(|role| {
+                role.actor_id()
+                    .map(|actor| (role.role_id().clone(), actor.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let distinct_actor_groups = self
+            .mission_binding_semantics(requirement.mission_id())
+            .map(|semantics| semantics.distinct_actor_groups(context_id))
+            .unwrap_or_default();
+        let candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId> = self
+            .physical_entity_registry()
+            .map(|registry| {
+                candidates
+                    .roles()
+                    .iter()
+                    .flat_map(RoleCandidates::node_ids)
+                    .filter_map(|node_id| {
+                        registry
+                            .entity_for_node(node_id)
+                            .map(|entry| (node_id.clone(), entry.entity_id().clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !distinct_actor_groups.is_empty()
+            && candidates
+                .roles()
+                .iter()
+                .flat_map(RoleCandidates::node_ids)
+                .any(|node_id| !candidate_entities.contains_key(node_id))
+        {
+            return Err(ControlError::InvalidProposal(
+                "physical entity registry does not cover every constrained candidate Node"
+                    .to_string(),
+            ));
+        }
+        Ok(candidates
+            .with_role_operations(role_operations)
+            .with_actor_binding_metadata(role_actors, distinct_actor_groups, candidate_entities))
     }
 
     /// Matches every task role against currently eligible node facts.

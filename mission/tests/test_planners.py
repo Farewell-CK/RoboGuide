@@ -12,7 +12,13 @@ from typing import cast
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
-from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_context import (
+    PHYSICAL_ENTITY_REFERENCE_SCHEMA,
+    GroundingContextSnapshot,
+    GroundingFreshness,
+    StateGroundingEvidence,
+    grounding_selection_policy_ref,
+)
 from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
@@ -100,7 +106,10 @@ def _current_catalog() -> CanonicalCapabilityCatalog:
 def _provider_plan(plan: JSONObject) -> JSONObject:
     """Encode current canonical parameter maps as provider DTO entries for fake responses."""
     encoded = deepcopy(plan)
-    if encoded.get("schema_version") != "roboguide.mission-plan/v0.7":
+    if encoded.get("schema_version") not in {
+        "roboguide.mission-plan/v0.7",
+        "roboguide.mission-plan/v0.8",
+    }:
         return encoded
     tasks = cast(list[JSONObject], encoded["tasks"])
     for task in tasks:
@@ -112,6 +121,112 @@ def _provider_plan(plan: JSONObject) -> JSONObject:
                 {"key": key, "value": parameters[key]} for key in sorted(parameters)
             ]
     return encoded
+
+
+def _v0_8_plan() -> JSONObject:
+    """Upgrade a canonical normalized fixture without inferring deployment identities."""
+    plan = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
+    plan["schema_version"] = "roboguide.mission-plan/v0.8"
+    for context in cast(list[JSONObject], plan["contexts"]):
+        context["executor_constraints"] = []
+    return plan
+
+
+def test_v0_8_planner_and_repairer_use_same_closed_provider_boundary() -> None:
+    """Both model writers preserve v0.8 Context fields through strict DTO normalization."""
+    plan_json = _v0_8_plan()
+    transport = FakeTransport([_response(_provider_plan(plan_json))] * 2)
+    settings = _local_settings()
+    planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    repairer = ResponsesMissionRepairer(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    mission = cast(JSONObject, plan_json["mission"])
+    mission_id = cast(str, mission["id"])
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    grounding = _grounding()
+    catalog = _current_catalog()
+
+    plan = planner.plan(mission_id, intent, catalog, grounding)
+    repaired = repairer.repair(
+        mission_id, intent, plan, MissionPlanReview.from_json(_review_output()), catalog, grounding
+    )
+    assert plan.to_json() == plan_json
+    assert repaired == plan
+    for _, _, payload, _ in transport.requests:
+        output = cast(JSONObject, cast(JSONObject, payload["text"])["format"])
+        schema = cast(JSONObject, output["schema"])
+        _assert_strict_provider_objects(schema)
+        context_schema = cast(JSONObject, cast(JSONObject, schema["$defs"])["context"])
+        assert "executor_constraints" in cast(JSONObject, context_schema["properties"])
+
+
+def test_v0_8_provider_output_cannot_invent_physical_grounding() -> None:
+    """A model-provided deployment identity needs exact admitted Grounding evidence."""
+    plan_json = _v0_8_plan()
+    mission = cast(JSONObject, plan_json["mission"])
+    cast(list[JSONObject], mission["actors"])[0]["physical_entity"] = "made-up-robot"
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    with pytest.raises(ValueError, match="unadmitted physical entity"):
+        planner.plan(
+            cast(str, mission["id"]),
+            GroundedIntent(cast(str, mission["objective"]), (), ()),
+            _current_catalog(),
+            _grounding(),
+        )
+
+
+@pytest.mark.parametrize("freshness", [GroundingFreshness.FRESH, GroundingFreshness.STALE])
+def test_v0_8_grounded_actor_requires_admitted_fresh_entity_reference(
+    freshness: GroundingFreshness,
+) -> None:
+    """Only exact deployment identities carried in fresh attributed evidence can be named."""
+    plan_json = _v0_8_plan()
+    mission = cast(JSONObject, plan_json["mission"])
+    cast(list[JSONObject], mission["actors"])[0]["physical_entity"] = "entity-courier"
+    grounding = GroundingContextSnapshot.create(
+        request_id="request-test",
+        dialogue_digest=_grounding().dialogue_digest,
+        captured_at_ms=20,
+        selection_policy_ref=grounding_selection_policy_ref(
+            frozenset({PHYSICAL_ENTITY_REFERENCE_SCHEMA})
+        ),
+        state_evidence=(
+            StateGroundingEvidence(
+                evidence_id="state-entity-courier",
+                object_type="physical-entity",
+                object_id="entity-courier",
+                semantic="observed",
+                source="admitted-deployment-world",
+                channel_id="entity-reference",
+                payload_schema=PHYSICAL_ENTITY_REFERENCE_SCHEMA,
+                value={"entity_id": "entity-courier"},
+                source_observed_at_ms=None,
+                received_at_ms=10,
+                valid_for_ms=20,
+                freshness=freshness,
+                confidence_millionths=None,
+                source_epoch=None,
+                sequence=1,
+            ),
+        ),
+    )
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    if freshness is GroundingFreshness.STALE:
+        with pytest.raises(ValueError, match="unadmitted physical entity"):
+            planner.plan(cast(str, mission["id"]), intent, _current_catalog(), grounding)
+    else:
+        assert (
+            planner.plan(cast(str, mission["id"]), intent, _current_catalog(), grounding)
+            .mission.actors[0]
+            .physical_entity
+            == "entity-courier"
+        )
 
 
 def _first_role(plan: JSONObject) -> JSONObject:

@@ -34,6 +34,8 @@ const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
+/// Schema identity for the mission-independent deployment entity registry file.
+const PHYSICAL_ENTITY_REGISTRY_SCHEMA: &str = "roboguide.physical-entity-registry/v0.1";
 
 /// Maximum HTTP header block accepted by the Mission/operator API.
 const MAX_CONTROL_HTTP_HEADER_BYTES: usize = 64 * 1024;
@@ -315,15 +317,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .unwrap_or_else(|| "roboguide-artifacts".to_string());
     let actor_placement_path = arguments.next().filter(|path| !path.trim().is_empty());
+    let physical_entity_registry_path = arguments.next().filter(|path| !path.trim().is_empty());
     if arguments.next().is_some() {
         return Err(
-            "unexpected integration-server argument; expected optional actor placement JSON path"
+            "unexpected integration-server argument; expected optional actor placement and physical entity registry JSON paths"
                 .into(),
         );
     }
     let actor_placement_constraints = actor_placement_path
         .as_deref()
         .map(|path| load_actor_placement_file(Path::new(path)))
+        .transpose()?;
+    let physical_entity_registry = physical_entity_registry_path
+        .as_deref()
+        .map(|path| load_physical_entity_registry_file(Path::new(path)))
         .transpose()?;
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
@@ -418,6 +425,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
         }
     }
+    if let Some(snapshot) = physical_entity_registry {
+        controller
+            .bridge
+            .control_mut()
+            .install_physical_entity_registry(snapshot)?;
+    }
+    controller
+        .bridge
+        .control()
+        .validate_physical_entity_registry_on_restore()?;
     controller
         .orchestrator
         .validate_control_authority(controller.bridge.control())
@@ -438,7 +455,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         controller.bridge.control(),
         &controller.orchestrator,
     )?;
-    if initialize_checkpoint || actor_placement_path.is_some() || restored_localization_evidence {
+    if initialize_checkpoint
+        || actor_placement_path.is_some()
+        || physical_entity_registry_path.is_some()
+        || restored_localization_evidence
+    {
         let checkpoint_json =
             server_checkpoint_json(&controller).map_err(|error| error.to_string())?;
         event_log.begin_batch()?;

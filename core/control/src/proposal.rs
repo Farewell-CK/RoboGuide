@@ -19,6 +19,8 @@ pub struct AssignmentProposal {
     role_operations: BTreeMap<RoleId, OperationRef>,
     /// Exact Role requirements revalidated before operation-aware Commit.
     role_requirements: BTreeMap<RoleId, RoleRequirement>,
+    /// Physical entity selected for each role under v0.8 semantics.
+    role_physical_entities: BTreeMap<RoleId, domain::PhysicalEntityId>,
 }
 
 impl AssignmentProposal {
@@ -28,12 +30,14 @@ impl AssignmentProposal {
         assignments: Vec<RoleAssignment>,
         role_operations: BTreeMap<RoleId, OperationRef>,
         role_requirements: BTreeMap<RoleId, RoleRequirement>,
+        role_physical_entities: BTreeMap<RoleId, domain::PhysicalEntityId>,
     ) -> Self {
         Self {
             task_ref,
             assignments,
             role_operations,
             role_requirements,
+            role_physical_entities,
         }
     }
 
@@ -65,6 +69,21 @@ impl AssignmentProposal {
     /// Returns whether this normalized proposal requires operation-aware Commit validation.
     pub(crate) fn requires_operation_validation(&self) -> bool {
         !self.role_operations.is_empty()
+    }
+
+    /// Returns the physical entity selected for one Role, when v0.8 semantics require one.
+    pub(crate) fn physical_entity_for_role(
+        &self,
+        role_id: &RoleId,
+    ) -> Option<&domain::PhysicalEntityId> {
+        self.role_physical_entities.get(role_id)
+    }
+
+    /// Returns every exact Role-to-physical-entity selection retained by the proposal.
+    pub(crate) const fn role_physical_entities(
+        &self,
+    ) -> &BTreeMap<RoleId, domain::PhysicalEntityId> {
+        &self.role_physical_entities
     }
 }
 
@@ -161,6 +180,40 @@ impl ControlPlane {
             }
         }
 
+        for group in candidates.distinct_actor_groups() {
+            let mut occupied = BTreeMap::new();
+            for assignment in &assignments {
+                let Some(actor_id) = candidates.actor_for_role(assignment.role_id()) else {
+                    continue;
+                };
+                if !group.contains(actor_id) {
+                    continue;
+                }
+                let entity_id = candidates
+                    .physical_entity_for_node(assignment.node_id())
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(format!(
+                            "constrained role {} has no physical entity selection",
+                            assignment.role_id()
+                        ))
+                    })?;
+                if let Some(previous_actor) = occupied.insert(entity_id.clone(), actor_id.clone()) {
+                    return Err(ControlError::InvalidProposal(format!(
+                        "actors {previous_actor} and {actor_id} select the same physical entity {entity_id}"
+                    )));
+                }
+            }
+        }
+
+        let role_physical_entities = assignments
+            .iter()
+            .filter_map(|assignment| {
+                candidates
+                    .physical_entity_for_node(assignment.node_id())
+                    .cloned()
+                    .map(|entity_id| (assignment.role_id().clone(), entity_id))
+            })
+            .collect();
         let proposal = AssignmentProposal::new(
             requirement.task_ref().clone(),
             assignments,
@@ -171,6 +224,7 @@ impl ControlPlane {
                 .cloned()
                 .map(|role| (role.role_id().clone(), role))
                 .collect(),
+            role_physical_entities,
         );
         events.append(
             timestamp,

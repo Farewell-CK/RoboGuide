@@ -45,12 +45,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
-- The current Mission boundary uses `roboguide.mission-plan/v0.7`: Mission Actors are declared once,
+- The current Mission boundary uses `roboguide.mission-plan/v0.8` (ADR-0040): Mission Actors are declared once,
   ContextRoles reference Actors, and TaskRoles reference ContextRoles while declaring multiple exact
   capability requirements, independent semantic ExecutionIntent, resources, Mission timing
   constraints, expected effect, and satisfaction evidence basis. Runtime/State duration estimates
-  are separate source-aware Scheduler evidence. v0.2-v0.6 remain compatibility inputs; their
+  are separate source-aware Scheduler evidence. v0.2-v0.7 remain compatibility inputs; their
   `execution-report` basis does not claim independent physical-world verification.
+- v0.8 Context executor constraints refer to distinct PhysicalEntityIds, not distinct NodeIds.
+  Deployment owns a revisioned entity-to-Node registry; Control validates it at Commit/Bind and
+  reacquires it after checkpoint restore. The current one-entity-per-Node routing profile is an
+  explicit Node Protocol limitation, never a Mission Actor identity rule. Grounded entity refs
+  must come from admitted fresh Mission evidence, not invented provider output.
 - Runtime successful terminal facts mean local execution completed, not that a Task or Mission is
   semantically satisfied. Control records `AwaitingSatisfaction` and retains bindings;
   Orchestration applies the Mission-declared basis, emits `TaskSatisfied`, then releases Task-scoped
