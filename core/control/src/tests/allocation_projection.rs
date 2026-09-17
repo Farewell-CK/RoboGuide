@@ -40,7 +40,7 @@ fn allocation_projection_normal_commit_is_committed() {
         )
         .expect("test proposal should validate");
     control
-        .commit(&proposal, timestamp, &correlation_id, &mut events)
+        .commit_with_state(&state, &proposal, timestamp, &correlation_id, &mut events)
         .expect("test proposal should commit");
 
     let snapshot = control
@@ -255,7 +255,7 @@ fn allocation_projection_release_is_multi_mission_isolated() {
         .expect("Mission B proposal should validate");
     fixture
         .control
-        .commit(
+        .commit_with_state(&fixture.state,
             &proposal_b,
             TimestampMs::new(1),
             &fixture.correlation_id,
@@ -378,7 +378,7 @@ fn allocation_projection_lag_and_state_mutation_do_not_change_authority() {
         )
         .expect("test proposal should validate");
     control
-        .commit(&proposal, timestamp, &correlation_id, &mut events)
+        .commit_with_state(&node_state, &proposal, timestamp, &correlation_id, &mut events)
         .expect("Control authority should commit independently of State projection");
 
     assert!(allocation_state.allocations().is_empty());

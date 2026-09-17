@@ -348,7 +348,7 @@ fn mission_dispatch_and_outcomes_use_current_task_execution() {
         )
         .expect("proposal succeeds");
     let committed = control
-        .commit(&proposal, now, &correlation, &mut events)
+        .commit_with_state(&state, &proposal, now, &correlation, &mut events)
         .expect("commit succeeds");
     control
         .bind_task_execution_with_requirement(
@@ -580,7 +580,7 @@ fn incomplete_multi_role_task_does_not_dispatch_or_report_terminal_outcome() {
         )
         .expect("proposal succeeds");
     let committed = control
-        .commit(&proposal, now, &correlation, &mut events)
+        .commit_with_state(&state, &proposal, now, &correlation, &mut events)
         .expect("commit succeeds");
     control
         .bind_task_execution_with_requirement(

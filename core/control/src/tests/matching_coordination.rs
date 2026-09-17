@@ -51,7 +51,7 @@
             )
             .expect("candidate assignment should produce a proposal");
         let plan = control
-            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &proposal, timestamp, &correlation_id, &mut events)
             .expect("unreserved resource should commit");
         assert_eq!(plan.assignments().len(), 1);
     }
@@ -458,10 +458,10 @@
             )
             .expect("Mission B proposal should succeed");
         let plan_a = control
-            .commit(&proposal_a, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &proposal_a, timestamp, &correlation_id, &mut events)
             .expect("Mission A plan should commit");
         let plan_b = control
-            .commit(&proposal_b, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &proposal_b, timestamp, &correlation_id, &mut events)
             .expect("Mission B plan should commit");
         control
             .create_group(
@@ -593,7 +593,7 @@
             )
             .expect("first proposal should be valid");
         control
-            .commit(&first_proposal, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &first_proposal, timestamp, &correlation_id, &mut events)
             .expect("first proposal should commit");
 
         let second_task = requirement("task-second", "transport-second", CapabilityKind::Transport);
@@ -623,7 +623,7 @@
             .expect("second proposal should be valid before reservation");
 
         assert!(matches!(
-            control.commit(&second_proposal, timestamp, &correlation_id, &mut events),
+            control.commit_with_state(&state, &second_proposal, timestamp, &correlation_id, &mut events),
             Err(ControlError::ResourceConflict { resource_id: conflict, .. })
                 if conflict == resource_id
         ));
@@ -683,7 +683,7 @@
             )
             .expect("first proposal should be valid");
         let first_plan = control
-            .commit(&first_proposal, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &first_proposal, timestamp, &correlation_id, &mut events)
             .expect("first proposal should commit");
         control
             .create_group(
@@ -787,7 +787,7 @@
             )
             .expect("released resource should be proposed again");
         let second_plan = control
-            .commit(
+            .commit_with_state(&state,
                 &second_proposal,
                 TimestampMs::new(6),
                 &correlation_id,

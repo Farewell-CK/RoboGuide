@@ -362,7 +362,7 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
         )
         .expect("competing proposal remains non-authoritative");
     assert!(matches!(
-        control.commit(
+        control.commit_with_state(&state,
             &competing_proposal,
             TimestampMs::new(30),
             &correlation,

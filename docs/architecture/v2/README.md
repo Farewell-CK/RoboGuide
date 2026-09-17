@@ -109,6 +109,11 @@ deployment/resource 不足、已有 Actor 的 reconciliation-required、永久�
 应用继续驱动其他 Mission，部署证据更新后重试。错误文本只用于诊断，不参与调度分类。
 时间窗口已错过的 deferral 仍停止自动重试。详见 ADR-0041。
 
+Commit 对每个 selected ResourceId 重新读取该 Node 的当前声明，核对 kind/capacity、
+eligibility 与 ownership/calendar 冲突后才统一写入；同类其他资源不能替代已选择 ID。
+旧的无 State 参数 Commit 入口只接受零资源 compatibility proposal，资源承诺必须使用
+state-aware Commit；不在 Control 内另建一份 Node resource truth。详见 ADR-0042。
+
 Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
 声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
 `verifier-evidence` 要求 exact verifier contract/predicate，并由 State 保存相互独立、带 source、

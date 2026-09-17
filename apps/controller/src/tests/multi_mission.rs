@@ -140,7 +140,7 @@ fn concurrent_missions_rebind_and_release_independently() {
         )
         .expect("Mission A proposal should succeed");
     let plan_a = control
-        .commit(&proposal_a, started_at, &trace_a, &mut log)
+        .commit_with_state(&state, &proposal_a, started_at, &trace_a, &mut log)
         .expect("Mission A commit should succeed");
     control
         .bind_task_execution_with_requirement(
@@ -188,7 +188,7 @@ fn concurrent_missions_rebind_and_release_independently() {
         )
         .expect("Mission B proposal should succeed");
     let plan_b = control
-        .commit(&proposal_b, started_at, &trace_b, &mut log)
+        .commit_with_state(&state, &proposal_b, started_at, &trace_b, &mut log)
         .expect("Mission B commit should succeed");
     control
         .bind_task_execution_with_requirement(
@@ -522,7 +522,7 @@ fn concurrent_missions_rebind_and_release_independently() {
         )
         .expect("Mission C proposal should reuse released resources");
     control
-        .commit(&proposal_c, TimestampMs::new(4), &trace_c, &mut log)
+        .commit_with_state(&state, &proposal_c, TimestampMs::new(4), &trace_c, &mut log)
         .expect("Mission C commit should reserve released resources");
 
     let events = log.snapshot();

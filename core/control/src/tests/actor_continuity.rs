@@ -268,7 +268,7 @@ fn actor_placement_constraint_is_enforced_again_at_group_bind() {
         )
         .expect("out-of-policy proposal remains uncommitted configuration");
     let committed = control
-        .commit(&proposal, now, &correlation_id, &mut events)
+        .commit_with_state(&state, &proposal, now, &correlation_id, &mut events)
         .expect("commit is independent of Mission actor metadata");
     let group_id = ExecutionGroupId::new("group-placement-guard").expect("group id valid");
     assert!(matches!(

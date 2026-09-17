@@ -80,7 +80,7 @@ fn rebound_task_requires_replacement_attempt_completion() {
         )
         .expect("Propose");
     let committed = control
-        .commit(&proposal, now, &correlation, &mut events)
+        .commit_with_state(&state, &proposal, now, &correlation, &mut events)
         .expect("Commit");
     control
         .bind_task_execution_with_requirement(

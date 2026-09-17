@@ -84,7 +84,7 @@ pub(crate) struct Reservation {
 }
 
 impl ControlPlane {
-    /// Commits a compatibility proposal that carries no independent operation constraint.
+    /// Commits only resource-free compatibility input; resources require a current State reader.
     pub fn commit<E: EventSink>(
         &mut self,
         proposal: &AssignmentProposal,
@@ -95,6 +95,15 @@ impl ControlPlane {
         if proposal.requires_operation_validation() {
             return Err(ControlError::InvalidProposal(
                 "normalized Mission proposal requires operation-aware Commit".to_string(),
+            ));
+        }
+        if proposal
+            .assignments()
+            .iter()
+            .any(|assignment| !assignment.resource_ids().is_empty())
+        {
+            return Err(ControlError::InvalidProposal(
+                "resource assignments require current State at Commit".to_string(),
             ));
         }
         self.commit_validated(proposal, timestamp, correlation_id, events)
@@ -183,7 +192,7 @@ impl ControlPlane {
         Ok(plan)
     }
 
-    /// Commits a compatibility ready-Task proposal without an independent operation constraint.
+    /// Commits only resource-free compatibility Tasks without an independent operation constraint.
     pub fn commit_for_group<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
@@ -195,6 +204,15 @@ impl ControlPlane {
         if proposal.requires_operation_validation() {
             return Err(ControlError::InvalidProposal(
                 "normalized Mission proposal requires operation-aware Group Commit".to_string(),
+            ));
+        }
+        if proposal
+            .assignments()
+            .iter()
+            .any(|assignment| !assignment.resource_ids().is_empty())
+        {
+            return Err(ControlError::InvalidProposal(
+                "resource assignments require current State at Group Commit".to_string(),
             ));
         }
         self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
@@ -358,9 +376,6 @@ impl ControlPlane {
                     )));
                 }
             }
-            let Some(operation) = proposal.operation_for_role(assignment.role_id()) else {
-                continue;
-            };
             let requirement = proposal
                 .requirement_for_role(assignment.role_id())
                 .ok_or_else(|| {
@@ -369,19 +384,57 @@ impl ControlPlane {
                         assignment.role_id()
                     ))
                 })?;
-            if !self.node_is_eligible_for_role_operation(
-                state,
-                assignment.node_id(),
-                requirement,
-                operation,
-                timestamp,
-            ) {
+            let operation = proposal.operation_for_role(assignment.role_id());
+            let eligible = operation.map_or_else(
+                || {
+                    self.node_is_eligible_for_role(
+                        state,
+                        assignment.node_id(),
+                        requirement,
+                        timestamp,
+                    )
+                },
+                |operation| {
+                    self.node_is_eligible_for_role_operation(
+                        state,
+                        assignment.node_id(),
+                        requirement,
+                        operation,
+                        timestamp,
+                    )
+                },
+            );
+            if !eligible {
                 return Err(ControlError::AssignmentUnavailable(format!(
-                    "node {} no longer satisfies capability and operation {} for role {}",
+                    "node {} no longer satisfies capability and operation {:?} for role {}",
                     assignment.node_id(),
                     operation,
                     assignment.role_id()
                 )));
+            }
+            let node = state
+                .node(assignment.node_id())
+                .ok_or_else(|| ControlError::UnknownNode(assignment.node_id().clone()))?;
+            let requirements = requirement.resource_requirements();
+            if assignment.resource_ids().len() != requirements.len() {
+                return Err(ControlError::InvalidProposal(format!(
+                    "role {} selected resource coverage differs from its requirements",
+                    assignment.role_id(),
+                )));
+            }
+            for (resource_id, required) in assignment.resource_ids().iter().zip(requirements.iter())
+            {
+                if !node.registration().resources().iter().any(|resource| {
+                    resource.id() == resource_id
+                        && resource.kind() == required.kind()
+                        && resource.capacity() >= required.units()
+                }) {
+                    return Err(ControlError::AssignmentUnavailable(format!(
+                        "selected resource {resource_id} is absent or no longer satisfies role {} on node {}",
+                        assignment.role_id(),
+                        assignment.node_id(),
+                    )));
+                }
             }
         }
         Ok(())

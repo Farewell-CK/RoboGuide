@@ -49,6 +49,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   decide retry policy; one Mission's current entity cardinality shortage cannot stop the timer.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
+- Resource-bearing Commit requires current State and revalidates every selected ResourceId's
+  Node, kind and capacity before any mutation. State-free compatibility Commit accepts only
+  zero-resource proposals without independent operation constraints.
 - The current Mission boundary uses `roboguide.mission-plan/v0.8` (ADR-0040): Mission Actors are declared once,
   ContextRoles reference Actors, and TaskRoles reference ContextRoles while declaring multiple exact
   capability requirements, independent semantic ExecutionIntent, resources, Mission timing

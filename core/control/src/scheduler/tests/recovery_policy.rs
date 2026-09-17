@@ -234,7 +234,8 @@ fn scheduler_decision_and_proposal_do_not_override_commit_conflict() {
         .expect("Mission B proposal should validate");
     assert!(control.reservations.is_empty());
     control
-        .commit(
+        .commit_with_state(
+            &state,
             &proposal_b,
             TimestampMs::new(0),
             &correlation(),
@@ -243,7 +244,7 @@ fn scheduler_decision_and_proposal_do_not_override_commit_conflict() {
         .expect("Mission B should commit first");
 
     assert!(matches!(
-        control.commit(
+        control.commit_with_state(&state,
             &proposal_a,
             TimestampMs::new(0),
             &correlation(),

@@ -284,7 +284,7 @@
             .expect("Mission B proposal should succeed");
         let mission_b_plan = fixture
             .control
-            .commit(
+            .commit_with_state(&fixture.state,
                 &mission_b_proposal,
                 TimestampMs::new(6),
                 &fixture.correlation_id,
@@ -485,7 +485,7 @@
             )
             .expect("zero-resource proposal should validate");
         let plan = control
-            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &proposal, timestamp, &correlation_id, &mut events)
             .expect("zero-resource proposal should commit");
         control
             .create_group(

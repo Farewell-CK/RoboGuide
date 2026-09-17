@@ -229,7 +229,7 @@
             )
             .expect("initial proposal should succeed");
         let plan = control
-            .commit(&proposal, timestamp, &correlation_id, &mut events)
+            .commit_with_state(&state, &proposal, timestamp, &correlation_id, &mut events)
             .expect("initial proposal should commit");
         control
             .create_group(

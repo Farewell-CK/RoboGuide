@@ -204,6 +204,9 @@ Orchestration 通过 typed scheduling disposition 区分 deployment 不足、rec
 invalid contract 与内部故障；应用不再按错误文本决定重试。跨 Task distinct Actor 的当前
 实体基数不足会保留 Ready 与持久化 deferral，其他 Mission 继续，补充部署证据后可重试。
 详见 [`ADR-0041`](docs/decisions/0041-core-scheduling-disposition.md)。
+资源承诺入口还必须提供当前 State，逐项重验 selected ResourceId 的 Node/kind/capacity；
+无 State 的 compatibility Commit 仅限零资源 proposal，见
+[`ADR-0042`](docs/decisions/0042-resource-identity-revalidation.md)。
 
 本切片不声称 optimal，也未实现 divisible quota、priority/fairness、travel/traffic cost、
 preemption、batching、auction、RL/LLM scheduling 或 multi-role joint recovery。完整决策见

@@ -157,7 +157,8 @@ fn group_shared_view_uses_exact_export_schema_and_freshness() {
         .expect("zero-resource proposal is valid");
     let committed = bridge
         .control
-        .commit(
+        .commit_with_state(
+            &bridge.state,
             &proposal,
             TimestampMs::new(3),
             &correlation,

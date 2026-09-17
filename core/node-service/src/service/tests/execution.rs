@@ -141,7 +141,7 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         )
         .expect("proposal succeeds");
     let committed = control
-        .commit(&proposal, now, &correlation, &mut log)
+        .commit_with_state(&state, &proposal, now, &correlation, &mut log)
         .expect("commit succeeds");
     control
         .bind_task_execution_with_requirement(

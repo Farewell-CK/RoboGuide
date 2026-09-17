@@ -444,7 +444,7 @@
             .expect("Mission B proposal should remain independent");
         fixture
             .control
-            .commit(
+            .commit_with_state(&fixture.state,
                 &mission_b_proposal,
                 TimestampMs::new(5),
                 &fixture.correlation_id,
