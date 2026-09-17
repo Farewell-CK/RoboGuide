@@ -1,0 +1,244 @@
+"""F-07 deterministic tests for Formal B1 provenance and population admission."""
+
+from __future__ import annotations
+
+import copy
+from typing import Any
+
+from roboguide_eval.b1_provenance import (
+    B1ProvenanceRecord,
+    ProvenanceFailure,
+    admit_to_formal_population,
+    digest,
+    verify_b1_provenance,
+)
+
+B2_STATIC_PLAN: dict[str, Any] = {
+    "schema_version": "roboguide.mission-plan/v0.7",
+    "mission": {
+        "id": "mission-e1-i-shared-world-episode-51",
+        "objective": "Cover both official navigation goals.",
+        "actors": [{"id": "shared-robot-a"}, {"id": "shared-robot-b"}],
+    },
+    "contexts": [],
+    "tasks": [
+        {
+            "id": "task-navigate-goal-a",
+            "description": "Navigate one robot to any_targets|0.",
+            "depends_on": [],
+            "roles": [],
+            "context_id": "ctx-goal-a",
+            "timing": None,
+            "satisfaction": None,
+        }
+    ],
+}
+
+MI_PLAN_DIFFERENT_TASK_IDS: dict[str, Any] = {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+        "id": "mission-mi-runtime-xyz",
+        "objective": "Cover both official navigation goals.",
+        "actors": [{"id": "actor-robot-object"}, {"id": "actor-robot-goal"}],
+    },
+    "contexts": [],
+    "tasks": [
+        {
+            "id": "reach-object",
+            "description": "MI-chosen decomposition A.",
+            "depends_on": [],
+            "roles": [],
+            "context_id": "ctx-a",
+            "timing": None,
+            "satisfaction": None,
+        },
+        {
+            "id": "reach-goal-receptacle",
+            "description": "MI-chosen decomposition B.",
+            "depends_on": [],
+            "roles": [],
+            "context_id": "ctx-a",
+            "timing": None,
+            "satisfaction": None,
+        },
+    ],
+}
+
+FROZEN_INPUT: dict[str, Any] = {"instruction": "two robots, two goals"}
+
+
+def _request(plan: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """Build one Mission Service request record around an accepted plan."""
+    return {
+        "request_id": "request-mi-run-1",
+        "mission_id": plan["mission"]["id"],
+        "lifecycle": "Accepted",
+        "plan": plan,
+        **extra,
+    }
+
+
+def _record(
+    input_doc: dict[str, Any],
+    plan: dict[str, Any],
+    mission_id: str,
+    benchmark: dict[str, Any],
+) -> B1ProvenanceRecord:
+    """Build one provenance record whose digests match the given evidence."""
+    return B1ProvenanceRecord(
+        run_id="run-1",
+        input_digest=digest(input_doc),
+        mi_run_identity="request-mi-run-1",
+        accepted_plan_digest=digest(plan),
+        mission_id=mission_id,
+        controller_submission_identity=f"group-{mission_id}",
+        execution_identity="shared-world-run-1",
+        benchmark_evidence_digest=digest(benchmark),
+    )
+
+
+def _benchmark(pddl: bool = True) -> dict[str, Any]:
+    """Build one minimal shared-world benchmark authority document."""
+    return {"official_pddl_success": pddl, "outcomes": {}}
+
+
+def test_f07_modified_b2_plan_forgery_is_rejected() -> None:
+    """A copied B2 plan with a new MissionId fails provenance."""
+    forged = copy.deepcopy(B2_STATIC_PLAN)
+    forged["mission"]["id"] = "mission-forged-123"
+    request = _request(forged)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, forged, "mission-forged-123", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-forged-123",
+        controller_plan=forged,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.STATIC_B2_PLAN_EQUALITY in result.failures
+    assert result.is_static_b2_plan is True
+
+
+def test_f07_genuine_mi_plan_with_different_task_ids_passes() -> None:
+    """Genuine MI output with different TaskIds passes the full chain."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert result.passed, result.failures
+    assert not result.is_static_b2_plan
+    assert result.plan_digest == digest(plan)
+
+
+def test_f07_plan_digest_mismatch_fails() -> None:
+    """A record claiming a different accepted-plan digest fails."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    tampered = copy.deepcopy(record)
+    object.__setattr__(tampered, "accepted_plan_digest", digest(B2_STATIC_PLAN))
+    result = verify_b1_provenance(
+        record=tampered,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.PLAN_DIGEST_MISMATCH in result.failures
+
+
+def test_f07_request_run_identity_mismatch_fails() -> None:
+    """A record bound to another MI run identity fails provenance."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    object.__setattr__(record, "mi_run_identity", "request-other-run")
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.MI_RUN_MISSING in result.failures
+
+
+def test_f07_controller_plan_mismatch_fails() -> None:
+    """The Controller executing a different plan than MI accepted fails."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    different = copy.deepcopy(plan)
+    different["tasks"][0]["id"] = "different-task"
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=different,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.CONTROLLER_PLAN_MISMATCH in result.failures
+
+
+def test_f07_admission_failure_excluded_from_population() -> None:
+    """A provenance-failing run is excluded from the formal population."""
+    admission = admit_to_formal_population(
+        provenance_passed=False,
+        provenance_failures=(ProvenanceFailure.STATIC_B2_PLAN_EQUALITY,),
+        benchmark_tri_state="BENCHMARK_TRUE",
+        valid_run="INVALID_INFRA",
+        valid_for_benchmark_population=True,
+    )
+    assert admission.valid_for_formal_population is False
+    assert "static_b2_plan_equality" in admission.invalid_reasons
+
+
+def test_f07_admission_pass_included() -> None:
+    """A passing chain with an authoritative outcome enters the population."""
+    admission = admit_to_formal_population(
+        provenance_passed=True,
+        provenance_failures=(),
+        benchmark_tri_state="BENCHMARK_TRUE",
+        valid_run="VALID_RUN",
+        valid_for_benchmark_population=True,
+    )
+    assert admission.valid_for_formal_population is True
+    assert admission.invalid_reasons == ()
+
+
+def test_f07_unavailable_outcome_excluded_even_with_provenance() -> None:
+    """Provenance alone cannot admit a run without benchmark authority."""
+    admission = admit_to_formal_population(
+        provenance_passed=True,
+        provenance_failures=(),
+        benchmark_tri_state="BENCHMARK_UNAVAILABLE",
+        valid_run="INVALID_INFRA",
+        valid_for_benchmark_population=False,
+    )
+    assert admission.valid_for_formal_population is False
+    assert "benchmark_outcome_unavailable" in admission.invalid_reasons

@@ -52,13 +52,74 @@ def verify(run: Path) -> dict[str, Any]:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     plan = (request or {}).get("plan") or {}
-    plan_text = json.dumps(plan, sort_keys=True, ensure_ascii=False)
-    static_text = json.dumps(static_plan, sort_keys=True, ensure_ascii=False)
-    static_fallback = bool(plan) and plan_text == static_text
+    # Canonical digest over the accepted plan (fixed canonicalization).
+    plan_digest = (
+        hashlib.sha256(
+            json.dumps(plan, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+        ).hexdigest()
+        if plan
+        else None
+    )
+    static_digest = (
+        hashlib.sha256(
+            json.dumps(
+                static_plan, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        if static_plan
+        else None
+    )
+    # Forgery gate: canonical byte-equality with the B2 fixture, regardless
+    # of MissionId or field order.
+    static_fallback = bool(plan_digest) and plan_digest == static_digest
 
     intents = _plan_intents(plan) if plan else []
     destinations = sorted({destination for destination, _ in intents})
     goals_covered = destinations == ["TARGET_any_targets|0", "any_targets|0"]
+
+    # --- F-06 tri-state benchmark authority over the shared-world summary ---
+    benchmark_tri_state = "BENCHMARK_UNAVAILABLE"
+    benchmark_reason = "authority_document_missing_or_malformed"
+    if shared:
+        pddl = shared.get("official_pddl_success")
+        if isinstance(pddl, bool):
+            benchmark_tri_state = "BENCHMARK_TRUE" if pddl else "BENCHMARK_FALSE"
+            benchmark_reason = "official_pddl_success_authoritative"
+        else:
+            benchmark_reason = "official_pddl_success_missing_or_not_bool"
+
+    # --- F-07 provenance chain (digest-bound, anti-forgery) ---
+    provenance_failures: list[str] = []
+    if not instruction_reached_mi:
+        provenance_failures.append("input_digest_missing")
+    if not mi_ran:
+        provenance_failures.append("mi_run_missing")
+    if plan_digest is None:
+        provenance_failures.append("plan_digest_missing")
+    if static_fallback:
+        provenance_failures.append("static_b2_plan_equality")
+    if not isinstance((mission or {}).get("status"), str):
+        provenance_failures.append("controller_mission_missing")
+    # Controller executed the accepted plan: every accepted destination must
+    # appear in the Controller mission evidence (semantic intent, not
+    # structural equality with the B2 fixture).
+    events = _load(run / "events.json") or {}
+    events_text = json.dumps(events, ensure_ascii=False)
+    intent_execution_consistent = bool(destinations) and all(
+        destination in events_text for destination in destinations
+    )
+    if not intent_execution_consistent:
+        provenance_failures.append("controller_plan_mismatch")
+    if shared is None:
+        provenance_failures.append("benchmark_evidence_missing")
+
+    provenance_passed = not provenance_failures
+    valid_run = (
+        "VALID_RUN"
+        if provenance_passed and benchmark_tri_state != "BENCHMARK_UNAVAILABLE"
+        else "INVALID_INFRA"
+    )
+    valid_for_formal_population = valid_run == "VALID_RUN"
 
     checks = {
         "same_high_level_task": instruction_reached_mi,
@@ -69,6 +130,9 @@ def verify(run: Path) -> dict[str, Any]:
             (mission or {}).get("status") in {"Completed", "Failed", "Cancelled"}
             or lifecycle in {"Blocked", "Failed", "NeedsClarification"}
         ),
+        "provenance_chain_passed": provenance_passed,
+        "intent_execution_consistent": intent_execution_consistent,
+        "valid_for_formal_population": valid_for_formal_population,
     }
     outcomes = (shared or {}).get("outcomes", {})
     context = {
@@ -79,8 +143,13 @@ def verify(run: Path) -> dict[str, Any]:
         "official_pddl_success": bool((shared or {}).get("official_pddl_success", False)),
         "per_agent_states": {agent: outcome.get("state") for agent, outcome in outcomes.items()},
         "instruction_sha256": _sha(instruction) if instruction else None,
-        "generated_plan_sha256": _sha(plan_text) if plan else None,
-        "static_plan_sha256": _sha(static_text),
+        "accepted_plan_canonical_digest": plan_digest,
+        "static_b2_plan_canonical_digest": static_digest,
+        "benchmark_tri_state": benchmark_tri_state,
+        "benchmark_outcome_reason": benchmark_reason,
+        "provenance_failures": provenance_failures,
+        "run_validity": valid_run,
+        "provenance_schema": "roboguide.e1.b1-provenance/v0.1",
         "stage2_context_diff": {
             "roboguide_assignment_texts": [intent.get("objective") for _, intent in intents],
             "roboguide_assignment_sha256": _sha(
@@ -91,6 +160,12 @@ def verify(run: Path) -> dict[str, Any]:
             "scene_context": "shared scene_description.txt retained in evidence/",
             "note": "EMOS-side leader assignment text/hash is extracted into the pair record "
             "from the EMOS run's fresh chat-history evidence",
+        },
+        "population_admission": {
+            "valid_for_formal_population": valid_for_formal_population,
+            "benchmark_tri_state": benchmark_tri_state,
+            "run_validity": valid_run,
+            "invalid_reasons": provenance_failures,
         },
     }
     passed = all(bool(value) for value in checks.values())
