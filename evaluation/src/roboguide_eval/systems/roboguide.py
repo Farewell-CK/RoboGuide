@@ -12,6 +12,11 @@ import json
 from pathlib import Path
 from typing import TypeGuard, cast
 
+from roboguide_eval.benchmark_evidence import (
+    BenchmarkOutcome,
+    assess_benchmark_evidence,
+    classify_run_validity,
+)
 from roboguide_eval.metrics import MetricsPayload, RawEvidenceRef
 from roboguide_eval.models import JSONObject, JSONValue
 from roboguide_eval.process import ProcessOutcome
@@ -266,38 +271,37 @@ class RoboGuideRunner(ProcessSystemRunner):
                 )
 
         identity = _object(context.get("identity")) or {}
-        outcomes = {
-            agent: outcome
-            for agent, raw in (_object(context.get("outcomes")) or {}).items()
-            if (outcome := _object(raw)) is not None
-        }
         raw_mission_status = context.get("mission_status")
         mission_status = raw_mission_status if isinstance(raw_mission_status, str) else None
 
-        success = checks.get("official_pddl_success")
-        self._copy_boolean(values, "success", success)
+        # Tri-state benchmark authority: the shared-world summary document is
+        # the only Habitat pddl_success authority. Missing/partial evidence
+        # never becomes a benchmark failure.
+        summary_path = run_directory / "evidence/shared-world-summary.json"
+        try:
+            summary_document = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            summary_document = None
+        assessment = assess_benchmark_evidence(summary_document)
+        if assessment.outcome is BenchmarkOutcome.TRUE:
+            values["success"] = True
+        elif assessment.outcome is BenchmarkOutcome.FALSE:
+            values["success"] = False
         if isinstance(mission_status, str):
             values["mission_completed"] = mission_status == "Completed"
             values["system_failure"] = mission_status == "Failed"
-        local_skill_values = [outcome.get("local_skill_completed") for outcome in outcomes.values()]
-        if all(isinstance(value, bool) for value in local_skill_values):
-            values["local_skill_completed"] = all(bool(value) for value in local_skill_values)
+        if assessment.local_skill_completed is not None:
+            values["local_skill_completed"] = assessment.local_skill_completed
         episode_terminated = identity.get("episode_terminated")
-        self._copy_boolean(values, "episode_terminated", episode_terminated)
+        if not isinstance(episode_terminated, bool):
+            episode_terminated = None
+        if episode_terminated is not None:
+            values["episode_terminated"] = episode_terminated
         steps = _integer(identity.get("simulator_steps"))
         if steps is not None:
             values["simulation_steps"] = steps
-        local_states = [outcome.get("state") for outcome in outcomes.values()]
-        if all(isinstance(state, str) for state in local_states):
-            values["local_agent_failure"] = any(state == "FAILED" for state in local_states)
-
-        def _sum_outcome(field: str) -> int | None:
-            """Sum one numeric outcome field across both agents."""
-            raw_values = [outcome.get(field) for outcome in outcomes.values()]
-            if all(isinstance(value, int) and not isinstance(value, bool) for value in raw_values):
-                return sum(int(value) for value in raw_values if isinstance(value, int))
-            return None
-
+        if assessment.local_agent_failure is not None:
+            values["local_agent_failure"] = assessment.local_agent_failure
         for metric, field in (
             ("local_llm_calls", "local_llm_calls"),
             ("local_token_usage", "local_tokens"),
@@ -306,10 +310,10 @@ class RoboGuideRunner(ProcessSystemRunner):
             ("send_request_count", "send_request_count"),
             ("message_pipe_activity_count", "message_pipe_activity_count"),
         ):
-            total = _sum_outcome(field)
+            total = assessment.numeric_aggregates.get(field)
             if total is not None:
                 values[metric] = total
-        tokens = _sum_outcome("local_tokens")
+        tokens = assessment.numeric_aggregates.get("local_tokens")
         if tokens is not None:
             values["token_usage"] = tokens
         values["global_llm_calls"] = 0
@@ -325,12 +329,35 @@ class RoboGuideRunner(ProcessSystemRunner):
         if isinstance(controller_alive, bool):
             values["infrastructure_failure"] = not controller_alive
 
+        episode_started = bool(summary_document is not None and episode_terminated is not None)
+        validity = classify_run_validity(
+            authority_present=assessment.authority_document_present,
+            episode_started=episode_started,
+            episode_terminated=episode_terminated,
+            infrastructure_failure=(
+                infrastructure_flag
+                if (infrastructure_flag := values.get("infrastructure_failure"))
+                and isinstance(infrastructure_flag, bool)
+                else None
+            ),
+            mission_status=mission_status,
+            process_status=None,
+            benchmark_outcome=assessment.outcome,
+        )
+        values["valid_for_benchmark_population"] = validity.valid_for_benchmark_population
+
         unavailable_metrics: JSONObject = {
             "model_failure": "the local stack does not emit a distinct model-failure fact"
         }
         details.update(
             {
                 "benchmark_success_source": "Habitat pddl_success (official shared-world summary)",
+                "benchmark_tri_state": assessment.outcome.value,
+                "benchmark_outcome_reason": assessment.outcome_reason,
+                "expected_outcome_agents": list(assessment.expected_agents),
+                "observed_outcome_agents": list(assessment.observed_agents),
+                "run_validity": validity.validity.value,
+                "population_admission_reasons": list(validity.reasons),
                 "identity": cast(JSONValue, identity),
                 "mission_outcome": mission_status,
                 "task_statuses": cast(JSONValue, context.get("task_statuses")),
