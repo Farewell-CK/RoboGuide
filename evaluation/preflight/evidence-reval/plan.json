@@ -1,0 +1,139 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "mission": {
+    "id": "mission-v08-provider-revalidation",
+    "objective": "One robot reaches the object any_targets|0 and one robot reaches the goal receptacle TARGET_any_targets|0.",
+    "actors": [
+      {
+        "id": "actor-robot-object"
+      },
+      {
+        "id": "actor-robot-goal"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "context-reach-targets",
+      "roles": [
+        {
+          "id": "role-robot-object",
+          "actor": "actor-robot-object"
+        },
+        {
+          "id": "role-robot-goal",
+          "actor": "actor-robot-goal"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent",
+      "executor_constraints": [
+        {
+          "kind": "distinct-physical-entities",
+          "context_roles": [
+            "role-robot-object",
+            "role-robot-goal"
+          ]
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "reach-object",
+      "description": "The assigned robot reaches the semantic object destination any_targets|0.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "task-role-reach-object",
+          "context_role": "role-robot-object",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "move",
+              "version": "v1"
+            },
+            "objective": "Reach the object any_targets|0.",
+            "parameters": {
+              "destination": "any_targets|0"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "context-reach-targets",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "The assigned robot is at the semantic object destination any_targets|0.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "reach-goal-receptacle",
+      "description": "The assigned robot reaches the semantic goal receptacle destination TARGET_any_targets|0.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "task-role-reach-goal-receptacle",
+          "context_role": "role-robot-goal",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": []
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "move",
+              "version": "v1"
+            },
+            "objective": "Reach the goal receptacle TARGET_any_targets|0.",
+            "parameters": {
+              "destination": "TARGET_any_targets|0"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "context-reach-targets",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "The assigned robot is at the semantic goal receptacle destination TARGET_any_targets|0.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

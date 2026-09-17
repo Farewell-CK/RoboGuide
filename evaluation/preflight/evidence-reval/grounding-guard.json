@@ -1,0 +1,2 @@
+{"admitted_guard": "PASS", "detail": "fresh admitted physical entity accepted"}
+{"unadmitted_guard": "PASS", "rejected_error": "actor courier references unadmitted physical entity 'physical.spot-1'"}

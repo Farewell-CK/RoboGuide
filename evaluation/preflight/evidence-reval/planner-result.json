@@ -1,0 +1,28 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "model": "gpt-5.6-luna",
+  "review_model": "gpt-5.6-luna",
+  "reasoning_effort": "xhigh",
+  "max_output_tokens": 4096,
+  "provider_base_url_host": "101.43.45.215:8080",
+  "request_utc": "2026-09-17T08:16:53Z",
+  "canonical_schema_sha256": "67a0102ac20a8a32a393774e45405ae1fd5bd8dd38a9694a9c9f424b76c1d822",
+  "provider_facing_schema_sha256": "286d1bfd6b85fa50fc5048fdb53a5c48d043161f539b717442e5835d5be9eeff",
+  "planner_latency_s": 30.6,
+  "planner_calls": 1,
+  "planner_http_schema_rejection": 0,
+  "normalized_schema_version": "roboguide.mission-plan/v0.8",
+  "physical_entity_fields_after_normalization": [
+    {
+      "actor": "actor-robot-object",
+      "physical_entity": "<omitted>"
+    },
+    {
+      "actor": "actor-robot-goal",
+      "physical_entity": "<omitted>"
+    }
+  ],
+  "normalization_gate": "PASS",
+  "canonical_validation_gate": "PASS",
+  "catalog_validation_gate": "PASS"
+}

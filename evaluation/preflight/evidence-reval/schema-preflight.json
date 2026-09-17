@@ -1,0 +1,7 @@
+{
+  "canonical_schema_sha256": "67a0102ac20a8a32a393774e45405ae1fd5bd8dd38a9694a9c9f424b76c1d822",
+  "provider_facing_schema_sha256": "286d1bfd6b85fa50fc5048fdb53a5c48d043161f539b717442e5835d5be9eeff",
+  "provider_schema_version_enforced_via_enum": true,
+  "expected_version": "roboguide.mission-plan/v0.8",
+  "matches": true
+}
