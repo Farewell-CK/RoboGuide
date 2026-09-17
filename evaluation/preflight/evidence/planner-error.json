@@ -1,0 +1,17 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "model": "gpt-5.6-luna",
+  "review_model": "gpt-5.6-luna",
+  "reasoning_effort": "xhigh",
+  "max_output_tokens": 4096,
+  "provider_endpoint_class": "relay (http, remote)",
+  "provider_base_url_host": "101.43.45.215:8080",
+  "request_utc": "2026-09-17T06:20:55Z",
+  "canonical_schema_sha256": "67a0102ac20a8a32a393774e45405ae1fd5bd8dd38a9694a9c9f424b76c1d822",
+  "provider_facing_schema_sha256": "28fd6221c6c54dc1431f8a990458047f6bce03b0d8e6ebf4855b0c3a977239d9",
+  "planner_outcome": "EXCEPTION",
+  "planner_exception_type": "MissionPlanError",
+  "planner_error_message": "mission.actors[0].physical_entity must be nonblank text",
+  "planner_latency_s": 32.4,
+  "planner_calls": 1
+}

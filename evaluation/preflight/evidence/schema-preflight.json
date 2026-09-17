@@ -1,0 +1,10 @@
+{
+  "canonical_schema_sha256": "67a0102ac20a8a32a393774e45405ae1fd5bd8dd38a9694a9c9f424b76c1d822",
+  "provider_facing_schema_sha256": "28fd6221c6c54dc1431f8a990458047f6bce03b0d8e6ebf4855b0c3a977239d9",
+  "provider_schema_version_const": "roboguide.mission-plan/v0.8",
+  "expected_version": "roboguide.mission-plan/v0.8",
+  "has_physical_entity_in_actors": true,
+  "has_executor_constraints_in_contexts": true,
+  "executor_constraint_kind_const": "distinct-physical-entities",
+  "derives_from_canonical_v08": true
+}
