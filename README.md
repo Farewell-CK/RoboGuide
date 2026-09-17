@@ -207,6 +207,9 @@ invalid contract 与内部故障；应用不再按错误文本决定重试。跨
 资源承诺入口还必须提供当前 State，逐项重验 selected ResourceId 的 Node/kind/capacity；
 无 State 的 compatibility Commit 仅限零资源 proposal，见
 [`ADR-0042`](docs/decisions/0042-resource-identity-revalidation.md)。
+registry 防回滚 watermark 独立持久化，恢复仍需部署供给当前 topology；旧 physical-binding
+checkpoint 缺 watermark 时拒绝自动迁移，见
+[`ADR-0043`](docs/decisions/0043-registry-anti-rollback-provenance.md)。
 
 本切片不声称 optimal，也未实现 divisible quota、priority/fairness、travel/traffic cost、
 preemption、batching、auction、RL/LLM scheduling 或 multi-role joint recovery。完整决策见

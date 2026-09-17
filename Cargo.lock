@@ -212,6 +212,7 @@ dependencies = [
  "ports",
  "serde",
  "serde_json",
+ "sha2",
  "state",
 ]
 

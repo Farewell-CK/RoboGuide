@@ -103,6 +103,11 @@ EAIOS 又各自独立。Control 首次绑定时依据当前部署 registry 和 l
 可执行配置显式限制为一 Node 一可寻址实体，不能将其误写成 Mission distinct Node 语义。
 恢复不得隐式更换已绑定 Actor 的实体。详见 ADR-0040。
 
+Control checkpoint 另存 registry identity、最高已准入 revision 与确定性内容摘要作为
+anti-rollback provenance；摘要不能解析为路由。restart 后部署仍必须供给 registry，低于
+watermark 或同 revision 不同内容均拒绝。旧 physical-binding checkpoint 缺少 watermark
+时需可信部署历史支持的显式迁移，不能用 bind-time revision 冒充最高 revision。详见 ADR-0043。
+
 调度不足与进程故障必须分离：Orchestration 用 typed scheduling disposition 区分可重试的
 deployment/resource 不足、已有 Actor 的 reconciliation-required、永久无效的输入契约和
 内部一致性错误。当前实体基数不足只留下 Ready Task 及持久化、去重的 deferral evidence；

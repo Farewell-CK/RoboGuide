@@ -12,3 +12,4 @@ include!("mission_execution_group.rs");
 include!("operation_support.rs");
 include!("actor_binding_semantics.rs");
 include!("commit_resource_identity.rs");
+include!("registry_provenance.rs");

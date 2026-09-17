@@ -63,6 +63,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   reacquires it after checkpoint restore. The current one-entity-per-Node routing profile is an
   explicit Node Protocol limitation, never a Mission Actor identity rule. Grounded entity refs
   must come from admitted fresh Mission evidence, not invented provider output.
+- Control persists a registry identity/highest-revision/content-digest watermark independently
+  of live topology and bind-time provenance. Restore still requires deployment topology;
+  historical physical-binding checkpoints without this watermark require trusted migration.
 - Runtime successful terminal facts mean local execution completed, not that a Task or Mission is
   semantically satisfied. Control records `AwaitingSatisfaction` and retains bindings;
   Orchestration applies the Mission-declared basis, emits `TaskSatisfied`, then releases Task-scoped

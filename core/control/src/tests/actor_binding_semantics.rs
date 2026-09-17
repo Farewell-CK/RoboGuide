@@ -815,7 +815,7 @@ fn checkpoint_restore_reacquires_and_fences_physical_topology() {
             0,
             &[("entity-a", "node-a"), ("entity-b", "node-b")],
         )),
-        Err(ControlError::ActorBindingRequiresReconciliation { .. })
+        Err(ControlError::InvalidProposal(reason)) if reason.contains("revision moved backwards")
     ));
 }
 

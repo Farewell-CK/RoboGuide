@@ -12,6 +12,7 @@ mod matching;
 mod node;
 mod proposal;
 mod reconciliation;
+mod registry_provenance;
 mod scheduler;
 
 pub use allocation::AllocationProjectionError;
@@ -36,6 +37,7 @@ use domain::{
     NodeLease, PhysicalEntityId, ResourceId, RoleId, TaskRef, TimestampMs,
 };
 use ports::SharedStateError;
+use registry_provenance::RegistryProvenance;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
@@ -51,6 +53,9 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
 /// authoritative after a process restart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ControlCheckpoint {
+    /// Latest admitted deployment provenance, containing no usable routing topology.
+    #[serde(default)]
+    registry_provenance: Option<RegistryProvenance>,
     /// Unique resource commitments keyed by resource identity.
     reservations: BTreeMap<ResourceId, Reservation>,
     /// Future Ready-Task reservations owned by the Control calendar.
@@ -328,6 +333,8 @@ pub struct ControlPlane {
     pub(crate) actor_node_constraints: BTreeMap<(MissionId, ActorId), ActorNodeConstraint>,
     /// Current deployment topology, deliberately reacquired rather than checkpointed.
     pub(crate) physical_entity_registry: Option<domain::PhysicalEntityRegistrySnapshot>,
+    /// Durable revision/digest watermark that survives separately from current topology.
+    registry_provenance: Option<RegistryProvenance>,
     /// Mission binding semantics registered from each accepted plan.
     pub(crate) mission_binding_semantics:
         BTreeMap<domain::MissionId, domain::MissionBindingSemantics>,
@@ -363,6 +370,7 @@ impl ControlPlane {
             actor_bindings: BTreeMap::new(),
             actor_node_constraints: BTreeMap::new(),
             physical_entity_registry: None,
+            registry_provenance: None,
             mission_binding_semantics: BTreeMap::new(),
             groups: BTreeMap::new(),
             pending_recovery_commitments: BTreeMap::new(),
@@ -373,6 +381,7 @@ impl ControlPlane {
     /// Captures durable Control authority without process-local lease timestamps.
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
+            registry_provenance: self.registry_provenance.clone(),
             reservations: self.reservations.clone(),
             scheduled_tasks: self.scheduled_tasks.values().cloned().collect(),
             calendar_version: self.calendar_version,
@@ -397,6 +406,21 @@ impl ControlPlane {
     ///
     /// Node leases start empty so every node must establish fresh authority in the new process.
     pub fn restore(checkpoint: ControlCheckpoint) -> Result<Self, ControlError> {
+        if checkpoint.registry_provenance.is_none()
+            && checkpoint
+                .actor_bindings
+                .iter()
+                .any(|binding| binding.physical_entity_id().is_some())
+        {
+            return Err(ControlError::InvalidProposal(
+                "physical Actor checkpoint lacks registry anti-rollback provenance; trusted checkpoint migration required".to_string(),
+            ));
+        }
+        if let Some(provenance) = &checkpoint.registry_provenance {
+            for binding in &checkpoint.actor_bindings {
+                provenance.validate_binding(binding)?;
+            }
+        }
         let mut actor_bindings = BTreeMap::new();
         for binding in checkpoint.actor_bindings {
             let key = (binding.mission_id().clone(), binding.actor_id().clone());
@@ -537,6 +561,7 @@ impl ControlPlane {
             actor_bindings,
             actor_node_constraints,
             physical_entity_registry: None,
+            registry_provenance: checkpoint.registry_provenance,
             mission_binding_semantics,
             groups,
             pending_recovery_commitments,
@@ -681,22 +706,9 @@ impl ControlPlane {
         &mut self,
         snapshot: domain::PhysicalEntityRegistrySnapshot,
     ) -> Result<(), ControlError> {
-        if let Some(current) = &self.physical_entity_registry {
-            if current.registry_id() != snapshot.registry_id() {
-                return Err(ControlError::InvalidProposal(
-                    "physical entity registry identity changed".to_string(),
-                ));
-            }
-            if snapshot.revision() < current.revision() {
-                return Err(ControlError::InvalidProposal(
-                    "physical entity registry revision moved backwards".to_string(),
-                ));
-            }
-            if snapshot.revision() == current.revision() && &snapshot != current {
-                return Err(ControlError::InvalidProposal(
-                    "physical entity registry changed without a new revision".to_string(),
-                ));
-            }
+        let provenance = RegistryProvenance::from_snapshot(&snapshot);
+        if let Some(current) = &self.registry_provenance {
+            current.validate_successor(&provenance)?;
         }
         for binding in self.actor_bindings.values() {
             let Some(entity_id) = binding.physical_entity_id() else {
@@ -722,6 +734,7 @@ impl ControlPlane {
                 });
             }
         }
+        self.registry_provenance = Some(provenance);
         self.physical_entity_registry = Some(snapshot);
         Ok(())
     }
