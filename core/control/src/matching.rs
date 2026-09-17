@@ -330,12 +330,15 @@ impl ControlPlane {
                     .map(|actor| (role.role_id().clone(), actor.clone()))
             })
             .collect::<BTreeMap<_, _>>();
-        let distinct_actor_groups = self
-            .mission_binding_semantics(requirement.mission_id())
+        let binding_semantics = self.mission_binding_semantics(requirement.mission_id());
+        let distinct_actor_groups = binding_semantics
             .map(|semantics| semantics.distinct_actor_groups(context_id))
             .unwrap_or_default();
-        let candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId> = self
-            .physical_entity_registry()
+        // Deployment topology supplies evidence only after the Mission opts into physical
+        // binding. Carry the same applicability used by Commit and Bind into scheduling.
+        let candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId> = binding_semantics
+            .filter(|semantics| semantics.requires_physical_entities())
+            .and(self.physical_entity_registry())
             .map(|registry| {
                 candidates
                     .roles()

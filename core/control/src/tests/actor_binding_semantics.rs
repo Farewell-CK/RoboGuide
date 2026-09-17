@@ -481,6 +481,62 @@ fn unconstrained_actors_may_share_one_physical_entity() {
     assert_eq!(alpha.physical_entity_id(), beta.physical_entity_id());
 }
 
+/// Deployment registry presence cannot change an ungrounded, unconstrained Mission's bindings.
+#[test]
+fn ungrounded_unconstrained_pipeline_is_independent_of_registry_presence() {
+    let (plan, requirement) = physical_binding_plan("mission-logical-only", None, None, false);
+    let plan = plan.with_v0_8_contract();
+    let group_id = ExecutionGroupId::new("group-logical-only").expect("group valid");
+    let correlation = CorrelationId::new("logical-only").expect("correlation valid");
+    let now = TimestampMs::new(0);
+    let mut results = Vec::new();
+    for install_registry in [false, true] {
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = TestEvents;
+        register_physical_nodes(&mut control, &mut state, &["node-a"]);
+        if install_registry {
+            control
+                .install_physical_entity_registry(physical_registry(1, &[("entity-a", "node-a")]))
+                .expect("registry installs");
+        }
+        create_ready_physical_group(&mut control, &plan, &requirement, &group_id, &mut events);
+        let candidates = control
+            .match_capabilities_for_mission(
+                &state, &plan, &requirement, now, &correlation, &mut events,
+            )
+            .expect("logical Actors match");
+        assert!(candidates.distinct_actor_groups().is_empty());
+        assert!(candidates.physical_entity_for_node(&NodeId::new("node-a").unwrap()).is_none());
+        let decision = BoundedJointScheduler::new()
+            .schedule_task(&state, &requirement, &candidates, now, &correlation, &mut events)
+            .expect("Actors may share the only Node");
+        let proposal = control
+            .propose(
+                &state, &requirement, &candidates, decision.proposed_assignments(),
+                now, &correlation, &mut events,
+            )
+            .expect("proposal validates");
+        assert!(proposal.role_physical_entities().is_empty());
+        let committed = control
+            .commit_for_group_with_state(&state, &group_id, &proposal, now, &correlation, &mut events)
+            .expect("commit succeeds");
+        let execution = bind_physical_task(
+            &mut control, &group_id, &requirement, &committed, &mut events,
+        ).expect("registry presence cannot reject a logical binding");
+        let bindings = ["alpha", "beta"].map(|actor| {
+            let binding = control.actor_binding(
+                plan.goal().mission_id(), &domain::ActorId::new(actor).unwrap(),
+            ).expect("Actor bound").clone();
+            assert!(binding.physical_entity_id().is_none());
+            assert!(binding.registry_id().is_none());
+            binding
+        });
+        results.push((execution, bindings));
+    }
+    assert_eq!(results[0], results[1]);
+}
+
 /// Grounding narrows each logical Actor to its admitted physical entity rather than a label guess.
 #[test]
 fn grounded_actor_matches_only_the_registered_physical_entity() {
