@@ -129,11 +129,16 @@ impl BoundedJointScheduler {
             .map(|offset| checked_timestamp_add(context.mission_accepted_at, offset))
             .transpose()
             .map_err(|_| SchedulerError::InvalidTimeWindow)?;
-        let completion_start_deadline = completion_deadline.map(|deadline| {
-            duration_ms.map_or(deadline, |duration| {
-                TimestampMs::new(deadline.as_millis() - duration)
-            })
-        });
+        let completion_start_deadline = match (completion_deadline, duration_ms) {
+            (Some(deadline), Some(duration)) => {
+                let Some(latest_start) = deadline.as_millis().checked_sub(duration) else {
+                    return Ok(TaskSchedulingOutcome::WindowMissed);
+                };
+                Some(TimestampMs::new(latest_start))
+            }
+            (deadline, None) => deadline,
+            (None, Some(_)) => None,
+        };
         let latest_activation_at = match (latest, completion_start_deadline) {
             (Some(latest), Some(completion)) => Some(latest.min(completion)),
             (Some(latest), None) => Some(latest),

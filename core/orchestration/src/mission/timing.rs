@@ -72,17 +72,29 @@ pub(super) fn plan_latest_activation_at(
         .completion_deadline_offset_ms()
         .map(|offset| checked_plan_timestamp(accepted_at, offset, task_ref))
         .transpose()?;
-    let completion_start = completion_deadline.map(|deadline| {
-        duration_ms.map_or(deadline, |duration| {
-            TimestampMs::new(deadline.as_millis() - duration)
-        })
-    });
-    Ok(match (latest_start, completion_start) {
+    let completion_start = match (completion_deadline, duration_ms) {
+        (Some(deadline), Some(duration)) => Some(TimestampMs::new(
+            deadline.as_millis().checked_sub(duration).ok_or(
+                OrchestrationError::SchedulingDeferred(SchedulingDeferral::WindowMissed),
+            )?,
+        )),
+        (deadline, None) => deadline,
+        (None, Some(_)) => None,
+    };
+    let latest = match (latest_start, completion_start) {
         (Some(latest), Some(completion)) => Some(latest.min(completion)),
         (Some(latest), None) => Some(latest),
         (None, Some(completion)) => Some(completion),
         (None, None) => None,
-    })
+    };
+    let earliest =
+        checked_plan_timestamp(accepted_at, timing.earliest_start_offset_ms(), task_ref)?;
+    if latest.is_some_and(|latest| latest < earliest) {
+        return Err(OrchestrationError::SchedulingDeferred(
+            SchedulingDeferral::WindowMissed,
+        ));
+    }
+    Ok(latest)
 }
 
 /// Emits durable creation evidence after Control admits one bounded scheduling interval.
@@ -159,6 +171,51 @@ pub(super) fn release_mission_scheduling<E: EventSink>(
                 task_ref,
                 reason: reason.to_string(),
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Restore-time timing reconstruction cannot panic or wrap for an impossible estimate.
+    #[test]
+    fn duration_activation_bounds_are_checked_during_reconstruction() {
+        let task = TaskRef::new(
+            MissionId::new("timing").unwrap(),
+            TaskId::new("task").unwrap(),
+        );
+        for (accepted, earliest, deadline, duration, expected) in [
+            (0, 0, 50, Some(49), Some(1)),
+            (0, 0, 50, Some(50), Some(0)),
+            (0, 0, 50, Some(51), None),
+            (100, 0, 50, Some(51), None),
+            (100, 10, 50, Some(41), None),
+            (0, 0, 0, Some(1), None),
+            (0, 0, 0, Some(0), Some(0)),
+            (0, 0, 0, None, Some(0)),
+            (0, 0, 50, Some(u64::MAX), None),
+            (0, 0, u64::MAX, Some(u64::MAX), Some(0)),
+            (u64::MAX - 50, 0, 50, Some(50), Some(u64::MAX - 50)),
+        ] {
+            let timing =
+                domain::TaskTiming::new_constraints(earliest, None, Some(deadline)).unwrap();
+            let result =
+                plan_latest_activation_at(&timing, TimestampMs::new(accepted), &task, duration);
+            match expected {
+                Some(latest) => assert_eq!(result.unwrap(), Some(TimestampMs::new(latest))),
+                None => assert!(matches!(
+                    result,
+                    Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::WindowMissed
+                    ))
+                )),
+            }
+        }
+        let timing = domain::TaskTiming::new_constraints(0, None, Some(1)).unwrap();
+        assert!(
+            plan_latest_activation_at(&timing, TimestampMs::new(u64::MAX), &task, Some(1)).is_err()
         );
     }
 }

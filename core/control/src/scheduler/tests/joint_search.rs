@@ -521,6 +521,138 @@ fn joint_scheduler_consumes_fresh_external_duration_evidence() {
     assert_eq!(decision.duration_estimate(), Some(&estimate));
 }
 
+/// Fresh duration evidence yields selections or explicit timing outcomes at arithmetic boundaries.
+#[test]
+fn duration_deadline_arithmetic_is_checked_at_scheduler_boundary() {
+    let mut state = InMemorySharedNodeState::new();
+    record_node(
+        &mut state,
+        registration("node-a", CapabilityKind::Compute, Vec::new()),
+    )
+    .unwrap();
+    // accepted_at, now, deadline offset, duration, expected latest activation (None = missed).
+    for (accepted, now, deadline, duration, expected_latest) in [
+        (0, 0, 50, 49, Some(1)),
+        (0, 0, 50, 50, Some(0)),
+        (0, 0, 50, 51, None),
+        (100, 100, 50, 51, None),
+        (0, 10, 50, 41, None),
+        (0, 0, 0, 1, None),
+        (0, 0, 50, u64::MAX, None),
+        (0, 0, u64::MAX, u64::MAX, Some(0)),
+        (u64::MAX - 50, u64::MAX - 50, 50, 50, Some(u64::MAX - 50)),
+    ] {
+        let role = scheduled_role("worker", CapabilityKind::Compute, Vec::new());
+        let task = TaskRequirement::new_scheduled(
+            MissionId::new("duration-boundary").unwrap(),
+            TaskId::new("task").unwrap(),
+            vec![role.clone()],
+            domain::TaskTiming::new_constraints(0, None, Some(deadline)).unwrap(),
+        )
+        .unwrap();
+        let candidates = CandidateSet::new(
+            task.task_ref().clone(),
+            vec![RoleCandidates::new(
+                role.role_id().clone(),
+                vec![NodeId::new("node-a").unwrap()],
+            )],
+        );
+        let estimate = domain::TaskDurationEstimate::new(
+            task.task_ref().clone(),
+            duration,
+            domain::StateSource::roboguide("estimate").unwrap(),
+            TimestampMs::new(now),
+            1,
+        )
+        .unwrap();
+        let result = BoundedJointScheduler::new()
+            .schedule_task_with_snapshot_and_estimate(
+                &state,
+                &task,
+                &candidates,
+                &SchedulingSnapshot::empty(),
+                TaskSchedulingContext::new(
+                    TimestampMs::new(accepted),
+                    TimestampMs::new(now),
+                    Some(&estimate),
+                ),
+            )
+            .expect("valid but infeasible timing must return an outcome without panicking");
+        match expected_latest {
+            Some(latest) => {
+                let TaskSchedulingOutcome::SelectedNow(decision) = result else {
+                    panic!("expected selection, got {result:?}")
+                };
+                assert_eq!(
+                    decision.latest_activation_at(),
+                    Some(TimestampMs::new(latest))
+                );
+                assert_eq!(
+                    decision.ends_at(),
+                    Some(TimestampMs::new(now.checked_add(duration).unwrap()))
+                );
+            }
+            None => assert_eq!(result, TaskSchedulingOutcome::WindowMissed),
+        }
+        assert!(
+            domain::TaskDurationEstimate::new(
+                task.task_ref().clone(),
+                0,
+                domain::StateSource::roboguide("estimate").unwrap(),
+                TimestampMs::new(now),
+                1
+            )
+            .is_err(),
+            "zero remains invalid evidence, not an invented instantaneous estimate"
+        );
+    }
+}
+
+/// Timestamp overflow remains a typed error, and an absent estimate is distinct from zero.
+#[test]
+fn duration_timestamp_overflow_and_zero_window_have_explicit_results() {
+    let mut state = InMemorySharedNodeState::new();
+    record_node(
+        &mut state,
+        registration("node-a", CapabilityKind::Compute, Vec::new()),
+    )
+    .unwrap();
+    for (accepted, deadline, expected_overflow) in [(u64::MAX, 1, true), (0, 0, false)] {
+        let role = scheduled_role("worker", CapabilityKind::Compute, Vec::new());
+        let task = TaskRequirement::new_scheduled(
+            MissionId::new("overflow").unwrap(),
+            TaskId::new("task").unwrap(),
+            vec![role.clone()],
+            domain::TaskTiming::new_constraints(0, None, Some(deadline)).unwrap(),
+        )
+        .unwrap();
+        let candidates = CandidateSet::new(
+            task.task_ref().clone(),
+            vec![RoleCandidates::new(
+                role.role_id().clone(),
+                vec![NodeId::new("node-a").unwrap()],
+            )],
+        );
+        let result = BoundedJointScheduler::new().schedule_task_with_snapshot(
+            &state,
+            &task,
+            &candidates,
+            &SchedulingSnapshot::empty(),
+            TimestampMs::new(accepted),
+            TimestampMs::new(accepted),
+        );
+        if expected_overflow {
+            assert_eq!(result, Err(SchedulerError::InvalidTimeWindow));
+        } else {
+            let TaskSchedulingOutcome::SelectedNow(decision) = result.unwrap() else {
+                panic!("unestimated Task may start at its zero deadline")
+            };
+            assert_eq!(decision.ends_at(), None);
+            assert_eq!(decision.latest_activation_at(), Some(TimestampMs::new(0)));
+        }
+    }
+}
+
 /// Scheduler rejects stale and cross-Task duration evidence before selecting resources.
 #[test]
 fn joint_scheduler_rejects_invalid_duration_evidence() {

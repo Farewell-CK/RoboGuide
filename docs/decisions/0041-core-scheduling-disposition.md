@@ -26,6 +26,12 @@ bound Actor remain distinct reasons; reconciliation still belongs to Control. Ot
 continue, and a later application pass retries against current registry and Node evidence.
 Window-missed deferrals retain their existing stop-retrying behavior.
 
+Deadline minus duration uses checked arithmetic in Scheduler and in checkpoint timing
+reconstruction. An estimate that cannot fit the activation window returns WindowMissed,
+including subtraction below zero; timestamp addition overflow remains an explicit error.
+Equal duration and available window permits activation at the exact inclusive boundary.
+Zero duration remains invalid source evidence; absent duration remains unknown, not zero.
+
 Checkpoint reason strings retain the existing kebab-case representation. Known historical
 reason strings deserialize into the typed enum; unknown strings fail restore rather than
 silently inventing a retry policy. No MissionPlan, Node Protocol, event schema, commitment
