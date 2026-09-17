@@ -126,7 +126,7 @@ fn unsupported_relation_never_reaches_control_authority() {
 
     assert!(matches!(
         result,
-        Err(OrchestrationError::Mission(reason))
+        Err(OrchestrationError::InvalidContract(reason))
             if reason.contains("valid contract syntax but is not executable")
     ));
     assert!(control.group_ids().is_empty());

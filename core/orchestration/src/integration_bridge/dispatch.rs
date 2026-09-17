@@ -234,9 +234,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 None => execution.coupling_mode() != domain::ExecutionCouplingMode::Independent,
             };
             if coordination_unavailable {
-                return Err(IntegrationRuntimeError::Protocol(
-                    "TaskExecution coordination mechanisms are not ready".to_string(),
-                ));
+                return Err(IntegrationRuntimeError::CoordinationNotReady);
             }
             if !matches!(
                 execution.lifecycle(),

@@ -43,6 +43,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
+- Orchestration scheduling dispositions are typed: deployment shortages remain observable,
+  durable deferrals, bound Actor reconciliation remains Control-owned, and invalid contracts
+  remain separate from internal failures. Application dispatch never parses diagnostics to
+  decide retry policy; one Mission's current entity cardinality shortage cannot stop the timer.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
 - The current Mission boundary uses `roboguide.mission-plan/v0.8` (ADR-0040): Mission Actors are declared once,

@@ -306,6 +306,8 @@ pub enum IntegrationRuntimeError {
     Route(tonic::Status),
     /// Protocol conversion failed.
     Protocol(String),
+    /// The committed Task is waiting for its declared Runtime coordination evidence.
+    CoordinationNotReady,
     /// Stable execution id was reused for another command.
     ExecutionConflict(String),
     /// Durable controller checkpoint was malformed or incompatible.
@@ -321,6 +323,9 @@ impl Display for IntegrationRuntimeError {
             Self::Domain(error) => error.fmt(f),
             Self::Route(error) => error.fmt(f),
             Self::Protocol(reason) => f.write_str(reason),
+            Self::CoordinationNotReady => {
+                f.write_str("TaskExecution coordination mechanisms are not ready")
+            }
             Self::ExecutionConflict(id) => {
                 write!(f, "execution {id} was reused with another command")
             }

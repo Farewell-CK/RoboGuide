@@ -36,14 +36,14 @@ impl SupportedMechanismProfile {
     pub fn validate(self, plan: &MissionPlan) -> Result<(), OrchestrationError> {
         for context in plan.contexts() {
             if !self.supports_coupling_mode(context.coupling_mode()) {
-                return Err(OrchestrationError::Mission(format!(
+                return Err(OrchestrationError::InvalidContract(format!(
                     "coordination Context {} uses an unsupported coupling mode",
                     context.context_id()
                 )));
             }
             for relation in context.relations() {
                 if !self.supports_relation(relation.kind()) {
-                    return Err(OrchestrationError::Mission(format!(
+                    return Err(OrchestrationError::InvalidContract(format!(
                         "execution relation {} uses {:?}, which is valid contract syntax but is not executable by this Controller build",
                         relation.relation_id(),
                         relation.kind()
@@ -57,7 +57,7 @@ impl SupportedMechanismProfile {
                 .coupling_mode_override()
                 .is_some_and(|mode| !self.supports_coupling_mode(mode))
             {
-                return Err(OrchestrationError::Mission(format!(
+                return Err(OrchestrationError::InvalidContract(format!(
                     "Task {} uses an unsupported coupling mode",
                     task.task_id()
                 )));

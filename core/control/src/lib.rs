@@ -131,6 +131,8 @@ pub enum ControlError {
     UnknownGroup(ExecutionGroupId),
     /// A role had no eligible candidate.
     NoCandidate(RoleId),
+    /// A previously selected assignment no longer satisfies current deployment evidence.
+    AssignmentUnavailable(String),
     /// A previously bound mission actor's node is no longer usable for a later task.
     ActorBindingRequiresReconciliation {
         /// Mission containing the actor binding.
@@ -232,6 +234,9 @@ impl Display for ControlError {
             Self::UnknownNode(id) => write!(formatter, "unknown node {id}"),
             Self::UnknownGroup(id) => write!(formatter, "unknown execution group {id}"),
             Self::NoCandidate(id) => write!(formatter, "no candidate for role {id}"),
+            Self::AssignmentUnavailable(reason) => {
+                write!(formatter, "assignment unavailable: {reason}")
+            }
             Self::ActorBindingRequiresReconciliation {
                 mission_id,
                 actor_id,

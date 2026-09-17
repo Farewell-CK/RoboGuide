@@ -376,7 +376,7 @@ impl ControlPlane {
                 operation,
                 timestamp,
             ) {
-                return Err(ControlError::InvalidProposal(format!(
+                return Err(ControlError::AssignmentUnavailable(format!(
                     "node {} no longer satisfies capability and operation {} for role {}",
                     assignment.node_id(),
                     operation,

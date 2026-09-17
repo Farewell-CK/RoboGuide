@@ -189,33 +189,10 @@ pub(crate) fn drive_rebound_attempts(
 
 /// Identifies a bound Task waiting for declared Runtime coordination evidence.
 fn coordination_dispatch_deferred(error: &IntegrationRuntimeError) -> bool {
-    matches!(
-        error,
-        IntegrationRuntimeError::Protocol(reason)
-            if reason == "TaskExecution coordination mechanisms are not ready"
-    )
+    matches!(error, IntegrationRuntimeError::CoordinationNotReady)
 }
 
 /// Identifies temporary scheduling failures that should leave a Task Ready for retry.
 pub(crate) fn deferred_dispatch(error: &OrchestrationError) -> bool {
-    matches!(
-        error,
-        OrchestrationError::Control(control::ControlError::NoCandidate(_))
-    ) || matches!(
-        error,
-        OrchestrationError::Mission(reason)
-            if reason.contains("no feasible")
-                || reason.contains("joint scheduling deferred")
-                || reason.contains("joint scheduling window missed")
-    ) || matches!(
-        error,
-        OrchestrationError::Control(
-            control::ControlError::ActorPlacementConstraintUnsatisfied { .. }
-        )
-    ) || matches!(
-        error,
-        OrchestrationError::Control(
-            control::ControlError::ActorBindingRequiresReconciliation { .. }
-        )
-    )
+    error.scheduling_disposition().deferral().is_some()
 }

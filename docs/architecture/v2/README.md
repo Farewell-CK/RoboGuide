@@ -103,6 +103,12 @@ EAIOS 又各自独立。Control 首次绑定时依据当前部署 registry 和 l
 可执行配置显式限制为一 Node 一可寻址实体，不能将其误写成 Mission distinct Node 语义。
 恢复不得隐式更换已绑定 Actor 的实体。详见 ADR-0040。
 
+调度不足与进程故障必须分离：Orchestration 用 typed scheduling disposition 区分可重试的
+deployment/resource 不足、已有 Actor 的 reconciliation-required、永久无效的输入契约和
+内部一致性错误。当前实体基数不足只留下 Ready Task 及持久化、去重的 deferral evidence；
+应用继续驱动其他 Mission，部署证据更新后重试。错误文本只用于诊断，不参与调度分类。
+时间窗口已错过的 deferral 仍停止自动重试。详见 ADR-0041。
+
 Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
 声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
 `verifier-evidence` 要求 exact verifier contract/predicate，并由 State 保存相互独立、带 source、

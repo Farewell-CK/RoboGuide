@@ -1,6 +1,7 @@
 use super::*;
 
 mod runtime_replay;
+mod scheduling_disposition;
 
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
 #[tokio::test]
@@ -522,11 +523,17 @@ fn expected_dispatch_deferrals_do_not_fail_server() {
         },
     );
     assert!(deferred_dispatch(&error));
-    assert!(deferred_dispatch(&OrchestrationError::Mission(
-        "joint scheduling deferred: invalid time window".to_string(),
+    assert!(deferred_dispatch(&OrchestrationError::SchedulingDeferred(
+        orchestration::SchedulingDeferral::InvalidTimeWindow,
     )));
-    assert!(deferred_dispatch(&OrchestrationError::Mission(
-        "joint scheduling window missed".to_string(),
+    assert!(deferred_dispatch(&OrchestrationError::SchedulingDeferred(
+        orchestration::SchedulingDeferral::WindowMissed,
+    )));
+    assert!(!deferred_dispatch(&OrchestrationError::Mission(
+        "internal failure mentioning joint scheduling deferred".to_string(),
+    )));
+    assert!(!deferred_dispatch(&OrchestrationError::InvalidContract(
+        "invalid contract mentioning no feasible selection".to_string(),
     )));
 }
 

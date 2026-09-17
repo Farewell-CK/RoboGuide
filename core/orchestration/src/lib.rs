@@ -28,6 +28,7 @@ mod mission {
     pub(super) mod timing;
 }
 mod mission_contract;
+mod scheduling_status;
 
 pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
@@ -37,6 +38,7 @@ pub use integration_bridge::{
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission_contract::decode_mission_plan;
+pub use scheduling_status::{SchedulingDeferral, SchedulingDisposition};
 
 /// Mission execution lifecycle owned by orchestration rather than Runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -68,7 +70,7 @@ pub struct MissionExecution {
     accepted_at: TimestampMs,
     /// Last durable scheduling deferral reason per Task, used to suppress duplicate evidence.
     #[serde(default)]
-    scheduling_deferrals: BTreeMap<TaskId, String>,
+    scheduling_deferrals: BTreeMap<TaskId, SchedulingDeferral>,
 }
 
 impl MissionExecution {
@@ -91,6 +93,11 @@ impl MissionExecution {
     pub const fn accepted_at(&self) -> TimestampMs {
         self.accepted_at
     }
+
+    /// Returns durable scheduling evidence for one Task without granting binding authority.
+    pub fn scheduling_deferral(&self, task_id: &TaskId) -> Option<SchedulingDeferral> {
+        self.scheduling_deferrals.get(task_id).copied()
+    }
 }
 
 /// Errors raised when Mission orchestration invariants are violated.
@@ -98,6 +105,10 @@ impl MissionExecution {
 pub enum OrchestrationError {
     /// Control rejected a lifecycle or ownership transition.
     Control(ControlError),
+    /// Current evidence cannot produce a dispatchable assignment; the Task remains Ready.
+    SchedulingDeferred(SchedulingDeferral),
+    /// Input contract is invalid or requests an unsupported execution mechanism.
+    InvalidContract(String),
     /// A Mission identity was absent or reused.
     Mission(String),
 }
@@ -107,7 +118,13 @@ impl Display for OrchestrationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Control(error) => write!(formatter, "control rejected orchestration: {error}"),
-            Self::Mission(reason) => formatter.write_str(reason),
+            Self::SchedulingDeferred(SchedulingDeferral::WindowMissed) => {
+                formatter.write_str("joint scheduling window missed")
+            }
+            Self::SchedulingDeferred(reason) => {
+                write!(formatter, "joint scheduling deferred: {}", reason.as_str())
+            }
+            Self::InvalidContract(reason) | Self::Mission(reason) => formatter.write_str(reason),
         }
     }
 }

@@ -189,8 +189,7 @@ fn group_shared_view_uses_exact_export_schema_and_freshness() {
     );
     assert!(matches!(
         missing_coordination,
-        Err(IntegrationRuntimeError::Protocol(reason))
-            if reason.contains("coordination mechanisms are not ready")
+        Err(IntegrationRuntimeError::CoordinationNotReady)
     ));
 
     let unknown = bridge

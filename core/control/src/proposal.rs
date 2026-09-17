@@ -136,7 +136,7 @@ impl ControlPlane {
                 .node(assignment.node_id())
                 .ok_or_else(|| ControlError::UnknownNode(assignment.node_id().clone()))?;
             if !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp) {
-                return Err(ControlError::InvalidProposal(format!(
+                return Err(ControlError::AssignmentUnavailable(format!(
                     "node {} is no longer eligible for role {}",
                     assignment.node_id(),
                     role.role_id()
@@ -145,7 +145,7 @@ impl ControlPlane {
             if let Some(operation) = candidates.operation_for_role(role.role_id())
                 && !node.registration().supports_operation(operation)
             {
-                return Err(ControlError::InvalidProposal(format!(
+                return Err(ControlError::AssignmentUnavailable(format!(
                     "node {} no longer supports operation {} for role {}",
                     assignment.node_id(),
                     operation,

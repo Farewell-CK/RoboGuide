@@ -193,7 +193,7 @@ fn proposal_and_commit_revalidate_current_operation_support() {
             &correlation,
             &mut events,
         ),
-        Err(ControlError::InvalidProposal(reason)) if reason.contains("no longer supports operation")
+        Err(ControlError::AssignmentUnavailable(reason)) if reason.contains("no longer supports operation")
     ));
 
     replace_operation_registration(&mut state, operation_support_node("node-a", "relocate"));
@@ -227,7 +227,7 @@ fn proposal_and_commit_revalidate_current_operation_support() {
             &correlation,
             &mut events,
         ),
-        Err(ControlError::InvalidProposal(reason)) if reason.contains("no longer satisfies capability and operation")
+        Err(ControlError::AssignmentUnavailable(reason)) if reason.contains("no longer satisfies capability and operation")
     ));
     assert!(control.allocation_snapshot(timestamp).expect("projection is valid").allocations().is_empty());
 }

@@ -200,6 +200,11 @@ interval；scheduled Task 只允许在所属 Group 中以 exact decision Commit�
 上层 policy 确认前不再进入自动 timer dispatch。Normal 与 Recovery 共用 calendar-aware 的
 确定性 Role/resource primitive，但当前 future reservation 只用于 normal Ready Task。
 
+Orchestration 通过 typed scheduling disposition 区分 deployment 不足、reconciliation、
+invalid contract 与内部故障；应用不再按错误文本决定重试。跨 Task distinct Actor 的当前
+实体基数不足会保留 Ready 与持久化 deferral，其他 Mission 继续，补充部署证据后可重试。
+详见 [`ADR-0041`](docs/decisions/0041-core-scheduling-disposition.md)。
+
 本切片不声称 optimal，也未实现 divisible quota、priority/fairness、travel/traffic cost、
 preemption、batching、auction、RL/LLM scheduling 或 multi-role joint recovery。完整决策见
 [`ADR-0029`](docs/decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。

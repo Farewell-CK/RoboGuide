@@ -62,7 +62,7 @@ impl MissionOrchestrator {
                             && execution
                                 .scheduling_deferrals
                                 .get(task_ref.task_id())
-                                .is_none_or(|reason| reason != "window-missed")
+                                .is_none_or(|reason| reason.allows_retry())
                     })
                     .map(|_| task_ref.clone())
             })
@@ -74,7 +74,7 @@ impl MissionOrchestrator {
         &mut self,
         mission_id: &MissionId,
         task_ref: &TaskRef,
-        reason: &str,
+        reason: SchedulingDeferral,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
@@ -86,14 +86,14 @@ impl MissionOrchestrator {
         if execution
             .scheduling_deferrals
             .get(task_ref.task_id())
-            .is_some_and(|recorded| recorded == reason)
+            .is_some_and(|recorded| *recorded == reason)
         {
             return Ok(());
         }
         execution
             .scheduling_deferrals
-            .insert(task_ref.task_id().clone(), reason.to_string());
-        append_scheduling_deferred(events, task_ref, reason, timestamp, correlation_id);
+            .insert(task_ref.task_id().clone(), reason);
+        append_scheduling_deferred(events, task_ref, reason.as_str(), timestamp, correlation_id);
         Ok(())
     }
 
@@ -190,22 +190,38 @@ impl MissionOrchestrator {
                 execution
                     .scheduling_deferrals
                     .get(task_ref.task_id())
-                    .is_some_and(|reason| reason == "window-missed"),
+                    .is_some_and(|reason| !reason.allows_retry()),
             )
         };
         if window_already_missed {
-            return Err(OrchestrationError::Mission(
-                "joint scheduling window missed".to_string(),
+            return Err(OrchestrationError::SchedulingDeferred(
+                SchedulingDeferral::WindowMissed,
             ));
         }
-        let candidates = control.match_capabilities_for_mission(
+        let candidates = match control.match_capabilities_for_mission(
             state,
             &plan,
             &requirement,
             timestamp,
             correlation_id,
             events,
-        )?;
+        ) {
+            Ok(candidates) => candidates,
+            Err(error) => {
+                let error = OrchestrationError::from(error);
+                if let Some(reason) = error.scheduling_disposition().deferral() {
+                    self.record_scheduling_deferral(
+                        mission_id,
+                        task_ref,
+                        reason,
+                        timestamp,
+                        correlation_id,
+                        events,
+                    )?;
+                }
+                return Err(error);
+            }
+        };
         let mut had_scheduled_decision = control.scheduled_task(task_ref).is_some();
         let mut was_scheduled = had_scheduled_decision;
         let reusable_decision = match control.scheduled_task(task_ref).cloned() {
@@ -283,13 +299,13 @@ impl MissionOrchestrator {
                     self.record_scheduling_deferral(
                         mission_id,
                         task_ref,
-                        "window-missed",
+                        SchedulingDeferral::WindowMissed,
                         timestamp,
                         correlation_id,
                         events,
                     )?;
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling window missed".to_string(),
+                    return Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::WindowMissed,
                     ));
                 }
                 None
@@ -314,26 +330,26 @@ impl MissionOrchestrator {
                     self.record_scheduling_deferral(
                         mission_id,
                         task_ref,
-                        "search-limited",
+                        SchedulingDeferral::SearchLimited,
                         timestamp,
                         correlation_id,
                         events,
                     )?;
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling deferred: search budget exhausted".to_string(),
+                    return Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::SearchLimited,
                     ));
                 }
                 Err(control::SchedulerError::InvalidTimeWindow) => {
                     self.record_scheduling_deferral(
                         mission_id,
                         task_ref,
-                        "invalid-time-window",
+                        SchedulingDeferral::InvalidTimeWindow,
                         timestamp,
                         correlation_id,
                         events,
                     )?;
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling deferred: invalid time window".to_string(),
+                    return Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::InvalidTimeWindow,
                     ));
                 }
                 Err(error) => return Err(OrchestrationError::Mission(error.to_string())),
@@ -399,26 +415,26 @@ impl MissionOrchestrator {
                     self.record_scheduling_deferral(
                         mission_id,
                         task_ref,
-                        "no-feasible-interval",
+                        SchedulingDeferral::NoFeasibleInterval,
                         timestamp,
                         correlation_id,
                         events,
                     )?;
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling deferred: no feasible interval".to_string(),
+                    return Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::NoFeasibleInterval,
                     ));
                 }
                 TaskSchedulingOutcome::WindowMissed => {
                     self.record_scheduling_deferral(
                         mission_id,
                         task_ref,
-                        "window-missed",
+                        SchedulingDeferral::WindowMissed,
                         timestamp,
                         correlation_id,
                         events,
                     )?;
-                    return Err(OrchestrationError::Mission(
-                        "joint scheduling window missed".to_string(),
+                    return Err(OrchestrationError::SchedulingDeferred(
+                        SchedulingDeferral::WindowMissed,
                     ));
                 }
             }
@@ -444,7 +460,13 @@ impl MissionOrchestrator {
             events,
         ) {
             Ok(proposal) => proposal,
-            Err(error) if was_scheduled => {
+            Err(error)
+                if was_scheduled
+                    && OrchestrationError::from(error.clone())
+                        .scheduling_disposition()
+                        .deferral()
+                        .is_some() =>
+            {
                 let reason = error.to_string();
                 control.invalidate_scheduled_task(task_ref, reason.clone());
                 events.append(
@@ -457,8 +479,16 @@ impl MissionOrchestrator {
                         reason,
                     },
                 );
-                return Err(OrchestrationError::Mission(
-                    "joint scheduling deferred after activation revalidation".to_string(),
+                self.record_scheduling_deferral(
+                    mission_id,
+                    task_ref,
+                    SchedulingDeferral::ActivationRevalidation,
+                    timestamp,
+                    correlation_id,
+                    events,
+                )?;
+                return Err(OrchestrationError::SchedulingDeferred(
+                    SchedulingDeferral::ActivationRevalidation,
                 ));
             }
             Err(error) => return Err(error.into()),
@@ -472,7 +502,13 @@ impl MissionOrchestrator {
             events,
         ) {
             Ok(committed) => committed,
-            Err(error) if was_scheduled => {
+            Err(error)
+                if was_scheduled
+                    && OrchestrationError::from(error.clone())
+                        .scheduling_disposition()
+                        .deferral()
+                        .is_some() =>
+            {
                 let reason = error.to_string();
                 control.invalidate_scheduled_task(task_ref, reason.clone());
                 events.append(
@@ -485,8 +521,16 @@ impl MissionOrchestrator {
                         reason,
                     },
                 );
-                return Err(OrchestrationError::Mission(
-                    "joint scheduling deferred after activation conflict".to_string(),
+                self.record_scheduling_deferral(
+                    mission_id,
+                    task_ref,
+                    SchedulingDeferral::ActivationConflict,
+                    timestamp,
+                    correlation_id,
+                    events,
+                )?;
+                return Err(OrchestrationError::SchedulingDeferred(
+                    SchedulingDeferral::ActivationConflict,
                 ));
             }
             Err(error) => return Err(error.into()),

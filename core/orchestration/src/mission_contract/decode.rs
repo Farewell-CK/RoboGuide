@@ -24,8 +24,13 @@ use super::execution_value::execution_value;
 use super::nullable_millis::NullableMillisField;
 use super::wire::*;
 
-/// Decodes historical input or one current MissionPlan v0.7 document.
+/// Decodes historical or current MissionPlan input, classifying rejection as an invalid contract.
 pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError> {
+    decode_contract(json).map_err(|error| OrchestrationError::InvalidContract(error.to_string()))
+}
+
+/// Validates wire fields and constructs domain values without creating execution authority.
+fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     let document: PlanDocument = serde_json::from_str(json).map_err(|error| {
         OrchestrationError::Mission(format!("invalid MissionPlan JSON: {error}"))
     })?;

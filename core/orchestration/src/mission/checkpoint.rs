@@ -104,7 +104,7 @@ impl MissionOrchestrator {
                         })?,
                 )
                 .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
-                let reason = deferral
+                let reason_text = deferral
                     .get("reason")
                     .and_then(serde_json::Value::as_str)
                     .filter(|reason| !reason.is_empty())
@@ -112,8 +112,14 @@ impl MissionOrchestrator {
                         OrchestrationError::Mission(
                             "checkpoint scheduling deferral misses reason".to_string(),
                         )
-                    })?
-                    .to_string();
+                    })?;
+                let reason: SchedulingDeferral =
+                    serde_json::from_value(serde_json::Value::String(reason_text.to_string()))
+                        .map_err(|error| {
+                            OrchestrationError::Mission(format!(
+                                "unknown checkpoint scheduling deferral: {error}"
+                            ))
+                        })?;
                 if !plan
                     .task_graph()
                     .tasks()
