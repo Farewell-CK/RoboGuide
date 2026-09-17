@@ -40,6 +40,7 @@ FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
 CURRENT_FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 CURRENT_CATALOG = Path("contracts/capability/v0.3/catalog.json")
+CURRENT_SCHEMA = Path("contracts/mission/v0.8/mission-plan.schema.json")
 
 
 def _response(output: JSONObject) -> JSONObject:
@@ -101,6 +102,11 @@ def _catalog() -> CanonicalCapabilityCatalog:
 def _current_catalog() -> CanonicalCapabilityCatalog:
     """Load the current split capability and operation Catalog."""
     return CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+
+
+def _current_schema() -> JSONObject:
+    """Load the canonical MissionPlan schema used by provider-boundary normalization."""
+    return cast(JSONObject, json.loads(CURRENT_SCHEMA.read_text(encoding="utf-8")))
 
 
 def _provider_plan(plan: JSONObject) -> JSONObject:
@@ -473,7 +479,9 @@ def test_provider_parameter_entries_preserve_all_canonical_scalar_types() -> Non
     }
     intent["parameters"] = expected
 
-    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    normalized = normalize_mission_plan_provider_output(
+        _provider_plan(plan_json), _current_schema()
+    )
     plan = MissionPlan.from_json(normalized)
 
     assert dict(plan.tasks[0].roles[0].execution.parameters) == expected
@@ -486,7 +494,9 @@ def test_provider_parameter_entries_allow_an_empty_canonical_map() -> None:
     intent = cast(JSONObject, role["execution_intent"])
     intent["parameters"] = {}
 
-    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    normalized = normalize_mission_plan_provider_output(
+        _provider_plan(plan_json), _current_schema()
+    )
     plan = MissionPlan.from_json(normalized)
 
     assert plan.tasks[0].roles[0].execution.parameters == ()
@@ -496,7 +506,9 @@ def test_provider_output_normalizes_before_canonical_and_catalog_validation() ->
     """Current DTO output becomes canonical v0.7 before all existing validation gates."""
     plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
 
-    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    normalized = normalize_mission_plan_provider_output(
+        _provider_plan(plan_json), _current_schema()
+    )
     plan = MissionPlan.from_json(normalized)
     plan.validate_implementation_support()
     _current_catalog().validate_plan(plan)
@@ -512,7 +524,9 @@ def test_provider_output_with_unknown_catalog_parameter_fails_closed() -> None:
     parameters = cast(JSONObject, intent["parameters"])
     parameters["unsupported"] = "must-fail"
 
-    normalized = normalize_mission_plan_provider_output(_provider_plan(plan_json))
+    normalized = normalize_mission_plan_provider_output(
+        _provider_plan(plan_json), _current_schema()
+    )
     plan = MissionPlan.from_json(normalized)
 
     with pytest.raises(CapabilityCatalogError, match="unsupported"):
@@ -540,7 +554,7 @@ def test_malformed_provider_parameter_entry_fails_closed(malformed: list[JSONVal
     intent["parameters"] = malformed
 
     with pytest.raises(ProviderMissionPlanError):
-        normalize_mission_plan_provider_output(provider_plan)
+        normalize_mission_plan_provider_output(provider_plan, _current_schema())
 
 
 def test_responses_planner_rejects_unknown_contract_before_review() -> None:

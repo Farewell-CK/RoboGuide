@@ -13,9 +13,9 @@ from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
-from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.models import JSONObject, MissionPlan
 from mission.provider_mission_plan import (
-    adapt_mission_plan_schema_for_provider,
+    build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
 from mission.request_record import DialogueTurn, IntentAssessment
@@ -70,20 +70,6 @@ class UrllibJsonTransport:
         if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
             raise MissionProviderError("provider response must be a JSON object")
         return cast(JSONObject, decoded)
-
-
-def _nullable_schema(value: JSONValue) -> JSONValue:
-    """Return a provider schema accepting null exactly for a contract-optional property."""
-    if isinstance(value, dict):
-        type_value = value.get("type")
-        if type_value == "null" or (isinstance(type_value, list) and "null" in type_value):
-            return value
-        alternatives = value.get("anyOf")
-        if isinstance(alternatives, list) and any(
-            isinstance(item, dict) and item.get("type") == "null" for item in alternatives
-        ):
-            return value
-    return {"anyOf": [value, {"type": "null"}]}
 
 
 def _validate_plan_output(
@@ -161,10 +147,9 @@ class _ResponsesClient:
             raise MissionProviderError("Mission Plan schema must be a JSON object")
         return cast(JSONObject, decoded)
 
-    def _mission_plan_provider_schema(self) -> JSONObject:
+    def _mission_plan_provider_schema(self, canonical_schema: JSONObject) -> JSONObject:
         """Return the current MissionPlan schema adapted to the strict provider DTO."""
-        adapted = adapt_mission_plan_schema_for_provider(self._load_schema())
-        return cast(JSONObject, self._provider_schema(adapted))
+        return build_mission_plan_provider_schema(canonical_schema)
 
     def _load_prompt(self, path: Path) -> str:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
@@ -177,46 +162,6 @@ class _ResponsesClient:
         """Expose the startup-frozen system policy equally to planning, review, and repair."""
         policy = self._settings.satisfaction_policy
         return None if policy is None else policy.to_json()
-
-    def _provider_schema(self, value: JSONValue) -> JSONValue:
-        """Project the full contract into the strict provider subset without weakening parsing."""
-        if isinstance(value, list):
-            return [self._provider_schema(item) for item in value]
-        if not isinstance(value, dict):
-            return value
-        unsupported = {
-            "$schema",
-            "$id",
-            "title",
-            "minLength",
-            "pattern",
-            "uniqueItems",
-            "allOf",
-            "if",
-            "then",
-            "else",
-        }
-        projected: JSONObject = {}
-        for key, item in value.items():
-            if key in unsupported:
-                continue
-            if key == "const":
-                projected["enum"] = [self._provider_schema(item)]
-                continue
-            projected[key] = self._provider_schema(item)
-        properties = projected.get("properties")
-        if projected.get("type") == "object" and isinstance(properties, dict):
-            required_value = value.get("required", [])
-            originally_required = (
-                {item for item in required_value if isinstance(item, str)}
-                if isinstance(required_value, list)
-                else set()
-            )
-            for name, schema in list(properties.items()):
-                if name not in originally_required:
-                    properties[name] = _nullable_schema(schema)
-            projected["required"] = list(properties)
-        return projected
 
     def _request(
         self,
@@ -306,6 +251,7 @@ class ResponsesMissionPlanner:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate a strict MissionPlan from the complete resolved Mission intent."""
+        canonical_schema = self._client._load_schema()
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
@@ -321,10 +267,12 @@ class ResponsesMissionPlanner:
                 sort_keys=True,
             ),
             schema_name="mission_plan_v0",
-            schema=self._client._mission_plan_provider_schema(),
+            schema=self._client._mission_plan_provider_schema(canonical_schema),
         )
         return _validate_plan_output(
-            normalize_mission_plan_provider_output(self._client._extract_output_json(response)),
+            normalize_mission_plan_provider_output(
+                self._client._extract_output_json(response), canonical_schema
+            ),
             mission_id,
             grounded_intent,
             capability_catalog,
@@ -398,6 +346,7 @@ class ResponsesMissionRepairer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate and validate one complete replacement draft from structured findings."""
+        canonical_schema = self._client._load_schema()
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
@@ -415,10 +364,12 @@ class ResponsesMissionRepairer:
                 sort_keys=True,
             ),
             schema_name="mission_plan_repair_v0",
-            schema=self._client._mission_plan_provider_schema(),
+            schema=self._client._mission_plan_provider_schema(canonical_schema),
         )
         return _validate_plan_output(
-            normalize_mission_plan_provider_output(self._client._extract_output_json(response)),
+            normalize_mission_plan_provider_output(
+                self._client._extract_output_json(response), canonical_schema
+            ),
             mission_id,
             grounded_intent,
             capability_catalog,
