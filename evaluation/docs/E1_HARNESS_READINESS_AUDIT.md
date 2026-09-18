@@ -9,14 +9,14 @@ baseline.
 
 Verdict summary: the harness records part of the pairing surface, verifies
 less, and has **no pair-level validation at all**. The RoboGuide arm wired
-into the harness (`evaluation/local.yaml:51-64`) executes the **authored
+into the harness (`evaluation/local.yaml:50-64`) executes the **authored
 static-plan path with a hardcoded episode**, so the 12-pair pilot cannot run
 through the harness today. Every finding below lists file/line evidence.
 
 ## A. The fifteen readiness questions
 
 **1. Which runners actually consume the seed?**
-Only the EMOS arm. `evaluation/local.yaml:26-29` renders
+Only the EMOS arm. `evaluation/local.yaml:34-38` renders
 `habitat.seed={seed}` (plus `iterator_options.num_episode_sample=1`,
 `test_episode_count=1`, `shuffle=False`). The RoboGuide arm consumes no
 seed: `scenarios/e1-shared-world-episode-51/run-shared-world.sh` never
@@ -52,7 +52,7 @@ It is standalone and is not wired into the eval harness
 Seed-driven iterator sampling (`num_episode_sample=1`, `shuffle=False`),
 then identity is read from the official stdout "Episode Step Info" banner
 with a fallback diff of EMOS's persistent episode-log step files
-(`evaluation/src/roboguide_eval/systems/emos.py:497-553`). The resolved id
+(`evaluation/src/roboguide_eval/systems/emos.py:514-553`). The resolved id
 is looked up in the digest-verified dataset file
 (`emos.py:608-630`, `resolve_episode_in_dataset`), producing scene id and
 dataset record identity.
@@ -92,7 +92,7 @@ currently checked by no one.
 **10. How is Stage2 identity proven identical?**
 It is not. The only evidence is the whole-checkout `git rev-parse HEAD`
 version probe (`evaluation/local.yaml:48`) and the shared checkout path
-(`ROBOGUIDE_EMOS_ROOT`, `local.yaml:58`). No file-level digest set exists,
+(`ROBOGUIDE_EMOS_ROOT`, `local.yaml:59`). No file-level digest set exists,
 so (a) a checkout change between the two arms of one pair, or (b) an
 uncommitted working-tree mutation, would go unnoticed. The Stage2 surface
 design (`fixtures/e1_fairness/stage2-surface-example.json`) defines the
@@ -137,9 +137,9 @@ Three separate surfaces must be distinguished:
   the model name from `EMOS_LLM_MODEL` (line 26, default `gpt-4o`!) and the
   endpoint from the ambient `OPENAI_BASE_URL`/`OPENAI_API_KEY` via
   `openai.OpenAI()` (line 43). The EMOS arm pins `EMOS_LLM_MODEL={model}`
-  (`local.yaml:34-35`); the RoboGuide arm pins **nothing** — its Stage2
+  (`local.yaml:42`); the RoboGuide arm pins **nothing** — its Stage2
   inherits whatever the invoking shell exported. In the pilot path
-  (`run-pair.sh:14`: `set -a; source emos.env`) both arms inherit the same
+  (`run-pair.sh:17`: `set -a; source emos.env`) both arms inherit the same
   values, and the harness child env is
   `dict(os.environ) | configured_overrides`
   (`evaluation/src/roboguide_eval/process.py:283-292`), so equality holds
@@ -162,7 +162,7 @@ Three separate surfaces must be distinguished:
 (a) The harness RoboGuide arm is B2 static-plan + pinned episode, so pilot
 pairs would not exercise MI at all; (b) the B1 MI chain is not integrated
 into the harness (no seed, no per-pair input injection, no results-root
-plumbing); (c) `ROBOGUIDE_B1_INPUT` is exported by `run-pair.sh:9` but
+plumbing); (c) `ROBOGUIDE_B1_INPUT` is exported by `run-pair.sh:14` but
 consumed by neither scenario script; (d) no pair-level validation exists, so
 seed≠40 pairs would be silently mismatched; (e) the RoboGuide arm performs
 no dataset digest verification; (f) Stage2/model identity is unproven (see
@@ -174,8 +174,8 @@ provide the missing validation contract; producer integration is planned
 
 | Surface | Class | Evidence |
 | --- | --- | --- |
-| Stage2 endpoint (`OPENAI_BASE_URL`) | MUST EQUAL | `models.py:43` ambient client; inherited from one `emos.env` per pair (`run-pair.sh:14`); unpinned on RG arm |
-| Stage2 model name (`EMOS_LLM_MODEL`) | MUST EQUAL | `models.py:26`; EMOS arm pinned `local.yaml:34-35`; RG arm inherited |
+| Stage2 endpoint (`OPENAI_BASE_URL`) | MUST EQUAL | `models.py:43` ambient client; inherited from one `emos.env` per pair (`run-pair.sh:17`); unpinned on RG arm |
+| Stage2 model name (`EMOS_LLM_MODEL`) | MUST EQUAL | `models.py:26`; EMOS arm pinned `local.yaml:42`; RG arm inherited |
 | Stage2 sampling (temperature/effort) | MUST EQUAL (trivially: unset) | `models.py:21-70` defines none; provider defaults both arms |
 | MI vs Stage1 model/effort | MAY DIFFER (organization axis) | `config/mission.toml:24-26` (`gpt-5.6-luna`, `xhigh`) vs EMOS Leader on `OpenAIModel` defaults |
 | MI timeout/retry | RECORD (org axis) | `config/mission.toml:30` (600 s); `mission-service-b1.toml` grounding attempts |
@@ -183,7 +183,7 @@ provide the missing validation contract; producer integration is planned
 | Habitat task/config chain | MUST EQUAL (content digest) | same root yaml both arms (`run-shared-world.sh:153-154` vs `local.yaml:21`); no digest recorded |
 | Benchmark authority (measure, `must_call_stop`, `robot_at_thresh`, `max_episode_steps`) | MUST EQUAL | `config_spot_fetch_mobility.yaml` (`must_call_stop: False`, `robot_at_thresh: 2.0`, `max_episode_steps: 3000`, `end_on_success: True`); bridge `--max-steps 3000` |
 | Habitat override deltas (`concur_render`, `video_option`) | RECORD | bridge `backend.py:123-125` vs EMOS arm overrides (`local.yaml:23-35`) |
-| CUDA device | RECORD | both device 1: `local.yaml:36-37`, `run-shared-world.sh:139`, `run-b1-roboguide.sh:151` |
+| CUDA device | RECORD | both device 1: `local.yaml:47`, `run-shared-world.sh:139`, `run-b1-roboguide.sh:151` |
 | Bridge step pacing (`--step-period-ms 20`) | RECORD (RG-arm implementation) | `run-shared-world.sh:158` |
 | Episode termination policy | MUST EQUAL | `end_on_success: True`, `should_terminate_on_wait: False` in the shared task config |
 | Agent start randomization | **MUST EQUAL — currently at risk** | task config `randomize_agent_start: 1` with ep51 `start_position [0,0,0]`; EMOS arm seeds `habitat.seed={seed}`, the bridge sets **no seed** (`backend.py:118-127` has no seed override), so start-state RNG differs between arms for the same episode |
