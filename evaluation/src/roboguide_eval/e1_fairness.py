@@ -265,6 +265,7 @@ class FairnessReason(StrEnum):
     SIMULATOR_IDENTITY_UNAVAILABLE = "simulator_identity_unavailable"
     MODEL_IDENTITY_MISMATCH = "model_identity_mismatch"
     OBSERVED_EVIDENCE_INVALID = "observed_evidence_invalid"
+    ENVIRONMENT_FINGERPRINT_DRIFT = "environment_fingerprint_drift"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1824,6 +1825,21 @@ def validate_pair(
                 gating=gating,
             )
         )
+
+    # Environment fingerprints are reproducibility metadata: shared keys
+    # with differing values become warnings, never exclusions.
+    for fingerprint_key in sorted(
+        set(emos_evidence.environment_fingerprint) & set(roboguide_evidence.environment_fingerprint)
+    ):
+        emos_value = emos_evidence.environment_fingerprint[fingerprint_key]
+        roboguide_value = roboguide_evidence.environment_fingerprint[fingerprint_key]
+        if _value_key(emos_value) != _value_key(roboguide_value):
+            warning_entries.append(
+                ReproducibilityWarning(
+                    reason=FairnessReason.ENVIRONMENT_FINGERPRINT_DRIFT,
+                    detail=f"environment_fingerprint.{fingerprint_key} differs across arms",
+                )
+            )
 
     comparability = (
         PairComparability.PAIR_NOT_COMPARABLE

@@ -816,3 +816,66 @@ def test_stage2_surface_fixture_lists_required_files() -> None:
     }
     assert "habitat-mas/habitat_mas/agents/crab_agent.py" in required_paths
     assert any("llm_spot_fetch_mobility" in path for path in required_paths)
+
+
+def test_arms_with_different_pair_ids_are_unmatched() -> None:
+    """Arms claiming different pair ids cannot form one population row."""
+    manifest = population()
+    emos = evidence("emos", "run-1", manifest)
+    roboguide = RunPairingEvidence.create(
+        arm="roboguide",
+        run_id="run-2",
+        pair_id="pair-2",
+        population_manifest_digest=manifest.digest,
+        requested=RequestedIntent(seed=7),
+        observed=observed_fields(manifest),
+    )
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.comparability is PairComparability.PAIR_NOT_COMPARABLE
+    assert FairnessReason.POPULATION_ROW_UNMATCHED in pair.reasons
+
+
+def test_duplicate_selector_pair_ids_fail_at_load() -> None:
+    """A selector with duplicate pair ids is rejected instead of guessed."""
+    document = json_document(population().to_json())
+    document["selector"]["rows"].append(dict(document["selector"]["rows"][0]))
+    with pytest.raises(FairnessError) as error:
+        PopulationManifest.from_json(document)
+    assert error.value.code == "invalid_selector"
+
+
+def test_pair_manifest_tamper_is_rejected() -> None:
+    """A mutated pair manifest fails its digest check on load."""
+    manifest = population()
+    pair = validate_pair(
+        manifest, evidence("emos", "run-1", manifest), evidence("roboguide", "run-2", manifest)
+    )
+    document = json_document(pair.to_json())
+    document["reasons"] = ["population_row_unmatched"]
+    with pytest.raises(FairnessError) as error:
+        PairManifest.from_json(document)
+    assert error.value.code == "digest_mismatch"
+
+
+def test_environment_fingerprint_drift_warns_without_gating() -> None:
+    """Cross-arm environment drift (device, platform) warns but compares."""
+    manifest = population()
+    emos = evidence(
+        "emos",
+        "run-1",
+        manifest,
+        environment_fingerprint={"cuda_device": "1", "platform": "linux-x86"},
+    )
+    roboguide = evidence(
+        "roboguide",
+        "run-2",
+        manifest,
+        environment_fingerprint={"cuda_device": "0", "platform": "linux-x86"},
+    )
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.comparability is PairComparability.PAIR_COMPARABLE
+    assert any(
+        warning.reason is FairnessReason.ENVIRONMENT_FINGERPRINT_DRIFT
+        and "cuda_device" in warning.detail
+        for warning in pair.reproducibility_warnings
+    )
