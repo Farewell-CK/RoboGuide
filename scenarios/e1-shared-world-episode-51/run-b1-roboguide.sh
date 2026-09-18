@@ -108,7 +108,7 @@ PYEOF
         fi
         sleep 1
     done
-    echo "timeout waiting for mission $MISSION_ID" >&2
+    echo "observation budget exhausted waiting for mission $MISSION_ID" >&2
     return 1
 }
 
@@ -241,8 +241,11 @@ done
 echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
 
 if [[ "$LIFECYCLE" == "Accepted" ]]; then
-    FAILURE_COMPONENT=controller
-    FAILURE_REASON=mission_completion_timeout
+    # A Ready/Deferred Mission may outlive this observation budget. Only actual
+    # process exit or persisted terminal failure evidence can attribute SUT failure.
+    FAILURE_OWNER=NONE
+    FAILURE_COMPONENT=""
+    FAILURE_REASON=""
     wait_mission_terminal "$RUN/mission.json" 1800
     sleep 3
     curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true

@@ -38,6 +38,15 @@ External host/harness/evaluator/environment/provider failure requires
 explicit attributed evidence. Controller/node/Mission Service/Local EAIOS
 process failures are SUT failures unless separate external evidence exists.
 
+Core scheduling deferrals are not failures. In particular, insufficient distinct
+entities, stale selected resources and a missed activation window leave a Task
+Ready with typed scheduling evidence. Exhausting the scenario's Mission observation
+budget does not attribute a Controller failure. The EXIT collector still detects
+an exited SUT process, and a persisted failed Mission still establishes SUT failure.
+Without either fact, the system outcome remains UNKNOWN. A prior current-Mission
+attempt can satisfy the existing provenance gate; a first Task still waiting without
+an attempt or attributable failure cannot. Waiting never fabricates either evidence.
+
 `RunValidity` records VALID_RUN, SYSTEM_FAILURE, MODEL_FAILURE,
 INVALID_PROVENANCE, or INVALID_INFRA. This classification is independent of
 the raw benchmark boolean and of process exit status.
@@ -173,6 +182,12 @@ Tests cover A-G, Controller rejection before dispatch, pre-MI SUT process
 failure, placeholder/stale repaired digests, unchanged TaskIds with changed
 plan content, missing/stale/tampered admission, request/observation read races,
 and cross-Mission / wrong-Group contamination.
+
+The F01-F07 integration regression also executes the scenario's real polling and
+EXIT functions with offline HTTP/process stubs. It carries F02 entity shortages,
+F03 commitment revalidation and F05 WindowMissed evidence through collection,
+persisted admission, Harness metrics and summary, and checks that subsequent
+process or terminal Mission failure is still attributed.
 
 Semantic ingress of authoritative Habitat goal predicates into MI remains
 separate integration work. These changes do not implement it or establish
