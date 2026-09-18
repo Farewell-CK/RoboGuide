@@ -65,6 +65,19 @@ frozen high-level input digest
   provenance verdict with the F-06 tri-state outcome and run validity.
   Formal statistics consume only `valid_for_formal_population = true`;
   excluded runs keep evidence plus machine-stable `invalid_reasons`.
+  `verify-b1.py` is a consumer of this single authority, never a second
+  one: it feeds canonical evidence facts (tri-state assessment, run-validity
+  classification from the bridge-written `identity.episode_terminated`,
+  provenance verdict) into `classify_run_validity` and
+  `admit_to_formal_population` instead of re-deriving admission policy.
+- **Authority separation**: the benchmark population is an evidence-validity
+  classification (`valid_for_benchmark_population`) and stays independent of
+  provenance; the formal population is the provenance-gated subset
+  (`provenance_passed ∧ valid_for_benchmark_population`). A provenance
+  failure therefore fails the B1 gate and excludes the run from formal
+  statistics without mutating the benchmark-evidence classification, and an
+  unavailable benchmark outcome excludes a run from both populations even
+  when its provenance chain is complete.
 - **Forward compatibility**: the provenance record carries
   `schema_version` (`roboguide.e1.b1-provenance/v0.1`) and stable digest
   fields so later semantic-ingress work can add canonical semantic input

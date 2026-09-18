@@ -334,11 +334,18 @@ def test_artifact_chain_missing_authority_never_becomes_false(tmp_path: Path) ->
     """A run whose Habitat authority is absent stays unavailable, not false."""
     run = _write_run(tmp_path, benchmark=_benchmark(None))
     verdict = _verify_b1(run)
-    # Missing authority: no benchmark boolean, formal population retained
-    # only when provenance passes (it does here — identity chain is complete).
+    # Missing authority: no benchmark boolean. Provenance alone can never
+    # admit the run — the verifier consumes the same canonical admission
+    # authority as the harness, which requires an authoritative outcome.
     assert verdict["context"]["benchmark_tri_state"] == "BENCHMARK_UNAVAILABLE"
     assert verdict["context"]["official_pddl_success"] is None
+    assert verdict["checks"]["provenance_chain_passed"] is True
     assert verdict["checks"]["valid_for_benchmark_population"] is False
+    assert verdict["checks"]["valid_for_formal_population"] is False
+    admission = verdict["context"]["population_admission"]
+    assert admission["authority"] == "roboguide_eval.b1_provenance.admit_to_formal_population"
+    assert admission["provenance_passed"] is True
+    assert "benchmark_outcome_unavailable" in admission["invalid_reasons"]
     # The success value never becomes False; it is simply absent from the
     # benchmark denominator.
     summary = summarize_results(tmp_path)
@@ -359,15 +366,27 @@ def test_artifact_chain_system_failure_stays_formal_observation(tmp_path: Path) 
     assert verdict["checks"]["provenance_chain_passed"] is True
     assert verdict["checks"]["valid_for_formal_population"] is True
     assert verdict["context"]["benchmark_tri_state"] == "BENCHMARK_FALSE"
+    # A SUT failure with an authoritative benchmark outcome is a VALID_RUN
+    # observation: excluding it would create survivorship bias.
+    assert verdict["context"]["population_admission"]["run_validity"] == "VALID_RUN"
+    assert verdict["checks"]["valid_for_benchmark_population"] is True
 
 
 def test_artifact_chain_provenance_fail_excluded_from_formal(tmp_path: Path) -> None:
-    """A run without a provenance artifact fails closed and is excluded."""
+    """A run without a provenance artifact fails closed and is excluded from formal."""
     run = _write_run(tmp_path, benchmark=_benchmark(True), include_provenance=False)
     verdict = _verify_b1(run)
     assert "provenance_record_missing" in verdict["context"]["provenance_failures"]
     assert verdict["checks"]["valid_for_formal_population"] is False
-    assert verdict["checks"]["valid_for_benchmark_population"] is False
+    assert verdict["verdict"] == "FAIL"
+    # Authorities stay separate: the episode ran to an authoritative outcome,
+    # so evidence validity (benchmark population) is unaffected by the
+    # provenance failure; only the formal population is provenance-gated.
+    admission = verdict["context"]["population_admission"]
+    assert admission["run_validity"] == "VALID_RUN"
+    assert verdict["checks"]["valid_for_benchmark_population"] is True
+    assert admission["provenance_passed"] is False
+    assert "provenance_record_missing" in admission["invalid_reasons"]
     # The formal gate consumes the B1 verdict: with provenance failed, the
     # verdict excludes the run and no formal consumer may count it.
     metrics = json.loads((run / "metrics.json").read_text())

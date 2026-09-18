@@ -1,12 +1,14 @@
 """Verify one E1 Protocol B1 RoboGuide run against the B1 acceptance gates.
 
-All provenance decisions delegate to the canonical
-``roboguide_eval.b1_provenance.verify_b1_provenance`` implementation. The
-verifier only extracts structured evidence from run artifacts: the actual
-frozen input used by the run, the MI request record, the Controller receipt
-(mission id, group id, registered task ids from Controller events), Node
-execution attempts, and the shared-world benchmark summary. No substring or
-lifecycle-enum heuristics are used as provenance authority.
+All provenance and population-admission decisions delegate to the canonical
+implementations (``roboguide_eval.b1_provenance.verify_b1_provenance`` and
+``admit_to_formal_population`` over ``roboguide_eval.benchmark_evidence``
+authorities). The verifier only extracts structured evidence from run
+artifacts: the actual frozen input used by the run, the MI request record,
+the Controller receipt (mission id, group id, registered task ids from
+Controller events), Node execution attempts, and the shared-world benchmark
+summary. No substring, lifecycle-enum, or admission-policy heuristic is
+re-derived here.
 """
 
 from __future__ import annotations
@@ -80,9 +82,14 @@ def verify(run: Path) -> dict[str, Any]:
     sys.path.insert(0, str(REPO_ROOT / "evaluation" / "src"))
     from roboguide_eval.b1_provenance import (
         B1ProvenanceRecord,
+        admit_to_formal_population,
     )
     from roboguide_eval.b1_provenance import (
         verify_b1_provenance as _verify_chain,
+    )
+    from roboguide_eval.benchmark_evidence import (
+        assess_benchmark_evidence,
+        classify_run_validity,
     )
 
     request = _load(run / "b1-request-record.json")
@@ -115,18 +122,14 @@ def verify(run: Path) -> dict[str, Any]:
     intents = _plan_intents(plan) if plan else []
     destinations = sorted({d for d, _ in intents})
 
-    # --- F-06 tri-state benchmark authority (no collapse residue) ---
-    benchmark_tri_state = "BENCHMARK_UNAVAILABLE"
-    benchmark_reason = "authority_document_missing_or_malformed"
-    pddl_value: bool | None = None
-    if shared:
-        pddl = shared.get("official_pddl_success")
-        if isinstance(pddl, bool):
-            pddl_value = pddl
-            benchmark_tri_state = "BENCHMARK_TRUE" if pddl else "BENCHMARK_FALSE"
-            benchmark_reason = "official_pddl_success_authoritative"
-        else:
-            benchmark_reason = "official_pddl_success_missing_or_not_bool"
+    # --- F-06 tri-state benchmark authority (canonical, never re-derived) ---
+    assessment = assess_benchmark_evidence(shared)
+    benchmark_tri_state = assessment.outcome.value
+    benchmark_reason = assessment.outcome_reason
+    # Raw strict-bool for display context only; the outcome class above is
+    # the authority.
+    pddl_raw = (shared or {}).get("official_pddl_success")
+    pddl_value: bool | None = pddl_raw if isinstance(pddl_raw, bool) else None
 
     # --- F-07 canonical provenance verification ---
     provenance_record = None
@@ -168,12 +171,40 @@ def verify(run: Path) -> dict[str, Any]:
     # --- semantic intent gates (structured, from the accepted plan) ---
     goals_covered = destinations == ["TARGET_any_targets|0", "any_targets|0"]
 
-    # Formal population is provenance + complete identity evidence; the
-    # benchmark population additionally requires Habitat authority.
-    valid_for_formal_population = provenance_passed
-    benchmark_authority_available = benchmark_tri_state != "BENCHMARK_UNAVAILABLE"
-    valid_for_benchmark_population = valid_for_formal_population and benchmark_authority_available
-    run_validity = "VALID_RUN" if provenance_passed else "INVALID_INFRA"
+    # --- F-06 population admission (single canonical authority) ---
+    # The verifier feeds the same canonical chain the harness uses: the
+    # tri-state assessment drives run-validity classification, and the formal
+    # admission authority combines that benchmark-population flag with the
+    # provenance verdict. Run validity is an evidence classification, never a
+    # function of provenance; the post-hoc verifier observes no process
+    # liveness or infrastructure fact, so those inputs stay unknown (None)
+    # rather than being invented.
+    summary_identity = (shared or {}).get("identity")
+    raw_terminated = (
+        summary_identity.get("episode_terminated") if isinstance(summary_identity, dict) else None
+    )
+    episode_terminated = raw_terminated if isinstance(raw_terminated, bool) else None
+    raw_mission_status = (mission or {}).get("status")
+    validity = classify_run_validity(
+        authority_present=assessment.authority_document_present,
+        episode_started=bool(shared is not None and episode_terminated is not None),
+        episode_terminated=episode_terminated,
+        infrastructure_failure=None,
+        mission_status=raw_mission_status if isinstance(raw_mission_status, str) else None,
+        process_status=None,
+        benchmark_outcome=assessment.outcome,
+    )
+    admission = admit_to_formal_population(
+        provenance_passed=provenance_passed,
+        provenance_failures=provenance.failures,
+        benchmark_tri_state=benchmark_tri_state,
+        valid_run=validity.validity.value,
+        valid_for_benchmark_population=validity.valid_for_benchmark_population,
+    )
+    valid_for_formal_population = admission.valid_for_formal_population
+    benchmark_authority_available = validity.benchmark_authority_available
+    valid_for_benchmark_population = validity.valid_for_benchmark_population
+    run_validity = validity.validity.value
 
     checks = {
         "mission_intelligence_ran": mi_ran,
@@ -208,11 +239,15 @@ def verify(run: Path) -> dict[str, Any]:
             "registered_task_ids": controller_receipt.get("registered_task_ids"),
         },
         "population_admission": {
-            "valid_for_formal_population": valid_for_formal_population,
+            "authority": "roboguide_eval.b1_provenance.admit_to_formal_population",
+            "valid_for_formal_population": admission.valid_for_formal_population,
+            "provenance_passed": admission.provenance_passed,
+            "benchmark_tri_state": admission.benchmark_tri_state,
             "benchmark_authority_available": benchmark_authority_available,
             "valid_for_benchmark_population": valid_for_benchmark_population,
-            "run_validity": run_validity,
-            "invalid_reasons": provenance_failures,
+            "run_validity": admission.valid_run,
+            "run_validity_reasons": list(validity.reasons),
+            "invalid_reasons": list(admission.invalid_reasons),
         },
     }
     passed = all(bool(value) for value in checks.values())
