@@ -65,16 +65,49 @@ MI_PLAN_DIFFERENT_TASK_IDS: dict[str, Any] = {
 }
 
 FROZEN_INPUT: dict[str, Any] = {"instruction": "two robots, two goals"}
+INSTRUCTION = "two robots, two goals"
 
 
-def _request(plan: dict[str, Any], **extra: Any) -> dict[str, Any]:
-    """Build one Mission Service request record around an accepted plan."""
+def _request(
+    plan: dict[str, Any],
+    *,
+    draft: bool = True,
+    instruction: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build one Mission Service request record around an accepted plan.
+
+    Includes genuine MI generation evidence (draft digest + first dialogue
+    instruction turn) so the canonical verifier can bind the invocation.
+    """
+    dialogue = (
+        [{"kind": "instruction", "content": instruction}]
+        if instruction is not None
+        else [{"kind": "instruction", "content": "two robots, two goals"}]
+    )
     return {
         "request_id": "request-mi-run-1",
         "mission_id": plan["mission"]["id"],
         "lifecycle": "Accepted",
         "plan": plan,
+        "draft_digest": "digest-placeholder" if draft else None,
+        "draft_revision": 1 if draft else 0,
+        "dialogue": dialogue,
         **extra,
+    }
+
+
+def _receipt(
+    plan: dict[str, Any],
+    mission_id: str | None = None,
+    group_id: str | None = None,
+) -> dict[str, Any]:
+    """Build one Controller submission receipt from observable evidence."""
+    task_ids = [task["id"] for task in plan.get("tasks", [])]
+    return {
+        "mission_id": mission_id or plan["mission"]["id"],
+        "group_id": group_id or "group-mi-runtime-xyz",
+        "registered_task_ids": task_ids,
     }
 
 
@@ -92,7 +125,7 @@ def _record(
         accepted_plan_digest=digest(plan),
         mission_id=mission_id,
         controller_submission_identity=f"group-{mission_id}",
-        execution_identity="shared-world-run-1",
+        execution_identity="exec-1",
         benchmark_evidence_digest=digest(benchmark),
     )
 
@@ -106,17 +139,19 @@ def test_f07_modified_b2_plan_forgery_is_rejected() -> None:
     """A copied B2 plan with a new MissionId fails provenance."""
     forged = copy.deepcopy(B2_STATIC_PLAN)
     forged["mission"]["id"] = "mission-forged-123"
-    request = _request(forged)
+    # A forged record has no MI draft/review generation evidence to bind.
+    request = _request(forged, draft=False)
     benchmark = _benchmark()
     record = _record(FROZEN_INPUT, forged, "mission-forged-123", benchmark)
     result = verify_b1_provenance(
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-forged-123",
-        controller_plan=forged,
+        controller_submission=_receipt(forged, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.STATIC_B2_PLAN_EQUALITY in result.failures
@@ -133,10 +168,11 @@ def test_f07_genuine_mi_plan_with_different_task_ids_passes() -> None:
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert result.passed, result.failures
     assert not result.is_static_b2_plan
@@ -155,10 +191,11 @@ def test_f07_plan_digest_mismatch_fails() -> None:
         record=tampered,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.PLAN_DIGEST_MISMATCH in result.failures
@@ -175,34 +212,36 @@ def test_f07_request_run_identity_mismatch_fails() -> None:
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.MI_RUN_MISSING in result.failures
 
 
-def test_f07_controller_plan_mismatch_fails() -> None:
-    """The Controller executing a different plan than MI accepted fails."""
+def test_f07_controller_task_registration_mismatch_fails() -> None:
+    """The Controller registering different task ids than MI accepted fails."""
     plan = MI_PLAN_DIFFERENT_TASK_IDS
     request = _request(plan)
     benchmark = _benchmark()
     record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
-    different = copy.deepcopy(plan)
-    different["tasks"][0]["id"] = "different-task"
+    wrong_receipt = _receipt(plan, group_id=record.controller_submission_identity)
+    wrong_receipt["registered_task_ids"] = ["some-other-task"]
     result = verify_b1_provenance(
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=different,
+        controller_submission=wrong_receipt,
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
-    assert ProvenanceFailure.CONTROLLER_PLAN_MISMATCH in result.failures
+    assert ProvenanceFailure.CONTROLLER_TASK_REGISTRATION_MISMATCH in result.failures
 
 
 def test_f07_admission_failure_excluded_from_population() -> None:
@@ -250,16 +289,16 @@ def test_f07_genuine_mi_with_b2_equal_plan_still_passes_provenance() -> None:
     plan["mission"]["id"] = "mission-genuine-mi-999"
     request = _request(plan)
     benchmark = _benchmark()
-    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    record = _record(FROZEN_INPUT, plan, "mission-genuine-mi-999", benchmark)
     result = verify_b1_provenance(
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
-        genuine_mi_invocation=True,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert result.passed
     assert result.is_static_b2_plan is True  # diagnostic flag only
@@ -269,20 +308,20 @@ def test_f07_forged_b2_without_genuine_mi_fails() -> None:
     """B2-equal plan without genuine MI invocation: provenance fails."""
     plan = copy.deepcopy(B2_STATIC_PLAN)
     plan["mission"]["id"] = "mission-forged-123"
-    request = _request(plan)
+    # A forged request record: no MI draft/review evidence, so the canonical
+    # verifier cannot bind a genuine MI generation invocation.
+    request = _request(plan, draft=False)
     benchmark = _benchmark()
     record = _record(FROZEN_INPUT, plan, "mission-forged-123", benchmark)
     result = verify_b1_provenance(
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-forged-123",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
-        controller_group_id="group-mi-forged",
-        observed_execution_ids=("exec-1", "exec-2"),
-        genuine_mi_invocation=False,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.STATIC_B2_PLAN_EQUALITY in result.failures
@@ -295,10 +334,11 @@ def test_f07_record_missing_fails_closed() -> None:
         record=None,
         frozen_input=FROZEN_INPUT,
         request_record=_request(plan),
-        controller_mission_id="mission-x",
-        controller_plan=plan,
+        controller_submission=_receipt(plan),
         benchmark_evidence=_benchmark(),
         static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.PROVENANCE_RECORD_MISSING in result.failures
@@ -314,12 +354,11 @@ def test_f07_controller_group_id_mismatch_fails() -> None:
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id="group-other"),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
-        controller_group_id="group-other",
-        genuine_mi_invocation=True,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH in result.failures
@@ -335,13 +374,96 @@ def test_f07_execution_identity_mismatch_fails() -> None:
         record=record,
         frozen_input=FROZEN_INPUT,
         request_record=request,
-        controller_mission_id="mission-mi-runtime-xyz",
-        controller_plan=plan,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
         benchmark_evidence=benchmark,
         static_b2_plan=B2_STATIC_PLAN,
-        controller_group_id="group-mi-runtime-xyz",
         observed_execution_ids=("exec-99",),
-        genuine_mi_invocation=True,
+        instruction_text=INSTRUCTION,
     )
     assert not result.passed
     assert ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH in result.failures
+
+
+def test_f07_missing_group_id_fails_not_skipped() -> None:
+    """A Controller receipt without a group id fails, never skips the check."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    receipt = _receipt(plan, group_id=record.controller_submission_identity)
+    receipt["group_id"] = None
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_submission=receipt,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.CONTROLLER_GROUP_ID_MISSING in result.failures
+
+
+def test_f07_empty_execution_attempts_fail_not_skip() -> None:
+    """Empty execution attempt evidence fails, never skips the identity check."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=(),
+        instruction_text=INSTRUCTION,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.EXECUTION_ATTEMPTS_EMPTY in result.failures
+
+
+def test_f07_lifecycle_alone_is_not_genuine_mi() -> None:
+    """A lifecycle-Accepted record without MI draft evidence fails B2 equality."""
+    plan = copy.deepcopy(B2_STATIC_PLAN)
+    plan["mission"]["id"] = "mission-lifecycle-only"
+    # draft=False: no MI generation evidence despite lifecycle Accepted.
+    request = _request(plan, draft=False)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-lifecycle-only", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.STATIC_B2_PLAN_EQUALITY in result.failures
+    assert ProvenanceFailure.MI_GENERATION_EVIDENCE_MISSING in result.failures
+
+
+def test_f07_instruction_mismatch_breaks_genuine_mi() -> None:
+    """A dialogue instruction that differs from the input breaks genuine MI."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan, instruction="some other instruction entirely")
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_submission=_receipt(plan, group_id=record.controller_submission_identity),
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        observed_execution_ids=("exec-1",),
+        instruction_text=INSTRUCTION,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.MI_GENERATION_EVIDENCE_MISSING in result.failures

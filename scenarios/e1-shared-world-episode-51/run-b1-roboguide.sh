@@ -177,6 +177,9 @@ done
 
 
 INSTRUCTION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["instruction"])' "$INPUT_JSON")
+# Gap 4: archive the actual frozen input used by this run so its digest is
+# computed over run-local evidence, never the scenario default.
+cp "$INPUT_JSON" "$RUN/b1-input-used.json"
 SUBMITTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "submission_start_utc=$SUBMITTED_AT" > "$RUN/b1-timing.txt"
 REQUEST_JSON=$(curl -sS -X POST http://127.0.0.1:8070/v1/mission-requests \
@@ -233,9 +236,10 @@ run_id = run.name
 try:
     record = build_b1_provenance_record(
         run_id=run_id,
-        frozen_input_path=Path("scenarios/e1-shared-world-episode-51/b1-input.json"),
+        frozen_input_path=run / "b1-input-used.json",
         request_record_path=run / "b1-request-record.json",
         controller_mission_path=run / "mission.json",
+        controller_events_path=run / "events.json",
         execution_attempts_path=run / "execution-attempts.json",
         shared_world_summary_path=run / "evidence/shared-world-summary.json",
     )

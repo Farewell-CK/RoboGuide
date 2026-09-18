@@ -345,6 +345,9 @@ class RoboGuideRunner(ProcessSystemRunner):
             benchmark_outcome=assessment.outcome,
         )
         values["valid_for_benchmark_population"] = validity.valid_for_benchmark_population
+        values["valid_for_formal_population"] = validity.valid_for_formal_population
+        values["benchmark_authority_available"] = validity.benchmark_authority_available
+        values["system_failure_observed"] = validity.system_failure
 
         unavailable_metrics: JSONObject = {
             "model_failure": "the local stack does not emit a distinct model-failure fact"
@@ -358,6 +361,7 @@ class RoboGuideRunner(ProcessSystemRunner):
                 "observed_outcome_agents": list(assessment.observed_agents),
                 "run_validity": validity.validity.value,
                 "population_admission_reasons": list(validity.reasons),
+                "system_failure_observed": validity.system_failure,
                 "identity": cast(JSONValue, identity),
                 "mission_outcome": mission_status,
                 "task_statuses": cast(JSONValue, context.get("task_statuses")),

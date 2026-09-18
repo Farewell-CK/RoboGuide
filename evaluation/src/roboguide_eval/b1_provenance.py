@@ -70,6 +70,10 @@ class ProvenanceFailure(StrEnum):
     PROVENANCE_RECORD_MISSING = "provenance_record_missing"
     CONTROLLER_SUBMISSION_IDENTITY_MISMATCH = "controller_submission_identity_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
+    CONTROLLER_GROUP_ID_MISSING = "controller_group_id_missing"
+    EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
+    MI_GENERATION_EVIDENCE_MISSING = "mi_generation_evidence_missing"
+    CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,38 +152,38 @@ def verify_b1_provenance(
     record: B1ProvenanceRecord | None,
     frozen_input: Any,
     request_record: Any,
-    controller_mission_id: str | None,
-    controller_plan: Any,
+    controller_submission: Any,
     benchmark_evidence: Any,
     static_b2_plan: Any,
-    controller_group_id: str | None = None,
     observed_execution_ids: tuple[str, ...] = (),
-    genuine_mi_invocation: bool = False,
+    instruction_text: str | None = None,
 ) -> ProvenanceVerification:
     """Verify the full B1 provenance chain against run evidence.
 
+    The Controller never exposes the submitted plan document; the submission
+    identity is therefore a *receipt*: the accepted-plan digest (from the MI
+    record, the only plan that was POSTed), the Controller-observed
+    mission_id + group_id, and the set of task ids the Controller actually
+    registered (structured execution evidence). A mission status view is
+    never digest-compared against a MissionPlan.
+
     Args:
-        record: The claimed provenance artifact for the run.
-        frozen_input: The frozen high-level input document.
-        request_record: The Mission Service request record (the MI run
-            evidence containing the accepted plan).
-        controller_mission_id: The MissionId the Controller accepted.
-        controller_plan: The plan document the Controller executed.
+        record: The claimed provenance artifact; mandatory for a valid run.
+        frozen_input: The actual frozen input document used by the run.
+        request_record: The MI request record (request_id, plan, draft
+            digest/review evidence, dialogue).
+        controller_submission: Controller-observed receipt mapping with
+            ``mission_id``, ``group_id``, and ``registered_task_ids``.
         benchmark_evidence: The shared-world benchmark summary document.
         static_b2_plan: The static B2 fixture plan (forgery reference).
-        controller_group_id: The ExecutionGroupId observed in Controller
-            evidence, compared against the record's submission identity.
         observed_execution_ids: Execution identities observed in Node
-            journals / attempts, compared against the record's identity.
-        genuine_mi_invocation: Runtime-observed fact that a genuine MI
-            invocation produced the accepted plan. When false, a plan whose
-            structure equals the B2 static fixture is rejected as forgery.
+            attempt evidence; required non-empty and matching the record.
+        instruction_text: The instruction string from the frozen input; the
+            MI dialogue's first user turn must equal it exactly.
 
     Returns:
-        The verification result. A copied static B2 plan (regardless of
-        MissionId) fails with ``STATIC_B2_PLAN_EQUALITY`` unless genuine MI
-        provenance distinguishes it; genuine MI plans with different
-        TaskIds pass when the chain matches.
+        The verification result. Genuine MI invocation is decided inside from
+        structured MI generation evidence, never from a lifecycle enum.
     """
 
     def mapping(value: Any) -> dict[str, Any] | None:
@@ -202,51 +206,93 @@ def verify_b1_provenance(
             failures.append(ProvenanceFailure.INPUT_DIGEST_MISMATCH)
 
     request = mapping(request_record)
+    plan_digest: str | None = None
+    genuine_mi = False
     if request is None or not isinstance(request.get("request_id"), str):
         failures.append(ProvenanceFailure.MI_RUN_MISSING)
-        plan_digest: str | None = None
-        request_plan_digest: str | None = None
     else:
         if record is not None and record.mi_run_identity != request["request_id"]:
             failures.append(ProvenanceFailure.MI_RUN_MISSING)
-        plan = request.get("plan")
-        plan_mapping = mapping(plan)
+        plan_mapping = mapping(request.get("plan"))
         if plan_mapping is None:
             failures.append(ProvenanceFailure.PLAN_MISSING)
-            plan_digest = None
         else:
             plan_digest = digest(plan_mapping)
-        recorded_plan_digest = request.get("accepted_plan_digest")
-        request_plan_digest = (
-            recorded_plan_digest if isinstance(recorded_plan_digest, str) else None
+        # Genuine MI generation evidence: the MI pipeline must have produced
+        # and accepted this draft (draft digest/revision or review evidence)
+        # and the first dialogue user turn must equal the actual instruction.
+        has_draft_evidence = isinstance(request.get("draft_digest"), str) or (
+            isinstance(request.get("review_history"), list) and bool(request["review_history"])
         )
-        if request_plan_digest is None and plan_digest is not None:
-            # The request record may carry the digest explicitly (preferred) —
-            # when absent, the plan body digest becomes the MI-run digest.
-            request_plan_digest = plan_digest
+        dialogue = request.get("dialogue")
+        first_user = None
+        if isinstance(dialogue, list) and dialogue:
+            turn = mapping(dialogue[0])
+            if turn is not None and turn.get("kind") in ("instruction", "Instruction"):
+                first_user = turn.get("content")
+        instruction_ok = instruction_text is None or (
+            isinstance(first_user, str) and first_user == instruction_text
+        )
+        genuine_mi = (
+            plan_digest is not None
+            and has_draft_evidence
+            and instruction_ok
+            and (record is None or record.mi_run_identity == request["request_id"])
+        )
+        if not genuine_mi and plan_digest is not None:
+            failures.append(ProvenanceFailure.MI_GENERATION_EVIDENCE_MISSING)
 
     if record is not None:
         if plan_digest is None:
             failures.append(ProvenanceFailure.PLAN_DIGEST_MISSING)
         elif record.accepted_plan_digest != plan_digest:
             failures.append(ProvenanceFailure.PLAN_DIGEST_MISMATCH)
-        if (
-            request_plan_digest is not None
-            and plan_digest is not None
-            and request_plan_digest != plan_digest
-        ):
-            failures.append(ProvenanceFailure.MI_RUN_PLAN_DIGEST_MISMATCH)
 
+    # Controller submission receipt: identity + structured task registration.
+    submission = mapping(controller_submission)
+    controller_mission_id = submission.get("mission_id") if submission else None
     if not isinstance(controller_mission_id, str) or not controller_mission_id:
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
     elif record is not None and controller_mission_id != record.mission_id:
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
+    elif request is not None and str(request.get("mission_id", "")) != controller_mission_id:
+        failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
 
-    controller_plan_mapping = mapping(controller_plan)
-    if controller_plan_mapping is None:
-        failures.append(ProvenanceFailure.CONTROLLER_PLAN_MISMATCH)
-    elif plan_digest is not None and digest(controller_plan_mapping) != plan_digest:
-        failures.append(ProvenanceFailure.CONTROLLER_PLAN_MISMATCH)
+    controller_group_id = submission.get("group_id") if submission else None
+    if not isinstance(controller_group_id, str) or not controller_group_id:
+        # Gap 2: a missing group id is a failure, never a skipped comparison.
+        failures.append(ProvenanceFailure.CONTROLLER_GROUP_ID_MISSING)
+    elif record is not None and record.controller_submission_identity != controller_group_id:
+        failures.append(ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH)
+
+    registered_raw = submission.get("registered_task_ids") if submission else None
+    registered_ids = (
+        {tid for tid in registered_raw if isinstance(tid, str)}
+        if isinstance(registered_raw, list)
+        else set()
+    )
+    plan_task_ids: set[str] = set()
+    if (
+        request is not None
+        and isinstance(request.get("plan"), dict)
+        and isinstance(request["plan"].get("tasks"), list)
+    ):
+        plan_task_ids = {
+            task["id"]
+            for task in request["plan"]["tasks"]
+            if isinstance(task, dict) and isinstance(task.get("id"), str)
+        }
+    if not plan_task_ids or registered_ids != plan_task_ids:
+        failures.append(ProvenanceFailure.CONTROLLER_TASK_REGISTRATION_MISMATCH)
+
+    if not observed_execution_ids:
+        # Gap 2: empty execution attempt evidence is a failure.
+        failures.append(ProvenanceFailure.EXECUTION_ATTEMPTS_EMPTY)
+    elif record is not None:
+        observed_set = frozenset(observed_execution_ids)
+        recorded_set = frozenset(record.execution_identity.split(","))
+        if recorded_set != observed_set:
+            failures.append(ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH)
 
     benchmark = mapping(benchmark_evidence)
     benchmark_digest = digest(benchmark) if benchmark is not None else None
@@ -255,26 +301,15 @@ def verify_b1_provenance(
     elif record is not None and benchmark_digest != record.benchmark_evidence_digest:
         failures.append(ProvenanceFailure.BENCHMARK_IDENTITY_MISMATCH)
 
-    # F07: controller submission and execution identities must match actual
-    # observable evidence, not just field presence.
-    if record is not None:
-        if controller_group_id is not None:
-            if record.controller_submission_identity != controller_group_id:
-                failures.append(ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH)
-        if observed_execution_ids:
-            observed_set = frozenset(observed_execution_ids)
-            recorded_set = frozenset(record.execution_identity.split(","))
-            if recorded_set != observed_set:
-                failures.append(ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH)
-
     b2_mapping = mapping(static_b2_plan)
+    request_plan = mapping(request.get("plan")) if request else None
     is_static_b2 = (
         b2_mapping is not None
-        and plan_digest is not None
+        and request_plan is not None
         and _structure_digest_ignoring_mission_id(b2_mapping)
-        == _structure_digest_ignoring_mission_id(mapping(controller_plan))
+        == _structure_digest_ignoring_mission_id(request_plan)
     )
-    if is_static_b2 and not genuine_mi_invocation:
+    if is_static_b2 and not genuine_mi:
         failures.append(ProvenanceFailure.STATIC_B2_PLAN_EQUALITY)
 
     return ProvenanceVerification(
@@ -341,6 +376,7 @@ def build_b1_provenance_record(
     frozen_input_path: Path,
     request_record_path: Path,
     controller_mission_path: Path,
+    controller_events_path: Path | None = None,
     execution_attempts_path: Path,
     shared_world_summary_path: Path,
 ) -> B1ProvenanceRecord:
@@ -348,7 +384,9 @@ def build_b1_provenance_record(
 
     Every digest is computed over the file's canonical JSON form using the
     fixed canonicalization, so the record is reproducible from the archived
-    evidence alone.
+    evidence alone. The controller submission identity is the Controller
+    group id observed in the mission status view, cross-checkable against
+    ExecutionGroupCreated evidence when an events file is supplied.
     """
 
     def load(path: Path) -> Any:
@@ -373,7 +411,16 @@ def build_b1_provenance_record(
     mission_id = str(request_record.get("mission_id", ""))
     plan = _as_mapping(request_record.get("plan"))
     accepted_plan_digest = digest(plan) if plan is not None else ""
-    controller_submission_identity = str((controller_mission or {}).get("group_id", ""))
+    controller_group = str((controller_mission or {}).get("group_id", ""))
+    if not controller_group and controller_events_path is not None:
+        events = load(controller_events_path)
+        for event in (events or {}).get("events", []):
+            payload = (event or {}).get("payload", {})
+            created = payload.get("ExecutionGroupCreated")
+            if isinstance(created, dict) and isinstance(created.get("group_id"), str):
+                controller_group = created["group_id"]
+                break
+    controller_submission_identity = controller_group
     attempts_list = (attempts or {}).get("attempts", [])
     execution_ids = sorted(
         str(a.get("execution_id", ""))
