@@ -219,6 +219,35 @@ for pid in "${PIDS[@]}"; do
     kill -0 "$pid" 2>/dev/null || true
 done
 
+# F07: generate the formal B1 provenance artifact from persisted evidence
+# using the canonical implementation (not hand-written digests).
+uv run python - "$RUN" <<'PROV'
+import json, sys
+from pathlib import Path
+
+sys.path.insert(0, ".")
+from roboguide_eval.b1_provenance import build_b1_provenance_record, write_b1_provenance
+
+run = Path(sys.argv[1])
+run_id = run.name
+try:
+    record = build_b1_provenance_record(
+        run_id=run_id,
+        frozen_input_path=Path("scenarios/e1-shared-world-episode-51/b1-input.json"),
+        request_record_path=run / "b1-request-record.json",
+        controller_mission_path=run / "mission.json",
+        execution_attempts_path=run / "execution-attempts.json",
+        shared_world_summary_path=run / "evidence/shared-world-summary.json",
+    )
+    write_b1_provenance(record, run / "b1-provenance.json")
+    print("provenance artifact written:", run / "b1-provenance.json")
+except Exception as error:
+    # The absence of a provenance artifact is itself the B1 failure signal:
+    # verify-b1.py treats a missing b1-provenance.json as mandatory-record
+    # failure (provenance_record_missing).
+    print(f"provenance generation failed: {error}", file=__import__("sys").stderr)
+PROV
+
 python3 "$SCENARIO/verify-shared-world.py" "$RUN" paired >"$RUN/verdict.json" || true
 python3 "$SCENARIO/verify-b1.py" "$RUN" >"$RUN/b1-verdict.json"
 cat "$RUN/b1-verdict.json"

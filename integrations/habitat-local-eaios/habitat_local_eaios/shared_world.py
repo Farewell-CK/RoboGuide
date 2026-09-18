@@ -934,22 +934,30 @@ class SharedWorldCoordinator:
             for agent_id, outcome in outcomes.items():
                 endpoints[agent_id].store().mark_terminal(handles[agent_id], outcome)
             metrics = summary.get("official_metrics", {})
-            self._write_json(
-                "shared-world-summary.json",
-                {
-                    "goal_predicates": [
-                        "any_at(any_targets|0)",
-                        "any_at(TARGET_any_targets|0)",
-                    ],
-                    "identity": summary["identity"],
-                    "official_pddl_success": bool(metrics.get("pddl_success", False)),
-                    "outcomes": {
-                        str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()
-                    },
-                    "stage1_assignment": "RoboGuide committed assignments "
-                    "(original EMOS group_discussion replaced per execution)",
+            # Strict authority semantics: write official_pddl_success only when
+            # the episode actually produced a strict-bool Habitat pddl_success.
+            # Missing or malformed metrics stay unavailable (key omitted) so
+            # downstream consumers never read a synthetic false.
+            raw_pddl = metrics.get("pddl_success")
+            summary_document: dict[str, object] = {
+                "goal_predicates": [
+                    "any_at(any_targets|0)",
+                    "any_at(TARGET_any_targets|0)",
+                ],
+                "identity": summary["identity"],
+                "outcomes": {
+                    str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()
                 },
-            )
+                "stage1_assignment": "RoboGuide committed assignments "
+                "(original EMOS group_discussion replaced per execution)",
+            }
+            if isinstance(raw_pddl, bool):
+                summary_document["official_pddl_success"] = raw_pddl
+            else:
+                summary_document["official_pddl_success_unavailable_reason"] = (
+                    "habitat metrics did not report a strict-bool pddl_success"
+                )
+            self._write_json("shared-world-summary.json", summary_document)
         except Exception as error:  # noqa: BLE001 - terminal failure must reach both nodes
             for endpoint, execution_id in pair:
                 store = endpoint.store()
