@@ -42,6 +42,7 @@ SHARED_WORLD_EVIDENCE = (
     "mission.json",
     "events.json",
     "execution-attempts.json",
+    "evidence/authoritative-semantic-evidence.json",
     "evidence/shared-world-summary.json",
     "evidence/assignment-arrival.jsonl",
     "evidence/scene_description.txt",

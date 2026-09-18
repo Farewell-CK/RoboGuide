@@ -121,6 +121,89 @@ def test_benchmark_missing_does_not_break_execution_provenance(tmp_path: Path) -
     assert verdict["admission"]["valid_for_benchmark_population"] is False
 
 
+def test_goal_coverage_is_diagnostic_only_for_formal_admission(tmp_path: Path) -> None:
+    """A plan omitting one joint predicate is diagnosed without invalidating the run protocol."""
+    run = make_run(tmp_path, omit_second_goal=True)
+    verdict = assess_b1_directory(run)
+    diagnostic = verdict["context"]["semantic_goal_diagnostic"][0]
+    assert diagnostic["diagnostic_only"] is True
+    assert diagnostic["objective_scope"] == "joint_terminal_state"
+    assert diagnostic["status"] == "partial"
+    assert diagnostic["missing_predicates"] == [
+        {"name": "any_at", "arguments": ["TARGET_any_targets|0"]}
+    ]
+    assert verdict["admission"]["valid_for_formal_population"] is True
+
+
+def test_missing_authoritative_semantic_evidence_fails_closed(tmp_path: Path) -> None:
+    """An accepted plan without the environment semantic artifact is not a valid B1 run."""
+    run = make_run(tmp_path)
+    (run / "evidence/authoritative-semantic-evidence.json").unlink()
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert "semantic_evidence_missing" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+def test_tampered_authoritative_semantic_evidence_fails_closed(tmp_path: Path) -> None:
+    """Changing a goal predicate without its digest cannot enter the provenance chain."""
+    run = make_run(tmp_path)
+    semantic = json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text())
+    semantic["goal"]["operands"].pop()
+    write_json(run / "evidence/authoritative-semantic-evidence.json", semantic)
+    verdict = assess_b1_directory(run)
+    assert "semantic_evidence_invalid" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+def test_weakened_goal_in_mi_context_fails_against_adapter_artifact(tmp_path: Path) -> None:
+    """A request carrying only one operand cannot replace the adapter's joint objective."""
+    run = make_run(tmp_path)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    context = request["grounding_context"]
+    context["semantic_evidence"]["goal"]["operands"] = context["semantic_evidence"]["goal"][
+        "operands"
+    ][:1]
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert "mi_semantic_evidence_mismatch" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+def test_rehashed_mi_context_cannot_replace_authoritative_goal(tmp_path: Path) -> None:
+    """Rehashing a weakened MI context cannot make it equal the adapter artifact."""
+    run = make_run(tmp_path)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    context = request["grounding_context"]
+    context["semantic_evidence"]["goal"]["operands"] = context["semantic_evidence"]["goal"][
+        "operands"
+    ][:1]
+    context["context_digest"] = plan_digest(
+        {
+            key: value
+            for key, value in context.items()
+            if key not in {"schema_version", "context_digest"}
+        }
+    )
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert "mi_semantic_evidence_mismatch" in verdict["context"]["provenance_failures"]
+
+
+def test_semantic_evidence_cannot_cross_episode(tmp_path: Path) -> None:
+    """A cryptographically valid evidence document for another episode is rejected."""
+    run = make_run(tmp_path)
+    semantic = json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text())
+    semantic["identity"]["episode_id"] = "52"
+    body = {key: value for key, value in semantic.items() if key != "digest"}
+    semantic["digest"] = "sha256:" + digest(body)
+    write_json(run / "evidence/authoritative-semantic-evidence.json", semantic)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert "semantic_evidence_identity_mismatch" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
 @pytest.mark.parametrize(
     "missing",
     [
@@ -128,6 +211,7 @@ def test_benchmark_missing_does_not_break_execution_provenance(tmp_path: Path) -
         "b1-request-observations.json",
         "b1-request-record.json",
         "b1-input-used.json",
+        "evidence/authoritative-semantic-evidence.json",
     ],
 )
 def test_missing_chain_artifact_fails_closed(tmp_path: Path, missing: str) -> None:

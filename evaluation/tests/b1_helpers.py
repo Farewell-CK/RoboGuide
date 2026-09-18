@@ -13,11 +13,13 @@ from unittest.mock import Mock
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import HttpMissionController
+from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.models import MissionPlan
 from mission.request_engine import MissionRequestEngine
-from mission.request_record import IntentAssessment
+from mission.request_record import DialogueTurn, IntentAssessment
 from mission.request_store import MissionRequestStore
 from mission.review import MissionPlanReview, MissionReviewIssue, ReviewIssueAction
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 from roboguide_eval.b1_provenance import build_b1_provenance_record, write_b1_provenance
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +30,28 @@ def write_json(path: Path, document: Any) -> None:
     """Persist one test artifact in the same JSON shape as production."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+class StaticSemanticGroundingReader:
+    """Supply one immutable adapter snapshot to every MI phase in an offline run."""
+
+    def __init__(self, evidence: AuthoritativeSemanticEvidence) -> None:
+        """Retain the exact semantic evidence object shared by the lifecycle."""
+        self._evidence = evidence
+
+    def capture(
+        self,
+        request_id: str,
+        dialogue: tuple[DialogueTurn, ...],
+        captured_at_ms: int,
+    ) -> GroundingContextSnapshot:
+        """Create one request-bound context without reading Control or Node state."""
+        return GroundingContextSnapshot.create(
+            request_id=request_id,
+            dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
+            captured_at_ms=captured_at_ms,
+            semantic_evidence=self._evidence,
+        )
 
 
 @contextmanager
@@ -71,14 +95,38 @@ def controller_server(status: int = 202) -> Iterator[tuple[str, list[bytes]]]:
         thread.join()
 
 
-def make_run(root: Path, *, case: str = "A", repaired: bool = False) -> Path:
+def make_run(
+    root: Path, *, case: str = "A", repaired: bool = False, omit_second_goal: bool = False
+) -> Path:
     """Build evidence through actual MI orchestration and HTTP boundary, stopping on failure."""
     run = root / f"run-{case}"
     run.mkdir(parents=True)
     write_json(run / "b1-input-used.json", {"instruction": INSTRUCTION, "episode_id": "51"})
+    semantic = AuthoritativeSemanticEvidence.create(
+        run_id=run.name,
+        episode_id="51",
+        revision="goal-revision-1",
+        goal=SemanticExpression.logical(
+            "and",
+            (
+                SemanticExpression.predicate("any_at", ("any_targets|0",)),
+                SemanticExpression.predicate("any_at", ("TARGET_any_targets|0",)),
+            ),
+        ),
+        world_context={"scene_id": "scene-51", "agent_ids": [0, 1], "entity_catalog": []},
+    )
+    write_json(run / "evidence/authoritative-semantic-evidence.json", semantic.to_json())
     raw = json.loads((ROOT / "scenarios/e1-shared-world-episode-51/mission-plan.json").read_text())
     raw["mission"]["objective"] = INSTRUCTION
     raw["tasks"][0]["description"] = "offline MI-generated task"
+    if omit_second_goal:
+        raw["tasks"][1]["description"] = "offline MI-generated task with omitted goal coverage"
+        raw["tasks"][1]["roles"][0]["execution_intent"]["parameters"]["destination"] = (
+            "unrelated-target"
+        )
+        raw["tasks"][1]["satisfaction"]["expected_effect"] = (
+            "The robot completed the unrelated target operation."
+        )
     planner = Mock()
     interpreter = Mock(interpret=Mock(return_value=IntentAssessment(INSTRUCTION, (), (), ())))
 
@@ -120,6 +168,7 @@ def make_run(root: Path, *, case: str = "A", repaired: bool = False) -> Path:
             reviewer=reviewer if repaired else None,
             repairer=repairer if repaired else None,
             max_repair_attempts=1 if repaired else 0,
+            grounding_reader=StaticSemanticGroundingReader(semantic),
         )
         record = engine.create(INSTRUCTION)
         write_json(run / "b1-request-record.json", record.to_json())
@@ -146,7 +195,7 @@ def make_run(root: Path, *, case: str = "A", repaired: bool = False) -> Path:
             },
         )
         task_ids = [task["id"] for task in raw["tasks"]]
-        events = [
+        events: list[dict[str, Any]] = [
             {"payload": {"ExecutionGroupCreated": {"mission_id": mission_id, "group_id": group_id}}}
         ]
         events.extend(
@@ -222,7 +271,7 @@ def make_run(root: Path, *, case: str = "A", repaired: bool = False) -> Path:
 
 
 def build_provenance(run: Path) -> None:
-    """Persist v0.2 links before invoking any verifier or metrics consumer."""
+    """Persist v0.3 links before invoking any verifier or metrics consumer."""
     record = build_b1_provenance_record(
         run_id=run.name,
         frozen_input_path=run / "b1-input-used.json",
@@ -231,6 +280,7 @@ def build_provenance(run: Path) -> None:
         controller_events_path=run / "events.json",
         execution_attempts_path=run / "execution-attempts.json",
         shared_world_summary_path=run / "evidence/shared-world-summary.json",
+        semantic_evidence_path=run / "evidence/authoritative-semantic-evidence.json",
         failure_evidence_path=run / "run-failure.json",
     )
     write_b1_provenance(record, run / "b1-provenance.json")

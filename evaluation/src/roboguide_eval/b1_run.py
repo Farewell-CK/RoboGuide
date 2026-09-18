@@ -31,6 +31,7 @@ B1_FILES = (
     "events.json",
     "execution-attempts.json",
     "run-failure.json",
+    "evidence/authoritative-semantic-evidence.json",
     "evidence/shared-world-summary.json",
 )
 
@@ -109,6 +110,7 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         observed_execution_ids=tuple(scoped["execution_ids"]),
         failure_evidence=failure,
         run_id=run.name,
+        semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
     )
     failures = [item.value for item in provenance.failures]
     if raw_failure is not None and not failure:
@@ -165,6 +167,7 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         },
         "context": {
             "provenance_failures": failures,
+            "semantic_goal_diagnostic": list(provenance.semantic_diagnostics),
             "controller_receipt": scoped,
             "benchmark_tri_state": benchmark_outcome.value,
             "benchmark_outcome_reason": benchmark.outcome_reason,

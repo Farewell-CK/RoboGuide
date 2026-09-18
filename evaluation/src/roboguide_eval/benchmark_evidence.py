@@ -188,8 +188,8 @@ class RunValidityAssessment:
 
     Attributes:
         validity: The independent validity class.
-        valid_for_benchmark_population: Whether the run may enter formal
-            success-rate statistics.
+        valid_for_benchmark_population: Whether the formally admitted run may
+            enter benchmark success-rate statistics.
         reasons: Machine-stable reasons backing the classification.
     """
 

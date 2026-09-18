@@ -1,6 +1,7 @@
-"""Verify B1 execution identity independently of Habitat availability.
+"""Verify B1 semantic and execution identity independently of Habitat availability.
 
-v0.2 binds the final draft, actual HTTP submission and scoped execution.
+v0.3 binds authoritative semantic evidence, the final draft, actual HTTP submission,
+and scoped execution.
 Attributable failures validate the chain up to the observed failure boundary.
 Hashes check archive consistency; evidence producers remain trusted.
 """
@@ -15,7 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.2"
+PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.3"
 SUBMISSION_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
 RUN_FAILURE_SCHEMA = "roboguide.e1.run-failure/v0.1"
@@ -90,6 +91,10 @@ class ProvenanceFailure(StrEnum):
     ACTUAL_SUBMISSION_MISSING = "actual_submission_missing"
     CONTROLLER_PLAN_MISMATCH = "controller_plan_mismatch"
     SUBMISSION_EVIDENCE_MISMATCH = "submission_evidence_mismatch"
+    SEMANTIC_EVIDENCE_MISSING = "semantic_evidence_missing"
+    SEMANTIC_EVIDENCE_INVALID = "semantic_evidence_invalid"
+    SEMANTIC_EVIDENCE_IDENTITY_MISMATCH = "semantic_evidence_identity_mismatch"
+    MI_SEMANTIC_EVIDENCE_MISMATCH = "mi_semantic_evidence_mismatch"
     CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
     EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
@@ -112,6 +117,7 @@ class B1ProvenanceRecord:
     observations_digest: str
     submission_evidence_digest: str
     failure_evidence_digest: str
+    semantic_evidence_digest: str
     benchmark_evidence_digest: str | None = None
     schema_version: str = PROVENANCE_SCHEMA_VERSION
 
@@ -145,6 +151,7 @@ class ProvenanceVerification:
     failures: tuple[ProvenanceFailure, ...]
     plan_digest: str | None
     is_static_b2_plan: bool
+    semantic_diagnostics: tuple[dict[str, Any], ...] = ()
 
 
 def request_failure(request: Any) -> dict[str, Any]:
@@ -338,6 +345,162 @@ def _check_submission(
     return failures
 
 
+def _semantic_expression_valid(value: Any) -> bool:
+    """Validate the neutral expression tree without importing benchmark libraries."""
+    item = _object(value)
+    if item.get("kind") == "predicate":
+        return (
+            set(item) == {"kind", "name", "arguments"}
+            and isinstance(item.get("name"), str)
+            and bool(item["name"])
+            and isinstance(item.get("arguments"), list)
+            and all(isinstance(argument, str) and argument for argument in item["arguments"])
+        )
+    if item.get("kind") != "logical":
+        return False
+    return (
+        set(item) == {"kind", "operator", "operands", "quantifier", "variables"}
+        and item.get("operator") in {"and", "or", "nand", "nor"}
+        and isinstance(item.get("operands"), list)
+        and bool(item["operands"])
+        and all(_semantic_expression_valid(operand) for operand in item["operands"])
+        and (item.get("quantifier") is None or isinstance(item.get("quantifier"), str))
+        and isinstance(item.get("variables"), list)
+        and all(isinstance(variable, str) and variable for variable in item["variables"])
+    )
+
+
+def _semantic_predicates(value: Any) -> list[dict[str, Any]]:
+    """Flatten only predicate leaves for non-authoritative coverage diagnostics."""
+    item = _object(value)
+    if item.get("kind") == "predicate":
+        return [
+            {
+                "name": item.get("name"),
+                "arguments": list(item.get("arguments", [])),
+            }
+        ]
+    return [
+        predicate
+        for operand in _array(item.get("operands"))
+        for predicate in _semantic_predicates(operand)
+    ]
+
+
+def _semantic_plan_text(value: Any) -> str:
+    """Collect plan text without treating it as authoritative semantic proof."""
+    if isinstance(value, str):
+        return value.casefold()
+    if isinstance(value, list):
+        return " ".join(_semantic_plan_text(item) for item in value)
+    if isinstance(value, dict):
+        return " ".join(_semantic_plan_text(item) for item in value.values())
+    return ""
+
+
+def semantic_goal_diagnostic(semantic_evidence: Any, plan: Any) -> dict[str, Any]:
+    """Report goal coverage without turning model omission into provenance invalidity."""
+    semantic = _object(semantic_evidence)
+    goal = _object(semantic.get("goal"))
+    predicates = _semantic_predicates(goal)
+    if not predicates:
+        return {
+            "diagnostic_only": True,
+            "status": "unavailable",
+            "reason": "authoritative_goal_predicates_unavailable",
+        }
+    text = _semantic_plan_text(plan)
+    argument_matches = [
+        predicate
+        for predicate in predicates
+        if all(str(argument).casefold() in text for argument in predicate["arguments"])
+    ]
+    exact_matches = [
+        predicate
+        for predicate in argument_matches
+        if isinstance(predicate.get("name"), str) and predicate["name"].casefold() in text
+    ]
+    missing = [predicate for predicate in predicates if predicate not in argument_matches]
+    operator = goal.get("operator") if goal.get("kind") == "logical" else None
+    return {
+        "diagnostic_only": True,
+        "status": "complete" if not missing else "partial",
+        "coverage_basis": "predicate argument text in final MissionPlan semantic outcomes",
+        "objective_scope": semantic.get("objective_scope"),
+        "authoritative_operator": operator,
+        "authoritative_predicate_count": len(predicates),
+        "exactly_covered_predicates": exact_matches,
+        "argument_mentioned_predicates": argument_matches,
+        "missing_predicates": missing,
+        "joint_goal_shape_preserved_in_mi_input": semantic.get("objective_scope")
+        == "joint_terminal_state"
+        and operator == "and"
+        and len(_array(goal.get("operands"))) >= 2,
+    }
+
+
+def _check_semantic_evidence(
+    document: Any,
+    request: dict[str, Any],
+    frozen: dict[str, Any],
+    record: B1ProvenanceRecord | None,
+    run_id: str | None,
+) -> list[ProvenanceFailure]:
+    """Bind adapter evidence, frozen episode identity, and the actual MI context."""
+    failures: list[ProvenanceFailure] = []
+    semantic = _object(document)
+    required = {
+        "schema_version",
+        "authority",
+        "identity",
+        "objective_scope",
+        "goal",
+        "world_context",
+        "digest",
+    }
+    if not semantic or set(semantic) != required:
+        return [ProvenanceFailure.SEMANTIC_EVIDENCE_MISSING]
+    identity = _object(semantic.get("identity"))
+    body = {key: value for key, value in semantic.items() if key != "digest"}
+    valid = (
+        semantic.get("schema_version") == "roboguide.authoritative-semantic-evidence/v0.1"
+        and semantic.get("authority") == "environment-authoritative"
+        and semantic.get("objective_scope") == "joint_terminal_state"
+        and isinstance(semantic.get("digest"), str)
+        and semantic.get("digest") == plan_digest(body)
+        and set(identity) == {"run_id", "episode_id", "revision"}
+        and isinstance(identity.get("run_id"), str)
+        and isinstance(identity.get("episode_id"), str)
+        and isinstance(identity.get("revision"), str)
+        and _semantic_expression_valid(semantic.get("goal"))
+        and isinstance(semantic.get("world_context"), dict)
+    )
+    if not valid:
+        failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)
+        return failures
+    if (run_id is not None and identity["run_id"] != run_id) or (
+        isinstance(frozen.get("episode_id"), str) and identity["episode_id"] != frozen["episode_id"]
+    ):
+        failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_IDENTITY_MISMATCH)
+    grounding = _object(request.get("grounding_context"))
+    admitted = _object(grounding.get("semantic_evidence"))
+    context_body = {
+        key: value
+        for key, value in grounding.items()
+        if key not in {"schema_version", "context_digest"}
+    }
+    if (
+        grounding.get("schema_version") != "roboguide.grounding-context/v0.2"
+        or grounding.get("context_digest") != plan_digest(context_body)
+        or admitted != semantic
+        or admitted.get("digest") != semantic.get("digest")
+    ):
+        failures.append(ProvenanceFailure.MI_SEMANTIC_EVIDENCE_MISMATCH)
+    if record and record.semantic_evidence_digest != semantic.get("digest"):
+        failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)
+    return failures
+
+
 def verify_b1_provenance(
     *,
     record: B1ProvenanceRecord | None,
@@ -349,6 +512,7 @@ def verify_b1_provenance(
     observed_execution_ids: tuple[str, ...] = (),
     failure_evidence: Any = None,
     run_id: str | None = None,
+    semantic_evidence: Any = None,
 ) -> ProvenanceVerification:
     """Check each reached boundary, allowing only attributable early failures."""
     failures: list[ProvenanceFailure] = []
@@ -401,6 +565,7 @@ def verify_b1_provenance(
         ):
             failures.append(ProvenanceFailure.FAILURE_EVIDENCE_MISMATCH)
         return ProvenanceVerification(not failures, tuple(failures), None, False)
+    failures.extend(_check_semantic_evidence(semantic_evidence, request, frozen, record, run_id))
     if not request.get("request_id") or not request.get("mission_id"):
         failures.append(ProvenanceFailure.MI_RUN_MISSING)
     if record and (
@@ -461,7 +626,13 @@ def verify_b1_provenance(
         )
     ):
         failures.append(ProvenanceFailure.STATIC_B2_PLAN_EQUALITY)
-    return ProvenanceVerification(not failures, tuple(dict.fromkeys(failures)), computed, static)
+    return ProvenanceVerification(
+        not failures,
+        tuple(dict.fromkeys(failures)),
+        computed,
+        static,
+        (semantic_goal_diagnostic(semantic_evidence, plan),),
+    )
 
 
 def build_b1_provenance_record(
@@ -473,6 +644,7 @@ def build_b1_provenance_record(
     controller_events_path: Path | None = None,
     execution_attempts_path: Path,
     shared_world_summary_path: Path,
+    semantic_evidence_path: Path | None = None,
     failure_evidence_path: Path | None = None,
     request_observations_path: Path | None = None,
 ) -> B1ProvenanceRecord:
@@ -494,6 +666,7 @@ def build_b1_provenance_record(
         load_document(execution_attempts_path),
     )
     failure = load_document(failure_evidence_path) if failure_evidence_path else None
+    semantic = load_document(semantic_evidence_path) if semantic_evidence_path else None
     return B1ProvenanceRecord(
         run_id=run_id,
         input_digest=digest(frozen),
@@ -506,6 +679,9 @@ def build_b1_provenance_record(
         observations_digest=digest(observations),
         submission_evidence_digest=digest(sent) if sent else "",
         failure_evidence_digest=digest(failure) if failure else "",
+        semantic_evidence_digest=(
+            str(semantic.get("digest")) if isinstance(semantic, dict) else ""
+        ),
         benchmark_evidence_digest=digest_document(shared_world_summary_path),
     )
 

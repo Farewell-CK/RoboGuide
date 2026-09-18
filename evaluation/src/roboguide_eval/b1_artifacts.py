@@ -102,6 +102,7 @@ def collect_b1_artifacts(
         controller_events_path=run / "events.json",
         execution_attempts_path=run / "execution-attempts.json",
         shared_world_summary_path=run / "evidence/shared-world-summary.json",
+        semantic_evidence_path=run / "evidence/authoritative-semantic-evidence.json",
         failure_evidence_path=run / "run-failure.json",
     )
     write_b1_provenance(record, run / "b1-provenance.json")
