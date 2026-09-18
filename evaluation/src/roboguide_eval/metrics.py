@@ -178,6 +178,30 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
         "the system-under-test lifecycle reached a failed outcome",
     ),
     MetricDefinition(
+        "system_failure_observed",
+        "boolean",
+        None,
+        "an explicit system-under-test failure observation, independent of population admission",
+    ),
+    MetricDefinition(
+        "valid_for_formal_population",
+        "boolean",
+        None,
+        "the run is admitted to the Formal E1 population as an observation",
+    ),
+    MetricDefinition(
+        "benchmark_authority_available",
+        "boolean",
+        None,
+        "the official Habitat benchmark authority produced a strict-bool outcome",
+    ),
+    MetricDefinition(
+        "valid_for_benchmark_population",
+        "boolean",
+        None,
+        "the run is formally admitted and has an authoritative benchmark outcome",
+    ),
+    MetricDefinition(
         "local_agent_failure",
         "boolean",
         None,

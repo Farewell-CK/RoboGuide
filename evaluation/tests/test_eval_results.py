@@ -210,7 +210,11 @@ def test_summarize_aggregates_runs_and_success_rate(tmp_path: Path) -> None:
         )
         writer.write_metrics(
             MetricsPayload(
-                values={"success": success, "wall_time": 1.0 + index},
+                values={
+                    "success": success,
+                    "wall_time": 1.0 + index,
+                    "valid_for_benchmark_population": True,
+                },
                 details={},
                 raw_evidence=(),
             ).to_json()

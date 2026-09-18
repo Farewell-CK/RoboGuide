@@ -10,6 +10,11 @@ from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
+from mission.submission_evidence import (
+    ControllerSubmissionEvidence,
+    MissionRequestObservations,
+    canonical_plan_digest,
+)
 
 MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.4"
 _COMPATIBLE_MISSION_REQUEST_SCHEMAS = {
@@ -204,6 +209,8 @@ class MissionRequestRecord:
     review_history: tuple[MissionPlanReviewAttempt, ...] = ()
     approval_reasons: tuple[str, ...] = ()
     grounding_context: GroundingContextSnapshot | None = None
+    submission_evidence: ControllerSubmissionEvidence | None = None
+    failure_evidence: JSONObject | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
@@ -240,6 +247,16 @@ class MissionRequestRecord:
             "created_at_ms": self.created_at_ms,
             "updated_at_ms": self.updated_at_ms,
         }
+
+    def observations(self) -> MissionRequestObservations:
+        """Expose read-only observations without extending the Mission Request contract."""
+        return MissionRequestObservations(
+            self.request_id,
+            self.mission_id,
+            canonical_plan_digest(self.to_json()),
+            self.submission_evidence,
+            self.failure_evidence,
+        )
 
     @classmethod
     def from_json(cls, value: JSONObject) -> MissionRequestRecord:

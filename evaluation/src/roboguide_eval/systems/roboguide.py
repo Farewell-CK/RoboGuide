@@ -9,10 +9,17 @@ Habitat skill, mutates Control, or infers benchmark success from Mission state.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import TypeGuard, cast
 
-from roboguide_eval.metrics import MetricsPayload, RawEvidenceRef
+from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
+from roboguide_eval.b1_run import B1_FILES, consume_b1_verdict
+from roboguide_eval.benchmark_evidence import (
+    BenchmarkOutcome,
+    assess_benchmark_evidence,
+)
+from roboguide_eval.metrics import MetricsError, MetricsPayload, RawEvidenceRef
 from roboguide_eval.models import JSONObject, JSONValue
 from roboguide_eval.process import ProcessOutcome
 from roboguide_eval.runner import PreparedSystem, ProcessSystemRunner
@@ -110,7 +117,35 @@ class RoboGuideRunner(ProcessSystemRunner):
             Canonical values plus independent Mission, Local EAIOS, episode,
             and benchmark evidence. Missing evidence remains unavailable.
         """
-        base = super().collect_result(prepared, run_directory, outcome)
+        formal_b1 = (
+            prepared.process_spec.environment_overrides.get("ROBOGUIDE_EVAL_PROTOCOL") == "B1"
+            or any(Path(arg).name == "run-b1-roboguide.sh" for arg in prepared.process_spec.argv)
+            or any(
+                (run_directory / name).exists()
+                for name in (
+                    *[path for path in B1_FILES if path.startswith("b1-")],
+                    "b1-verdict.json",
+                )
+            )
+        )
+        try:
+            base = super().collect_result(prepared, run_directory, outcome)
+        except MetricsError as error:
+            if not formal_b1:
+                raise
+            # Optional raw scalar metrics cannot suppress the authoritative B1 gate.
+            without_raw_metrics = replace(
+                prepared,
+                environment_spec=replace(prepared.environment_spec, metrics_source_path=None),
+            )
+            base = super().collect_result(without_raw_metrics, run_directory, outcome)
+            base = MetricsPayload(
+                values=base.values,
+                details={"raw_metrics_validation_error": str(error)},
+                raw_evidence=base.raw_evidence,
+            )
+        if formal_b1:
+            return self._collect_formal_b1(base, run_directory, outcome)
         values = dict(base.values)
         details = dict(base.details)
         evidence = list(base.raw_evidence)
@@ -228,6 +263,56 @@ class RoboGuideRunner(ProcessSystemRunner):
         )
         return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
 
+    def _collect_formal_b1(
+        self, base: MetricsPayload, run_directory: Path, outcome: ProcessOutcome
+    ) -> MetricsPayload:
+        """Consume the persisted, revalidated B1 gate before emitting any population metrics."""
+        verdict = consume_b1_verdict(
+            run_directory,
+            harness_start_failure=(
+                outcome.failure_reason() if outcome.status == "start_failed" else None
+            ),
+        )
+        admission = verdict["admission"]
+        values = dict(base.values)
+        # A generic process payload cannot override this protocol's authority.
+        for name in ("success", "system_failure", "model_failure", "infrastructure_failure"):
+            values.pop(name, None)
+        for name in (
+            "valid_for_formal_population",
+            "benchmark_authority_available",
+            "valid_for_benchmark_population",
+            "system_failure",
+            "model_failure",
+        ):
+            values[name] = admission[name]
+        values["system_failure_observed"] = admission["system_failure"]
+        values["infrastructure_failure"] = admission["failure_owner"] == "EXTERNAL_INFRA"
+        benchmark = admission["benchmark_outcome"]
+        if benchmark != BenchmarkOutcome.UNAVAILABLE:
+            values["success"] = benchmark == BenchmarkOutcome.TRUE
+        details = dict(base.details)
+        details.update(
+            {
+                "b1_admission": verdict["admission"],
+                "protocol_provenance": verdict["protocol_provenance"],
+                "system_outcome": verdict["system_outcome"],
+                "benchmark_tri_state": benchmark,
+                "failure_owner": admission["failure_owner"],
+                "run_validity": admission["run_validity"],
+                "population_admission_reasons": list(admission["reasons"]),
+                "benchmark_success_source": "official Habitat pddl_success",
+            }
+        )
+        evidence = list(base.raw_evidence)
+        known = {item.path for item in evidence}
+        for name in (*B1_FILES, "b1-verdict.json"):
+            if name not in known and (run_directory / name).is_file():
+                evidence.append(
+                    RawEvidenceRef(name, "Formal B1 protocol evidence", "application/json")
+                )
+        return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
+
     def _collect_shared_world(
         self,
         verdict: dict[str, object],
@@ -266,38 +351,37 @@ class RoboGuideRunner(ProcessSystemRunner):
                 )
 
         identity = _object(context.get("identity")) or {}
-        outcomes = {
-            agent: outcome
-            for agent, raw in (_object(context.get("outcomes")) or {}).items()
-            if (outcome := _object(raw)) is not None
-        }
         raw_mission_status = context.get("mission_status")
         mission_status = raw_mission_status if isinstance(raw_mission_status, str) else None
 
-        success = checks.get("official_pddl_success")
-        self._copy_boolean(values, "success", success)
+        # Tri-state benchmark authority: the shared-world summary document is
+        # the only Habitat pddl_success authority. Missing/partial evidence
+        # never becomes a benchmark failure.
+        summary_path = run_directory / "evidence/shared-world-summary.json"
+        try:
+            summary_document = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            summary_document = None
+        assessment = assess_benchmark_evidence(summary_document)
+        if assessment.outcome is BenchmarkOutcome.TRUE:
+            values["success"] = True
+        elif assessment.outcome is BenchmarkOutcome.FALSE:
+            values["success"] = False
         if isinstance(mission_status, str):
             values["mission_completed"] = mission_status == "Completed"
             values["system_failure"] = mission_status == "Failed"
-        local_skill_values = [outcome.get("local_skill_completed") for outcome in outcomes.values()]
-        if all(isinstance(value, bool) for value in local_skill_values):
-            values["local_skill_completed"] = all(bool(value) for value in local_skill_values)
+        if assessment.local_skill_completed is not None:
+            values["local_skill_completed"] = assessment.local_skill_completed
         episode_terminated = identity.get("episode_terminated")
-        self._copy_boolean(values, "episode_terminated", episode_terminated)
+        if not isinstance(episode_terminated, bool):
+            episode_terminated = None
+        if episode_terminated is not None:
+            values["episode_terminated"] = episode_terminated
         steps = _integer(identity.get("simulator_steps"))
         if steps is not None:
             values["simulation_steps"] = steps
-        local_states = [outcome.get("state") for outcome in outcomes.values()]
-        if all(isinstance(state, str) for state in local_states):
-            values["local_agent_failure"] = any(state == "FAILED" for state in local_states)
-
-        def _sum_outcome(field: str) -> int | None:
-            """Sum one numeric outcome field across both agents."""
-            raw_values = [outcome.get(field) for outcome in outcomes.values()]
-            if all(isinstance(value, int) and not isinstance(value, bool) for value in raw_values):
-                return sum(int(value) for value in raw_values if isinstance(value, int))
-            return None
-
+        if assessment.local_agent_failure is not None:
+            values["local_agent_failure"] = assessment.local_agent_failure
         for metric, field in (
             ("local_llm_calls", "local_llm_calls"),
             ("local_token_usage", "local_tokens"),
@@ -306,10 +390,10 @@ class RoboGuideRunner(ProcessSystemRunner):
             ("send_request_count", "send_request_count"),
             ("message_pipe_activity_count", "message_pipe_activity_count"),
         ):
-            total = _sum_outcome(field)
+            total = assessment.numeric_aggregates.get(field)
             if total is not None:
                 values[metric] = total
-        tokens = _sum_outcome("local_tokens")
+        tokens = assessment.numeric_aggregates.get("local_tokens")
         if tokens is not None:
             values["token_usage"] = tokens
         values["global_llm_calls"] = 0
@@ -322,8 +406,26 @@ class RoboGuideRunner(ProcessSystemRunner):
         if all(isinstance(value, bool) for value in dispatches):
             values["physical_dispatch_count"] = sum(1 for value in dispatches if value)
         controller_alive = checks.get("controller_alive")
-        if isinstance(controller_alive, bool):
-            values["infrastructure_failure"] = not controller_alive
+        if controller_alive is False:
+            values["system_failure"] = True
+
+        # Shared-world/B2 diagnostics never acquire Formal B1 provenance by inference.
+        validity = assess_b1_run(
+            provenance_valid=False,
+            provenance_failures=("non_b1_diagnostic_run",),
+            failure_owner=(
+                FailureOwner.EXTERNAL_INFRA
+                if values.get("infrastructure_failure") is True
+                else FailureOwner.SUT_SYSTEM
+                if controller_alive is False or mission_status == "Failed"
+                else FailureOwner.NONE
+            ),
+            benchmark_outcome=assessment.outcome,
+        )
+        values["valid_for_benchmark_population"] = validity.valid_for_benchmark_population
+        values["valid_for_formal_population"] = validity.valid_for_formal_population
+        values["benchmark_authority_available"] = validity.benchmark_authority_available
+        values["system_failure_observed"] = validity.system_failure
 
         unavailable_metrics: JSONObject = {
             "model_failure": "the local stack does not emit a distinct model-failure fact"
@@ -331,6 +433,13 @@ class RoboGuideRunner(ProcessSystemRunner):
         details.update(
             {
                 "benchmark_success_source": "Habitat pddl_success (official shared-world summary)",
+                "benchmark_tri_state": assessment.outcome.value,
+                "benchmark_outcome_reason": assessment.outcome_reason,
+                "expected_outcome_agents": list(assessment.expected_agents),
+                "observed_outcome_agents": list(assessment.observed_agents),
+                "run_validity": validity.run_validity.value,
+                "population_admission_reasons": list(validity.reasons),
+                "system_failure_observed": validity.system_failure,
                 "identity": cast(JSONValue, identity),
                 "mission_outcome": mission_status,
                 "task_statuses": cast(JSONValue, context.get("task_statuses")),

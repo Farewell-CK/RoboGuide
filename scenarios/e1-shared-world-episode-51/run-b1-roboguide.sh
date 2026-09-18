@@ -17,32 +17,50 @@ SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 PIDS=()
 
-# Port hygiene: a previous run's server may survive its trap (SIGTERM is not
-# guaranteed to be prompt). Kill only OUR OWN leftover binaries on these ports,
-# then require the ports to be free before starting anything.
+COMPONENTS=()
+REQUEST_ID=""
+FAILURE_OWNER=EXTERNAL_INFRA
+FAILURE_COMPONENT=environment
+FAILURE_REASON=deployment_setup_failed
+
 clean_port() {
-    # Kill leftover RoboGuide/Habitat processes holding one of our ports.
-    local port="$1" pid
-    pid=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1 || true)
-    if [[ -n "$pid" ]]; then
-        if ps -p "$pid" -o args= | grep -qE "integration-server|roboguide-node|habitat_local_eaios|mission.api|apps/mission-service/main.py"; then
-            echo "port $port held by leftover pid $pid ($(ps -p "$pid" -o args= | head -c 60)) - killing" >&2
-            kill -9 "$pid" 2>/dev/null || true
-            sleep 1
-        else
-            echo "FATAL: port $port held by foreign process $pid" >&2
-            exit 1
-        fi
+    # A conflicting listener is external evidence; never kill another run.
+    local port="$1"
+    if ss -tln | grep -q ":$port "; then
+        FAILURE_REASON="configured_port_occupied:$port"
+        echo "$FAILURE_REASON" >&2
+        exit 1
     fi
 }
 
-cleanup() {
-    # Stop only the exact processes launched by this B1 run.
-    for pid in "${PIDS[@]:-}"; do
-        kill "$pid" 2>/dev/null || true
+finish_run() {
+    # Archive evidence before stopping our exact child processes, including early failures.
+    local code=$? owner=NONE component="" reason="" index
+    trap - EXIT
+    set +e
+    if [[ "$code" != 0 ]]; then
+        owner="$FAILURE_OWNER"
+        component="$FAILURE_COMPONENT"
+        reason="$FAILURE_REASON"
+    fi
+    for index in "${!PIDS[@]}"; do
+        if ! kill -0 "${PIDS[$index]}" 2>/dev/null && [[ "$owner" == NONE ]]; then
+            owner=SUT_SYSTEM
+            component="${COMPONENTS[$index]}"
+            reason="sut_process_exited_before_collection"
+        fi
     done
+    uv run --project "$REPO" python -m roboguide_eval.b1_artifacts "$RUN" \
+        --request-id "$REQUEST_ID" --failure-owner "$owner" \
+        --component "$component" --reason "$reason"
+    local archive_code=$?
+    for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+    if [[ "$archive_code" != 0 ]]; then
+        echo "B1 evidence collection failed; no admission can be claimed" >&2
+        exit "$archive_code"
+    fi
+    exit "$code"
 }
-trap cleanup EXIT
 
 wait_http() {
     # Wait for one HTTP route within the supplied number of seconds.
@@ -94,19 +112,25 @@ PYEOF
     return 1
 }
 
+mkdir -p "$RUN"
+RUN="$(cd "$RUN" && pwd)"
+# Preserve existing archives and Harness-owned manifest/log files.
+if [[ -e "$RUN/b1-input-used.json" || -e "$RUN/controller.sqlite3" ]]; then
+    echo "refusing to overwrite an existing B1 run: $RUN" >&2
+    exit 1
+fi
+cp "$INPUT_JSON" "$RUN/b1-input-used.json"
+INPUT_JSON="$RUN/b1-input-used.json"
+mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
+trap finish_run EXIT
 if [[ ! -x "$SERVER" || ! -x "$NODE" ]]; then
-    echo "build integration-server and roboguide-node first" >&2
+    FAILURE_REASON=required_sut_binary_missing
     exit 1
 fi
 if [[ ! -d "$EMOS_ROOT" ]]; then
-    echo "EMOS checkout does not exist: $EMOS_ROOT" >&2
+    FAILURE_REASON=emos_checkout_missing
     exit 1
 fi
-
-mkdir -p "$RUN"
-RUN="$(cd "$RUN" && pwd)"
-rm -rf -- "$RUN"/* 2>/dev/null || true
-mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
@@ -144,18 +168,29 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --step-period-ms 20
 ) >"$RUN/shared-bridge.log" 2>&1 &
 PIDS+=($!)
+COMPONENTS+=(local_eaios)
+FAILURE_OWNER=SUT_SYSTEM
+FAILURE_COMPONENT=local_eaios
+FAILURE_REASON=local_eaios_startup_failed
 wait_http http://127.0.0.1:28100/v1/health 240
 wait_http http://127.0.0.1:28102/v1/health 30
 
 "$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
     127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
 PIDS+=($!)
+COMPONENTS+=(controller)
+FAILURE_COMPONENT=controller
+FAILURE_REASON=controller_startup_failed
 wait_http http://127.0.0.1:28060/healthz 30
 
 "$NODE" "$RUN/node-a.toml" >"$RUN/node-a.log" 2>&1 &
 PIDS+=($!)
+COMPONENTS+=(node)
 "$NODE" "$RUN/node-b.toml" >"$RUN/node-b.log" 2>&1 &
 PIDS+=($!)
+COMPONENTS+=(node)
+FAILURE_COMPONENT=node
+FAILURE_REASON=node_registration_failed
 wait_nodes
 curl -sf http://127.0.0.1:28060/v1/inventory -o "$RUN/inventory.json"
 
@@ -168,15 +203,13 @@ ROBOGUIDE_ALLOW_INSECURE_LLM_HTTP=1 uv run python "$REPO/apps/mission-service/ma
     --service-config "$RUN/mission-service-b1.toml" \
     --repository-root "$REPO" >"$RUN/mission-service.log" 2>&1 &
 PIDS+=($!)
+COMPONENTS+=(mission_service)
+FAILURE_COMPONENT=mission_service
+FAILURE_REASON=mission_service_startup_failed
+wait_http http://127.0.0.1:8070/healthz 120
 cd "$RUN"
-# The collection GET returns 404 by design; connectivity alone proves readiness.
-for _ in $(seq 1 120); do
-    if curl -s -o /dev/null http://127.0.0.1:8070/v1/mission-requests; then break; fi
-    sleep 1
-done
-
-
 INSTRUCTION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["instruction"])' "$INPUT_JSON")
+FAILURE_REASON=mission_ingress_failed
 SUBMITTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "submission_start_utc=$SUBMITTED_AT" > "$RUN/b1-timing.txt"
 REQUEST_JSON=$(curl -sS -X POST http://127.0.0.1:8070/v1/mission-requests \
@@ -208,17 +241,13 @@ done
 echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
 
 if [[ "$LIFECYCLE" == "Accepted" ]]; then
-    wait_mission_terminal "$RUN/mission.json" 1800 || true
+    FAILURE_COMPONENT=controller
+    FAILURE_REASON=mission_completion_timeout
+    wait_mission_terminal "$RUN/mission.json" 1800
     sleep 3
     curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
 fi
 curl -sf http://127.0.0.1:28060/v1/events -o "$RUN/events.json" || true
 curl -sf http://127.0.0.1:28060/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
 
-for pid in "${PIDS[@]}"; do
-    kill -0 "$pid" 2>/dev/null || true
-done
-
-python3 "$SCENARIO/verify-shared-world.py" "$RUN" paired >"$RUN/verdict.json" || true
-python3 "$SCENARIO/verify-b1.py" "$RUN" >"$RUN/b1-verdict.json"
-cat "$RUN/b1-verdict.json"
+# EXIT always collects observations, provenance and canonical B1 admission before cleanup.

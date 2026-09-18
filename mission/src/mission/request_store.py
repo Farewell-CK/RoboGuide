@@ -5,10 +5,44 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 from mission.grounding_context import GroundingContextSnapshot
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
+from mission.submission_evidence import (
+    OBSERVATIONS_SCHEMA,
+    ControllerSubmissionEvidence,
+    canonical_plan_digest,
+)
+
+STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.1"
+
+
+def _restore_record(document: object) -> MissionRequestRecord:
+    """Read legacy rows or the atomic request/observations storage envelope."""
+    value = _json_object(document, "mission request storage")
+    if value.get("schema_version") != STORAGE_SCHEMA:
+        return MissionRequestRecord.from_json(value)
+    request = _json_object(value["request"], "request")
+    record = MissionRequestRecord.from_json(request)
+    observations = _json_object(value["observations"], "observations")
+    if (
+        observations.get("schema_version") != OBSERVATIONS_SCHEMA
+        or observations.get("request_id") != record.request_id
+        or observations.get("mission_id") != record.mission_id
+        or observations.get("request_record_digest") != canonical_plan_digest(request)
+    ):
+        raise MissionRequestError("request observations are detached from durable request")
+    submission = observations.get("submission_evidence")
+    failure = observations.get("failure_evidence")
+    return replace(
+        record,
+        submission_evidence=(
+            ControllerSubmissionEvidence.from_json(submission) if submission else None
+        ),
+        failure_evidence=(_json_object(failure, "failure evidence") if failure else None),
+    )
 
 
 class MissionRequestStore:
@@ -55,7 +89,14 @@ class MissionRequestStore:
     def save(self, record: MissionRequestRecord) -> None:
         """Atomically persist the request projection and its immutable current context."""
         document = json.dumps(
-            record.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            {
+                "schema_version": STORAGE_SCHEMA,
+                "request": record.to_json(),
+                "observations": record.observations().to_json(),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         )
         with self._lock, self._connect() as connection:
             if record.grounding_context is not None:
@@ -118,7 +159,7 @@ class MissionRequestStore:
         if row is None:
             return None
         decoded: object = json.loads(str(row[0]))
-        return MissionRequestRecord.from_json(_json_object(decoded, "mission request"))
+        return _restore_record(decoded)
 
     def grounding_context(
         self, request_id: str, context_digest: str
@@ -143,7 +184,4 @@ class MissionRequestStore:
             rows = connection.execute(
                 "SELECT document_json FROM mission_requests ORDER BY request_id"
             ).fetchall()
-        return tuple(
-            MissionRequestRecord.from_json(_json_object(json.loads(str(row[0])), "mission request"))
-            for row in rows
-        )
+        return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)

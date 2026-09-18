@@ -139,17 +139,27 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
         "pre-pair assignment must not start alone"
     )
     handle_b = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
+    summary = None
     for _ in range(80):
         state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
         state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
         if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
-            break
+            # Local terminal publication precedes the separate benchmark artifact write.
+            # Wait for both boundaries; a local completion is not benchmark availability.
+            try:
+                summary = json.loads(
+                    (evidence / "shared-world-summary.json").read_text(encoding="utf-8")
+                )
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+            else:
+                break
         time.sleep(0.1)
     assert state_a["state"] == "COMPLETED"
     assert state_b["state"] == "COMPLETED"
     assert handle_a["execution_id"] != handle_b["execution_id"]
     assert runtime.calls == 1
-    summary = json.loads((evidence / "shared-world-summary.json").read_text(encoding="utf-8"))
+    assert summary is not None, "benchmark summary was not published within the test budget"
     assert summary["identity"]["episode_reset_count"] == 1
     assert summary["identity"]["simulator_worlds"] == 1
     assert summary["official_pddl_success"] is True

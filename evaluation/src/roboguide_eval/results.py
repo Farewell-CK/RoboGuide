@@ -404,6 +404,13 @@ def summarize_results(results_root: Path) -> JSONObject:
     runs: list[JSONObject] = []
     success_known = 0
     success_count = 0
+    population_total = 0
+    population_admitted_count = 0
+    formal_total = 0
+    formal_admitted_count = 0
+    system_failure_count = 0
+    model_failure_count = 0
+    invalid_infra_count = 0
     total_wall_time = 0.0
     for manifest_path in manifest_paths:
         try:
@@ -424,10 +431,35 @@ def summarize_results(results_root: Path) -> JSONObject:
                 values = metrics_document.get("values")
                 if isinstance(values, dict):
                     metrics_summary = {"values": values}
+                    # F-06: only runs explicitly admitted to the formal
+                    # benchmark population may contribute success statistics;
+                    # UNAVAILABLE/INVALID_INFRA runs never enter the
+                    # denominator while their evidence stays summarized.
+                    population_admitted = values.get("valid_for_benchmark_population")
+                    formal_admitted = values.get("valid_for_formal_population")
                     success = values.get("success")
-                    if isinstance(success, bool):
+                    if isinstance(success, bool) and population_admitted is True:
                         success_known += 1
                         success_count += int(success)
+                    if isinstance(population_admitted, bool):
+                        population_total += 1
+                        if population_admitted:
+                            population_admitted_count += 1
+                    # Formal population: SUT system/model failures stay in as
+                    # observations; only external infra invalid is excluded.
+                    if isinstance(formal_admitted, bool):
+                        formal_total += 1
+                        if formal_admitted:
+                            formal_admitted_count += 1
+                    if formal_admitted is True and (
+                        values.get("system_failure_observed") is True
+                        or values.get("system_failure") is True
+                    ):
+                        system_failure_count += 1
+                    if values.get("model_failure") is True and formal_admitted is True:
+                        model_failure_count += 1
+                    if values.get("infrastructure_failure") is True:
+                        invalid_infra_count += 1
                     wall_time = values.get("wall_time")
                     if isinstance(wall_time, int | float) and not isinstance(wall_time, bool):
                         total_wall_time += float(wall_time)
@@ -462,6 +494,15 @@ def summarize_results(results_root: Path) -> JSONObject:
             "success_metric_known": success_known,
             "success_count": success_count,
             "success_rate": (success_count / success_known) if success_known else None,
+            "benchmark_population_total": population_total,
+            "benchmark_population_admitted": population_admitted_count,
+            "benchmark_population_excluded": population_total - population_admitted_count,
+            "formal_population_total": formal_total,
+            "formal_population_admitted": formal_admitted_count,
+            "formal_population_excluded": formal_total - formal_admitted_count,
+            "system_failure_observations": system_failure_count,
+            "model_failure_observations": model_failure_count,
+            "invalid_infra_runs": invalid_infra_count,
             "total_wall_time": total_wall_time,
         },
     }
