@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from email.message import Message
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 from mission.grounding_context import (
@@ -25,8 +26,10 @@ from mission.grounding_context import (
 )
 from mission.models import JSONObject, JSONValue
 from mission.request_record import DialogueTurn
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
 MAX_GROUNDING_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_SEMANTIC_EVIDENCE_BYTES = 512 * 1024
 _STATE_RECORD_FIELDS = {
     "object",
     "semantic",
@@ -183,6 +186,7 @@ class HttpMissionGroundingReader:
         admitted_world_payload_schemas: frozenset[str] = frozenset(),
         max_gaps: int = 32,
         max_acquisition_attempts: int = 2,
+        semantic_evidence_path: Path | None = None,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -202,6 +206,7 @@ class HttpMissionGroundingReader:
         self._max_gaps = max_gaps
         self._max_acquisition_attempts = max_acquisition_attempts
         self._transport = transport or UrllibGroundingJsonTransport()
+        self._semantic_evidence_path = semantic_evidence_path
         if any(not schema.strip() for schema in admitted_world_payload_schemas):
             raise GroundingReadError("admitted World payload schemas must be nonblank")
         self._admitted_world_payload_schemas = admitted_world_payload_schemas
@@ -217,6 +222,7 @@ class HttpMissionGroundingReader:
         gaps = _GroundingGapCollector(self._max_gaps)
         state = self._read_state(gaps)
         memory = self._read_memory(gaps)
+        semantic_evidence = self._read_semantic_evidence(gaps)
         return self._bounded_snapshot(
             request_id=request_id,
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
@@ -224,7 +230,30 @@ class HttpMissionGroundingReader:
             state_evidence=state,
             memory_evidence=memory,
             gaps=gaps.finish(),
+            semantic_evidence=semantic_evidence,
         )
+
+    def _read_semantic_evidence(
+        self, gaps: _GroundingGapCollector
+    ) -> AuthoritativeSemanticEvidence | None:
+        """Read one fixed adapter artifact without allowing MI to select its source."""
+        if self._semantic_evidence_path is None:
+            return None
+        try:
+            raw = self._semantic_evidence_path.read_bytes()
+            if len(raw) > MAX_SEMANTIC_EVIDENCE_BYTES:
+                raise GroundingReadError("semantic evidence exceeds local limit")
+            document = json.loads(raw.decode("utf-8"))
+            return AuthoritativeSemanticEvidence.from_json(document)
+        except (
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            GroundingReadError,
+            SemanticEvidenceError,
+        ) as error:
+            gaps.add("semantic_evidence_unavailable", "authoritative-semantic-evidence", str(error))
+            return None
 
     def _read_state(self, gaps: _GroundingGapCollector) -> tuple[StateGroundingEvidence, ...]:
         """Read only World records and preserve the Controller's freshness assessment."""
@@ -316,6 +345,7 @@ class HttpMissionGroundingReader:
         state_evidence: tuple[StateGroundingEvidence, ...],
         memory_evidence: tuple[MemoryGroundingEvidence, ...],
         gaps: tuple[GroundingGap, ...],
+        semantic_evidence: AuthoritativeSemanticEvidence | None,
     ) -> GroundingContextSnapshot:
         """Drop deterministic stable tails until the complete snapshot fits its hard limit."""
         retained_state = list(state_evidence)
@@ -339,6 +369,7 @@ class HttpMissionGroundingReader:
                     memory_evidence=tuple(retained_memory),
                     gaps=current_gaps,
                     selection_policy_ref=self._selection_policy_ref,
+                    semantic_evidence=semantic_evidence,
                 )
             except GroundingContextSizeError:
                 if retained_memory:

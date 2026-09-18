@@ -68,6 +68,7 @@ def build_engine(
             admitted_world_payload_schemas=(service_settings.grounding_world_payload_schemas),
             max_gaps=service_settings.max_grounding_gaps,
             max_acquisition_attempts=service_settings.grounding_acquisition_attempts,
+            semantic_evidence_path=service_settings.grounding_semantic_evidence_path,
         ),
     )
     return engine, service_settings

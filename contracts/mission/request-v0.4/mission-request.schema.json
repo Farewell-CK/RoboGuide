@@ -65,6 +65,7 @@
     "grounding_context": {
       "oneOf": [
         {"$ref": "../grounding-context-v0.1/grounding-context.schema.json"},
+        {"$ref": "../grounding-context-v0.2/grounding-context.schema.json"},
         {"type": "null"}
       ]
     },

@@ -38,6 +38,7 @@ class MissionServiceSettings:
     max_grounding_memory_evidence: int
     max_grounding_gaps: int
     grounding_world_payload_schemas: frozenset[str]
+    grounding_semantic_evidence_path: Path | None
     max_request_bytes: int
     approval_policy: ApprovalPolicy
 
@@ -99,6 +100,9 @@ def load_service_settings(
         grounding_world_payload_schemas=_optional_text_set(
             service, "grounding_world_payload_schemas"
         ),
+        grounding_semantic_evidence_path=_optional_path(
+            service, "grounding_semantic_evidence_path", root
+        ),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
     )
@@ -139,6 +143,13 @@ def _optional_text(table: Mapping[str, object], key: str, default: str) -> str:
     if key not in table:
         return default
     return _text(table, key)
+
+
+def _optional_path(table: Mapping[str, object], key: str, root: Path) -> Path | None:
+    """Resolve one fixed local evidence path without accepting request-controlled input."""
+    if key not in table:
+        return None
+    return (root / _text(table, key)).resolve()
 
 
 def _positive_integer(table: Mapping[str, object], key: str) -> int:

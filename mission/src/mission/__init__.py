@@ -44,6 +44,11 @@ from mission.review import (
     MissionReviewIssue,
     ReviewIssueAction,
 )
+from mission.semantic_evidence import (
+    AuthoritativeSemanticEvidence,
+    SemanticEvidenceError,
+    SemanticExpression,
+)
 
 __all__ = [
     "ApprovalDecision",
@@ -82,5 +87,8 @@ __all__ = [
     "MemoryContentStatus",
     "MemoryGroundingEvidence",
     "StateGroundingEvidence",
+    "AuthoritativeSemanticEvidence",
+    "SemanticEvidenceError",
+    "SemanticExpression",
     "load_settings",
 ]
