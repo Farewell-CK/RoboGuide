@@ -5,6 +5,13 @@ Habitat-MAS / EMOS 等外部系统与 RoboGuide 之间进行可复现、可追�
 当前是第一版骨架：**实验编排 + 进程边界 + 可复现结果基础设施**，并以
 E1（Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。
 
+Formal B1 的 provenance、failure owner 和 population 规则见
+[Evaluation Evidence Validity](docs/evaluation-evidence-validity.md)。Formal population
+只由有效 provenance 与显式 external-infrastructure failure 决定；benchmark population
+另外要求官方 Habitat `pddl_success` 可用。`verify-b1.py` 与 Harness 共用 canonical
+admission，Harness 消费并核对已持久化 verdict。自定义 B1 启动 wrapper 须显式配置
+`ROBOGUIDE_EVAL_PROTOCOL=B1`，使缺少 artifacts 时仍执行 B1 gate。
+
 ## 边界（必须遵守）
 
 - Eval Harness 不属于 RoboGuide Core、Runtime、Control Plane、State & Memory

@@ -1,90 +1,179 @@
-# Evaluation Evidence Validity Protocol — F-06 / F-07
+# Formal B1 evidence and population protocol
 
-Defines how the Eval Harness derives benchmark outcomes and admits Formal B1
-runs into statistics. Both rules are enforced by deterministic modules with
-test coverage; neither changes the benchmark authority (official Habitat
-`pddl_success`) or the EMOS/RoboGuide protocol definition.
+This document describes the F-06/F-07 closure implementation. It changes
+evaluation provenance and read-only Mission Service observability, not
+MissionPlan, Control, Scheduler, Actor identity, or Habitat verification.
+No real provider, Formal B1, or Pilot execution is part of its validation.
 
-## F-06 — Benchmark evidence tri-state authority
+## Population authority
 
-Module: `evaluation/src/roboguide_eval/benchmark_evidence.py`
+`roboguide_eval.b1_admission.assess_b1_run` is the sole admission policy:
 
-- `BenchmarkOutcome` is a **tri-state**: `BENCHMARK_TRUE`,
-  `BENCHMARK_FALSE`, `BENCHMARK_UNAVAILABLE`. A boolean is produced only
-  when the authoritative shared-world summary explicitly carries
-  `official_pddl_success` as a strict bool. Missing/malformed document,
-  missing field, or non-bool field stays `UNAVAILABLE` — never `false`.
-- **Local outcome completeness**: the expected shared-world agent population
-  is `("0", "1")`. `local_skill_completed` / `local_agent_failure` /
-  token/replan/message aggregates are computed only when **every expected
-  agent** reports the relevant typed field. Empty or partial populations
-  yield `None`/omitted — `all([]) == True` can never masquerade as
-  "both agents completed".
-- **Run validity** (`RunValidity`) is classified independently of the
-  benchmark outcome: `VALID_RUN` / `INVALID_INFRA` / `SYSTEM_FAILURE` /
-  `MODEL_FAILURE`, driven by explicit evidence-completeness,
-  episode-start, termination-fact, infrastructure, mission-status, and
-  process-status facts — not by grepping a log for `Error:`.
-- `valid_for_benchmark_population` accompanies every reduced run.
-  `summarize_results` counts success rate **only** over runs with
-  `valid_for_benchmark_population = true`; `BENCHMARK_UNAVAILABLE` /
-  invalid runs never enter the denominator, and their evidence is fully
-  retained with machine-stable exclusion reasons.
-
-## F-07 — Formal B1 provenance chain
-
-Module: `evaluation/src/roboguide_eval/b1_provenance.py`
-(+ the rewritten `scenarios/e1-shared-world-episode-51/verify-b1.py`)
-
-A Formal B1 run binds a machine-verifiable chain:
-
-```
-frozen high-level input digest
-  → MI invocation (request_id) identity
-  → accepted MissionPlan canonical digest (SHA-256, sorted-key compact JSON)
-  → Controller MissionId / submission identity
-  → Controller-executed plan == accepted plan (digest equality)
-  → Habitat benchmark evidence digest (shared-world summary)
+```text
+formal    = provenance_valid AND NOT external_infrastructure_invalid
+benchmark = formal AND authoritative Habitat pddl_success available
 ```
 
-- **Digest canonicalization is fixed**: UTF-8 JSON, sorted keys, compact
-  separators, `ensure_ascii=False` — byte-stable across platforms.
-- **Static B2 stays B2**: `mission-plan.json` remains the fixed-plan
-  diagnostics fixture. The B1 anti-forgery gate digests both plans with
-  only `mission.id` blanked — copying the B2 plan and changing the
-  MissionId still fails (`static_b2_plan_equality`) because every other
-  byte matches the fixture, while genuine MI output with completely
-  different TaskIds/decomposition passes.
-- **B1 verifies canonical semantic intent**, not structural equality with
-  the B2 fixture: official goal coverage (both `any_targets|0` and
-  `TARGET_any_targets|0` destinations), accepted-plan → Controller
-  execution consistency (every accepted destination appears in Controller
-  mission evidence), and the full provenance chain. MI legally producing
-  different TaskIds is not a failure.
-- **Population admission**: `admit_to_formal_population` combines the
-  provenance verdict with the F-06 tri-state outcome and run validity.
-  Formal statistics consume only `valid_for_formal_population = true`;
-  excluded runs keep evidence plus machine-stable `invalid_reasons`.
-  `verify-b1.py` is a consumer of this single authority, never a second
-  one: it feeds canonical evidence facts (tri-state assessment, run-validity
-  classification from the bridge-written `identity.episode_terminated`,
-  provenance verdict) into `classify_run_validity` and
-  `admit_to_formal_population` instead of re-deriving admission policy.
-- **Authority separation**: the benchmark population is an evidence-validity
-  classification (`valid_for_benchmark_population`) and stays independent of
-  provenance; the formal population is the provenance-gated subset
-  (`provenance_passed ∧ valid_for_benchmark_population`). A provenance
-  failure therefore fails the B1 gate and excludes the run from formal
-  statistics without mutating the benchmark-evidence classification, and an
-  unavailable benchmark outcome excludes a run from both populations even
-  when its provenance chain is complete.
-- **Forward compatibility**: the provenance record carries
-  `schema_version` (`roboguide.e1.b1-provenance/v0.1`) and stable digest
-  fields so later semantic-ingress work can add canonical semantic input
-  and grounding-context digests without breaking the format.
+Only official Habitat `pddl_success`, exported as
+`official_pddl_success` in the shared-world summary, determines benchmark
+success. A strict boolean false is a valid benchmark failure observation.
+Missing/malformed/non-boolean authority is `BENCHMARK_UNAVAILABLE`; it is
+never filled with false or derived from Mission/Task/local-skill completion.
 
-## Non-goals
+| Case | Formal | Benchmark | Outcome | Failure owner |
+| --- | --- | --- | --- | --- |
+| A: authoritative true | yes | yes | true | NONE |
+| B: authoritative false | yes | yes | false | NONE |
+| C: attributable early SUT failure | yes | no | unavailable | SUT_SYSTEM |
+| D: attributable early model failure | yes | no | unavailable | MODEL |
+| E: explicit external infrastructure failure | no | no | retain available authority | EXTERNAL_INFRA |
+| F: missing/tampered provenance | no | no | retain available authority | preserve observed owner |
+| G: valid provenance, unavailable benchmark | yes | no | unavailable | BENCHMARK_AUTHORITY_UNAVAILABLE |
 
-Semantic ingress (authoritative Habitat/PDDL goal predicates entering MI)
-is explicitly out of scope here and tracked for a later round; the
-provenance format reserves versioned fields for it.
+SUT and model failures are formal experiment observations. Excluding them
+because Habitat never started would bias the population toward survivors.
+Neither summary absence, episode-start absence, Controller death, nor a
+generic nonzero shell exit establishes external infrastructure failure.
+External host/harness/evaluator/environment/provider failure requires
+explicit attributed evidence. Controller/node/Mission Service/Local EAIOS
+process failures are SUT failures unless separate external evidence exists.
+
+`RunValidity` records VALID_RUN, SYSTEM_FAILURE, MODEL_FAILURE,
+INVALID_PROVENANCE, or INVALID_INFRA. This classification is independent of
+the raw benchmark boolean and of process exit status.
+
+## Execution provenance v0.2
+
+`roboguide.e1.b1-provenance/v0.2` links:
+
+1. Archived frozen input and initial User/Instruction dialogue.
+2. Exact public MI request record and separately versioned observations.
+3. Final generated/admitted draft revision and digest.
+4. The digest of the actual bytes supplied to HTTP POST /v1/missions.
+5. Controller response MissionId/GroupId and current-group Task registrations.
+6. Current Mission/Group execution attempts or attributable boundary failure.
+
+The MI digest and actual-submission digest both use
+`sha256:<hex>` over sorted-key, compact UTF-8 JSON with
+`ensure_ascii=False`. Artifact-link fields deliberately use unprefixed hex;
+conversion is explicit by construction, not string slicing.
+Production MI `_plan_digest` delegates to this same canonicalization in the
+submission-observability module. Evaluation implements the identical
+canonicalization and tests cross-package equality, including Unicode.
+
+A string-valued `draft_digest` is insufficient: it must exactly hash the
+final `record.plan`. If review history exists, its last approved entry must
+reference this final revision and digest. Repair cannot reuse the old draft
+hash. Copied static B2 fixtures receive no exception; every B1 run needs the
+same complete reached-boundary evidence. Genuine MI output is not rejected
+merely for using the same structure or different TaskIds.
+
+The independent submission observation hashes `urllib.request.Request.data`
+immediately at the HTTP boundary. It retains canonical body digest, raw-byte
+SHA-256, submitted MissionId, timestamp, response status, response
+MissionId/GroupId, and any transport error. Equal TaskIds alone never prove
+equal MissionPlans: changing destination, Actor, intent, or Context constraints
+breaks the plan-digest gate.
+
+The benchmark digest is an optional, independent link. Missing benchmark
+evidence does not invalidate execution provenance. A present benchmark that
+disagrees with its recorded link becomes unavailable for benchmark assessment;
+it does not rewrite execution identity. v0.1 is rejected rather than silently
+reinterpreted under these rules.
+
+Evidence producers and the archive collection environment are trusted.
+SHA-256 detects inconsistent/tampered links; it is not a digital signature
+against an actor able to replace every source artifact and all hashes.
+
+## Read-only Mission Service observations
+
+`GET /v1/mission-requests/{request_id}/observations` returns
+`roboguide.mission-request-observations/v0.1`. It binds to the exact
+public request projection using `request_record_digest` and contains:
+
+- `roboguide.controller-submission-evidence/v0.1`, when HTTP submission was attempted.
+- `roboguide.mission-request-failure/v0.1`, when a known MI/submission boundary failed.
+
+The public Mission Request v0.4 and all MissionPlan contracts are unchanged.
+Private SQLite rows now use a versioned request/observations envelope in
+the existing transaction. Existing bare request rows remain readable with
+observations unavailable. New envelopes are not readable by older binaries;
+downgrades require an explicit storage migration, not silent observation loss.
+
+Request and observations are fetched as a matched pair with bounded retries.
+A collection race or missing sidecar fails the provenance gate; it never
+assumes that the only plan in the MI record was the one sent.
+
+A model failure before any plan exists validates frozen input -> real request
+-> explicit failing MI stage. A Controller rejection/transport failure validates
+the final MI plan -> actual POST attempt -> failure. A scoped accepted Mission
+failure can replace missing execution attempts. A SUT startup failure before
+MI exists requires a run-bound, input-digest-bound process-boundary observation;
+it does not invent MI execution, accepted plans, or Controller receipts.
+
+## One decision consumed end to end
+
+`b1_run.assess_b1_directory` extracts scoped evidence and invokes the
+single admission function. The scenario verifier persists
+`roboguide.e1-b1-verdict/v0.2`, containing the
+`roboguide.e1.b1-admission/v0.1` decision.
+
+The verdict explicitly separates:
+
+- protocol provenance validity;
+- system outcome (COMPLETED / FAILURE / UNKNOWN);
+- formal and benchmark population admission;
+- benchmark tri-state.
+
+Its top-level PASS/FAIL means formal protocol admission only. A valid SUT
+failure can therefore have PASS admission, FAILURE system outcome, formal
+admission true, benchmark admission false, and benchmark outcome unavailable.
+
+`RoboGuideRunner.collect_result` uses the Formal B1 path for
+`run-b1-roboguide.sh`, explicit `ROBOGUIDE_EVAL_PROTOCOL=B1`, or archived
+B1 evidence. Custom launch wrappers must declare that environment setting.
+It consumes the persisted verdict and checks it against current canonical
+verification. Missing, modified, or stale admission fails closed; it never
+falls back to shared-world/B2 admission.
+
+Admission flags are registered canonical metrics, including
+`valid_for_benchmark_population`. The artifact-chain test validates the
+MetricsPayload before writing it, so production metric validation cannot
+silently discard otherwise correct admission values. A Harness OS-level
+process-launch failure is separately recorded as explicit external infrastructure.
+
+`summarize_results` consumes metrics only. Benchmark rates count only
+benchmark-admitted runs. Formal system/model-failure counts count only
+formal-admitted observations. Infrastructure counts use explicit
+infrastructure metrics, not absence of benchmark authority.
+
+The scenario EXIT handler archives evidence and runs provenance/admission
+before stopping its own children, including early exits. It never deletes an
+existing B1 archive or kills a different run's port listener. This is evidence
+collection, not an authorization to run the scenario.
+
+## Verification
+
+Offline regressions use the real MI engine and local HTTP Controller stub:
+
+```text
+frozen input
+ -> real-shaped MI request + actual HTTP receipt
+ -> scoped Controller Mission/events and attempts or failure
+ -> optional Habitat evidence
+ -> provenance verification
+ -> canonical admission
+ -> persisted verdict
+ -> RoboGuideRunner.collect_result
+ -> metrics.json
+ -> summarize_results
+```
+
+Tests cover A-G, Controller rejection before dispatch, pre-MI SUT process
+failure, placeholder/stale repaired digests, unchanged TaskIds with changed
+plan content, missing/stale/tampered admission, request/observation read races,
+and cross-Mission / wrong-Group contamination.
+
+Semantic ingress of authoritative Habitat goal predicates into MI remains
+separate integration work. These changes do not implement it or establish
+Formal E1 benchmark results.
