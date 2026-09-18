@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import threading
 import time
 import uuid
@@ -14,7 +12,7 @@ from typing import Protocol
 
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
-from mission.controller import MissionPlanSubmitter
+from mission.controller import MissionControllerError, MissionPlanSubmitter
 from mission.grounding_context import (
     GroundingContextSnapshot,
     admitted_physical_entity_ids,
@@ -22,7 +20,7 @@ from mission.grounding_context import (
 )
 from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
-from mission.models import MissionPlan
+from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
 from mission.request_record import (
     DialogueSpeaker,
@@ -42,6 +40,7 @@ from mission.review import (
     MissionReviewRoute,
     route_mission_review,
 )
+from mission.submission_evidence import ControllerSubmissionEvidence, canonical_plan_digest
 
 
 class IdGenerator(Protocol):
@@ -272,13 +271,20 @@ class MissionRequestEngine:
 
     def _process(self, record: MissionRequestRecord) -> MissionRequestRecord:
         """Interpret and plan until clarification, approval, or submission is required."""
+        stage = "grounding"
         try:
-            record = self._update(record, lifecycle=MissionRequestLifecycle.INTERPRETING)
+            record = self._update(
+                record,
+                lifecycle=MissionRequestLifecycle.INTERPRETING,
+                submission_evidence=None,
+                failure_evidence=None,
+            )
             grounding_context = self._grounding_reader.capture(
                 record.request_id, record.dialogue, self._clock()
             )
             self._validate_grounding_context(record, grounding_context)
             record = self._update(record, grounding_context=grounding_context)
+            stage = "interpreter"
             assessment = self._interpreter.interpret(record.dialogue, grounding_context)
             if assessment.open_questions:
                 return self._update(
@@ -296,12 +302,14 @@ class MissionRequestEngine:
                 )
             record = self._update(record, assessment=assessment)
             grounded_intent = assessment.grounded_intent()
+            stage = "planner"
             plan = self._planner.plan(
                 mission_id=record.mission_id,
                 grounded_intent=grounded_intent,
                 capability_catalog=self._capability_catalog,
                 grounding_context=grounding_context,
             )
+            stage = "draft_validation"
             record = self._record_draft(record, assessment, grounded_intent, plan)
         except Exception as error:
             return self._update(
@@ -309,6 +317,7 @@ class MissionRequestEngine:
                 lifecycle=MissionRequestLifecycle.FAILED,
                 approval_required=False,
                 issues=(str(error),),
+                failure_evidence=self._failure_evidence(record, stage, str(error)),
             )
         return self._review_and_advance(record, grounded_intent)
 
@@ -390,6 +399,7 @@ class MissionRequestEngine:
                     record,
                     lifecycle=MissionRequestLifecycle.FAILED,
                     issues=(f"mission review failed: {error}",),
+                    failure_evidence=self._failure_evidence(record, "reviewer", str(error)),
                 )
             attempt = MissionPlanReviewAttempt(
                 draft_revision=record.draft_revision,
@@ -423,6 +433,7 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=("mission review rejected automatic repair",),
+                    failure_evidence=self._failure_evidence(record, "reviewer", "draft_rejected"),
                 )
             if record.repair_attempts >= self._max_repair_attempts:
                 return self._update(
@@ -430,6 +441,9 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=("mission review repair attempts exhausted",),
+                    failure_evidence=self._failure_evidence(
+                        record, "reviewer", "repair_budget_exhausted"
+                    ),
                 )
             if self._repairer is None:
                 return self._update(
@@ -437,6 +451,9 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=("mission review requires repair but no Repairer is configured",),
+                    failure_evidence=self._failure_evidence(
+                        record, "reviewer", "repair_unavailable"
+                    ),
                 )
             assessment = record.assessment
             if assessment is None:
@@ -469,6 +486,7 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=(f"mission repair failed: {error}",),
+                    failure_evidence=self._failure_evidence(record, "repairer", str(error)),
                 )
 
     def _advance_admitted_draft(self, record: MissionRequestRecord) -> MissionRequestRecord:
@@ -502,11 +520,29 @@ class MissionRequestEngine:
         try:
             receipt = self._controller.submit_plan(plan)
         except Exception as error:
+            observed = (
+                error.submission_evidence if isinstance(error, MissionControllerError) else None
+            )
             return self._update(
                 record,
                 lifecycle=MissionRequestLifecycle.FAILED,
                 issues=(f"submission failed: {error}",),
+                submission_evidence=(
+                    replace(observed, request_id=record.request_id) if observed else None
+                ),
+                failure_evidence=self._failure_evidence(
+                    record, "controller_submission", str(error)
+                ),
             )
+        record = self._update(
+            record,
+            submission_evidence=(
+                replace(receipt.evidence, request_id=record.request_id)
+                if receipt.evidence
+                else None
+            ),
+            failure_evidence=None,
+        )
         if receipt.accepted:
             return self._update(
                 record,
@@ -517,6 +553,9 @@ class MissionRequestEngine:
             record,
             lifecycle=MissionRequestLifecycle.BLOCKED,
             issues=(f"Controller HTTP {receipt.status_code}: {receipt.detail}",),
+            failure_evidence=self._failure_evidence(
+                record, "controller_submission", receipt.detail
+            ),
         )
 
     def _update(
@@ -535,6 +574,8 @@ class MissionRequestEngine:
         review_history: tuple[MissionPlanReviewAttempt, ...] | None = None,
         approval_reasons: tuple[str, ...] | None = None,
         grounding_context: GroundingContextSnapshot | None | _Unset = _UNSET,
+        submission_evidence: ControllerSubmissionEvidence | None | _Unset = _UNSET,
+        failure_evidence: JSONObject | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
@@ -564,9 +605,35 @@ class MissionRequestEngine:
                 else grounding_context
             ),
             updated_at_ms=self._clock(),
+            submission_evidence=(
+                record.submission_evidence
+                if isinstance(submission_evidence, _Unset)
+                else submission_evidence
+            ),
+            failure_evidence=(
+                record.failure_evidence
+                if isinstance(failure_evidence, _Unset)
+                else failure_evidence
+            ),
         )
         self._store.save(updated)
         return updated
+
+    def _failure_evidence(
+        self, record: MissionRequestRecord, stage: str, detail: str
+    ) -> JSONObject:
+        """Observe the failing boundary without changing retry or lifecycle policy."""
+        return {
+            "schema_version": "roboguide.mission-request-failure/v0.1",
+            "request_id": record.request_id,
+            "mission_id": record.mission_id,
+            "stage": stage,
+            "failure_owner": "MODEL"
+            if stage in {"interpreter", "planner", "draft_validation", "reviewer", "repairer"}
+            else "SUT_SYSTEM",
+            "detail": detail,
+            "observed_at_ms": self._clock(),
+        }
 
     def _require_grounding_context(self, record: MissionRequestRecord) -> GroundingContextSnapshot:
         """Return the immutable context shared by this deliberation or fail closed."""
@@ -662,7 +729,4 @@ class MissionRequestEngine:
 
 def _plan_digest(plan: MissionPlan) -> str:
     """Compute the immutable approval identity of one canonical MissionPlan draft."""
-    encoded = json.dumps(
-        plan.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode()
-    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+    return canonical_plan_digest(plan.to_json())

@@ -94,6 +94,9 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 1 and parts[0]:
                 self._run(lambda: self.server.engine.get(parts[0]), HTTPStatus.OK)
                 return
+            if len(parts) == 2 and parts[0] and parts[1] == "observations":
+                self._run(lambda: self.server.engine.get(parts[0]).observations(), HTTPStatus.OK)
+                return
             if len(parts) == 3 and all(parts) and parts[1] == "grounding-contexts":
                 self._run(
                     lambda: self.server.engine.grounding_context(parts[0], parts[2]),

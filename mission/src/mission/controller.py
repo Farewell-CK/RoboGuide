@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
-from http.client import HTTPMessage
+from dataclasses import dataclass, replace
+from http.client import HTTPException, HTTPMessage
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
 from mission.models import JSONObject, MissionPlan
+from mission.submission_evidence import ControllerSubmissionEvidence
 
 MAX_CONTROLLER_RESPONSE_BYTES = 2 * 1024 * 1024
 INVENTORY_SCHEMA = "roboguide.inventory/v0.1"
@@ -19,6 +21,8 @@ INVENTORY_SCHEMA = "roboguide.inventory/v0.1"
 
 class MissionControllerError(RuntimeError):
     """Report an invalid Controller response or bounded transport failure."""
+
+    submission_evidence: ControllerSubmissionEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +257,7 @@ class SubmissionReceipt:
     accepted: bool
     status_code: int
     detail: str
+    evidence: ControllerSubmissionEvidence | None = None
 
 
 class MissionPlanSubmitter(Protocol):
@@ -312,25 +317,26 @@ class HttpMissionController:
 
     def inventory(self) -> InventorySnapshot:
         """Fetch and validate the current advisory Shared Node State projection."""
-        status, decoded = self._request("GET", "/v1/inventory", None)
+        status, decoded, _ = self._request("GET", "/v1/inventory", None)
         if status != 200:
             raise MissionControllerError(f"Controller inventory returned HTTP {status}")
         return InventorySnapshot.from_json(decoded)
 
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit a strict MissionPlan and classify accepted versus rejected responses."""
-        status, decoded = self._request("POST", "/v1/missions", plan.to_json())
+        status, decoded, evidence = self._request("POST", "/v1/missions", plan.to_json())
         detail_value = decoded.get("error", decoded.get("status", "Controller response"))
         detail = str(detail_value)
         return SubmissionReceipt(
             accepted=status in {200, 202},
             status_code=status,
             detail=detail,
+            evidence=evidence,
         )
 
     def _request(
         self, method: str, path: str, body: Mapping[str, object] | None
-    ) -> tuple[int, JSONObject]:
+    ) -> tuple[int, JSONObject, ControllerSubmissionEvidence | None]:
         """Issue one bounded JSON request and return error responses without retrying."""
         payload = None
         headers = {"Accept": "application/json"}
@@ -340,6 +346,11 @@ class HttpMissionController:
         request = urllib.request.Request(
             f"{self._endpoint}{path}", data=payload, headers=headers, method=method
         )
+        evidence = (
+            ControllerSubmissionEvidence.from_body(request.data, time.time_ns() // 1_000_000)
+            if method == "POST" and path == "/v1/missions" and isinstance(request.data, bytes)
+            else None
+        )
         try:
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 status = response.status
@@ -347,14 +358,42 @@ class HttpMissionController:
         except urllib.error.HTTPError as error:
             status = error.code
             raw = error.read(MAX_CONTROLLER_RESPONSE_BYTES + 1)
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise MissionControllerError(f"Controller request failed: {error}") from error
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            HTTPException,
+            MissionControllerError,
+        ) as error:
+            failure = MissionControllerError(f"Controller request failed: {error}")
+            failure.submission_evidence = (
+                replace(evidence, transport_error=type(error).__name__) if evidence else None
+            )
+            raise failure from error
+        if evidence is not None:
+            evidence = replace(evidence, controller_status_code=status)
         if len(raw) > MAX_CONTROLLER_RESPONSE_BYTES:
-            raise MissionControllerError("Controller response exceeds local limit")
+            failure = MissionControllerError("Controller response exceeds local limit")
+            failure.submission_evidence = evidence
+            raise failure
         try:
             decoded: object = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise MissionControllerError("Controller returned invalid JSON") from error
+            failure = MissionControllerError("Controller returned invalid JSON")
+            failure.submission_evidence = evidence
+            raise failure from error
         if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-            raise MissionControllerError("Controller response must be a JSON object")
-        return status, cast(JSONObject, decoded)
+            failure = MissionControllerError("Controller response must be a JSON object")
+            failure.submission_evidence = evidence
+            raise failure
+        if evidence is not None:
+            evidence = replace(
+                evidence,
+                controller_mission_id=(
+                    decoded["mission_id"] if isinstance(decoded.get("mission_id"), str) else None
+                ),
+                controller_group_id=(
+                    decoded["group_id"] if isinstance(decoded.get("group_id"), str) else None
+                ),
+            )
+        return status, cast(JSONObject, decoded), evidence
