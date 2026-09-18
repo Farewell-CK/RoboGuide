@@ -137,7 +137,26 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         benchmark_outcome=BenchmarkOutcome.TRUE,
     )
     assert ok.validity is RunValidity.VALID_RUN
+    assert ok.valid_for_formal_population is True
+    assert ok.benchmark_authority_available is True
     assert ok.valid_for_benchmark_population is True
+    assert ok.system_failure is False
+
+    # A SUT system failure stays inside the formal population as an
+    # observation (no survivorship bias) while remaining a benchmark false.
+    sys_obs = classify_run_validity(
+        authority_present=True,
+        episode_started=True,
+        episode_terminated=True,
+        infrastructure_failure=False,
+        mission_status="Failed",
+        process_status="completed",
+        benchmark_outcome=BenchmarkOutcome.FALSE,
+    )
+    assert sys_obs.validity is RunValidity.VALID_RUN
+    assert sys_obs.valid_for_formal_population is True
+    assert sys_obs.system_failure is True
+    assert sys_obs.valid_for_benchmark_population is True
 
     # Missing authority document -> invalid infra.
     missing = classify_run_validity(
@@ -189,5 +208,6 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         process_status="completed",
         benchmark_outcome=BenchmarkOutcome.FALSE,
     )
-    assert sys_fail.validity is RunValidity.SYSTEM_FAILURE
-    assert not sys_fail.valid_for_benchmark_population
+    assert sys_fail.validity is RunValidity.VALID_RUN
+    assert sys_fail.system_failure is True
+    assert sys_fail.valid_for_formal_population is True

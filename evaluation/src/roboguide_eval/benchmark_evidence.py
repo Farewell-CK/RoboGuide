@@ -115,13 +115,27 @@ def assess_benchmark_evidence(
         )
 
     outcomes_raw = _as_mapping(summary.get("outcomes")) or {}
-    narrowed: dict[str, dict[str, Any]] = {}
+    narrowed: dict[str, Mapping[str, Any]] = {}
     for agent, raw in outcomes_raw.items():
         mapping = _as_mapping(raw)
-        if mapping is not None and isinstance(mapping, dict):
+        if mapping is not None:
             narrowed[agent] = mapping
-    outcomes: Mapping[str, dict[str, Any]] = narrowed
-    observed = tuple(sorted(outcomes, key=int))
+    outcomes: Mapping[str, Mapping[str, Any]] = narrowed
+    try:
+        observed = tuple(sorted(outcomes, key=int))
+    except ValueError:
+        # Malformed authority evidence (non-numeric agent keys) must fail
+        # closed for the evaluator, never crash it.
+        return BenchmarkEvidenceAssessment(
+            outcome=BenchmarkOutcome.UNAVAILABLE,
+            outcome_reason="authority_agent_keys_malformed",
+            local_skill_completed=None,
+            local_agent_failure=None,
+            numeric_aggregates={},
+            expected_agents=expected_agents,
+            observed_agents=tuple(outcomes),
+            authority_document_present=True,
+        )
 
     pddl = _bool_field(summary.get("official_pddl_success"))
     if pddl is None:
@@ -190,7 +204,11 @@ class RunValidityAssessment:
     """
 
     validity: RunValidity
+    valid_for_formal_population: bool
+    benchmark_authority_available: bool
     valid_for_benchmark_population: bool
+    system_failure: bool
+    model_failure: bool | None
     reasons: tuple[str, ...]
 
 
@@ -223,13 +241,21 @@ def classify_run_validity(
     if infrastructure_failure is True:
         return RunValidityAssessment(
             validity=RunValidity.INVALID_INFRA,
+            valid_for_formal_population=False,
+            benchmark_authority_available=False,
             valid_for_benchmark_population=False,
+            system_failure=False,
+            model_failure=None,
             reasons=tuple(reasons + ["infrastructure_failure_explicit"]),
         )
     if not authority_present or not episode_started:
         return RunValidityAssessment(
             validity=RunValidity.INVALID_INFRA,
+            valid_for_formal_population=False,
+            benchmark_authority_available=False,
             valid_for_benchmark_population=False,
+            system_failure=False,
+            model_failure=None,
             reasons=tuple(reasons),
         )
     if authority_present and episode_started and episode_terminated is None:
@@ -237,29 +263,43 @@ def classify_run_validity(
         # so the benchmark outcome cannot be trusted as final evidence.
         return RunValidityAssessment(
             validity=RunValidity.INVALID_INFRA,
+            valid_for_formal_population=False,
+            benchmark_authority_available=True,
             valid_for_benchmark_population=False,
+            system_failure=False,
+            model_failure=None,
             reasons=tuple(reasons),
-        )
-    if mission_status == "Failed":
-        return RunValidityAssessment(
-            validity=RunValidity.SYSTEM_FAILURE,
-            valid_for_benchmark_population=False,
-            reasons=tuple(reasons + ["mission_status_failed"]),
         )
     if process_status is not None and process_status != "completed":
         return RunValidityAssessment(
             validity=RunValidity.INVALID_INFRA,
+            valid_for_formal_population=False,
+            benchmark_authority_available=True,
             valid_for_benchmark_population=False,
+            system_failure=False,
+            model_failure=None,
             reasons=tuple(reasons + [f"process_status_{process_status}"]),
         )
     if benchmark_outcome is BenchmarkOutcome.UNAVAILABLE:
         return RunValidityAssessment(
-            validity=RunValidity.INVALID_INFRA,
+            validity=RunValidity.VALID_RUN,
+            valid_for_formal_population=True,
+            benchmark_authority_available=False,
             valid_for_benchmark_population=False,
+            system_failure=False,
+            model_failure=None,
             reasons=tuple(reasons + ["benchmark_outcome_unavailable"]),
         )
+    # The episode ran to an authoritative terminal state. A SUT system or
+    # model failure stays inside the formal population as an observation:
+    # excluding it would create survivorship bias.
+    system_failure = mission_status == "Failed"
     return RunValidityAssessment(
         validity=RunValidity.VALID_RUN,
+        valid_for_formal_population=True,
+        benchmark_authority_available=True,
         valid_for_benchmark_population=True,
+        system_failure=system_failure,
+        model_failure=False,
         reasons=tuple(reasons) or ("evidence_complete",),
     )

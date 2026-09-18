@@ -242,3 +242,106 @@ def test_f07_unavailable_outcome_excluded_even_with_provenance() -> None:
     )
     assert admission.valid_for_formal_population is False
     assert "benchmark_outcome_unavailable" in admission.invalid_reasons
+
+
+def test_f07_genuine_mi_with_b2_equal_plan_still_passes_provenance() -> None:
+    """Genuine MI provenance + coincidental B2-equal plan: diagnostic only."""
+    plan = copy.deepcopy(B2_STATIC_PLAN)
+    plan["mission"]["id"] = "mission-genuine-mi-999"
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        genuine_mi_invocation=True,
+    )
+    assert result.passed
+    assert result.is_static_b2_plan is True  # diagnostic flag only
+
+
+def test_f07_forged_b2_without_genuine_mi_fails() -> None:
+    """B2-equal plan without genuine MI invocation: provenance fails."""
+    plan = copy.deepcopy(B2_STATIC_PLAN)
+    plan["mission"]["id"] = "mission-forged-123"
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-forged-123", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-forged-123",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        controller_group_id="group-mi-forged",
+        observed_execution_ids=("exec-1", "exec-2"),
+        genuine_mi_invocation=False,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.STATIC_B2_PLAN_EQUALITY in result.failures
+
+
+def test_f07_record_missing_fails_closed() -> None:
+    """A run with no provenance record at all fails closed."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    result = verify_b1_provenance(
+        record=None,
+        frozen_input=FROZEN_INPUT,
+        request_record=_request(plan),
+        controller_mission_id="mission-x",
+        controller_plan=plan,
+        benchmark_evidence=_benchmark(),
+        static_b2_plan=B2_STATIC_PLAN,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.PROVENANCE_RECORD_MISSING in result.failures
+
+
+def test_f07_controller_group_id_mismatch_fails() -> None:
+    """Controller submission identity mismatch fails provenance."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        controller_group_id="group-other",
+        genuine_mi_invocation=True,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH in result.failures
+
+
+def test_f07_execution_identity_mismatch_fails() -> None:
+    """Execution identity mismatch fails provenance."""
+    plan = MI_PLAN_DIFFERENT_TASK_IDS
+    request = _request(plan)
+    benchmark = _benchmark()
+    record = _record(FROZEN_INPUT, plan, "mission-mi-runtime-xyz", benchmark)
+    result = verify_b1_provenance(
+        record=record,
+        frozen_input=FROZEN_INPUT,
+        request_record=request,
+        controller_mission_id="mission-mi-runtime-xyz",
+        controller_plan=plan,
+        benchmark_evidence=benchmark,
+        static_b2_plan=B2_STATIC_PLAN,
+        controller_group_id="group-mi-runtime-xyz",
+        observed_execution_ids=("exec-99",),
+        genuine_mi_invocation=True,
+    )
+    assert not result.passed
+    assert ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH in result.failures

@@ -31,6 +31,13 @@ def canonical_json_bytes(value: Any) -> bytes:
     )
 
 
+def _as_mapping(value: Any) -> dict[str, Any] | None:
+    """Narrow one decoded value to a string-keyed mapping or None."""
+    if not isinstance(value, dict) or not all(isinstance(k, str) for k in value):
+        return None
+    return value
+
+
 def digest(value: Any) -> str:
     """Return the hex SHA-256 digest of one canonicalized value."""
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
@@ -60,6 +67,9 @@ class ProvenanceFailure(StrEnum):
     BENCHMARK_EVIDENCE_MISSING = "benchmark_evidence_missing"
     BENCHMARK_IDENTITY_MISMATCH = "benchmark_identity_mismatch"
     STATIC_B2_PLAN_EQUALITY = "static_b2_plan_equality"
+    PROVENANCE_RECORD_MISSING = "provenance_record_missing"
+    CONTROLLER_SUBMISSION_IDENTITY_MISMATCH = "controller_submission_identity_mismatch"
+    EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +152,9 @@ def verify_b1_provenance(
     controller_plan: Any,
     benchmark_evidence: Any,
     static_b2_plan: Any,
+    controller_group_id: str | None = None,
+    observed_execution_ids: tuple[str, ...] = (),
+    genuine_mi_invocation: bool = False,
 ) -> ProvenanceVerification:
     """Verify the full B1 provenance chain against run evidence.
 
@@ -154,6 +167,13 @@ def verify_b1_provenance(
         controller_plan: The plan document the Controller executed.
         benchmark_evidence: The shared-world benchmark summary document.
         static_b2_plan: The static B2 fixture plan (forgery reference).
+        controller_group_id: The ExecutionGroupId observed in Controller
+            evidence, compared against the record's submission identity.
+        observed_execution_ids: Execution identities observed in Node
+            journals / attempts, compared against the record's identity.
+        genuine_mi_invocation: Runtime-observed fact that a genuine MI
+            invocation produced the accepted plan. When false, a plan whose
+            structure equals the B2 static fixture is rejected as forgery.
 
     Returns:
         The verification result. A copied static B2 plan (regardless of
@@ -169,6 +189,8 @@ def verify_b1_provenance(
         return value
 
     failures: list[ProvenanceFailure] = []
+    if record is None:
+        failures.append(ProvenanceFailure.PROVENANCE_RECORD_MISSING)
 
     input_record = mapping(frozen_input)
     if input_record is None:
@@ -233,6 +255,18 @@ def verify_b1_provenance(
     elif record is not None and benchmark_digest != record.benchmark_evidence_digest:
         failures.append(ProvenanceFailure.BENCHMARK_IDENTITY_MISMATCH)
 
+    # F07: controller submission and execution identities must match actual
+    # observable evidence, not just field presence.
+    if record is not None:
+        if controller_group_id is not None:
+            if record.controller_submission_identity != controller_group_id:
+                failures.append(ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH)
+        if observed_execution_ids:
+            observed_set = frozenset(observed_execution_ids)
+            recorded_set = frozenset(record.execution_identity.split(","))
+            if recorded_set != observed_set:
+                failures.append(ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH)
+
     b2_mapping = mapping(static_b2_plan)
     is_static_b2 = (
         b2_mapping is not None
@@ -240,7 +274,7 @@ def verify_b1_provenance(
         and _structure_digest_ignoring_mission_id(b2_mapping)
         == _structure_digest_ignoring_mission_id(mapping(controller_plan))
     )
-    if is_static_b2:
+    if is_static_b2 and not genuine_mi_invocation:
         failures.append(ProvenanceFailure.STATIC_B2_PLAN_EQUALITY)
 
     return ProvenanceVerification(
@@ -299,3 +333,69 @@ def admit_to_formal_population(
         valid_run=valid_run,
         invalid_reasons=tuple(reasons),
     )
+
+
+def build_b1_provenance_record(
+    *,
+    run_id: str,
+    frozen_input_path: Path,
+    request_record_path: Path,
+    controller_mission_path: Path,
+    execution_attempts_path: Path,
+    shared_world_summary_path: Path,
+) -> B1ProvenanceRecord:
+    """Build one B1 provenance record from persisted run artifacts.
+
+    Every digest is computed over the file's canonical JSON form using the
+    fixed canonicalization, so the record is reproducible from the archived
+    evidence alone.
+    """
+
+    def load(path: Path) -> Any:
+        """Load one JSON document or return None."""
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    frozen_input = load(frozen_input_path)
+    if frozen_input is None:
+        raise ValueError(f"frozen B1 input is missing or malformed: {frozen_input_path}")
+    request_record = load(request_record_path)
+    if request_record is None:
+        raise ValueError(f"MI request record is missing: {request_record_path}")
+    controller_mission = load(controller_mission_path)
+    attempts = load(execution_attempts_path)
+    benchmark = load(shared_world_summary_path)
+
+    input_digest = digest(frozen_input)
+    mi_run_identity = str(request_record.get("request_id", ""))
+    mission_id = str(request_record.get("mission_id", ""))
+    plan = _as_mapping(request_record.get("plan"))
+    accepted_plan_digest = digest(plan) if plan is not None else ""
+    controller_submission_identity = str((controller_mission or {}).get("group_id", ""))
+    attempts_list = (attempts or {}).get("attempts", [])
+    execution_ids = sorted(
+        str(a.get("execution_id", ""))
+        for a in attempts_list
+        if isinstance(a, dict) and a.get("execution_id")
+    )
+    execution_identity = ",".join(execution_ids)
+    benchmark_digest = digest(benchmark) if benchmark is not None else ""
+
+    return B1ProvenanceRecord(
+        run_id=run_id,
+        input_digest=input_digest,
+        mi_run_identity=mi_run_identity,
+        accepted_plan_digest=accepted_plan_digest,
+        mission_id=mission_id,
+        controller_submission_identity=controller_submission_identity,
+        execution_identity=execution_identity,
+        benchmark_evidence_digest=benchmark_digest,
+    )
+
+
+def write_b1_provenance(record: B1ProvenanceRecord, path: Path) -> None:
+    """Write one provenance artifact as JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record.to_json(), indent=2) + "\n", encoding="utf-8")
