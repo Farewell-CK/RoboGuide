@@ -1,0 +1,90 @@
+{
+  "allowed_differences": [
+    "assignment_wording",
+    "global_llm_calls",
+    "global_token_usage",
+    "organization_axis",
+    "wall_time"
+  ],
+  "benchmark_authority": {
+    "implementation_digest": "sha256:00f6c615707f5718902f8810ff47e8fbed56db2d3a462c8bb5a0a134e141677e",
+    "measure": "pddl_success",
+    "parameters": {
+      "must_call_stop": false,
+      "robot_at_thresh_m": 0.3
+    }
+  },
+  "dataset": {
+    "file_sha256": "sha256:b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576",
+    "name": "habitat-mas-mp3d-mobility",
+    "revision": "mobility_episodes_1"
+  },
+  "digest": "sha256:b1ef0c8429d36daa540180852f58e9b3be0e142e6ac76690971eecab0ed38178",
+  "embodiment_profile": {
+    "agents": [
+      {
+        "handle": "SpotRobot",
+        "index": 0,
+        "robot_type": "SpotRobot"
+      },
+      {
+        "handle": "FetchRobot",
+        "index": 1,
+        "robot_type": "FetchRobot"
+      }
+    ]
+  },
+  "model_configuration": {
+    "model": "gpt-5.6-luna",
+    "provider": "openai",
+    "reasoning_effort": "medium"
+  },
+  "population_id": "e1-mobility-example",
+  "protocol": "controlled-v0.1",
+  "required_differences": [],
+  "schema_version": "roboguide.e1.population-manifest/v0.1",
+  "selector": {
+    "policy": "explicit_set",
+    "rows": [
+      {
+        "derived_metadata": {
+          "geodesic_distance_m": 7.77636,
+          "note": "example row; episode 51 is a fixture, not the abstraction",
+          "same_floor": false
+        },
+        "expected_episode_id": "51",
+        "expected_scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+        "pair_id": "pair-ep51",
+        "seed": 40
+      },
+      {
+        "expected_episode_id": "11",
+        "expected_scene_id": "data/scene_datasets/mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "pair_id": "pair-011",
+        "seed": 7
+      },
+      {
+        "expected_episode_id": "13",
+        "expected_scene_id": "data/scene_datasets/mp3d/8WUmhLawc2A/8WUmhLawc2A.glb",
+        "pair_id": "pair-013",
+        "seed": 13
+      }
+    ]
+  },
+  "simulator_identity": {
+    "conda_environment": "habitat",
+    "habitat_lab_commit": "habitat-lab-example"
+  },
+  "stage2_identity": {
+    "checkout_commit": "emos-checkout-example",
+    "file_digests": {
+      "habitat-mas/habitat_mas/agents/crab_agent.py": "sha256:3349a915f7cd0c2ff25e4b8ee4eaf965ba1de9c25062e649e4d94f8137ce9342"
+    }
+  },
+  "task": {
+    "benchmark": "habitat-mas",
+    "habitat_config_digest": "sha256:cd347e723b1fe1d90b3c64ad43c4f809b8f33cb86fb85e07c1fab4400693b186",
+    "task": "spot_fetch_mobility",
+    "task_spec_digest": "sha256:d31d1358d2e60126537f0bd99e4cc927095c0f1394d72eb1161cfa247289a41f"
+  }
+}
