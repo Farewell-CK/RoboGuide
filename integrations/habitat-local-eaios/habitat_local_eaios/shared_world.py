@@ -25,6 +25,7 @@ from .backend import HabitatBackendConfig, LocalExecutionOutcome, _observation_t
 from .crabagent_backend import CrabAgentBackendConfig
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .semantic_evidence import build_authoritative_semantic_evidence
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
@@ -37,6 +38,25 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """Retain both Habitat agent identities served by the shared world."""
         super().__init__(config)
         self._agent_ids = agent_ids
+
+    def initialize(self) -> None:
+        """Initialize the environment and publish authoritative semantics before readiness."""
+        super().initialize()
+        _, habitat_env, _, _ = self._require_initialized()
+        try:
+            document = build_authoritative_semantic_evidence(
+                habitat_env,
+                run_id=getattr(self._config, "run_id", ""),
+                episode_id=self._config.episode_id,
+                agent_ids=self._agent_ids,
+                episode=self._episode,
+            )
+            self._write_json("authoritative-semantic-evidence.json", document)
+        except Exception as error:
+            self.close()
+            raise IntegrationError(
+                f"authoritative semantic evidence initialization failed: {error}"
+            ) from error
 
     def execute_pair(
         self,
@@ -940,10 +960,6 @@ class SharedWorldCoordinator:
             # downstream consumers never read a synthetic false.
             raw_pddl = metrics.get("pddl_success")
             summary_document: dict[str, object] = {
-                "goal_predicates": [
-                    "any_at(any_targets|0)",
-                    "any_at(TARGET_any_targets|0)",
-                ],
                 "identity": summary["identity"],
                 "outcomes": {
                     str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()
@@ -951,6 +967,15 @@ class SharedWorldCoordinator:
                 "stage1_assignment": "RoboGuide committed assignments "
                 "(original EMOS group_discussion replaced per execution)",
             }
+            semantic_evidence = self._evidence_dir / "authoritative-semantic-evidence.json"
+            if semantic_evidence.is_file():
+                semantic_document = json.loads(semantic_evidence.read_text(encoding="utf-8"))
+                if isinstance(semantic_document, dict) and isinstance(
+                    semantic_document.get("digest"), str
+                ):
+                    summary_document["authoritative_semantic_evidence_digest"] = semantic_document[
+                        "digest"
+                    ]
             if isinstance(raw_pddl, bool):
                 summary_document["official_pddl_success"] = raw_pddl
             else:

@@ -53,6 +53,11 @@ def _arguments() -> argparse.Namespace:
         help="LLM backends only: directory for scene/trace/token evidence",
     )
     parser.add_argument(
+        "--run-id",
+        default="unbound",
+        help="shared backend only: immutable evaluation run identity for semantic evidence",
+    )
+    parser.add_argument(
         "--port-b",
         type=int,
         default=None,
@@ -97,6 +102,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         step_period_ms=arguments.step_period_ms,
         subtask_mode=arguments.subtask_mode,
         evidence_dir=arguments.evidence_dir,
+        run_id=arguments.run_id,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
     coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
@@ -142,6 +148,7 @@ def main() -> None:
             **common,
             subtask_mode=arguments.subtask_mode,
             evidence_dir=arguments.evidence_dir,
+            run_id=arguments.run_id,
         )
         backend_class: type = CrabAgentMobilityBackend
     else:

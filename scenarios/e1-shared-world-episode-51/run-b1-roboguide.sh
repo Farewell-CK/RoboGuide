@@ -134,7 +134,8 @@ fi
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
-sed "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
+sed -e "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
+    -e "s|SEMANTIC_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-semantic-evidence.json|" \
     "$SCENARIO/mission-service-b1.toml" > "$RUN/mission-service-b1.toml"
 
 clean_port 25060
@@ -161,6 +162,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --agent-b-id 1 \
         --pair-wait-s 1200 \
         --evidence-dir "$RUN/evidence" \
+        --run-id "$(basename "$RUN")" \
         --habitat-config \
             "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \
         --episode-id 51 \

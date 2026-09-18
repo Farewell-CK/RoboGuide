@@ -13,6 +13,7 @@ max_grounding_state_evidence = 64
 max_grounding_memory_evidence = 32
 max_grounding_gaps = 32
 grounding_world_payload_schemas = []
+grounding_semantic_evidence_path = "SEMANTIC_EVIDENCE_PLACEHOLDER"
 max_request_bytes = 1048576
 
 # Deployment decision for E1-I (simulation-only navigation): no approval risk gate;

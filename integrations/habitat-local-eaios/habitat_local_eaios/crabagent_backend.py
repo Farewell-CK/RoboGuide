@@ -27,6 +27,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
 
     subtask_mode: str = "natural-objective"
     evidence_dir: Path = Path("crabagent-evidence")
+    run_id: str = "unbound"
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
