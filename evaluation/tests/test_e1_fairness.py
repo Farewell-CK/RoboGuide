@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from roboguide_eval.e1_fairness import (
+    DIMENSION_ORDER,
     DIMENSION_SPECS,
     ArmName,
     BenchmarkAuthorityIdentity,
@@ -1012,3 +1013,67 @@ def test_both_arms_same_wrong_episode_versus_row_is_caught() -> None:
     pair = validate_pair(manifest, emos, roboguide)
     assert pair.comparability is PairComparability.PAIR_NOT_COMPARABLE
     assert FairnessReason.EPISODE_IDENTITY_MISMATCH in pair.reasons
+
+
+def _probe_value(dimension_id: str) -> Any:
+    """Return a deterministic wrong-value probe for one dimension."""
+    probes: dict[str, Any] = {
+        "dataset_identity": sha("probe-dataset"),
+        "episode_identity": "777",
+        "scene_identity": "scene-probe",
+        "task_spec_identity": {
+            "benchmark": "other-benchmark",
+            "task": "other-task",
+            "task_spec_digest": sha("probe-spec"),
+        },
+        "embodiment_profile": {"agents": [{"index": 0, "handle": "ProbeRobot"}]},
+        "habitat_config_identity": {"habitat_config_digest": sha("probe-config")},
+        "benchmark_authority_identity": {
+            "measure": "other_measure",
+            "implementation_digest": sha("probe-measure"),
+            "parameters": {},
+        },
+        "stage2_identity": {"checkout_commit": "probe", "file_digests": {}},
+        "simulator_identity": {"habitat_lab_commit": "probe", "conda_environment": "probe-env"},
+        "model_configuration_identity": {"provider": "probe", "model": "probe-model"},
+        "population_manifest_identity": sha("probe-population"),
+    }
+    return probes[dimension_id]
+
+
+@pytest.mark.parametrize("dimension_id", DIMENSION_ORDER)
+def test_dimension_reason_matrix_mismatch(dimension_id: str) -> None:
+    """Every dimension maps a confirmed mismatch to its own reason code."""
+    manifest = population()
+    roboguide = with_observed(
+        evidence("roboguide", "run-2", manifest),
+        dimension_id,
+        ObservedField(_probe_value(dimension_id), "probe", EvidenceStatus.AVAILABLE),
+    )
+    pair = validate_pair(manifest, evidence("emos", "run-1", manifest), roboguide)
+    spec = DIMENSION_SPECS[dimension_id]
+    if spec.dimension_class is DimensionClass.REPRODUCIBILITY_METADATA:
+        assert pair.comparability is PairComparability.PAIR_COMPARABLE
+        assert any(w.reason is spec.mismatch_reason for w in pair.reproducibility_warnings)
+    else:
+        assert pair.comparability is PairComparability.PAIR_NOT_COMPARABLE
+        assert spec.mismatch_reason in pair.reasons
+
+
+@pytest.mark.parametrize("dimension_id", DIMENSION_ORDER)
+def test_dimension_reason_matrix_unavailable(dimension_id: str) -> None:
+    """Every dimension maps explicit unavailability to its own reason code."""
+    manifest = population()
+    roboguide = with_observed(
+        evidence("roboguide", "run-2", manifest),
+        dimension_id,
+        ObservedField(None, "probe", EvidenceStatus.UNAVAILABLE),
+    )
+    pair = validate_pair(manifest, evidence("emos", "run-1", manifest), roboguide)
+    spec = DIMENSION_SPECS[dimension_id]
+    if spec.dimension_class is DimensionClass.REPRODUCIBILITY_METADATA:
+        assert pair.comparability is PairComparability.PAIR_COMPARABLE
+        assert any(w.reason is spec.unavailable_reason for w in pair.reproducibility_warnings)
+    else:
+        assert pair.comparability is PairComparability.PAIR_NOT_COMPARABLE
+        assert spec.unavailable_reason in pair.reasons
