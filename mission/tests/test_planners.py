@@ -35,6 +35,7 @@ from mission.responses import (
     ResponsesMissionReviewer,
 )
 from mission.review import MissionPlanReview, ReviewIssueAction
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
@@ -268,6 +269,29 @@ def _grounding(
     return EmptyMissionGroundingReader().capture("request-test", dialogue, 10)
 
 
+def _semantic_grounding() -> GroundingContextSnapshot:
+    """Build a fixed joint-goal snapshot for Reviewer/Repairer input assertions."""
+    evidence = AuthoritativeSemanticEvidence.create(
+        run_id="run-test",
+        episode_id="episode-51",
+        revision="goal-1",
+        goal=SemanticExpression.logical(
+            "and",
+            (
+                SemanticExpression.predicate("at", ("target-a",)),
+                SemanticExpression.predicate("at", ("target-b",)),
+            ),
+        ),
+        world_context={"scene_id": "scene-51", "agent_ids": [0, 1]},
+    )
+    return GroundingContextSnapshot.create(
+        request_id="request-test",
+        dialogue_digest="sha256:" + "0" * 64,
+        captured_at_ms=10,
+        semantic_evidence=evidence,
+    )
+
+
 def _review_output(action: str = "RepairPlan") -> JSONObject:
     """Build one strict rejected-review provider payload for adapter tests."""
     return {
@@ -419,6 +443,46 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
         "capability_catalog": _catalog().to_json(),
         "grounding_context": grounding.to_json(),
     }
+
+
+def test_reviewer_and_repairer_receive_frozen_joint_goal_guidance() -> None:
+    """Reviewer and Repairer receive the exact joint goal without changing MissionPlan fields."""
+    plan_json = _v0_8_plan()
+    grounding = _semantic_grounding()
+    settings = _local_settings()
+    reviewer_transport = FakeTransport([_response(_review_output())])
+    reviewer = ResponsesMissionReviewer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        reviewer_transport,
+    )
+    plan = MissionPlan.from_json(plan_json)
+    intent = GroundedIntent(cast(str, cast(JSONObject, plan_json["mission"])["objective"]), (), ())
+    reviewer.review(intent, plan, _current_catalog(), grounding)
+    reviewer_input = json.loads(cast(str, reviewer_transport.requests[0][2]["input"]))
+
+    repair_transport = FakeTransport([_response(_provider_plan(plan_json))])
+    repairer = ResponsesMissionRepairer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        repair_transport,
+    )
+    repairer.repair(
+        cast(str, cast(JSONObject, plan_json["mission"])["id"]),
+        intent,
+        plan,
+        MissionPlanReview.from_json(_review_output()),
+        _current_catalog(),
+        grounding,
+    )
+    repair_input = json.loads(cast(str, repair_transport.requests[0][2]["input"]))
+
+    for payload in (reviewer_input, repair_input):
+        guidance = payload["authoritative_semantic_goal"]
+        assert guidance["objective_scope"] == "joint_terminal_state"
+        assert guidance["goal"]["operator"] == "and"
+        assert len(guidance["goal"]["operands"]) == 2
+        assert guidance["review_requirements"]["preserve_logical_tree"] is True
 
 
 def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan() -> None:

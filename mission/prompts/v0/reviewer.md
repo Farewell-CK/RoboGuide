@@ -4,6 +4,11 @@ Review the supplied `grounded_intent`, `grounding_context`, `capability_catalog`
 artifact together. The context is the exact immutable evidence used by Interpreter and Planner.
 Approve it only when all of the following hold:
 
+- when `authoritative_semantic_goal` is present, treat its goal as one joint terminal-state
+  diagnostic: preserve the logical tree and account for every predicate in the plan's semantic
+  outcomes; do not split a conjunction into unrelated Missions or infer Actors/Physical Entities
+  merely from predicate count;
+
 - the original mission identity and objective are preserved;
 - every confirmed constraint is represented in an observable plan decision and no explicit
   assumption is silently promoted into a confirmed user requirement;

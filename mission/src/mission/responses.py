@@ -21,6 +21,7 @@ from mission.provider_mission_plan import (
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 from mission.satisfaction_policy import MissionSatisfactionPolicy, validate_satisfaction_policy
+from mission.semantic_evidence import semantic_goal_review_payload
 
 
 class MissionProviderError(RuntimeError):
@@ -120,6 +121,16 @@ def _review_schema() -> JSONObject:
             },
         },
     }
+
+
+def _with_semantic_goal(
+    payload: JSONObject, grounding_context: GroundingContextSnapshot
+) -> JSONObject:
+    """Add explicit frozen-goal guidance without changing non-B1 provider inputs."""
+    goal = semantic_goal_review_payload(grounding_context.semantic_evidence)
+    if goal is None:
+        return payload
+    return {**payload, "authoritative_semantic_goal": goal}
 
 
 class _ResponsesClient:
@@ -256,13 +267,16 @@ class ResponsesMissionPlanner:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
             input_text=json.dumps(
-                {
-                    "mission_id": mission_id,
-                    "grounded_intent": grounded_intent.to_json(),
-                    "satisfaction_policy": self._client._satisfaction_policy_input(),
-                    "capability_catalog": capability_catalog.to_json(),
-                    "grounding_context": grounding_context.to_json(),
-                },
+                _with_semantic_goal(
+                    {
+                        "mission_id": mission_id,
+                        "grounded_intent": grounded_intent.to_json(),
+                        "satisfaction_policy": self._client._satisfaction_policy_input(),
+                        "capability_catalog": capability_catalog.to_json(),
+                        "grounding_context": grounding_context.to_json(),
+                    },
+                    grounding_context,
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
@@ -307,13 +321,16 @@ class ResponsesMissionReviewer:
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
             input_text=json.dumps(
-                {
-                    "grounded_intent": grounded_intent.to_json(),
-                    "mission_plan": plan.to_json(),
-                    "satisfaction_policy": self._client._satisfaction_policy_input(),
-                    "capability_catalog": capability_catalog.to_json(),
-                    "grounding_context": grounding_context.to_json(),
-                },
+                _with_semantic_goal(
+                    {
+                        "grounded_intent": grounded_intent.to_json(),
+                        "mission_plan": plan.to_json(),
+                        "satisfaction_policy": self._client._satisfaction_policy_input(),
+                        "capability_catalog": capability_catalog.to_json(),
+                        "grounding_context": grounding_context.to_json(),
+                    },
+                    grounding_context,
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
@@ -351,15 +368,18 @@ class ResponsesMissionRepairer:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
             input_text=json.dumps(
-                {
-                    "mission_id": mission_id,
-                    "grounded_intent": grounded_intent.to_json(),
-                    "rejected_plan": rejected_plan.to_json(),
-                    "satisfaction_policy": self._client._satisfaction_policy_input(),
-                    "review": review.to_json(),
-                    "capability_catalog": capability_catalog.to_json(),
-                    "grounding_context": grounding_context.to_json(),
-                },
+                _with_semantic_goal(
+                    {
+                        "mission_id": mission_id,
+                        "grounded_intent": grounded_intent.to_json(),
+                        "rejected_plan": rejected_plan.to_json(),
+                        "satisfaction_policy": self._client._satisfaction_policy_input(),
+                        "review": review.to_json(),
+                        "capability_catalog": capability_catalog.to_json(),
+                        "grounding_context": grounding_context.to_json(),
+                    },
+                    grounding_context,
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             ),

@@ -9,8 +9,9 @@ from typing import cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import SubmissionReceipt
 from mission.grounding_context import GroundingContextSnapshot
+from mission.grounding_reader import HttpMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
-from mission.models import JSONObject, MissionPlan
+from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.request_record import (
     DialogueSpeaker,
     DialogueTurn,
@@ -22,6 +23,7 @@ from mission.request_record import (
 from mission.request_store import MissionRequestStore
 from mission.requests import MissionRequestEngine
 from mission.review import MissionPlanReview, MissionReviewIssue, ReviewIssueAction
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = Path("contracts/capability/v0.1/catalog.json")
@@ -129,6 +131,17 @@ class SequenceClock:
         """Return the next process-local test timestamp."""
         self.value += 1
         return self.value
+
+
+class EmptyGroundingTransport:
+    """Return empty World and Memory projections for fixed semantic-ingress tests."""
+
+    def get_json(self, url: str, timeout_seconds: float) -> dict[str, JSONValue]:
+        """Return valid empty grounding responses without reading live Control state."""
+        del timeout_seconds
+        if "/state/records" in url:
+            return {"schema": "roboguide.state-query/v0.1", "records": []}
+        return {"schema": "roboguide.memory-catalog/v0.1", "memories": []}
 
 
 class FakeReviewer:
@@ -246,6 +259,7 @@ def _engine(
     controller: AcceptingController,
     max_repair_attempts: int = 2,
     planner: FakePlanner | None = None,
+    grounding_reader: MissionGroundingReader | None = None,
 ) -> MissionRequestEngine:
     """Compose one persistent deterministic Review/Repair orchestration fixture."""
     return MissionRequestEngine(
@@ -260,7 +274,65 @@ def _engine(
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=max_repair_attempts,
+        grounding_reader=grounding_reader,
     )
+
+
+def test_fixed_authoritative_semantics_are_reused_by_every_mi_phase(tmp_path: Path) -> None:
+    """One frozen adapter snapshot reaches Interpreter, Planner, Review, Repair, and POST."""
+    evidence = AuthoritativeSemanticEvidence.create(
+        run_id="controlled-preflight",
+        episode_id="51",
+        revision="goal-1",
+        goal=SemanticExpression.logical(
+            "and",
+            (
+                SemanticExpression.predicate("at", ("target-a",)),
+                SemanticExpression.predicate("at", ("target-b",)),
+            ),
+        ),
+        world_context={"scene_id": "scene-51", "agent_ids": [0, 1]},
+    )
+    semantic_path = tmp_path / "authoritative-semantic-evidence.json"
+    semantic_path.write_text(json.dumps(evidence.to_json()), encoding="utf-8")
+    grounding_reader = HttpMissionGroundingReader(
+        "http://controller.test",
+        "http://artifact.test",
+        1.0,
+        4,
+        4,
+        EmptyGroundingTransport(),
+        semantic_evidence_path=semantic_path,
+    )
+    interpreter = FakeInterpreter()
+    planner = FakePlanner()
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN), _review()])
+    repairer = FakeRepairer()
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        interpreter,
+        reviewer,
+        repairer,
+        controller,
+        planner=planner,
+        grounding_reader=grounding_reader,
+    )
+
+    accepted = engine.create("执行联合目标")
+
+    assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    context = accepted.grounding_context
+    assert context is not None
+    assert context.semantic_evidence == evidence
+    all_contexts = [
+        *interpreter.grounding_contexts,
+        *planner.grounding_contexts,
+        *reviewer.grounding_contexts,
+        *repairer.grounding_contexts,
+    ]
+    assert all(item is context for item in all_contexts)
+    assert controller.submissions == [accepted.plan]
 
 
 def test_repairable_review_produces_a_new_approved_draft_revision(tmp_path: Path) -> None:
