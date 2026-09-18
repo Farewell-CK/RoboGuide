@@ -51,9 +51,9 @@ an attempt or attributable failure cannot. Waiting never fabricates either evide
 INVALID_PROVENANCE, or INVALID_INFRA. This classification is independent of
 the raw benchmark boolean and of process exit status.
 
-## Execution provenance v0.2
+## Execution provenance v0.3
 
-`roboguide.e1.b1-provenance/v0.2` links:
+`roboguide.e1.b1-provenance/v0.3` links:
 
 1. Archived frozen input and initial User/Instruction dialogue.
 2. Exact public MI request record and separately versioned observations.
@@ -61,6 +61,8 @@ the raw benchmark boolean and of process exit status.
 4. The digest of the actual bytes supplied to HTTP POST /v1/missions.
 5. Controller response MissionId/GroupId and current-group Task registrations.
 6. Current Mission/Group execution attempts or attributable boundary failure.
+7. Environment-authoritative, benchmark-neutral semantic evidence, including
+   the exact joint terminal-state goal and its frozen identity/digest.
 
 The MI digest and actual-submission digest both use
 `sha256:<hex>` over sorted-key, compact UTF-8 JSON with
@@ -89,6 +91,12 @@ evidence does not invalidate execution provenance. A present benchmark that
 disagrees with its recorded link becomes unavailable for benchmark assessment;
 it does not rewrite execution identity. v0.1 is rejected rather than silently
 reinterpreted under these rules.
+
+Semantic goal coverage is a separate MI/model diagnostic. Reviewer and Repairer
+receive the frozen goal structure and must preserve its conjunction and every
+predicate. The verifier records coverage diagnostics for the final MissionPlan,
+but an omitted predicate is a RoboGuide/model outcome, not a provenance failure;
+it remains in the Formal population when the execution chain is otherwise valid.
 
 Evidence producers and the archive collection environment are trusted.
 SHA-256 detects inconsistent/tampered links; it is not a digital signature

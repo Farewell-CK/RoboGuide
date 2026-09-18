@@ -57,7 +57,7 @@ failure observation，两个 plan digest 相等；collector/Harness 未报告 sy
 | Mission Request observability | public v0.4 字段集合不变；sidecar 保存实际请求 digest；Core acceptance/commit/bind 文件与 Core source 相同 |
 | Controller checkpoint | service wrapper v16 内含 integration v15，分别校验版本；registry watermark 不恢复 live routing |
 | Mission Request store | `roboguide.mission-request-storage/v0.1` 私有 envelope，原有表内原子保存；legacy bare row 可读，旧 binary 降级仍需显式 migration |
-| Evaluation artifacts | provenance v0.2、verdict v0.2、admission v0.1；只消费归档，不写入 Controller 或 MI store |
+| Evaluation artifacts | provenance v0.3、verdict v0.2、admission v0.1；semantic evidence 绑定和 goal coverage diagnostic 只消费归档，不写入 Controller 或 MI store |
 | Scheduling × Eval | AssignmentUnavailable → ActivationRevalidation；distinct shortage → DistinctEntitiesUnavailable；WindowMissed → 非 fatal deferral；没有 failure 事实不产生 SUT/infra failure |
 
 ## Gates

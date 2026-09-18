@@ -10,8 +10,9 @@ after Commit and Group Bind. A joint physical goal can additionally require two 
 executors. Actor identity, Role cardinality, Physical Entity, Node, Physical Host, and Local
 EAIOS are different concepts. Neither a second Actor name nor a second Node automatically
 establishes physical distinctness. Mission Intelligence cannot infer entity identity from live
-deployment inventory. The B1 application currently posts only instruction text; its stored
-goal predicates and world context do not yet enter Mission grounding.
+deployment inventory. The B1 environment adapter now admits benchmark-neutral authoritative
+goal and world evidence into the immutable Mission grounding snapshot; this does not claim that
+a real B1 episode or the semantic-ingress protocol has been experimentally closed.
 
 ## Decision
 

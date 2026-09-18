@@ -98,10 +98,11 @@ RoboGuide 执行。因此 manifest 的 `episode_selection` 区分两层：
 
 相同 episode 仍不足以形成 paired workload。两侧还必须覆盖同一 semantic goal
 predicates。当前 episode 51 的官方任务要求两个 agent 分别满足两个 `any_at`
-谓词，而 C1-S0B RoboGuide Mission 只覆盖其中一个导航谓词；因此
-[`e1/controlled-workload-v0.1.yaml`](e1/controlled-workload-v0.1.yaml) 明确保持
-`admission.status: blocked`。这条 smoke 可以验证 Local boundary，但不能产生
-Formal E1 comparative score。
+谓词；Habitat adapter 会把完整的 joint terminal-state goal 冻结进 Mission
+Grounding Context。最终 MissionPlan 是否覆盖全部谓词由 MI Reviewer/Repairer 和
+provenance diagnostic 记录；遗漏谓词属于 RoboGuide/model outcome，不会伪造成
+provenance invalid，也不会把该次观察从 Formal population 中静默排除。只有官方
+`pddl_success` 可用时，run 才能进入 benchmark population。
 
 **scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
 `dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不
