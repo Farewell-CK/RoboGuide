@@ -3,10 +3,9 @@
 The official Habitat ``pddl_success`` is the only benchmark success authority.
 A benchmark outcome may only become ``True``/``False`` when authoritative
 Habitat evidence explicitly carries that boolean; missing, malformed,
-partial, or non-executed evidence stays ``UNAVAILABLE`` and never becomes a
-failure. Run validity (population admission) is classified independently from
-the benchmark outcome so invalid runs never enter formal success-rate
-denominators while their evidence is fully retained.
+or non-boolean authority stays ``UNAVAILABLE`` and never becomes a failure.
+Formal observations need no benchmark authority; benchmark-rate denominators
+are selected separately by the canonical provenance-aware admission policy.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ class RunValidity(StrEnum):
     """Independent run-validity classification for formal population admission."""
 
     VALID_RUN = "VALID_RUN"
+    INVALID_PROVENANCE = "INVALID_PROVENANCE"
     INVALID_INFRA = "INVALID_INFRA"
     SYSTEM_FAILURE = "SYSTEM_FAILURE"
     MODEL_FAILURE = "MODEL_FAILURE"
@@ -96,7 +96,7 @@ def assess_benchmark_evidence(
         The complete assessment. The benchmark outcome is ``TRUE``/``FALSE``
         only when the authority document explicitly carries
         ``official_pddl_success`` as a bool; everything else — missing
-        document, missing field, non-bool field, empty outcomes — is
+        document, missing field, or non-bool field — is
         ``UNAVAILABLE``. ``local_skill_completed`` additionally requires
         every expected agent's outcome with a strict bool field, so an empty
         or partial population never yields ``all([]) is True``.
@@ -124,18 +124,8 @@ def assess_benchmark_evidence(
     try:
         observed = tuple(sorted(outcomes, key=int))
     except ValueError:
-        # Malformed authority evidence (non-numeric agent keys) must fail
-        # closed for the evaluator, never crash it.
-        return BenchmarkEvidenceAssessment(
-            outcome=BenchmarkOutcome.UNAVAILABLE,
-            outcome_reason="authority_agent_keys_malformed",
-            local_skill_completed=None,
-            local_agent_failure=None,
-            numeric_aggregates={},
-            expected_agents=expected_agents,
-            observed_agents=tuple(outcomes),
-            authority_document_present=True,
-        )
+        # Local outcome metadata never overrides official pddl_success.
+        observed = tuple(sorted(outcomes))
 
     pddl = _bool_field(summary.get("official_pddl_success"))
     if pddl is None:
@@ -222,84 +212,33 @@ def classify_run_validity(
     process_status: str | None,
     benchmark_outcome: BenchmarkOutcome,
 ) -> RunValidityAssessment:
-    """Classify run validity independently from the benchmark outcome.
+    """Adapt non-B1 callers to the canonical policy without guessing infrastructure.
 
-    Evidence completeness (authority document present), real episode
-    execution (episode started), and an authoritative termination fact are
-    required before a run may count as population-valid; explicit
-    infrastructure or system failure facts mark invalid classes with the
-    evidence retained.
+    Formal B1 must use provenance-aware assess_b1_run instead. Historical
+    completeness/episode arguments remain observational compatibility inputs.
     """
-    reasons: list[str] = []
-    if not authority_present:
-        reasons.append("authority_document_missing")
-    if not episode_started:
-        reasons.append("episode_never_started")
-    if authority_present and episode_terminated is None:
-        reasons.append("termination_fact_missing")
+    from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
 
-    if infrastructure_failure is True:
-        return RunValidityAssessment(
-            validity=RunValidity.INVALID_INFRA,
-            valid_for_formal_population=False,
-            benchmark_authority_available=False,
-            valid_for_benchmark_population=False,
-            system_failure=False,
-            model_failure=None,
-            reasons=tuple(reasons + ["infrastructure_failure_explicit"]),
-        )
-    if not authority_present or not episode_started:
-        return RunValidityAssessment(
-            validity=RunValidity.INVALID_INFRA,
-            valid_for_formal_population=False,
-            benchmark_authority_available=False,
-            valid_for_benchmark_population=False,
-            system_failure=False,
-            model_failure=None,
-            reasons=tuple(reasons),
-        )
-    if authority_present and episode_started and episode_terminated is None:
-        # The episode genuinely ran but no authoritative terminal fact exists,
-        # so the benchmark outcome cannot be trusted as final evidence.
-        return RunValidityAssessment(
-            validity=RunValidity.INVALID_INFRA,
-            valid_for_formal_population=False,
-            benchmark_authority_available=True,
-            valid_for_benchmark_population=False,
-            system_failure=False,
-            model_failure=None,
-            reasons=tuple(reasons),
-        )
-    if process_status is not None and process_status != "completed":
-        return RunValidityAssessment(
-            validity=RunValidity.INVALID_INFRA,
-            valid_for_formal_population=False,
-            benchmark_authority_available=True,
-            valid_for_benchmark_population=False,
-            system_failure=False,
-            model_failure=None,
-            reasons=tuple(reasons + [f"process_status_{process_status}"]),
-        )
-    if benchmark_outcome is BenchmarkOutcome.UNAVAILABLE:
-        return RunValidityAssessment(
-            validity=RunValidity.VALID_RUN,
-            valid_for_formal_population=True,
-            benchmark_authority_available=False,
-            valid_for_benchmark_population=False,
-            system_failure=False,
-            model_failure=None,
-            reasons=tuple(reasons + ["benchmark_outcome_unavailable"]),
-        )
-    # The episode ran to an authoritative terminal state. A SUT system or
-    # model failure stays inside the formal population as an observation:
-    # excluding it would create survivorship bias.
-    system_failure = mission_status == "Failed"
+    del authority_present, episode_started, episode_terminated, process_status
+    owner = (
+        FailureOwner.EXTERNAL_INFRA
+        if infrastructure_failure is True
+        else FailureOwner.SUT_SYSTEM
+        if mission_status == "Failed"
+        else FailureOwner.NONE
+    )
+    result = assess_b1_run(
+        provenance_valid=True,
+        provenance_failures=(),
+        failure_owner=owner,
+        benchmark_outcome=benchmark_outcome,
+    )
     return RunValidityAssessment(
-        validity=RunValidity.VALID_RUN,
-        valid_for_formal_population=True,
-        benchmark_authority_available=True,
-        valid_for_benchmark_population=True,
-        system_failure=system_failure,
-        model_failure=False,
-        reasons=tuple(reasons) or ("evidence_complete",),
+        validity=RunValidity(result.run_validity.value),
+        valid_for_formal_population=result.valid_for_formal_population,
+        benchmark_authority_available=result.benchmark_authority_available,
+        valid_for_benchmark_population=result.valid_for_benchmark_population,
+        system_failure=result.system_failure,
+        model_failure=result.model_failure,
+        reasons=result.reasons,
     )

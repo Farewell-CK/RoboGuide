@@ -437,7 +437,6 @@ def summarize_results(results_root: Path) -> JSONObject:
                     # denominator while their evidence stays summarized.
                     population_admitted = values.get("valid_for_benchmark_population")
                     formal_admitted = values.get("valid_for_formal_population")
-                    authority_available = values.get("benchmark_authority_available")
                     success = values.get("success")
                     if isinstance(success, bool) and population_admitted is True:
                         success_known += 1
@@ -452,13 +451,14 @@ def summarize_results(results_root: Path) -> JSONObject:
                         formal_total += 1
                         if formal_admitted:
                             formal_admitted_count += 1
-                    if values.get("system_failure_observed") is True or (
-                        values.get("system_failure") is True and formal_admitted is True
+                    if formal_admitted is True and (
+                        values.get("system_failure_observed") is True
+                        or values.get("system_failure") is True
                     ):
                         system_failure_count += 1
-                    if values.get("model_failure") is True:
+                    if values.get("model_failure") is True and formal_admitted is True:
                         model_failure_count += 1
-                    if formal_admitted is False and authority_available is not True:
+                    if values.get("infrastructure_failure") is True:
                         invalid_infra_count += 1
                     wall_time = values.get("wall_time")
                     if isinstance(wall_time, int | float) and not isinstance(wall_time, bool):

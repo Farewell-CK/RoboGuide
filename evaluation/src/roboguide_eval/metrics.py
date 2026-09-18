@@ -181,7 +181,7 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
         "system_failure_observed",
         "boolean",
         None,
-        "a system-under-test failure is retained as a formal-population observation",
+        "an explicit system-under-test failure observation, independent of population admission",
     ),
     MetricDefinition(
         "valid_for_formal_population",
@@ -194,6 +194,12 @@ CANONICAL_METRICS: Final[tuple[MetricDefinition, ...]] = (
         "boolean",
         None,
         "the official Habitat benchmark authority produced a strict-bool outcome",
+    ),
+    MetricDefinition(
+        "valid_for_benchmark_population",
+        "boolean",
+        None,
+        "the run is formally admitted and has an authoritative benchmark outcome",
     ),
     MetricDefinition(
         "local_agent_failure",

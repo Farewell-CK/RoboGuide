@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from roboguide_eval.benchmark_evidence import (
@@ -110,6 +109,13 @@ def test_f06_pddl_not_bool_is_unavailable() -> None:
         assert assessment.outcome_reason == "official_pddl_success_missing_or_not_bool"
 
 
+def test_local_metadata_never_replaces_official_benchmark_authority() -> None:
+    """A malformed local agent id cannot turn an explicit official bool into unavailable."""
+    result = assess_benchmark_evidence(_summary(pddl=False, outcomes={"bad-id": _outcome()}))
+    assert result.outcome is BenchmarkOutcome.FALSE
+    assert result.local_skill_completed is None
+
+
 def test_f06_skill_field_not_bool_is_unavailable() -> None:
     """A non-bool skill field keeps the population-derived boolean unknown."""
     summary = _summary(
@@ -124,7 +130,7 @@ def test_f06_skill_field_not_bool_is_unavailable() -> None:
     assert assessment.local_skill_completed is None
 
 
-def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
+def test_f06_validity_classification_matrix() -> None:
     """Run validity is classified independently of the benchmark outcome."""
     # Complete evidence, valid run.
     ok = classify_run_validity(
@@ -153,12 +159,12 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         process_status="completed",
         benchmark_outcome=BenchmarkOutcome.FALSE,
     )
-    assert sys_obs.validity is RunValidity.VALID_RUN
+    assert sys_obs.validity is RunValidity.SYSTEM_FAILURE
     assert sys_obs.valid_for_formal_population is True
     assert sys_obs.system_failure is True
     assert sys_obs.valid_for_benchmark_population is True
 
-    # Missing authority document -> invalid infra.
+    # Missing authority never implies an infrastructure failure.
     missing = classify_run_validity(
         authority_present=False,
         episode_started=False,
@@ -168,9 +174,10 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         process_status=None,
         benchmark_outcome=BenchmarkOutcome.UNAVAILABLE,
     )
-    assert missing.validity is RunValidity.INVALID_INFRA
+    assert missing.validity is RunValidity.VALID_RUN
+    assert missing.valid_for_formal_population
     assert not missing.valid_for_benchmark_population
-    assert "authority_document_missing" in missing.reasons
+    assert "benchmark_authority_unavailable" in missing.reasons
 
     # Initialization failure (episode never started, authority absent).
     init = classify_run_validity(
@@ -183,7 +190,7 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         benchmark_outcome=BenchmarkOutcome.UNAVAILABLE,
     )
     assert init.validity is RunValidity.INVALID_INFRA
-    assert "infrastructure_failure_explicit" in init.reasons
+    assert "external_infrastructure_failure_explicit" in init.reasons
 
     # Episode started but no authoritative terminal fact.
     unterm = classify_run_validity(
@@ -195,10 +202,11 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         process_status=None,
         benchmark_outcome=BenchmarkOutcome.UNAVAILABLE,
     )
-    assert unterm.validity is RunValidity.INVALID_INFRA
-    assert "termination_fact_missing" in unterm.reasons
+    assert unterm.validity is RunValidity.VALID_RUN
+    assert unterm.valid_for_formal_population
+    assert "benchmark_authority_unavailable" in unterm.reasons
 
-    # System failure keeps evidence but stays out of the population.
+    # System failure remains a formal observation.
     sys_fail = classify_run_validity(
         authority_present=True,
         episode_started=True,
@@ -208,6 +216,6 @@ def test_f06_validity_classification_matrix(tmp_path: Path) -> None:
         process_status="completed",
         benchmark_outcome=BenchmarkOutcome.FALSE,
     )
-    assert sys_fail.validity is RunValidity.VALID_RUN
+    assert sys_fail.validity is RunValidity.SYSTEM_FAILURE
     assert sys_fail.system_failure is True
     assert sys_fail.valid_for_formal_population is True

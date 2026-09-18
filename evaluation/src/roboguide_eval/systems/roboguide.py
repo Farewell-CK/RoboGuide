@@ -9,15 +9,17 @@ Habitat skill, mutates Control, or infers benchmark success from Mission state.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import TypeGuard, cast
 
+from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
+from roboguide_eval.b1_run import B1_FILES, consume_b1_verdict
 from roboguide_eval.benchmark_evidence import (
     BenchmarkOutcome,
     assess_benchmark_evidence,
-    classify_run_validity,
 )
-from roboguide_eval.metrics import MetricsPayload, RawEvidenceRef
+from roboguide_eval.metrics import MetricsError, MetricsPayload, RawEvidenceRef
 from roboguide_eval.models import JSONObject, JSONValue
 from roboguide_eval.process import ProcessOutcome
 from roboguide_eval.runner import PreparedSystem, ProcessSystemRunner
@@ -115,7 +117,35 @@ class RoboGuideRunner(ProcessSystemRunner):
             Canonical values plus independent Mission, Local EAIOS, episode,
             and benchmark evidence. Missing evidence remains unavailable.
         """
-        base = super().collect_result(prepared, run_directory, outcome)
+        formal_b1 = (
+            prepared.process_spec.environment_overrides.get("ROBOGUIDE_EVAL_PROTOCOL") == "B1"
+            or any(Path(arg).name == "run-b1-roboguide.sh" for arg in prepared.process_spec.argv)
+            or any(
+                (run_directory / name).exists()
+                for name in (
+                    *[path for path in B1_FILES if path.startswith("b1-")],
+                    "b1-verdict.json",
+                )
+            )
+        )
+        try:
+            base = super().collect_result(prepared, run_directory, outcome)
+        except MetricsError as error:
+            if not formal_b1:
+                raise
+            # Optional raw scalar metrics cannot suppress the authoritative B1 gate.
+            without_raw_metrics = replace(
+                prepared,
+                environment_spec=replace(prepared.environment_spec, metrics_source_path=None),
+            )
+            base = super().collect_result(without_raw_metrics, run_directory, outcome)
+            base = MetricsPayload(
+                values=base.values,
+                details={"raw_metrics_validation_error": str(error)},
+                raw_evidence=base.raw_evidence,
+            )
+        if formal_b1:
+            return self._collect_formal_b1(base, run_directory, outcome)
         values = dict(base.values)
         details = dict(base.details)
         evidence = list(base.raw_evidence)
@@ -233,6 +263,56 @@ class RoboGuideRunner(ProcessSystemRunner):
         )
         return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
 
+    def _collect_formal_b1(
+        self, base: MetricsPayload, run_directory: Path, outcome: ProcessOutcome
+    ) -> MetricsPayload:
+        """Consume the persisted, revalidated B1 gate before emitting any population metrics."""
+        verdict = consume_b1_verdict(
+            run_directory,
+            harness_start_failure=(
+                outcome.failure_reason() if outcome.status == "start_failed" else None
+            ),
+        )
+        admission = verdict["admission"]
+        values = dict(base.values)
+        # A generic process payload cannot override this protocol's authority.
+        for name in ("success", "system_failure", "model_failure", "infrastructure_failure"):
+            values.pop(name, None)
+        for name in (
+            "valid_for_formal_population",
+            "benchmark_authority_available",
+            "valid_for_benchmark_population",
+            "system_failure",
+            "model_failure",
+        ):
+            values[name] = admission[name]
+        values["system_failure_observed"] = admission["system_failure"]
+        values["infrastructure_failure"] = admission["failure_owner"] == "EXTERNAL_INFRA"
+        benchmark = admission["benchmark_outcome"]
+        if benchmark != BenchmarkOutcome.UNAVAILABLE:
+            values["success"] = benchmark == BenchmarkOutcome.TRUE
+        details = dict(base.details)
+        details.update(
+            {
+                "b1_admission": verdict["admission"],
+                "protocol_provenance": verdict["protocol_provenance"],
+                "system_outcome": verdict["system_outcome"],
+                "benchmark_tri_state": benchmark,
+                "failure_owner": admission["failure_owner"],
+                "run_validity": admission["run_validity"],
+                "population_admission_reasons": list(admission["reasons"]),
+                "benchmark_success_source": "official Habitat pddl_success",
+            }
+        )
+        evidence = list(base.raw_evidence)
+        known = {item.path for item in evidence}
+        for name in (*B1_FILES, "b1-verdict.json"):
+            if name not in known and (run_directory / name).is_file():
+                evidence.append(
+                    RawEvidenceRef(name, "Formal B1 protocol evidence", "application/json")
+                )
+        return MetricsPayload(values=values, details=details, raw_evidence=tuple(evidence))
+
     def _collect_shared_world(
         self,
         verdict: dict[str, object],
@@ -326,22 +406,20 @@ class RoboGuideRunner(ProcessSystemRunner):
         if all(isinstance(value, bool) for value in dispatches):
             values["physical_dispatch_count"] = sum(1 for value in dispatches if value)
         controller_alive = checks.get("controller_alive")
-        if isinstance(controller_alive, bool):
-            values["infrastructure_failure"] = not controller_alive
+        if controller_alive is False:
+            values["system_failure"] = True
 
-        episode_started = bool(summary_document is not None and episode_terminated is not None)
-        validity = classify_run_validity(
-            authority_present=assessment.authority_document_present,
-            episode_started=episode_started,
-            episode_terminated=episode_terminated,
-            infrastructure_failure=(
-                infrastructure_flag
-                if (infrastructure_flag := values.get("infrastructure_failure"))
-                and isinstance(infrastructure_flag, bool)
-                else None
+        # Shared-world/B2 diagnostics never acquire Formal B1 provenance by inference.
+        validity = assess_b1_run(
+            provenance_valid=False,
+            provenance_failures=("non_b1_diagnostic_run",),
+            failure_owner=(
+                FailureOwner.EXTERNAL_INFRA
+                if values.get("infrastructure_failure") is True
+                else FailureOwner.SUT_SYSTEM
+                if controller_alive is False or mission_status == "Failed"
+                else FailureOwner.NONE
             ),
-            mission_status=mission_status,
-            process_status=None,
             benchmark_outcome=assessment.outcome,
         )
         values["valid_for_benchmark_population"] = validity.valid_for_benchmark_population
@@ -359,7 +437,7 @@ class RoboGuideRunner(ProcessSystemRunner):
                 "benchmark_outcome_reason": assessment.outcome_reason,
                 "expected_outcome_agents": list(assessment.expected_agents),
                 "observed_outcome_agents": list(assessment.observed_agents),
-                "run_validity": validity.validity.value,
+                "run_validity": validity.run_validity.value,
                 "population_admission_reasons": list(validity.reasons),
                 "system_failure_observed": validity.system_failure,
                 "identity": cast(JSONValue, identity),

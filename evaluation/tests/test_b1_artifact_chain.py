@@ -1,395 +1,206 @@
-"""End-to-end F-06/F-07 artifact-chain integration test.
-
-Builds a real run directory (frozen input, MI request record, Controller
-mission view + events, execution attempts, benchmark summary), generates the
-provenance artifact with the canonical builder, runs verify-b1, reduces to a
-MetricsPayload-shaped values map, and passes it through summarize_results —
-proving that a provenance-failing run never enters the wrong population, a
-SUT system failure stays a formal observation, and a missing Habitat
-authority never becomes a benchmark false.
-"""
+"""Prove artifacts -> verifier -> persisted admission -> Runner -> metrics -> summary."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-EVAL_SRC = REPO_ROOT / "evaluation" / "src"
-SCENARIO = REPO_ROOT / "scenarios" / "e1-shared-world-episode-51"
-
-sys.path.insert(0, str(EVAL_SRC))
-
-from roboguide_eval.b1_provenance import (  # noqa: E402
-    build_b1_provenance_record,
-    write_b1_provenance,
-)
-from roboguide_eval.results import summarize_results  # noqa: E402
-from roboguide_eval.systems.roboguide import RoboGuideRunner  # # noqa: E402
-
-MANIFEST = {
-    "schema": "roboguide-eval.run-manifest/v0.1",
-    "experiment_id": "chain-test",
-    "system": "roboguide",
-    "run_id": "chain-run-1",
-    "episode_id": "51",
-    "seed": 40,
-    "process_status": "completed",
-    "exit_code": 0,
-}
-
-FROZEN_INPUT: dict[str, Any] = {
-    "schema": "roboguide.e1.b1-input/v0.1",
-    "mission": {"episode_id": "51", "seed": 40},
-    "instruction": "Two heterogeneous robots cover both official goals.",
-}
-
-MI_PLAN: dict[str, Any] = {
-    "schema_version": "roboguide.mission-plan/v0.8",
-    "mission": {
-        "id": "mission-chain-test",
-        "objective": "cover both goals",
-        "actors": [{"id": "a"}, {"id": "b"}],
-    },
-    "contexts": [],
-    "tasks": [
-        {"id": "reach-object", "roles": [], "context_id": "ctx", "depends_on": []},
-        {"id": "reach-goal", "roles": [], "context_id": "ctx", "depends_on": []},
-    ],
-}
+import pytest
+from b1_helpers import ROOT, make_run, write_json
+from roboguide_eval.models import EnvironmentSpec
+from roboguide_eval.process import ProcessManager, ProcessOutcome, ProcessSpec
+from roboguide_eval.results import summarize_results
+from roboguide_eval.runner import PreparedSystem
+from roboguide_eval.systems.roboguide import RoboGuideRunner
 
 
-def _request_record() -> dict[str, Any]:
-    """Build one genuine MI request record with generation evidence."""
-    return {
-        "request_id": "request-chain-1",
-        "mission_id": "mission-chain-test",
-        "lifecycle": "Accepted",
-        "plan": MI_PLAN,
-        "draft_digest": "sha256:placeholder",
-        "draft_revision": 1,
-        "review_history": [{"revision": 1, "outcome": "approved"}],
-        "dialogue": [
-            {
-                "kind": "instruction",
-                "content": FROZEN_INPUT["instruction"],
-            }
-        ],
-    }
-
-
-def _mission_view() -> dict[str, Any]:
-    """Build the Controller mission status view (identity only)."""
-    return {
-        "mission_id": "mission-chain-test",
-        "group_id": "group-mission-chain-test",
-        "status": "Completed",
-        "tasks": [
-            {"task_id": "reach-object", "status": "Completed"},
-            {"task_id": "reach-goal", "status": "Completed"},
-        ],
-        "relations": [],
-        "peer_channels": [],
-    }
-
-
-def _events() -> dict[str, Any]:
-    """Build Controller events with group creation and task registration."""
-    return {
-        "events": [
-            {
-                "sequence": 1,
-                "payload": {
-                    "ExecutionGroupCreated": {
-                        "group_id": "group-mission-chain-test",
-                        "mission_id": "mission-chain-test",
-                    }
-                },
-            },
-            {
-                "sequence": 2,
-                "payload": {
-                    "TaskExecutionRegistered": {
-                        "group_id": "group-mission-chain-test",
-                        "task_ref": {
-                            "mission_id": "mission-chain-test",
-                            "task_id": "reach-object",
-                        },
-                    }
-                },
-            },
-            {
-                "sequence": 3,
-                "payload": {
-                    "TaskExecutionRegistered": {
-                        "group_id": "group-mission-chain-test",
-                        "task_ref": {
-                            "mission_id": "mission-chain-test",
-                            "task_id": "reach-goal",
-                        },
-                    }
-                },
-            },
-        ]
-    }
-
-
-def _attempts() -> dict[str, Any]:
-    """Build Node execution attempt evidence."""
-    return {
-        "schema": "roboguide.execution-attempt-history/v0.1",
-        "attempts": [
-            {
-                "execution_id": "attempt-1",
-                "mission_id": "mission-chain-test",
-                "task_id": "reach-object",
-                "node_id": "node-a",
-                "status": "Completed",
-            },
-            {
-                "execution_id": "attempt-2",
-                "mission_id": "mission-chain-test",
-                "task_id": "reach-goal",
-                "node_id": "node-b",
-                "status": "Completed",
-            },
-        ],
-    }
-
-
-def _benchmark(pddl: bool | None) -> dict[str, Any] | None:
-    """Build the shared-world authority summary."""
-    if pddl is None:
-        return {"identity": {"episode_id": "51"}, "outcomes": {}}
-    return {
-        "identity": {"episode_id": "51", "episode_terminated": True},
-        "official_pddl_success": pddl,
-        "outcomes": {
-            "0": {"state": "COMPLETED", "local_skill_completed": True},
-            "1": {"state": "COMPLETED", "local_skill_completed": True},
-        },
-    }
-
-
-def _shared_world_verdict(benchmark: dict[str, Any] | None) -> dict[str, Any]:
-    """Build the shared-world verdict shape the runner consumes."""
-    return {
-        "schema": "roboguide.e1-shared-world-verdict/v0.1",
-        "verdict": "PASS",
-        "checks": {
-            "official_pddl_success": (
-                benchmark.get("official_pddl_success") if benchmark is not None else None
-            ),
-            "controller_alive": True,
-            "node_a_exactly_once": True,
-            "node_b_exactly_once": True,
-        },
-        "context": {
-            "mission_status": "Completed",
-            "identity": {"episode_id": "51", "episode_terminated": True},
-            "outcomes": (benchmark or {}).get("outcomes", {}),
-            "task_statuses": {},
-            "peer_communication": {},
-        },
-    }
-
-
-def _write_run(
-    tmp_path: Path,
-    *,
-    benchmark: dict[str, Any] | None,
-    include_provenance: bool = True,
-) -> Path:
-    """Materialize one complete run directory from real artifacts."""
-    run = tmp_path / "chain-run-1"
-    run.mkdir(parents=True)
-    (run / "b1-input-used.json").write_text(json.dumps(FROZEN_INPUT, indent=2), encoding="utf-8")
-    (run / "b1-request-record.json").write_text(
-        json.dumps(_request_record(), indent=2), encoding="utf-8"
+def verify(run: Path) -> dict[str, Any]:
+    """Invoke the actual scenario verifier, which persists admission before collection."""
+    spec = importlib.util.spec_from_file_location(
+        "verify_b1", ROOT / "scenarios/e1-shared-world-episode-51/verify-b1.py"
     )
-    (run / "mission.json").write_text(json.dumps(_mission_view(), indent=2), encoding="utf-8")
-    (run / "events.json").write_text(json.dumps(_events()), encoding="utf-8")
-    (run / "execution-attempts.json").write_text(
-        json.dumps(_attempts(), indent=2), encoding="utf-8"
-    )
-    (run / "evidence").mkdir()
-    if benchmark is not None:
-        (run / "evidence" / "shared-world-summary.json").write_text(
-            json.dumps(benchmark, indent=2), encoding="utf-8"
-        )
-    (run / "verdict.json").write_text(
-        json.dumps(_shared_world_verdict(benchmark), indent=2), encoding="utf-8"
-    )
-    (run / "manifest.json").write_text(json.dumps(MANIFEST, indent=2), encoding="utf-8")
-    if include_provenance:
-        record = build_b1_provenance_record(
-            run_id="chain-run-1",
-            frozen_input_path=run / "b1-input-used.json",
-            request_record_path=run / "b1-request-record.json",
-            controller_mission_path=run / "mission.json",
-            controller_events_path=run / "events.json",
-            execution_attempts_path=run / "execution-attempts.json",
-            shared_world_summary_path=run / "evidence/shared-world-summary.json",
-        )
-        write_b1_provenance(record, run / "b1-provenance.json")
-    _reduce_metrics(run)
-    return run
-
-
-def _reduce_metrics(run: Path) -> None:
-    """Reduce the run through the real RoboGuideRunner into metrics.json."""
-    from roboguide_eval.models import EnvironmentSpec
-    from roboguide_eval.process import ProcessOutcome, ProcessSpec
-    from roboguide_eval.runner import PreparedSystem
-
-    stdout_path = run / "stdout.log"
-    stdout_path.write_text("", encoding="utf-8")
-    stderr_path = run / "stderr.log"
-    stderr_path.write_text("", encoding="utf-8")
-    argv = ("bash", "run-b1-roboguide.sh", str(run))
-    outcome = ProcessOutcome(
-        argv=argv,
-        working_directory=REPO_ROOT,
-        status="completed",
-        exit_code=0,
-        timed_out=False,
-        duration_seconds=1.0,
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-    )
-    prepared = PreparedSystem(
-        system="roboguide",
-        process_spec=ProcessSpec(
-            argv=argv,
-            working_directory=REPO_ROOT,
-            environment_overrides={},
-            timeout_seconds=60.0,
-        ),
-        environment_spec=EnvironmentSpec(name="roboguide", expected_output_paths=()),
-        system_version=None,
-        config_digest="chain-test",
-    )
-    payload = _runner().collect_result(prepared, run, outcome)
-    (run / "metrics.json").write_text(
-        json.dumps(
-            {"values": dict(payload.values), "details": dict(payload.details)},
-            indent=2,
-            default=str,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _aggregate(summary: dict[str, Any]) -> dict[str, Any]:
-    """Narrow the summarize_results aggregate to a string-keyed mapping."""
-    aggregate = summary.get("aggregate")
-    assert isinstance(aggregate, dict)
-    return aggregate
-
-
-def _verify_b1(run: Path) -> dict[str, Any]:
-    """Load verify-b1.py from the scenario and run it on one directory."""
-    spec = importlib.util.spec_from_file_location("verify_b1_chain", SCENARIO / "verify-b1.py")
-    if spec is None or spec.loader is None:
-        raise AssertionError("verify-b1.py could not be loaded")
-    module: Any = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     result: dict[str, Any] = module.verify(run)
+    assert json.loads((run / "b1-verdict.json").read_text()) == result
     return result
 
 
-def _runner() -> RoboGuideRunner:
-    """Instantiate the runner with an idle process manager (no spawns here)."""
-    from roboguide_eval.process import ProcessManager
-    from roboguide_eval.systems.roboguide import RoboGuideRunner as _Runner
-
-    return _Runner(
-        process_manager=ProcessManager(),
-        environment={},
-        repository_root=REPO_ROOT,
+def collect(
+    run: Path,
+    *,
+    exit_code: int = 0,
+    start_failed: bool = False,
+    raw_metrics: str | None = None,
+    formal_b1: bool = True,
+) -> dict[str, Any]:
+    """Use the public Harness collect_result API and persist its actual MetricsPayload."""
+    argv = ("bash", "run-b1-roboguide.sh" if formal_b1 else "run-shared-world.sh", str(run))
+    prepared = PreparedSystem(
+        system="roboguide",
+        process_spec=ProcessSpec(argv, ROOT, {}, 60),
+        environment_spec=EnvironmentSpec(
+            name="roboguide", expected_output_paths=(), metrics_source_path=raw_metrics
+        ),
+        system_version=None,
+        config_digest="offline-protocol-test",
     )
+    outcome = ProcessOutcome(
+        argv, ROOT, "completed", 0, False, 1, run / "stdout.log", run / "stderr.log"
+    )
+    outcome = replace(
+        outcome, exit_code=exit_code, status="start_failed" if start_failed else "completed"
+    )
+    runner = RoboGuideRunner(process_manager=ProcessManager(), environment={}, repository_root=ROOT)
+    payload = runner.collect_result(prepared, run, outcome)
+    payload.validate()
+    document = payload.to_json()
+    write_json(run / "metrics.json", document)
+    return dict(document)
 
 
-def test_artifact_chain_valid_run_reaches_both_populations(tmp_path: Path) -> None:
-    """A fully valid chain is admitted to both formal and benchmark populations."""
-    run = _write_run(tmp_path, benchmark=_benchmark(True))
-    verdict = _verify_b1(run)
-    assert verdict["context"]["provenance_failures"] == []
-    assert verdict["checks"]["provenance_chain_passed"] is True
-    assert verdict["checks"]["valid_for_formal_population"] is True
-    assert verdict["checks"]["valid_for_benchmark_population"] is True
-    assert verdict["context"]["official_pddl_success"] is True
-
-    summary = summarize_results(tmp_path)
-    aggregate = _aggregate(summary)
-    assert aggregate["formal_population_admitted"] == 1
-    assert aggregate["benchmark_population_admitted"] == 1
-    assert aggregate["success_metric_known"] == 1
+def test_harness_nonzero_sut_exit_does_not_exclude_formal_observation(tmp_path: Path) -> None:
+    """The process exit status cannot override explicit SUT failure attribution."""
+    run = make_run(tmp_path, case="C")
+    verify(run)
+    metrics = collect(run, exit_code=1)
+    assert metrics["values"]["valid_for_formal_population"] is True
+    assert metrics["values"]["system_failure"] is True
 
 
-def test_artifact_chain_missing_authority_never_becomes_false(tmp_path: Path) -> None:
-    """A run whose Habitat authority is absent stays unavailable, not false."""
-    run = _write_run(tmp_path, benchmark=_benchmark(None))
-    verdict = _verify_b1(run)
-    # Missing authority: no benchmark boolean. Provenance alone can never
-    # admit the run — the verifier consumes the same canonical admission
-    # authority as the harness, which requires an authoritative outcome.
-    assert verdict["context"]["benchmark_tri_state"] == "BENCHMARK_UNAVAILABLE"
-    assert verdict["context"]["official_pddl_success"] is None
-    assert verdict["checks"]["provenance_chain_passed"] is True
-    assert verdict["checks"]["valid_for_benchmark_population"] is False
-    assert verdict["checks"]["valid_for_formal_population"] is False
-    admission = verdict["context"]["population_admission"]
-    assert admission["authority"] == "roboguide_eval.b1_provenance.admit_to_formal_population"
-    assert admission["provenance_passed"] is True
-    assert "benchmark_outcome_unavailable" in admission["invalid_reasons"]
-    # The success value never becomes False; it is simply absent from the
-    # benchmark denominator.
-    summary = summarize_results(tmp_path)
-    aggregate = _aggregate(summary)
-    assert aggregate["success_metric_known"] == 0
-    assert aggregate["benchmark_population_admitted"] == 0
+def test_harness_own_launch_failure_is_external_infrastructure(tmp_path: Path) -> None:
+    """An OS-level Harness launch failure is explicit infrastructure evidence."""
+    run = tmp_path / "never-launched"
+    run.mkdir()
+    metrics = collect(run, start_failed=True)
+    assert metrics["details"]["failure_owner"] == "EXTERNAL_INFRA"
+    assert metrics["values"]["valid_for_formal_population"] is False
 
 
-def test_artifact_chain_system_failure_stays_formal_observation(tmp_path: Path) -> None:
-    """A SUT system failure remains a formal-population observation."""
-    run = _write_run(tmp_path, benchmark=_benchmark(False))
-    mission = json.loads((run / "mission.json").read_text())
-    mission["status"] = "Failed"
-    (run / "mission.json").write_text(json.dumps(mission), encoding="utf-8")
-    verdict = _verify_b1(run)
-    # Provenance chain does not depend on mission status; the run remains
-    # formally admitted and the benchmark authority stays available.
-    assert verdict["checks"]["provenance_chain_passed"] is True
-    assert verdict["checks"]["valid_for_formal_population"] is True
-    assert verdict["context"]["benchmark_tri_state"] == "BENCHMARK_FALSE"
-    # A SUT failure with an authoritative benchmark outcome is a VALID_RUN
-    # observation: excluding it would create survivorship bias.
-    assert verdict["context"]["population_admission"]["run_validity"] == "VALID_RUN"
-    assert verdict["checks"]["valid_for_benchmark_population"] is True
+@pytest.mark.parametrize("case", ["A", "F"])
+def test_invalid_optional_scalar_metrics_cannot_disable_b1_gate(tmp_path: Path, case: str) -> None:
+    """The canonical gate still runs if an optional SUT metrics report fails validation."""
+    run = make_run(tmp_path, case=case)
+    verify(run)
+    write_json(run / "raw-metrics.json", {"values": {"success": "not-a-boolean"}})
+    metrics = collect(run, raw_metrics="raw-metrics.json")
+    assert metrics["values"]["valid_for_formal_population"] is (case == "A")
+    assert "raw_metrics_validation_error" in metrics["details"]
 
 
-def test_artifact_chain_provenance_fail_excluded_from_formal(tmp_path: Path) -> None:
-    """A run without a provenance artifact fails closed and is excluded from formal."""
-    run = _write_run(tmp_path, benchmark=_benchmark(True), include_provenance=False)
-    verdict = _verify_b1(run)
-    assert "provenance_record_missing" in verdict["context"]["provenance_failures"]
-    assert verdict["checks"]["valid_for_formal_population"] is False
-    assert verdict["verdict"] == "FAIL"
-    # Authorities stay separate: the episode ran to an authoritative outcome,
-    # so evidence validity (benchmark population) is unaffected by the
-    # provenance failure; only the formal population is provenance-gated.
-    admission = verdict["context"]["population_admission"]
-    assert admission["run_validity"] == "VALID_RUN"
-    assert verdict["checks"]["valid_for_benchmark_population"] is True
-    assert admission["provenance_passed"] is False
-    assert "provenance_record_missing" in admission["invalid_reasons"]
-    # The formal gate consumes the B1 verdict: with provenance failed, the
-    # verdict excludes the run and no formal consumer may count it.
-    metrics = json.loads((run / "metrics.json").read_text())
-    formal_gate = verdict["checks"]["valid_for_formal_population"] is False
-    assert formal_gate
-    assert metrics["details"].get("verdict") is not None
+@pytest.mark.parametrize(
+    ("case", "formal", "benchmark", "success", "owner"),
+    [
+        ("A", True, True, True, "NONE"),
+        ("B", True, True, False, "NONE"),
+        ("C", True, False, None, "SUT_SYSTEM"),
+        ("C-rejected", True, False, None, "SUT_SYSTEM"),
+        ("D", True, False, None, "MODEL"),
+        ("E", False, False, True, "EXTERNAL_INFRA"),
+        ("F", False, False, True, "NONE"),
+        ("G", True, False, None, "BENCHMARK_AUTHORITY_UNAVAILABLE"),
+    ],
+)
+def test_artifact_chain_truth_table(
+    tmp_path: Path, case: str, formal: bool, benchmark: bool, success: bool | None, owner: str
+) -> None:
+    """Every A-G population decision survives the complete production consumption order."""
+    run = make_run(tmp_path, case=case)
+    assert not (run / "metrics.json").exists()
+    verdict = verify(run)
+    assert not (run / "metrics.json").exists()
+    metrics = collect(run)
+    values = metrics["values"]
+    assert values["valid_for_formal_population"] is formal
+    assert values["valid_for_benchmark_population"] is benchmark
+    assert values.get("success") is success
+    if success is None:
+        assert "success" not in values
+        assert metrics["details"]["benchmark_tri_state"] == "BENCHMARK_UNAVAILABLE"
+    assert metrics["details"]["failure_owner"] == owner
+    assert values["system_failure"] is (owner == "SUT_SYSTEM")
+    assert values["model_failure"] is (owner == "MODEL")
+    assert metrics["details"]["b1_admission"] == verdict["admission"]
+    aggregate = summarize_results(tmp_path)["aggregate"]
+    assert isinstance(aggregate, dict)
+    assert aggregate["formal_population_admitted"] == int(formal)
+    assert aggregate["benchmark_population_admitted"] == int(benchmark)
+    assert aggregate["success_metric_known"] == int(benchmark)
+    assert aggregate["success_count"] == int(benchmark and success is True)
+    assert aggregate["invalid_infra_runs"] == int(owner == "EXTERNAL_INFRA")
+    if case.startswith("C"):
+        assert verdict["protocol_provenance"] == "VALID"
+        assert verdict["system_outcome"] == "FAILURE"
+        assert aggregate["system_failure_observations"] == 1
+    if case == "D":
+        assert aggregate["model_failure_observations"] == 1
+
+
+def test_harness_rejects_missing_persisted_admission(tmp_path: Path) -> None:
+    """Valid underlying evidence alone cannot bypass the persisted protocol gate."""
+    run = make_run(tmp_path)
+    metrics = collect(run)
+    assert metrics["values"]["valid_for_formal_population"] is False
+    verify(run)
+    assert collect(run)["values"]["valid_for_formal_population"] is True
+
+
+@pytest.mark.parametrize("tamper", ["admission", "request", "provenance"])
+def test_harness_rejects_stale_or_tampered_gate(tmp_path: Path, tamper: str) -> None:
+    """The Harness checks current evidence and never trusts a stale PASS document."""
+    run = make_run(tmp_path)
+    verify(run)
+    filename = {
+        "admission": "b1-verdict.json",
+        "request": "b1-request-record.json",
+        "provenance": "b1-provenance.json",
+    }[tamper]
+    document = json.loads((run / filename).read_text())
+    if tamper == "admission":
+        document["evidence_digest"] = "forged"
+    elif tamper == "request":
+        document["draft_digest"] = "digest-placeholder"
+    else:
+        document["accepted_plan_digest"] = "forged"
+    write_json(run / filename, document)
+    metrics = collect(run)
+    assert metrics["values"]["valid_for_formal_population"] is False
+    assert metrics["values"]["valid_for_benchmark_population"] is False
+
+
+def test_harness_does_not_fall_back_when_all_b1_artifacts_missing(tmp_path: Path) -> None:
+    """The configured B1 command still selects its mandatory gate without artifacts."""
+    run = tmp_path / "empty"
+    run.mkdir()
+    write_json(
+        run / "verdict.json",
+        {
+            "schema": "roboguide.e1-shared-world-verdict/v0.1",
+            "checks": {"official_pddl_success": True},
+            "context": {},
+        },
+    )
+    assert collect(run)["values"]["valid_for_formal_population"] is False
+
+
+def test_static_b2_success_cannot_enter_formal_b1_population(tmp_path: Path) -> None:
+    """A static diagnostic retains raw pddl success but has no Formal B1 admission."""
+    run = tmp_path / "static-b2"
+    run.mkdir()
+    write_json(
+        run / "verdict.json",
+        {
+            "schema": "roboguide.e1-shared-world-verdict/v0.1",
+            "checks": {},
+            "context": {"mission_status": "Completed", "identity": {"episode_terminated": True}},
+        },
+    )
+    write_json(run / "evidence/shared-world-summary.json", {"official_pddl_success": True})
+    metrics = collect(run, formal_b1=False)
+    assert metrics["values"]["success"] is True
+    assert metrics["values"]["valid_for_formal_population"] is False
+    assert metrics["values"]["valid_for_benchmark_population"] is False
