@@ -879,3 +879,136 @@ def test_environment_fingerprint_drift_warns_without_gating() -> None:
         and "cuda_device" in warning.detail
         for warning in pair.reproducibility_warnings
     )
+
+
+def test_int_and_float_number_forms_compare_equal() -> None:
+    """``2`` and ``2.0`` are the same JSON number and never a mismatch."""
+    base = population()
+    manifest = PopulationManifest.create(
+        population_id=base.population_id,
+        protocol=base.protocol,
+        dataset=base.dataset,
+        task=base.task,
+        benchmark_authority=BenchmarkAuthorityIdentity(
+            measure="pddl_success",
+            implementation_digest=sha("pddl-measure"),
+            parameters={"must_call_stop": False, "robot_at_thresh_m": 2},
+        ),
+        embodiment_profile=base.embodiment_profile,
+        stage2_identity=base.stage2_identity,
+        simulator_identity=base.simulator_identity,
+        model_configuration=base.model_configuration,
+        allowed_differences=base.allowed_differences,
+        required_differences=base.required_differences,
+        selector=base.selector,
+    )
+    fields = observed_fields(manifest)
+    raw_form = fields["benchmark_authority_identity"].value
+    assert isinstance(raw_form, dict)
+    int_form: dict[str, Any] = dict(raw_form)
+    int_form["parameters"] = {**int_form["parameters"], "robot_at_thresh_m": 2}
+    float_form: dict[str, Any] = dict(int_form)
+    float_form["parameters"] = {**float_form["parameters"], "robot_at_thresh_m": 2.0}
+    emos = RunPairingEvidence.create(
+        arm="emos",
+        run_id="run-1",
+        pair_id="pair-1",
+        population_manifest_digest=manifest.digest,
+        requested=RequestedIntent(seed=40),
+        observed={
+            **fields,
+            "benchmark_authority_identity": ObservedField(
+                int_form, "env-config", EvidenceStatus.AVAILABLE
+            ),
+        },
+    )
+    roboguide = RunPairingEvidence.create(
+        arm="roboguide",
+        run_id="run-2",
+        pair_id="pair-1",
+        population_manifest_digest=manifest.digest,
+        requested=RequestedIntent(seed=40),
+        observed={
+            **fields,
+            "benchmark_authority_identity": ObservedField(
+                float_form, "env-config", EvidenceStatus.AVAILABLE
+            ),
+        },
+    )
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.comparability is PairComparability.PAIR_COMPARABLE
+    assert pair.reasons == ()
+
+
+def test_unlisted_dimensions_are_recorded_in_the_pair_manifest() -> None:
+    """The pair manifest names the unmodeled dimensions it excluded on."""
+    manifest = population()
+    emos = evidence("emos", "run-1", manifest)
+    base = evidence("roboguide", "run-2", manifest)
+    roboguide = RunPairingEvidence.create(
+        arm=base.arm,
+        run_id=base.run_id,
+        pair_id=base.pair_id,
+        population_manifest_digest=base.population_manifest_digest,
+        requested=base.requested,
+        observed={
+            **base.observed,
+            "vendor_lock": ObservedField("on", "config", EvidenceStatus.AVAILABLE),
+        },
+    )
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.unlisted_observed_dimensions == ("vendor_lock",)
+    restored = PairManifest.from_json(pair.to_json())
+    assert restored.unlisted_observed_dimensions == ("vendor_lock",)
+
+
+def test_row_without_expectations_warns_but_still_compares() -> None:
+    """A row lacking expected episode/scene surfaces a warning, not a gate."""
+    base = population()
+    manifest = PopulationManifest.create(
+        population_id=base.population_id,
+        protocol=base.protocol,
+        dataset=base.dataset,
+        task=base.task,
+        benchmark_authority=base.benchmark_authority,
+        embodiment_profile=base.embodiment_profile,
+        stage2_identity=base.stage2_identity,
+        simulator_identity=base.simulator_identity,
+        model_configuration=base.model_configuration,
+        allowed_differences=base.allowed_differences,
+        required_differences=base.required_differences,
+        selector=PopulationSelector("explicit_set", (PopulationRow(pair_id="pair-1", seed=40),)),
+    )
+    emos = RunPairingEvidence.create(
+        arm="emos",
+        run_id="run-1",
+        pair_id="pair-1",
+        population_manifest_digest=manifest.digest,
+        requested=RequestedIntent(seed=40),
+        observed=observed_fields(manifest),
+    )
+    roboguide = RunPairingEvidence.create(
+        arm="roboguide",
+        run_id="run-2",
+        pair_id="pair-1",
+        population_manifest_digest=manifest.digest,
+        requested=RequestedIntent(seed=40),
+        observed=observed_fields(manifest),
+    )
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.comparability is PairComparability.PAIR_COMPARABLE
+    assert any(
+        warning.reason is FairnessReason.POPULATION_ROW_EXPECTATION_MISSING
+        for warning in pair.reproducibility_warnings
+    )
+
+
+def test_both_arms_same_wrong_episode_versus_row_is_caught() -> None:
+    """Arms agreeing on an episode other than the row's expectation fail."""
+    manifest = population()
+    wrong = ObservedField("99", "official-banner", EvidenceStatus.AVAILABLE)
+    emos = with_observed(evidence("emos", "run-1", manifest), "episode_identity", wrong)
+    roboguide = with_observed(evidence("roboguide", "run-2", manifest), "episode_identity", wrong)
+    pair = validate_pair(manifest, emos, roboguide)
+    assert pair.comparability is PairComparability.PAIR_NOT_COMPARABLE
+    assert FairnessReason.EPISODE_IDENTITY_MISMATCH in pair.reasons

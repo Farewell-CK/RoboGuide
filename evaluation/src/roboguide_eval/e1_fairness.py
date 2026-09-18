@@ -266,6 +266,7 @@ class FairnessReason(StrEnum):
     MODEL_IDENTITY_MISMATCH = "model_identity_mismatch"
     OBSERVED_EVIDENCE_INVALID = "observed_evidence_invalid"
     ENVIRONMENT_FINGERPRINT_DRIFT = "environment_fingerprint_drift"
+    POPULATION_ROW_EXPECTATION_MISSING = "population_row_expectation_missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1460,6 +1461,7 @@ class PairManifest:
     reasons: tuple[FairnessReason, ...]
     reproducibility_warnings: tuple[ReproducibilityWarning, ...]
     unlisted_differences: tuple[JSONObject, ...]
+    unlisted_observed_dimensions: tuple[str, ...] = ()
     digest: str = ""
 
     @classmethod
@@ -1475,6 +1477,7 @@ class PairManifest:
         reasons: tuple[FairnessReason, ...],
         reproducibility_warnings: tuple[ReproducibilityWarning, ...],
         unlisted_differences: tuple[JSONObject, ...],
+        unlisted_observed_dimensions: tuple[str, ...] = (),
     ) -> PairManifest:
         """Create one pair manifest and bind its digest to the full verdict."""
         pair = cls(
@@ -1487,6 +1490,7 @@ class PairManifest:
             reasons=reasons,
             reproducibility_warnings=reproducibility_warnings,
             unlisted_differences=unlisted_differences,
+            unlisted_observed_dimensions=unlisted_observed_dimensions,
         )
         object.__setattr__(pair, "digest", digest(pair._body()))
         return pair
@@ -1506,6 +1510,9 @@ class PairManifest:
                 warning.to_json() for warning in self.reproducibility_warnings
             ],
             "unlisted_differences": cast(JSONValue, list(self.unlisted_differences)),
+            "unlisted_observed_dimensions": cast(
+                JSONValue, sorted(self.unlisted_observed_dimensions)
+            ),
         }
 
     def to_json(self) -> JSONObject:
@@ -1568,6 +1575,12 @@ class PairManifest:
                     item["unlisted_differences"], "unlisted_differences"
                 )
             ),
+            unlisted_observed_dimensions=tuple(
+                _require_text(dimension, "unlisted observed dimension")
+                for dimension in _require_list(
+                    item["unlisted_observed_dimensions"], "unlisted_observed_dimensions"
+                )
+            ),
             digest=_require_digest_string(item["digest"], "digest"),
         )
         if pair.digest != digest(pair._body()):
@@ -1587,14 +1600,39 @@ _PAIR_MANIFEST_FIELDS = frozenset(
         "reasons",
         "reproducibility_warnings",
         "unlisted_differences",
+        "unlisted_observed_dimensions",
         "digest",
     }
 )
 
 
+def _normalize_numbers(value: JSONValue) -> JSONValue:
+    """Normalize JSON numbers so int and float forms compare equally.
+
+    ``2`` and ``2.0`` are the same JSON number; producers legitimately emit
+    either form (for example a threshold read from YAML). Booleans are left
+    untouched because ``bool`` subclasses ``int``.
+    """
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, float):
+        return value
+    if isinstance(value, list):
+        return [_normalize_numbers(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_numbers(item) for key, item in value.items()}
+    return value
+
+
 def _value_key(value: JSONValue) -> str:
-    """Return the canonical digest key of one observed value for comparison."""
-    return digest(value)
+    """Return the canonical comparison key of one observed value.
+
+    Number forms are normalized (``2`` equals ``2.0``); every other value
+    compares by its canonical digest.
+    """
+    return digest(_normalize_numbers(value))
 
 
 def _compare_observed_pair(
@@ -1748,16 +1786,27 @@ def validate_pair(
     if emos_evidence.population_manifest_digest != roboguide_evidence.population_manifest_digest:
         gating_reasons.append(FairnessReason.CROSS_POPULATION_PAIR)
 
-    # Unknown observed dimensions are unmodelable requirements: fail closed.
+    # Unknown observed dimensions are unmodelable requirements: fail closed
+    # and record which dimensions were unmodeled.
+    unlisted_dimensions: set[str] = set()
     for evidence in (emos_evidence, roboguide_evidence):
-        unknown = sorted(set(evidence.observed) - set(DIMENSION_SPECS))
-        if unknown:
-            gating_reasons.append(FairnessReason.UNLISTED_REQUIRED_DIFFERENCE)
+        unlisted_dimensions.update(set(evidence.observed) - set(DIMENSION_SPECS))
+    if unlisted_dimensions:
+        gating_reasons.append(FairnessReason.UNLISTED_REQUIRED_DIFFERENCE)
 
     # Population row resolution and requested-seed coherence.
     row = population.selector.row(emos_evidence.pair_id)
     if population.selector.policy == "explicit_set" and row is None:
         gating_reasons.append(FairnessReason.POPULATION_ROW_UNMATCHED)
+    if row is not None and (row.expected_episode_id is None or row.expected_scene_id is None):
+        # A row without frozen expectations weakens the pairing proof to
+        # cross-arm agreement only; surface it, but do not gate.
+        warning_entries.append(
+            ReproducibilityWarning(
+                reason=FairnessReason.POPULATION_ROW_EXPECTATION_MISSING,
+                detail=f"population row {row.pair_id} lacks expected episode/scene",
+            )
+        )
     if row is not None and row.seed is not None:
         for evidence in (emos_evidence, roboguide_evidence):
             if evidence.requested.seed is not None and evidence.requested.seed != row.seed:
@@ -1872,6 +1921,7 @@ def validate_pair(
         reasons=tuple(sorted(set(gating_reasons))),
         reproducibility_warnings=tuple(warning_entries),
         unlisted_differences=_unlisted_difference_entries(emos_evidence, roboguide_evidence),
+        unlisted_observed_dimensions=tuple(sorted(unlisted_dimensions)),
     )
 
 
