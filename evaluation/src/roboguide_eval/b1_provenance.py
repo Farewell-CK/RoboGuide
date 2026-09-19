@@ -16,6 +16,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
+
 PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.3"
 SUBMISSION_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
@@ -92,6 +94,7 @@ class ProvenanceFailure(StrEnum):
     ACTUAL_SUBMISSION_MISSING = "actual_submission_missing"
     CONTROLLER_PLAN_MISMATCH = "controller_plan_mismatch"
     SUBMISSION_EVIDENCE_MISMATCH = "submission_evidence_mismatch"
+    FROZEN_INPUT_INVALID = "frozen_input_invalid"
     SEMANTIC_EVIDENCE_MISSING = "semantic_evidence_missing"
     SEMANTIC_EVIDENCE_INVALID = "semantic_evidence_invalid"
     SEMANTIC_EVIDENCE_IDENTITY_MISMATCH = "semantic_evidence_identity_mismatch"
@@ -544,6 +547,14 @@ def verify_b1_provenance(
     if record and run_id is not None and record.run_id != run_id:
         failures.append(ProvenanceFailure.RUN_ID_MISMATCH)
     frozen = _object(frozen_input)
+    # The frozen input must itself be a legal B1 input v0.1 document — the
+    # same contract the generic runner enforces — so a wrong-schema or
+    # structurally incomplete input can never ride the provenance chain,
+    # even when a run bypasses the runner and its digest happens to match.
+    try:
+        extract_b1_workload(frozen)
+    except B1WorkloadError:
+        failures.append(ProvenanceFailure.FROZEN_INPUT_INVALID)
     if not isinstance(frozen.get("instruction"), str) or not frozen["instruction"]:
         failures.append(ProvenanceFailure.INPUT_DIGEST_MISSING)
     elif record and record.input_digest != digest(frozen):

@@ -371,7 +371,13 @@ def test_workload_identity_missing_or_malformed_fails_closed(
     failure = (
         "semantic_evidence_identity_mismatch" if source == "frozen" else "semantic_evidence_invalid"
     )
-    assert verdict["context"]["provenance_failures"] == [failure]
+    assert failure in verdict["context"]["provenance_failures"]
+    # A frozen-side removal or malformation also breaks the input contract
+    # itself, which is reported independently of the identity comparison.
+    if source in {"frozen", "both"}:
+        assert "frozen_input_invalid" in verdict["context"]["provenance_failures"]
+    else:
+        assert "frozen_input_invalid" not in verdict["context"]["provenance_failures"]
     assert verdict["admission"]["provenance_valid"] is False
 
 
@@ -515,3 +521,42 @@ def test_static_b2_record_without_generation_cannot_enter_b1(tmp_path: Path) -> 
     request["draft_digest"] = None
     update_request(run, request)
     assert assess_b1_directory(run)["admission"]["valid_for_formal_population"] is False
+
+
+def test_wrong_schema_frozen_input_cannot_ride_provenance(tmp_path: Path) -> None:
+    """A wrong-schema input document fails closed even with a matching digest."""
+    run = make_run(tmp_path)
+    frozen = json.loads((run / "b1-input-used.json").read_text())
+    frozen["schema"] = "roboguide.e1.b1-input/v0.9"
+    write_json(run / "b1-input-used.json", frozen)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert "frozen_input_invalid" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["provenance_valid"] is False
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+def test_missing_schema_frozen_input_cannot_ride_provenance(tmp_path: Path) -> None:
+    """An input document without the schema marker is not a B1 workload."""
+    run = make_run(tmp_path)
+    frozen = json.loads((run / "b1-input-used.json").read_text())
+    del frozen["schema"]
+    write_json(run / "b1-input-used.json", frozen)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert "frozen_input_invalid" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["provenance_valid"] is False
+
+
+def test_missing_scene_frozen_input_cannot_ride_provenance(tmp_path: Path) -> None:
+    """A workload without the scene identity is structurally incomplete."""
+    run = make_run(tmp_path)
+    frozen = json.loads((run / "b1-input-used.json").read_text())
+    del frozen["scene_id"]
+    write_json(run / "b1-input-used.json", frozen)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    failures = verdict["context"]["provenance_failures"]
+    assert "frozen_input_invalid" in failures
+    assert "semantic_evidence_identity_mismatch" in failures
+    assert verdict["admission"]["provenance_valid"] is False

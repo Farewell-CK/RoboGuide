@@ -72,6 +72,9 @@ def test_episode51_fixture_remains_a_valid_workload() -> None:
         ("dataset_sha256", "not-a-digest"),
         ("dataset_sha256", "5D2C6AA6608D5611C73D8F6C688E17613A9898AFA5F0F668E66DB068598191CA"),
         ("scene_id", 51),
+        ("scene_id", "  "),
+        ("schema", "roboguide.e1.b1-input/v0.9"),
+        ("schema", None),
         ("instruction", "   "),
     ],
 )
@@ -89,12 +92,22 @@ def test_non_object_document_is_rejected() -> None:
     assert error.value.field == "document"
 
 
-def test_optional_scene_may_be_absent() -> None:
-    """Scene identity is optional: absence is honest, not a zero default."""
+def test_missing_scene_is_rejected() -> None:
+    """The scene identity is mandatory: absence fails with its field reason."""
     document = _input_document()
     del document["scene_id"]
-    workload = extract_b1_workload(document)
-    assert workload.scene_id is None
+    with pytest.raises(B1WorkloadError) as error:
+        extract_b1_workload(document)
+    assert error.value.field == "scene_id"
+
+
+def test_missing_schema_marker_is_rejected() -> None:
+    """A document without the exact v0.1 schema marker is not a B1 workload."""
+    document = _input_document()
+    del document["schema"]
+    with pytest.raises(B1WorkloadError) as error:
+        extract_b1_workload(document)
+    assert error.value.field == "schema"
 
 
 def test_cli_reports_validation_failure_before_launch(tmp_path: Path) -> None:

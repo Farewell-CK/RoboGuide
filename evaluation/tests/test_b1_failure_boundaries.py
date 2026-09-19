@@ -22,7 +22,18 @@ def test_explicit_sut_startup_failure_remains_formal(
     """Frozen workload plus failed launched SUT boundary admits even before MI has an id."""
     run = tmp_path / "startup-failure"
     run.mkdir()
-    write_json(run / "b1-input-used.json", {"instruction": "perform the frozen task"})
+    write_json(
+        run / "b1-input-used.json",
+        {
+            "schema": "roboguide.e1.b1-input/v0.1",
+            "instruction": "perform the frozen task",
+            "episode_id": "51",
+            "seed": 40,
+            "scene_id": "scene-51",
+            "dataset_revision": "dataset-1",
+            "dataset_sha256": "a" * 64,
+        },
+    )
     monkeypatch.setattr("roboguide_eval.b1_artifacts._fetch", Mock(return_value=None))
     verdict = collect_b1_artifacts(
         run,

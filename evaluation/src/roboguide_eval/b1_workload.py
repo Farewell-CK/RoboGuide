@@ -4,9 +4,12 @@ The Formal B1 RoboGuide arm must be driven by the workload declared in its
 frozen high-level input document — dataset identity, episode, seed, and the
 text instruction — instead of a scenario-embedded episode. This module is
 the single parser/validator the scenario runner consumes before launching
-any component: every field is checked here, with typed errors, so a
-missing or inconsistent workload fails in seconds with a machine-stable
-reason instead of deep inside a simulator process.
+any component: the exact v0.1 schema marker and every workload-authoritative
+field (including the scene identity) are checked here, with typed errors,
+so a missing, mistyped, or wrong-schema workload fails in seconds with a
+machine-stable reason instead of deep inside a simulator process. The B1
+provenance verifier delegates to the same extraction so the contract holds
+even when a run bypasses this runner.
 
 Downstream identity binding is NOT re-implemented here: the bridge's
 authoritative semantic evidence carries the runtime-observed episode,
@@ -53,7 +56,9 @@ class B1Workload:
             iterator ignores seed 0, so zero is rejected.
         dataset_revision: The monolithic dataset revision name.
         dataset_sha256: The expected sha256 over the dataset gzip bytes.
-        scene_id: The expected scene identity, when the input declares one.
+        scene_id: The expected scene identity; mandatory because the
+            provenance verifier binds it against the bridge's runtime
+            semantic evidence, so an input without it is not a workload.
         instruction: The high-level text instruction for Mission
             Intelligence.
     """
@@ -62,7 +67,7 @@ class B1Workload:
     seed: int
     dataset_revision: str
     dataset_sha256: str
-    scene_id: str | None
+    scene_id: str
     instruction: str
 
 
@@ -89,12 +94,16 @@ def extract_b1_workload(document: Any) -> B1Workload:
 
     Raises:
         B1WorkloadError: On any missing, mistyped, or inconsistent field.
-            Unknown extra fields are tolerated so future input revisions
-            do not break older runners, but every workload-authoritative
-            field is mandatory.
+            The document must carry the exact v0.1 schema marker; unknown
+            extra fields are tolerated so future additive revisions do not
+            break older runners, but every workload-authoritative field —
+            including the scene identity — is mandatory.
     """
     if not isinstance(document, dict):
         raise B1WorkloadError("document", "must be a JSON object")
+    schema = document.get("schema")
+    if schema != B1_INPUT_SCHEMA:
+        raise B1WorkloadError("schema", f"must be exactly {B1_INPUT_SCHEMA!r}")
     episode_id = _require_text(document, "episode_id")
     seed = document.get("seed")
     if not isinstance(seed, int) or isinstance(seed, bool):
@@ -108,9 +117,7 @@ def extract_b1_workload(document: Any) -> B1Workload:
     dataset_sha256 = _require_text(document, "dataset_sha256")
     if _HEX64.fullmatch(dataset_sha256) is None:
         raise B1WorkloadError("dataset_sha256", "must be 64 lowercase hex characters")
-    scene_id = document.get("scene_id")
-    if scene_id is not None and (not isinstance(scene_id, str) or not scene_id.strip()):
-        raise B1WorkloadError("scene_id", "must be a nonblank string when present")
+    scene_id = _require_text(document, "scene_id")
     instruction = _require_text(document, "instruction")
     return B1Workload(
         episode_id=episode_id,
@@ -152,7 +159,7 @@ def _main(argv: list[str] | None = None) -> int:
         ("seed", workload.seed),
         ("dataset_revision", workload.dataset_revision),
         ("dataset_sha256", workload.dataset_sha256),
-        ("scene_id", workload.scene_id if workload.scene_id is not None else ""),
+        ("scene_id", workload.scene_id),
     ):
         print(f"{name}={value}")
     return 0

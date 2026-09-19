@@ -104,8 +104,10 @@ def make_run(
     write_json(
         run / "b1-input-used.json",
         {
+            "schema": "roboguide.e1.b1-input/v0.1",
             "instruction": INSTRUCTION,
             "episode_id": "51",
+            "seed": 40,
             "scene_id": "scene-51",
             "dataset_revision": "dataset-1",
             "dataset_sha256": "a" * 64,
