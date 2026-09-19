@@ -29,6 +29,18 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     assert "password" not in path.read_text(encoding="utf-8").lower()
 
 
+def test_shared_world_service_configuration_selects_deployment_execution_profile() -> None:
+    """The shared-world Mission Service loads its fixed profile through deployment config."""
+    settings = load_service_settings(
+        Path("scenarios/e1-shared-world-episode-51/mission-service-b1.toml"),
+        repository_root=Path.cwd(),
+    )
+    assert (
+        settings.execution_profile_path
+        == (Path.cwd() / "scenarios/e1-shared-world-episode-51/execution-profile.json").resolve()
+    )
+
+
 def test_service_configuration_rejects_ambiguous_risk_contract(tmp_path: Path) -> None:
     """Risk policy cannot use a dotted name that disagrees with Node Config parsing."""
     path = tmp_path / "mission-service.toml"

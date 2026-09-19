@@ -4,6 +4,10 @@ Review the supplied `grounded_intent`, `grounding_context`, `capability_catalog`
 artifact together. The context is the exact immutable evidence used by Interpreter and Planner.
 Approve it only when all of the following hold:
 
+- when `deployment_execution_profile` is supplied, every Role whose canonical operation is listed
+  there declares at least the exact profile resource kind and units; review this as a deployment
+  scheduling constraint, never as a semantic distinct-executor requirement or a Node selection;
+
 - when `authoritative_semantic_goal` is present, treat its goal as one joint terminal-state
   diagnostic: preserve the logical tree and account for every predicate in the plan's semantic
   outcomes; do not split a conjunction into unrelated Missions or infer Actors/Physical Entities

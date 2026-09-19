@@ -5,6 +5,8 @@
 # No pre-authored MissionPlan is submitted; the static plan remains B2-only.
 # The executed workload (episode, seed, dataset identity) is extracted from
 # the frozen B1 input document, so any E1 population episode runs unchanged.
+# The deployment-owned Mission execution profile supplies shared-world space
+# capacity to production Mission Intelligence; the script never patches plans.
 # Usage: run-b1-roboguide.sh <run-dir-abs-or-rel> [input-json]
 set -euo pipefail
 
@@ -65,10 +67,20 @@ finish_run() {
 }
 
 wait_http() {
-    # Wait for one HTTP route within the supplied number of seconds.
-    local url="$1" budget="$2"
+    # A reachable health route may still report OFFLINE while Habitat initializes.
+    local url="$1" budget="$2" expected_state="${3:-}" response
     for _ in $(seq 1 "$budget"); do
-        if curl -sf -o /dev/null "$url"; then return 0; fi
+        if response=$(curl --max-time 5 -sf "$url"); then
+            if [[ -z "$expected_state" ]]; then return 0; fi
+            if printf '%s' "$response" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+except (ValueError, TypeError):
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(value, dict) and value.get("state") == sys.argv[1] else 1)
+' "$expected_state"; then return 0; fi
+        fi
         sleep 1
     done
     echo "timeout waiting for $url" >&2
@@ -184,8 +196,10 @@ COMPONENTS+=(local_eaios)
 FAILURE_OWNER=SUT_SYSTEM
 FAILURE_COMPONENT=local_eaios
 FAILURE_REASON=local_eaios_startup_failed
-wait_http http://127.0.0.1:28100/v1/health 240
-wait_http http://127.0.0.1:28102/v1/health 30
+# ONLINE is published only after the child writes authoritative semantic evidence.
+# Wait before MI freezes its one immutable grounding snapshot.
+wait_http http://127.0.0.1:28100/v1/health 240 ONLINE
+wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
 
 "$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
     127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
