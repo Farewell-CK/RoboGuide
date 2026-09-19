@@ -1,0 +1,71 @@
+{
+  "schema_version": "roboguide.e1.stage2-surface/v0.1",
+  "purpose": "Design fixture for the Stage2 held-constant fingerprint. Lists the file surface that constitutes the original EMOS Stage2/local-execution stack for E1 paired runs. Digests are computed at run time over the resolved checkout; this fixture pins WHICH files are required equality surface versus reproducibility metadata, not their values.",
+  "example_note": "Paths are relative to the EMOS checkout root (ROBOGUIDE_EMOS_ROOT). The population manifest's stage2_identity.file_digests carries the runtime-computed digests over exactly this required surface.",
+  "surface_entries": [
+    {
+      "path": "habitat-mas/habitat_mas/agents/crab_agent.py",
+      "role": "Stage2 CrabAgent conversation/organization agent",
+      "class": "required"
+    },
+    {
+      "path": "habitat-mas/habitat_mas/llm/model_wrapper.py",
+      "role": "Shared OpenAI-compatible model wrapper used by Stage2 policies",
+      "class": "required"
+    },
+    {
+      "path": "habitat-mas/habitat_mas/tasks/habitat_mas_sensors.py",
+      "role": "Text-context sensors (scene description, robot resume) consumed by Stage2",
+      "class": "required"
+    },
+    {
+      "path": "habitat-lab/habitat/config/benchmark/multi_agent/pddl/pddl_spot_fetch_mobility.yaml",
+      "role": "Benchmark task spec (goal predicates, typed entities, solution)",
+      "class": "required"
+    },
+    {
+      "path": "habitat-baselines/habitat_baselines/config/benchmark/multi_rearrange/llm_spot_fetch_mobility.yaml",
+      "role": "Benchmark runner config chain root (max steps, measures, sampling)",
+      "class": "required"
+    },
+    {
+      "path": "habitat-lab/habitat/tasks/rearrange/multi_task/pddl_sensors.py",
+      "role": "PddlSuccess / PddlStageGoals benchmark authority measures",
+      "class": "required"
+    },
+    {
+      "path": "habitat-lab/habitat/tasks/rearrange/multi_task/pddl_sim_state.py",
+      "role": "any_at geometric predicate evaluation (is_any_robot_at)",
+      "class": "required"
+    },
+    {
+      "path": "habitat-lab/habitat/tasks/rearrange/sub_tasks/pddl_actions.py",
+      "role": "Oracle skill actions (nav_to_obj, nav_to_goal, reject_to_handle)",
+      "class": "required"
+    },
+    {
+      "path": "habitat-mas/habitat_mas/policies/",
+      "role": "MultiLLMPolicy / HierarchicalPolicy navigation policy stack",
+      "class": "required"
+    },
+    {
+      "path": "data/robot_resume/",
+      "role": "Per-robot resume text consumed by Stage2 prompting",
+      "class": "reproducibility_metadata"
+    },
+    {
+      "path": "emos.env",
+      "role": "Endpoint/model environment (values recorded, never committed)",
+      "class": "reproducibility_metadata"
+    },
+    {
+      "path": "chat_history_output/",
+      "role": "Run-produced conversation traces (evidence, not surface)",
+      "class": "reproducibility_metadata"
+    }
+  ],
+  "computation": {
+    "algorithm": "sha256 over file bytes, keyed by checkout-relative path, canonical JSON mapping path->sha256:<hex>",
+    "excluded": ["__pycache__", ".git", "*.pyc", "data/datasets (covered by dataset identity)", "video_dir", "episode_log"]
+  }
+}
