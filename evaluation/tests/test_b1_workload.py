@@ -146,3 +146,55 @@ def test_b2_runner_remains_the_static_plan_diagnostics_path() -> None:
     """The B2 scenario keeps its authored plan; genericity is B1-only."""
     script = B2_RUNNER.read_text(encoding="utf-8")
     assert "mission-plan.json" in script
+
+
+@pytest.mark.parametrize(
+    ("responses", "success"),
+    [
+        (["HTTP_ERROR", '{"state":"OFFLINE"}', "{}", "malformed", '{"state":"ONLINE"}'], True),
+        (['{"state":"OFFLINE"}', '{"state":"OFFLINE"}'], False),
+        (["[]", "{}", "malformed"], False),
+    ],
+)
+def test_runner_waits_for_semantic_publication_readiness(
+    tmp_path: Path, responses: list[str], success: bool
+) -> None:
+    """HTTP 200 cannot admit MI before ONLINE; failed initialization exhausts its budget."""
+    script = RUNNER.read_text(encoding="utf-8")
+    probe = script[script.index("wait_http() {") : script.index("wait_nodes() {")]
+    replies = tmp_path / "replies"
+    counter = tmp_path / "counter"
+    replies.write_text("\n".join(responses) + "\n", encoding="utf-8")
+    counter.write_text("0\n", encoding="utf-8")
+    shell = (
+        probe
+        + r"""
+probe_replies="$1"
+probe_counter="$2"
+probe_budget="$3"
+curl() {
+    local probe_count probe_reply
+    probe_count=$(cat "$probe_counter")
+    probe_count=$((probe_count + 1))
+    printf '%s\n' "$probe_count" > "$probe_counter"
+    probe_reply=$(sed -n "${probe_count}p" "$probe_replies")
+    if [[ "$probe_reply" == HTTP_ERROR ]]; then return 22; fi
+    printf '%s\n' "$probe_reply"
+}
+sleep() { :; }
+wait_http http://unused/v1/health "$probe_budget" ONLINE
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", shell, "probe", str(replies), str(counter), str(len(responses))],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert (result.returncode == 0) is success
+    assert int(counter.read_text(encoding="utf-8")) == len(responses)
+    assert "timeout waiting" in result.stderr if not success else result.stderr == ""
+    for port, budget in ((28100, 240), (28102, 30)):
+        gate = f"wait_http http://127.0.0.1:{port}/v1/health {budget} ONLINE"
+        assert script.index(gate) < script.index("# Production Mission Intelligence ingress")
