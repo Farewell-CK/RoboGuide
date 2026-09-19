@@ -3,7 +3,9 @@
 # production Mission Intelligence (Interpreter -> Planner -> Reviewer/Repair ->
 # approval) -> Controller -> shared-world RNS -> original EMOS Stage2.
 # No pre-authored MissionPlan is submitted; the static plan remains B2-only.
-# Usage: run-b1-roboguide.sh <run-dir-abs-or-rel>
+# The executed workload (episode, seed, dataset identity) is extracted from
+# the frozen B1 input document, so any E1 population episode runs unchanged.
+# Usage: run-b1-roboguide.sh <run-dir-abs-or-rel> [input-json]
 set -euo pipefail
 
 SCENARIO="$(cd "$(dirname "$0")" && pwd)"
@@ -123,6 +125,13 @@ cp "$INPUT_JSON" "$RUN/b1-input-used.json"
 INPUT_JSON="$RUN/b1-input-used.json"
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
 trap finish_run EXIT
+# The workload (episode, seed, dataset identity) comes from the frozen B1
+# input itself — never from a scenario-embedded episode. The extractor
+# fails with a stable field-level reason before any component launches.
+WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPUT_JSON")" \
+    || { FAILURE_REASON=invalid_b1_workload; exit 1; }
+EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
+SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
 if [[ ! -x "$SERVER" || ! -x "$NODE" ]]; then
     FAILURE_REASON=required_sut_binary_missing
     exit 1
@@ -165,7 +174,8 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --run-id "$(basename "$RUN")" \
         --habitat-config \
             "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \
-        --episode-id 51 \
+        --episode-id "$EPISODE_ID" \
+        --seed "$SEED" \
         --max-steps 3000 \
         --step-period-ms 20
 ) >"$RUN/shared-bridge.log" 2>&1 &
