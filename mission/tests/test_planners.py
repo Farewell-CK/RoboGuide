@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
+from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import (
     PHYSICAL_ENTITY_REFERENCE_SCHEMA,
     GroundingContextSnapshot,
@@ -108,6 +109,13 @@ def _current_catalog() -> CanonicalCapabilityCatalog:
 def _current_schema() -> JSONObject:
     """Load the canonical MissionPlan schema used by provider-boundary normalization."""
     return cast(JSONObject, json.loads(CURRENT_SCHEMA.read_text(encoding="utf-8")))
+
+
+def _shared_world_execution_profile() -> DeploymentExecutionProfile:
+    """Load the checked-in shared-world operation/resource deployment profile."""
+    return DeploymentExecutionProfile.load(
+        Path("scenarios/e1-shared-world-episode-51/execution-profile.json")
+    )
 
 
 def _provider_plan(plan: JSONObject) -> JSONObject:
@@ -408,6 +416,108 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     parameter_entry = cast(JSONObject, parameters_schema["items"])
     assert parameter_entry["additionalProperties"] is False
     assert set(cast(list[str], parameter_entry["required"])) == {"key", "value"}
+
+
+@pytest.mark.parametrize("operation", ["move", "navigate"])
+@pytest.mark.parametrize("version", ["v0.7", "v0.8"])
+def test_shared_world_profile_binds_space_resource_to_model_mobility_roles(
+    operation: str, version: str
+) -> None:
+    """MI binds deployment capacity facts even when the provider omits Role resources."""
+    plan_json = cast(
+        JSONObject,
+        json.loads(Path("scenarios/e1-shared-world-episode-51/mission-plan.json").read_text()),
+    )
+    plan_json["schema_version"] = f"roboguide.mission-plan/{version}"
+    if version == "v0.8":
+        for context in cast(list[JSONObject], plan_json["contexts"]):
+            context["executor_constraints"] = []
+    for task in cast(list[JSONObject], plan_json["tasks"]):
+        for role in cast(list[JSONObject], task["roles"]):
+            requirements = cast(JSONObject, role["requirements"])
+            requirements["resources"] = []
+            capability = cast(list[JSONObject], requirements["capabilities"])[0]
+            cast(JSONObject, capability["contract"])["name"] = operation
+            intent = cast(JSONObject, role["execution_intent"])
+            cast(JSONObject, intent["operation"])["name"] = operation
+    transport = FakeTransport([_response(_provider_plan(plan_json))])
+    settings = _local_settings()
+    profile = _shared_world_execution_profile()
+    planner = ResponsesMissionPlanner(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        transport,
+        execution_profile=profile,
+    )
+    mission = cast(JSONObject, plan_json["mission"])
+    plan = planner.plan(
+        cast(str, mission["id"]),
+        GroundedIntent(cast(str, mission["objective"]), (), ()),
+        _current_catalog(),
+        _grounding(),
+    )
+
+    assert all(
+        role.resources[0].kind == "space" and role.resources[0].units == 1
+        for task in plan.tasks
+        for role in task.roles
+    )
+    planning_input = json.loads(cast(str, transport.requests[0][2]["input"]))
+    assert planning_input["deployment_execution_profile"] == profile.to_json()
+    assert plan.to_json()["contexts"] == plan_json["contexts"]
+    assert plan.to_json()["mission"] == plan_json["mission"]
+
+
+def test_shared_world_profile_is_frozen_across_review_and_repair_inputs() -> None:
+    """Reviewer and Repairer receive the same deployment profile as the Planner."""
+    plan_json = cast(
+        JSONObject,
+        json.loads(Path("scenarios/e1-shared-world-episode-51/mission-plan.json").read_text()),
+    )
+    plan = MissionPlan.from_json(plan_json)
+    profile = _shared_world_execution_profile()
+    settings = _local_settings()
+    grounding = _grounding()
+    mission = cast(JSONObject, plan_json["mission"])
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    reviewer_transport = FakeTransport([_response(_review_output())])
+    ResponsesMissionReviewer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        reviewer_transport,
+        execution_profile=profile,
+    ).review(intent, plan, _current_catalog(), grounding)
+    for task in cast(list[JSONObject], plan_json["tasks"]):
+        for role in cast(list[JSONObject], task["roles"]):
+            cast(JSONObject, role["requirements"])["resources"] = []
+    repair_transport = FakeTransport([_response(_provider_plan(plan_json))])
+    repaired = ResponsesMissionRepairer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        repair_transport,
+        execution_profile=profile,
+    ).repair(
+        cast(str, mission["id"]),
+        intent,
+        plan,
+        MissionPlanReview.from_json(_review_output()),
+        _current_catalog(),
+        grounding,
+    )
+    assert all(role.resources[0].kind == "space" for task in repaired.tasks for role in task.roles)
+
+    assert (
+        json.loads(cast(str, reviewer_transport.requests[0][2]["input"])).get(
+            "deployment_execution_profile"
+        )
+        == profile.to_json()
+    )
+    assert (
+        json.loads(cast(str, repair_transport.requests[0][2]["input"])).get(
+            "deployment_execution_profile"
+        )
+        == profile.to_json()
+    )
 
 
 def test_responses_reviewer_returns_structured_findings_with_independent_model() -> None:

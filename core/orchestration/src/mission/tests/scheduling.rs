@@ -3,6 +3,195 @@
 use super::lifecycle::registration;
 use super::*;
 
+/// Exercise real Commit/Bind occupancy, shortage retry, and one-actor sequential reuse.
+#[test]
+fn shared_world_endpoint_resources_flow_through_control_ownership() {
+    for (resources, node_count, sequential) in [
+        (false, 2, false),
+        (true, 2, false),
+        (true, 1, false),
+        (true, 1, true),
+    ] {
+        let mut document: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../scenarios/e1-shared-world-episode-51/mission-plan.json"
+        ))
+        .expect("fixture is JSON");
+        document["schema_version"] = serde_json::json!("roboguide.mission-plan/v0.8");
+        for context in document["contexts"].as_array_mut().expect("contexts") {
+            context["executor_constraints"] = serde_json::json!([]);
+        }
+        for task in document["tasks"].as_array_mut().expect("tasks") {
+            let role = &mut task["roles"][0];
+            role["execution_intent"]["operation"]["name"] = serde_json::json!("move");
+            role["requirements"]["capabilities"][0]["contract"]["name"] = serde_json::json!("move");
+            if !resources {
+                role["requirements"]["resources"] = serde_json::json!([]);
+            }
+        }
+        if sequential {
+            document["tasks"][1]["depends_on"] = serde_json::json!([document["tasks"][0]["id"]]);
+            document["mission"]["actors"] = serde_json::json!([{"id": "one-robot"}]);
+            for context in document["contexts"].as_array_mut().expect("contexts") {
+                context["roles"][0]["actor"] = serde_json::json!("one-robot");
+            }
+        }
+        let plan = decode_mission_plan(&document.to_string()).expect("mobility plan decodes");
+        let mission_id = plan.goal().mission_id().clone();
+        let tasks = plan.task_graph().tasks();
+        let first = tasks[0].requirement().task_ref().clone();
+        let second = tasks[1].requirement().task_ref().clone();
+        let group_id = ExecutionGroupId::new("shared-world").unwrap();
+        let correlation = CorrelationId::new("shared-world").unwrap();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = InMemoryEventLog::new();
+        for index in 0..node_count {
+            control
+                .register_node(
+                    &mut state,
+                    registration(
+                        &format!("node-{index}"),
+                        vec![Capability::new(CapabilityKind::Mobility, true)],
+                        vec![(
+                            CapabilityContractRef::new("mobility", "move", "v1").unwrap(),
+                            CapabilityKind::Mobility,
+                        )],
+                        vec![(
+                            ResourceId::new(format!("slot-{index}")).unwrap(),
+                            ResourceKind::Space,
+                        )],
+                    ),
+                    NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                    TimestampMs::new(0),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("endpoint registers");
+        }
+        let mut orchestrator = MissionOrchestrator::new();
+        orchestrator
+            .submit(
+                plan,
+                group_id.clone(),
+                &mut control,
+                TimestampMs::new(0),
+                &correlation,
+                &mut events,
+            )
+            .expect("Mission accepted without distinct executors");
+        assert_eq!(
+            orchestrator.ready_tasks(&mission_id, &control).len(),
+            if sequential { 1 } else { 2 }
+        );
+        let bound = orchestrator
+            .prepare_task(
+                &mission_id,
+                &first,
+                &state,
+                &mut control,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("first Task commits and binds");
+        assert_eq!(bound.assignments()[0].node_id().as_str(), "node-0");
+        assert_eq!(
+            bound.assignments()[0].resource_ids().len(),
+            usize::from(resources)
+        );
+        control
+            .activate_task_execution(
+                &group_id,
+                &first,
+                TimestampMs::new(1),
+                &correlation,
+                &mut events,
+            )
+            .expect("bound first Task activates");
+        if !sequential {
+            let outcome = orchestrator.prepare_task(
+                &mission_id,
+                &second,
+                &state,
+                &mut control,
+                TimestampMs::new(2),
+                &correlation,
+                &mut events,
+            );
+            if resources && node_count == 1 {
+                let error = outcome.expect_err("occupied endpoint defers second Task");
+                assert!(
+                    error
+                        .scheduling_disposition()
+                        .deferral()
+                        .expect("typed shortage")
+                        .allows_retry()
+                );
+                assert_eq!(
+                    control
+                        .group(&group_id)
+                        .unwrap()
+                        .task_execution(&second)
+                        .unwrap()
+                        .lifecycle(),
+                    TaskExecutionLifecycle::Ready
+                );
+                assert!(events.contains_payload(|payload| matches!(
+                    payload, domain::EventPayload::TaskSchedulingDeferred { task_ref, .. } if task_ref == &second
+                )));
+                assert!(!events.contains_payload(|payload| matches!(
+                    payload,
+                    domain::EventPayload::TaskSatisfied { .. }
+                )));
+            } else {
+                let bound = outcome.expect("free resource or omitted demand permits selection");
+                assert_eq!(
+                    bound.assignments()[0].node_id().as_str(),
+                    if resources { "node-1" } else { "node-0" }
+                );
+                assert_eq!(
+                    bound.assignments()[0].resource_ids().len(),
+                    usize::from(resources)
+                );
+                continue;
+            }
+        }
+        orchestrator
+            .record_task_execution_completed(
+                &mission_id,
+                &first,
+                &mut control,
+                TimestampMs::new(3),
+                &correlation,
+                &mut events,
+            )
+            .expect("test execution outcome recorded");
+        orchestrator
+            .satisfy_task_from_execution_report(
+                &mission_id,
+                &first,
+                &mut control,
+                TimestampMs::new(3),
+                &correlation,
+                &mut events,
+            )
+            .expect("declared satisfaction releases first Task resources");
+        let bound = orchestrator
+            .prepare_task(
+                &mission_id,
+                &second,
+                &state,
+                &mut control,
+                TimestampMs::new(4),
+                &correlation,
+                &mut events,
+            )
+            .expect("deferred or DAG-ordered Task can now reuse sole endpoint");
+        assert_eq!(bound.assignments()[0].node_id().as_str(), "node-0");
+        assert_eq!(bound.assignments()[0].resource_ids()[0].as_str(), "slot-0");
+    }
+}
+
 /// Current fixtures add bounded timing, quantitative resources, and satisfaction policy.
 fn scheduled_phase1_plan() -> MissionPlan {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
