@@ -5,6 +5,8 @@
 # No pre-authored MissionPlan is submitted; the static plan remains B2-only.
 # The executed workload (episode, seed, dataset identity) is extracted from
 # the frozen B1 input document, so any E1 population episode runs unchanged.
+# The deployment-owned Mission execution profile supplies shared-world space
+# capacity to production Mission Intelligence; the script never patches plans.
 # Usage: run-b1-roboguide.sh <run-dir-abs-or-rel> [input-json]
 set -euo pipefail
 

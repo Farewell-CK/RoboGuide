@@ -13,6 +13,7 @@ from typing import Any, cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
+from mission.execution_profile import load_optional_execution_profile
 from mission.grounding_reader import HttpMissionGroundingReader
 from mission.models import JSONObject
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
@@ -34,25 +35,26 @@ def build_engine(
     planner_settings = load_settings(mission_config, repository_root=repository_root)
     capability_catalog = CanonicalCapabilityCatalog.load(planner_settings.capability_catalog_path)
     service_settings = load_service_settings(service_config, repository_root=repository_root)
+    execution_profile = load_optional_execution_profile(service_settings.execution_profile_path)
     environment = current_environment()
     controller = HttpMissionController(
         service_settings.controller_endpoint,
         service_settings.controller_timeout_seconds,
     )
     reviewer = (
-        ResponsesMissionReviewer(planner_settings, environment)
+        ResponsesMissionReviewer(planner_settings, environment, execution_profile=execution_profile)
         if planner_settings.review_enabled
         else None
     )
     repairer = (
-        ResponsesMissionRepairer(planner_settings, environment)
+        ResponsesMissionRepairer(planner_settings, environment, execution_profile=execution_profile)
         if reviewer is not None and planner_settings.max_repair_attempts > 0
         else None
     )
     engine = MissionRequestEngine(
         MissionRequestStore(service_settings.state_db),
         ResponsesMissionInterpreter(planner_settings, environment),
-        ResponsesMissionPlanner(planner_settings, environment),
+        ResponsesMissionPlanner(planner_settings, environment, execution_profile=execution_profile),
         controller,
         capability_catalog,
         service_settings.approval_policy,

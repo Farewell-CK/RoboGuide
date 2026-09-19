@@ -172,6 +172,7 @@ pointer = "/local_handle"
 [[operations]]
 operation = "mobility.move@v1"
 owner = "habitat-local-eaios"
+required_resources = ["habitat-navigation-slot-a"]
 local_locks = ["habitat-simulator-a"]
 
 [operations.workflow]

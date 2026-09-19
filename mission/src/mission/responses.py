@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
+from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
@@ -80,9 +81,12 @@ def _validate_plan_output(
     capability_catalog: CanonicalCapabilityCatalog,
     satisfaction_policy: MissionSatisfactionPolicy | None,
     grounding_context: GroundingContextSnapshot,
+    execution_profile: DeploymentExecutionProfile | None,
 ) -> MissionPlan:
     """Validate one generated draft against identity, implementation, and Catalog boundaries."""
     plan = MissionPlan.from_json(value)
+    if execution_profile is not None:
+        plan = execution_profile.apply(plan)
     plan.validate_implementation_support()
     plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
     if plan.mission.mission_id != mission_id:
@@ -249,10 +253,12 @@ class ResponsesMissionPlanner:
         settings: MissionSettings,
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
+        execution_profile: DeploymentExecutionProfile | None = None,
     ) -> None:
         """Create a Planner over transport mechanics that carry no Mission authority."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
+        self._execution_profile = execution_profile
 
     def plan(
         self,
@@ -274,6 +280,11 @@ class ResponsesMissionPlanner:
                         "satisfaction_policy": self._client._satisfaction_policy_input(),
                         "capability_catalog": capability_catalog.to_json(),
                         "grounding_context": grounding_context.to_json(),
+                        **(
+                            {"deployment_execution_profile": self._execution_profile.to_json()}
+                            if self._execution_profile is not None
+                            else {}
+                        ),
                     },
                     grounding_context,
                 ),
@@ -292,6 +303,7 @@ class ResponsesMissionPlanner:
             capability_catalog,
             self._settings.satisfaction_policy,
             grounding_context,
+            self._execution_profile,
         )
 
 
@@ -303,10 +315,12 @@ class ResponsesMissionReviewer:
         settings: MissionSettings,
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
+        execution_profile: DeploymentExecutionProfile | None = None,
     ) -> None:
         """Create a Reviewer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
+        self._execution_profile = execution_profile
 
     def review(
         self,
@@ -328,6 +342,11 @@ class ResponsesMissionReviewer:
                         "satisfaction_policy": self._client._satisfaction_policy_input(),
                         "capability_catalog": capability_catalog.to_json(),
                         "grounding_context": grounding_context.to_json(),
+                        **(
+                            {"deployment_execution_profile": self._execution_profile.to_json()}
+                            if self._execution_profile is not None
+                            else {}
+                        ),
                     },
                     grounding_context,
                 ),
@@ -348,10 +367,12 @@ class ResponsesMissionRepairer:
         settings: MissionSettings,
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
+        execution_profile: DeploymentExecutionProfile | None = None,
     ) -> None:
         """Create a Repairer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
+        self._execution_profile = execution_profile
 
     def repair(
         self,
@@ -377,6 +398,11 @@ class ResponsesMissionRepairer:
                         "review": review.to_json(),
                         "capability_catalog": capability_catalog.to_json(),
                         "grounding_context": grounding_context.to_json(),
+                        **(
+                            {"deployment_execution_profile": self._execution_profile.to_json()}
+                            if self._execution_profile is not None
+                            else {}
+                        ),
                     },
                     grounding_context,
                 ),
@@ -395,6 +421,7 @@ class ResponsesMissionRepairer:
             capability_catalog,
             self._settings.satisfaction_policy,
             grounding_context,
+            self._execution_profile,
         )
 
 

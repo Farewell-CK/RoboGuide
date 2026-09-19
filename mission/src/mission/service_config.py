@@ -39,6 +39,7 @@ class MissionServiceSettings:
     max_grounding_gaps: int
     grounding_world_payload_schemas: frozenset[str]
     grounding_semantic_evidence_path: Path | None
+    execution_profile_path: Path | None
     max_request_bytes: int
     approval_policy: ApprovalPolicy
 
@@ -103,6 +104,7 @@ def load_service_settings(
         grounding_semantic_evidence_path=_optional_path(
             service, "grounding_semantic_evidence_path", root
         ),
+        execution_profile_path=_optional_path(service, "execution_profile_path", root),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
     )

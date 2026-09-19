@@ -1,0 +1,31 @@
+{
+  "schema_version": "roboguide.execution-profile/v0.1",
+  "profiles": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "move",
+        "version": "v1"
+      },
+      "resources": [
+        {
+          "kind": "space",
+          "units": 1
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "resources": [
+        {
+          "kind": "space",
+          "units": 1
+        }
+      ]
+    }
+  ]
+}
