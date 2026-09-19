@@ -15,6 +15,7 @@ from mission.semantic_evidence import (
     AuthoritativeSemanticEvidence,
     SemanticEvidenceError,
     SemanticExpression,
+    semantic_evidence_digest,
 )
 
 
@@ -34,6 +35,8 @@ def _evidence() -> AuthoritativeSemanticEvidence:
         run_id="run-51",
         episode_id="51",
         revision="goal-revision-1",
+        dataset_revision="dataset-1",
+        dataset_sha256="a" * 64,
         goal=SemanticExpression.logical(
             "and",
             (
@@ -83,6 +86,53 @@ def test_semantic_identity_cannot_be_reused_for_another_episode() -> None:
     identity = cast(JSONObject, document["identity"])
     identity["episode_id"] = "52"
     with pytest.raises(SemanticEvidenceError, match="digest"):
+        AuthoritativeSemanticEvidence.from_json(document)
+
+
+@pytest.mark.parametrize("field", ["episode_id", "dataset_revision", "dataset_sha256", "scene_id"])
+def test_semantic_identity_fields_are_digest_bound(field: str) -> None:
+    """Changing any environment identity without updating the digest fails closed."""
+    document = _evidence().to_json()
+    container = cast(JSONObject, document["world_context" if field == "scene_id" else "identity"])
+    container[field] = "b" * 64 if field == "dataset_sha256" else "other-identity"
+    with pytest.raises(SemanticEvidenceError, match="digest"):
+        AuthoritativeSemanticEvidence.from_json(document)
+
+
+@pytest.mark.parametrize("field", ["dataset_revision", "dataset_sha256", "scene_id"])
+@pytest.mark.parametrize("invalid", [None, "", " ", 7, [], {}])
+def test_semantic_identity_requires_complete_typed_fields(field: str, invalid: Any) -> None:
+    """A recomputed digest cannot admit missing or malformed v0.2 identity fields."""
+    document = _evidence().to_json()
+    container = cast(JSONObject, document["world_context" if field == "scene_id" else "identity"])
+    if invalid is None:
+        container.pop(field)
+    else:
+        container[field] = invalid
+    document["digest"] = semantic_evidence_digest(document)
+    with pytest.raises(SemanticEvidenceError):
+        AuthoritativeSemanticEvidence.from_json(document)
+
+
+@pytest.mark.parametrize("invalid", ["a" * 63, "A" * 64, "sha256:" + "a" * 64, "g" * 64])
+def test_dataset_digest_requires_exact_sha256_format(invalid: str) -> None:
+    """Dataset hashes use unprefixed lowercase hex to match deployment input artifacts."""
+    document = _evidence().to_json()
+    cast(JSONObject, document["identity"])["dataset_sha256"] = invalid
+    document["digest"] = semantic_evidence_digest(document)
+    with pytest.raises(SemanticEvidenceError, match="SHA-256"):
+        AuthoritativeSemanticEvidence.from_json(document)
+
+
+def test_v01_semantic_evidence_is_not_silently_upgraded() -> None:
+    """Old evidence cannot claim dataset identity through a reader-side version upgrade."""
+    document = _evidence().to_json()
+    document["schema_version"] = "roboguide.authoritative-semantic-evidence/v0.1"
+    identity = cast(JSONObject, document["identity"])
+    identity.pop("dataset_revision")
+    identity.pop("dataset_sha256")
+    document["digest"] = semantic_evidence_digest(document)
+    with pytest.raises(SemanticEvidenceError, match="unsupported"):
         AuthoritativeSemanticEvidence.from_json(document)
 
 

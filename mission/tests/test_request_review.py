@@ -284,6 +284,8 @@ def test_fixed_authoritative_semantics_are_reused_by_every_mi_phase(tmp_path: Pa
         run_id="controlled-preflight",
         episode_id="51",
         revision="goal-1",
+        dataset_revision="dataset-1",
+        dataset_sha256="a" * 64,
         goal=SemanticExpression.logical(
             "and",
             (

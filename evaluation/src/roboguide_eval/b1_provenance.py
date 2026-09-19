@@ -463,17 +463,19 @@ def _check_semantic_evidence(
     identity = _object(semantic.get("identity"))
     body = {key: value for key, value in semantic.items() if key != "digest"}
     valid = (
-        semantic.get("schema_version") == "roboguide.authoritative-semantic-evidence/v0.1"
+        semantic.get("schema_version") == "roboguide.authoritative-semantic-evidence/v0.2"
         and semantic.get("authority") == "environment-authoritative"
         and semantic.get("objective_scope") == "joint_terminal_state"
         and isinstance(semantic.get("digest"), str)
         and semantic.get("digest") == plan_digest(body)
-        and set(identity) == {"run_id", "episode_id", "revision"}
-        and isinstance(identity.get("run_id"), str)
-        and isinstance(identity.get("episode_id"), str)
-        and isinstance(identity.get("revision"), str)
+        and set(identity)
+        == {"run_id", "episode_id", "revision", "dataset_revision", "dataset_sha256"}
+        and all(isinstance(value, str) and value.strip() for value in identity.values())
+        and re.fullmatch(r"[a-f0-9]{64}", identity["dataset_sha256"]) is not None
         and _semantic_expression_valid(semantic.get("goal"))
         and isinstance(semantic.get("world_context"), dict)
+        and isinstance(semantic["world_context"].get("scene_id"), str)
+        and bool(semantic["world_context"]["scene_id"].strip())
     )
     if not valid:
         failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)

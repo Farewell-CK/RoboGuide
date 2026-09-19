@@ -10,7 +10,7 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
-SEMANTIC_EVIDENCE_SCHEMA = "roboguide.authoritative-semantic-evidence/v0.1"
+SEMANTIC_EVIDENCE_SCHEMA = "roboguide.authoritative-semantic-evidence/v0.2"
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _LOGICAL_OPERATORS = {"and", "or", "nand", "nor"}
 
@@ -134,6 +134,8 @@ class AuthoritativeSemanticEvidence:
     run_id: str
     episode_id: str
     revision: str
+    dataset_revision: str
+    dataset_sha256: str
     objective_scope: str
     goal: SemanticExpression
     world_context: JSONObject
@@ -146,6 +148,8 @@ class AuthoritativeSemanticEvidence:
         run_id: str,
         episode_id: str,
         revision: str,
+        dataset_revision: str,
+        dataset_sha256: str,
         goal: SemanticExpression,
         world_context: JSONObject,
     ) -> AuthoritativeSemanticEvidence:
@@ -153,7 +157,13 @@ class AuthoritativeSemanticEvidence:
         body: JSONObject = {
             "schema_version": SEMANTIC_EVIDENCE_SCHEMA,
             "authority": "environment-authoritative",
-            "identity": {"run_id": run_id, "episode_id": episode_id, "revision": revision},
+            "identity": {
+                "run_id": run_id,
+                "episode_id": episode_id,
+                "revision": revision,
+                "dataset_revision": dataset_revision,
+                "dataset_sha256": dataset_sha256,
+            },
             "objective_scope": "joint_terminal_state",
             "goal": goal.to_json(),
             "world_context": _clone_object(world_context),
@@ -162,6 +172,8 @@ class AuthoritativeSemanticEvidence:
             run_id=run_id,
             episode_id=episode_id,
             revision=revision,
+            dataset_revision=dataset_revision,
+            dataset_sha256=dataset_sha256,
             objective_scope="joint_terminal_state",
             goal=goal,
             world_context=_clone_object(world_context),
@@ -173,6 +185,13 @@ class AuthoritativeSemanticEvidence:
         _require_text(self.run_id, "identity.run_id")
         _require_text(self.episode_id, "identity.episode_id")
         _require_text(self.revision, "identity.revision")
+        _require_text(self.dataset_revision, "identity.dataset_revision")
+        if (
+            not isinstance(self.dataset_sha256, str)
+            or re.fullmatch(r"[a-f0-9]{64}", self.dataset_sha256) is None
+        ):
+            raise SemanticEvidenceError("identity.dataset_sha256 must be a lowercase SHA-256")
+        _text(self.world_context.get("scene_id"), "world_context.scene_id")
         if self.objective_scope != "joint_terminal_state":
             raise SemanticEvidenceError("semantic evidence must describe a joint terminal state")
         _clone_object(self.world_context)
@@ -190,6 +209,8 @@ class AuthoritativeSemanticEvidence:
                 "run_id": self.run_id,
                 "episode_id": self.episode_id,
                 "revision": self.revision,
+                "dataset_revision": self.dataset_revision,
+                "dataset_sha256": self.dataset_sha256,
             },
             "objective_scope": self.objective_scope,
             "goal": self.goal.to_json(),
@@ -222,11 +243,17 @@ class AuthoritativeSemanticEvidence:
         if item["authority"] != "environment-authoritative":
             raise SemanticEvidenceError("semantic evidence authority is unsupported")
         identity = _object(item["identity"], "semantic identity")
-        _require_fields(identity, {"run_id", "episode_id", "revision"}, "semantic identity")
+        _require_fields(
+            identity,
+            {"run_id", "episode_id", "revision", "dataset_revision", "dataset_sha256"},
+            "semantic identity",
+        )
         return cls(
             run_id=_text(identity["run_id"], "identity.run_id"),
             episode_id=_text(identity["episode_id"], "identity.episode_id"),
             revision=_text(identity["revision"], "identity.revision"),
+            dataset_revision=_text(identity["dataset_revision"], "identity.dataset_revision"),
+            dataset_sha256=_text(identity["dataset_sha256"], "identity.dataset_sha256"),
             objective_scope=_text(item["objective_scope"], "objective_scope"),
             goal=SemanticExpression.from_json(item["goal"]),
             world_context=_clone_object(_object(item["world_context"], "world_context")),

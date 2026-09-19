@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 
@@ -36,16 +37,22 @@ def build_authoritative_semantic_evidence(
         episode if episode is not None else getattr(environment, "current_episode", None)
     )
     scene_id = getattr(episode_value, "scene_id", None)
-    if scene_id is None:
+    if not isinstance(scene_id, str) or not scene_id.strip():
         raise SemanticEvidenceBuildError("authoritative environment scene identity is unavailable")
+    loaded_episode_id = getattr(episode_value, "episode_id", None)
+    if loaded_episode_id is None or str(loaded_episode_id) != episode_id:
+        raise SemanticEvidenceBuildError("loaded episode identity does not match requested episode")
+    dataset_revision, dataset_sha256 = _dataset_identity(environment)
     goal_digest = _digest(encoded_goal)
     body: dict[str, Any] = {
-        "schema_version": "roboguide.authoritative-semantic-evidence/v0.1",
+        "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
         "authority": "environment-authoritative",
         "identity": {
             "run_id": run_id,
             "episode_id": episode_id,
             "revision": f"goal-{goal_digest.removeprefix('sha256:')}",
+            "dataset_revision": dataset_revision,
+            "dataset_sha256": dataset_sha256,
         },
         "objective_scope": "joint_terminal_state",
         "goal": encoded_goal,
@@ -56,6 +63,38 @@ def build_authoritative_semantic_evidence(
         },
     }
     return {**body, "digest": _digest(body)}
+
+
+def _dataset_identity(environment: Any) -> tuple[str, str]:
+    """Bind the loaded monolithic dataset to its deployment filename and raw bytes.
+
+    Habitat resolves data_path against its process working directory and split.
+    The current deployment's revision is the filename without .json.gz; its
+    digest covers gzip bytes. Missing sources and scene shards fail closed.
+    """
+    dataset = getattr(environment, "_dataset", None)
+    config = getattr(dataset, "config", None)
+    data_path = getattr(config, "data_path", None)
+    split = getattr(config, "split", None)
+    if not isinstance(data_path, str) or not data_path.strip() or not isinstance(split, str):
+        raise SemanticEvidenceBuildError("loaded dataset configuration is unavailable")
+    try:
+        path = Path(data_path.format(split=split))
+        if not path.name.endswith(".json.gz") or path.name == ".json.gz":
+            raise SemanticEvidenceBuildError("dataset revision requires a named .json.gz source")
+        content_template = getattr(dataset, "content_scenes_path", None)
+        if not isinstance(content_template, str) or "{scene}" not in content_template:
+            raise SemanticEvidenceBuildError("dataset content source layout is unavailable")
+        content_dir = Path(content_template.split("{scene}")[0].format(data_path=path.parent))
+        if content_dir.exists():
+            raise SemanticEvidenceBuildError("scene-sharded dataset identity is unsupported")
+        hasher = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(chunk)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        raise SemanticEvidenceBuildError("loaded dataset identity is unavailable") from error
+    return path.name.removesuffix(".json.gz"), hasher.hexdigest()
 
 
 def _expression(value: Any) -> dict[str, Any]:

@@ -275,6 +275,8 @@ def _semantic_grounding() -> GroundingContextSnapshot:
         run_id="run-test",
         episode_id="episode-51",
         revision="goal-1",
+        dataset_revision="dataset-1",
+        dataset_sha256="a" * 64,
         goal=SemanticExpression.logical(
             "and",
             (

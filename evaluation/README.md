@@ -104,6 +104,14 @@ provenance diagnostic 记录；遗漏谓词属于 RoboGuide/model outcome，不�
 provenance invalid，也不会把该次观察从 Formal population 中静默排除。只有官方
 `pddl_success` 可用时，run 才能进入 benchmark population。
 
+Authoritative semantic evidence v0.2 在中立 `identity` 字段中保留
+`episode_id`、`dataset_revision`、`dataset_sha256`，场景来自
+`world_context.scene_id`。Habitat adapter 从已加载 dataset 对象的实际配置解析
+`data_path`（含 split），沿用当前部署的 `.json.gz` 文件名去后缀作为 revision，
+对 gzip 原始字节计算 SHA-256；不从 B1 输入复制身份。此路径要求部署数据在加载和
+采集期间保持不可变，只支持当前单文件 dataset；缺失来源、scene shards、无法识别的
+episode/scene 均失败。v0.1 缺少 dataset 身份，读取时拒绝，不自动补齐或升级。
+
 **scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
 `dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不
 import Habitat/EMOS），并先校验文件 SHA-256 与 spec 的 dataset digest 一致；

@@ -106,6 +106,8 @@ def make_run(
         run_id=run.name,
         episode_id="51",
         revision="goal-revision-1",
+        dataset_revision="dataset-1",
+        dataset_sha256="a" * 64,
         goal=SemanticExpression.logical(
             "and",
             (
