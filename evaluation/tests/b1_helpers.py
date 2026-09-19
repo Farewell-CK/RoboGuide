@@ -101,7 +101,16 @@ def make_run(
     """Build evidence through actual MI orchestration and HTTP boundary, stopping on failure."""
     run = root / f"run-{case}"
     run.mkdir(parents=True)
-    write_json(run / "b1-input-used.json", {"instruction": INSTRUCTION, "episode_id": "51"})
+    write_json(
+        run / "b1-input-used.json",
+        {
+            "instruction": INSTRUCTION,
+            "episode_id": "51",
+            "scene_id": "scene-51",
+            "dataset_revision": "dataset-1",
+            "dataset_sha256": "a" * 64,
+        },
+    )
     semantic = AuthoritativeSemanticEvidence.create(
         run_id=run.name,
         episode_id="51",

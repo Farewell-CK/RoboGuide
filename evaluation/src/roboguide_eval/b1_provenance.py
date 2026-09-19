@@ -446,7 +446,7 @@ def _check_semantic_evidence(
     record: B1ProvenanceRecord | None,
     run_id: str | None,
 ) -> list[ProvenanceFailure]:
-    """Bind adapter evidence, frozen episode identity, and the actual MI context."""
+    """Bind adapter evidence to the complete frozen workload identity and MI context."""
     failures: list[ProvenanceFailure] = []
     semantic = _object(document)
     required = {
@@ -480,8 +480,17 @@ def _check_semantic_evidence(
     if not valid:
         failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)
         return failures
-    if (run_id is not None and identity["run_id"] != run_id) or (
-        isinstance(frozen.get("episode_id"), str) and identity["episode_id"] != frozen["episode_id"]
+    workload_identity = {
+        "episode_id": identity["episode_id"],
+        "scene_id": semantic["world_context"]["scene_id"],
+        "dataset_revision": identity["dataset_revision"],
+        "dataset_sha256": identity["dataset_sha256"],
+    }
+    if (run_id is not None and identity["run_id"] != run_id) or any(
+        not isinstance(frozen.get(field), str)
+        or not frozen[field].strip()
+        or frozen[field] != value
+        for field, value in workload_identity.items()
     ):
         failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_IDENTITY_MISMATCH)
     grounding = _object(request.get("grounding_context"))

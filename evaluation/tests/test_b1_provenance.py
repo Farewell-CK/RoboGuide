@@ -204,6 +204,91 @@ def test_semantic_evidence_cannot_cross_episode(tmp_path: Path) -> None:
     assert verdict["admission"]["valid_for_formal_population"] is False
 
 
+def update_semantic_evidence(run: Path, semantic: dict[str, Any]) -> None:
+    """Rehash all dependent artifacts to isolate semantic identity checks from outer links."""
+    semantic["digest"] = plan_digest(
+        {key: value for key, value in semantic.items() if key != "digest"}
+    )
+    write_json(run / "evidence/authoritative-semantic-evidence.json", semantic)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    context = request["grounding_context"]
+    context["semantic_evidence"] = semantic
+    context["context_digest"] = plan_digest(
+        {
+            key: value
+            for key, value in context.items()
+            if key not in {"schema_version", "context_digest"}
+        }
+    )
+    update_request(run, request)
+
+
+@pytest.mark.parametrize("field", ["episode_id", "scene_id", "dataset_revision", "dataset_sha256"])
+@pytest.mark.parametrize("source", ["frozen", "semantic"])
+def test_complete_workload_identity_is_cross_bound(tmp_path: Path, field: str, source: str) -> None:
+    """Even fully rehashed MI evidence cannot cross episode, scene, or dataset boundaries."""
+    run = make_run(tmp_path)
+    replacement = "b" * 64 if field == "dataset_sha256" else "other-identity"
+    if source == "frozen":
+        frozen = json.loads((run / "b1-input-used.json").read_text())
+        frozen[field] = replacement
+        write_json(run / "b1-input-used.json", frozen)
+        build_provenance(run)
+    else:
+        semantic = json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text())
+        semantic["world_context" if field == "scene_id" else "identity"][field] = replacement
+        update_semantic_evidence(run, semantic)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["semantic_evidence_identity_mismatch"]
+    assert verdict["admission"]["provenance_valid"] is False
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+@pytest.mark.parametrize("field", ["episode_id", "scene_id", "dataset_revision", "dataset_sha256"])
+@pytest.mark.parametrize("source", ["frozen", "semantic", "both"])
+@pytest.mark.parametrize("invalid", [None, " ", 51, [], {}])
+def test_workload_identity_missing_or_malformed_fails_closed(
+    tmp_path: Path, field: str, source: str, invalid: Any
+) -> None:
+    """Neither missing-on-both-sides equality nor malformed identities can pass rehashing."""
+    run = make_run(tmp_path)
+    if source in {"frozen", "both"}:
+        frozen = json.loads((run / "b1-input-used.json").read_text())
+        if invalid is None:
+            frozen.pop(field)
+        else:
+            frozen[field] = invalid
+        write_json(run / "b1-input-used.json", frozen)
+        build_provenance(run)
+    if source in {"semantic", "both"}:
+        semantic = json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text())
+        container = semantic["world_context" if field == "scene_id" else "identity"]
+        if invalid is None:
+            container.pop(field)
+        else:
+            container[field] = invalid
+        update_semantic_evidence(run, semantic)
+    verdict = assess_b1_directory(run)
+    failure = (
+        "semantic_evidence_identity_mismatch" if source == "frozen" else "semantic_evidence_invalid"
+    )
+    assert verdict["context"]["provenance_failures"] == [failure]
+    assert verdict["admission"]["provenance_valid"] is False
+
+
+def test_old_semantic_schema_cannot_supply_b1_identity(tmp_path: Path) -> None:
+    """v0.1 evidence cannot be upgraded by rehashing the surrounding provenance chain."""
+    run = make_run(tmp_path)
+    semantic = json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text())
+    semantic["schema_version"] = "roboguide.authoritative-semantic-evidence/v0.1"
+    semantic["identity"].pop("dataset_revision")
+    semantic["identity"].pop("dataset_sha256")
+    update_semantic_evidence(run, semantic)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["semantic_evidence_invalid"]
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
 @pytest.mark.parametrize(
     "missing",
     [

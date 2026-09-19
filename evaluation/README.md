@@ -111,6 +111,8 @@ Authoritative semantic evidence v0.2 在中立 `identity` 字段中保留
 对 gzip 原始字节计算 SHA-256；不从 B1 输入复制身份。此路径要求部署数据在加载和
 采集期间保持不可变，只支持当前单文件 dataset；缺失来源、scene shards、无法识别的
 episode/scene 均失败。v0.1 缺少 dataset 身份，读取时拒绝，不自动补齐或升级。
+Evaluation 将这四个字段逐项与 `b1-input-used.json` 严格交叉绑定，任一字段缺失、
+类型错误或不匹配都使 provenance invalid；重新计算外层 digest 也不能绕过。
 
 **scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
 `dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不
