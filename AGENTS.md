@@ -242,6 +242,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   but are never real evidence.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
+  The Formal B1 RoboGuide scenario runner is workload-generic: it extracts the
+  executed episode, simulator seed, and dataset identity from the frozen B1 input
+  document (`roboguide_eval.b1_workload`), forwards the seed as `habitat.seed`,
+  and records the consumed seed plus the actually observed initial agent positions
+  in the shared-world summary identity. No episode is embedded in the runner; the
+  episode-51 input remains one regression fixture.
 - `contracts/capability/v0.3/` is the deployment-independent Canonical Capability Catalog consumed
   by Mission Intelligence. It separates capabilities/attributes from operations/parameters and
   validates exact requirements without current providers; live Node inventory remains Control
