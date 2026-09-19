@@ -21,6 +21,45 @@ class HabitatBackendConfig:
     agent_id: int
     max_steps: int
     step_period_ms: int
+    seed: int | None = None
+
+
+def habitat_config_overrides(seed: int | None) -> list[str]:
+    """Return the fixed Habitat config overrides for one bridge process.
+
+    The overrides pin single-environment headless evaluation for both
+    backends. A nonnull ``seed`` is forwarded as the ``habitat.seed``
+    override — the same mechanism the EMOS evaluation arm uses — so the
+    simulator RNG (including ``randomize_agent_start`` agent placement) is
+    reproducible when the deployment supplies one. ``None`` keeps the
+    config-file default; the consumed value is always recorded in run
+    evidence by the shared-world backend, never silently assumed.
+    """
+    overrides = [
+        "habitat_baselines.num_environments=1",
+        "habitat_baselines.eval.video_option=[]",
+        "habitat.simulator.concur_render=False",
+    ]
+    if seed is not None:
+        overrides.append(f"habitat.seed={seed}")
+    return overrides
+
+
+def initial_agent_positions(habitat_env: Any, agent_ids: tuple[int, ...]) -> dict[str, list[float]]:
+    """Observe the actual per-agent base positions after one episode reset.
+
+    ``randomize_agent_start`` samples agent starts from the simulator RNG,
+    and the two evaluation arms may consume different RNG streams, so a
+    shared seed never proves equal initial states. This reads each agent's
+    articulated base position directly from the live environment and
+    returns plain floats keyed by agent id so the shared-world summary can
+    carry the observed facts as evidence for later cross-arm comparison.
+    """
+    positions: dict[str, list[float]] = {}
+    for agent_id in sorted(agent_ids):
+        position = habitat_env.sim.get_agent_data(agent_id).articulated_agent.base_pos
+        positions[str(agent_id)] = [float(component) for component in position]
+    return positions
 
 
 @dataclass(frozen=True)
@@ -120,11 +159,7 @@ class HabitatMobilityBackend:
             self._numpy = importlib.import_module("numpy")
             config = config_module.get_config(
                 str(self._config.config_path),
-                overrides=[
-                    "habitat_baselines.num_environments=1",
-                    "habitat_baselines.eval.video_option=[]",
-                    "habitat.simulator.concur_render=False",
-                ],
+                overrides=habitat_config_overrides(self._config.seed),
             )
             gym_env = gym_module.make_gym_from_config(config)
             habitat_env = gym_env.habitat_env

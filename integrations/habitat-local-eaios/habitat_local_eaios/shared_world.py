@@ -21,7 +21,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .backend import HabitatBackendConfig, LocalExecutionOutcome, _observation_true
+from .backend import (
+    HabitatBackendConfig,
+    LocalExecutionOutcome,
+    _observation_true,
+    initial_agent_positions,
+)
 from .crabagent_backend import CrabAgentBackendConfig
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
@@ -100,6 +105,12 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 "pid": os.getpid(),
                 "scene_id": str(habitat_env.current_episode.scene_id),
                 "simulator_worlds": 1,
+                # The consumed simulator seed and the actually observed agent
+                # base positions after this reset are benchmark-condition
+                # evidence: paired arms must compare these recorded facts,
+                # never assume equal seeds imply equal initial states.
+                "habitat_seed": self._config.seed,
+                "initial_agent_positions": initial_agent_positions(habitat_env, agent_ids),
             }
             outcomes, steps, done, info = self._pair_loop(
                 observations,

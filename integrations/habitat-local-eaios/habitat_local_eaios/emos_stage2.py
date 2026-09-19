@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .backend import LocalExecutionOutcome, _observation_true
+from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 
@@ -53,11 +53,7 @@ class EmosStage2Runtime:
 
             config = get_config(
                 str(self._config.config_path),
-                overrides=[
-                    "habitat_baselines.num_environments=1",
-                    "habitat_baselines.eval.video_option=[]",
-                    "habitat.simulator.concur_render=False",
-                ],
+                overrides=habitat_config_overrides(self._config.seed),
             )
             gym_env = make_gym_from_config(config)
             habitat_env = gym_env.habitat_env

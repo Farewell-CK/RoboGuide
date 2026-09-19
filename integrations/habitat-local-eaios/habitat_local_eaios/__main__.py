@@ -37,6 +37,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--habitat-config", type=Path, required=True)
     parser.add_argument("--episode-id", required=True)
     parser.add_argument("--agent-id", type=int, default=0)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="simulator seed forwarded as habitat.seed; None keeps the config default",
+    )
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--step-period-ms", type=int, default=20)
     parser.add_argument("--initialization-timeout-s", type=float, default=120.0)
@@ -100,6 +106,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         agent_id=arguments.agent_id,
         max_steps=arguments.max_steps,
         step_period_ms=arguments.step_period_ms,
+        seed=arguments.seed,
         subtask_mode=arguments.subtask_mode,
         evidence_dir=arguments.evidence_dir,
         run_id=arguments.run_id,
@@ -142,6 +149,7 @@ def main() -> None:
         "agent_id": arguments.agent_id,
         "max_steps": arguments.max_steps,
         "step_period_ms": arguments.step_period_ms,
+        "seed": arguments.seed,
     }
     if arguments.backend == "emos-crabagent":
         config: HabitatBackendConfig = CrabAgentBackendConfig(
