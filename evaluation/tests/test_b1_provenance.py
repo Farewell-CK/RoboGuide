@@ -12,7 +12,7 @@ import pytest
 from b1_helpers import ROOT, build_provenance, make_run, write_json
 from mission.request_engine import _plan_digest
 from mission.request_record import MissionRequestRecord
-from roboguide_eval.b1_provenance import digest, plan_digest
+from roboguide_eval.b1_provenance import _check_draft, digest, plan_digest
 from roboguide_eval.b1_run import assess_b1_directory
 
 
@@ -99,6 +99,105 @@ def test_final_review_must_reference_final_revision(tmp_path: Path) -> None:
     request["review_history"] = request["review_history"][:1]
     update_request(run, request)
     assert "final_review_mismatch" in assess_b1_directory(run)["context"]["provenance_failures"]
+
+
+@pytest.mark.parametrize("attempt_index", [0, 1])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        "",
+        "sha256:placeholder",
+        "a" * 64,
+        "sha256:" + "A" * 64,
+        "sha256:" + "b" * 64,
+        7,
+        [],
+        {},
+    ],
+)
+def test_every_review_context_digest_must_match_frozen_request(
+    tmp_path: Path, attempt_index: int, invalid: Any
+) -> None:
+    """Missing, malformed, or wrong context on either side of repair invalidates provenance."""
+    run = make_run(tmp_path, repaired=True)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    attempt = request["review_history"][attempt_index]
+    attempt["grounding_context_digest"] = invalid
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["mi_review_context_mismatch"]
+    assert verdict["admission"]["provenance_valid"] is False
+    assert verdict["admission"]["valid_for_formal_population"] is False
+
+
+@pytest.mark.parametrize("attempt_index", [0, 1])
+def test_review_context_digest_cannot_be_omitted(tmp_path: Path, attempt_index: int) -> None:
+    """Deleting the field cannot use legacy review compatibility to admit a B1 run."""
+    run = make_run(tmp_path, repaired=True)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    request["review_history"][attempt_index].pop("grounding_context_digest")
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["mi_review_context_mismatch"]
+    assert verdict["admission"]["provenance_valid"] is False
+
+
+@pytest.mark.parametrize("attempt_index", [0, 1])
+def test_review_context_cannot_cross_request_snapshot(tmp_path: Path, attempt_index: int) -> None:
+    """A genuine digest from another request is not evidence for this review or repair."""
+    run = make_run(tmp_path, repaired=True)
+    other_run = make_run(tmp_path / "other", repaired=True)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    other = json.loads((other_run / "b1-request-record.json").read_text())
+    other_digest = other["grounding_context"]["context_digest"]
+    assert other_digest != request["grounding_context"]["context_digest"]
+    request["review_history"][attempt_index]["grounding_context_digest"] = other_digest
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["mi_review_context_mismatch"]
+    assert verdict["admission"]["provenance_valid"] is False
+
+
+@pytest.mark.parametrize("stale_attempt", [0, 1])
+def test_repaired_request_cannot_retain_stale_review_context(
+    tmp_path: Path, stale_attempt: int
+) -> None:
+    """A valid newer snapshot with the same goal cannot rescue one stale review context."""
+    run = make_run(tmp_path, repaired=True)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    context = request["grounding_context"]
+    previous_digest = context["context_digest"]
+    context["captured_at_ms"] += 1
+    context["context_digest"] = plan_digest(
+        {
+            key: value
+            for key, value in context.items()
+            if key not in {"schema_version", "context_digest"}
+        }
+    )
+    assert context["context_digest"] != previous_digest
+    for index, attempt in enumerate(request["review_history"]):
+        if index != stale_attempt:
+            attempt["grounding_context_digest"] = context["context_digest"]
+    update_request(run, request)
+    verdict = assess_b1_directory(run)
+    assert verdict["context"]["provenance_failures"] == ["mi_review_context_mismatch"]
+    assert verdict["admission"]["provenance_valid"] is False
+
+
+@pytest.mark.parametrize("plan_present", [True, False])
+def test_early_failure_does_not_skip_existing_review_context(
+    tmp_path: Path, plan_present: bool
+) -> None:
+    """The early-failure draft gate still validates every review attempt that was reached."""
+    run = make_run(tmp_path, repaired=True)
+    request = json.loads((run / "b1-request-record.json").read_text())
+    if not plan_present:
+        request["plan"] = None
+    assert _check_draft(request, early=True) == []
+    request["review_history"][0].pop("grounding_context_digest")
+    assert _check_draft(request, early=True) == ["mi_review_context_mismatch"]
 
 
 def test_mi_and_evaluation_canonicalization_are_identical(tmp_path: Path) -> None:

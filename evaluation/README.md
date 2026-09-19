@@ -113,6 +113,10 @@ Authoritative semantic evidence v0.2 在中立 `identity` 字段中保留
 episode/scene 均失败。v0.1 缺少 dataset 身份，读取时拒绝，不自动补齐或升级。
 Evaluation 将这四个字段逐项与 `b1-input-used.json` 严格交叉绑定，任一字段缺失、
 类型错误或不匹配都使 provenance invalid；重新计算外层 digest 也不能绕过。
+Request 的每条 `review_history`（包括 repair 前后及 early failure 前已产生的 review）
+还必须保留格式正确且等于最终 frozen `grounding_context.context_digest` 的
+`grounding_context_digest`；缺失、跨 snapshot 或 stale review 使 provenance invalid。
+该检查复用现有 request record，不改变 Mission Request HTTP API。
 
 **scene/index 的来源（pinned dataset resolver）**：在 local.yaml 为系统配置
 `dataset_path` 指向 pinned episodes 文件后，runner 只读解析（gzip+JSON，不

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import SubmissionReceipt
 from mission.grounding_context import GroundingContextSnapshot
@@ -335,6 +336,57 @@ def test_fixed_authoritative_semantics_are_reused_by_every_mi_phase(tmp_path: Pa
     ]
     assert all(item is context for item in all_contexts)
     assert controller.submissions == [accepted.plan]
+    restored = MissionRequestStore(tmp_path / "review-requests.sqlite3").get(accepted.request_id)
+    assert restored is not None
+    assert restored.grounding_context == context
+    assert len(restored.review_history) == 2
+    assert all(
+        attempt.grounding_context_digest == context.context_digest
+        for attempt in restored.review_history
+    )
+
+
+@pytest.mark.parametrize("repair_rounds", [0, 1, 2])
+def test_durable_review_attempts_keep_the_exact_model_input_context(
+    tmp_path: Path, repair_rounds: int
+) -> None:
+    """All exported attempts retain the shared model-input digest across bounded repairs."""
+    reviewer = FakeReviewer(
+        [_review(ReviewIssueAction.REPAIR_PLAN) for _ in range(repair_rounds)] + [_review()]
+    )
+    repairer = FakeRepairer()
+    interpreter = FakeInterpreter()
+    planner = FakePlanner()
+    engine = _engine(
+        tmp_path, interpreter, reviewer, repairer, AcceptingController(), planner=planner
+    )
+    accepted = engine.create("执行明确的运输任务")
+    assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    assert accepted.repair_attempts == repair_rounds
+    assert accepted.grounding_context is not None
+    context = accepted.grounding_context
+    assert len(reviewer.grounding_contexts) == repair_rounds + 1
+    assert len(repairer.grounding_contexts) == repair_rounds
+    assert all(
+        item is context
+        for item in [
+            *interpreter.grounding_contexts,
+            *planner.grounding_contexts,
+            *reviewer.grounding_contexts,
+            *repairer.grounding_contexts,
+        ]
+    )
+    restored = MissionRequestStore(tmp_path / "review-requests.sqlite3").get(accepted.request_id)
+    assert restored is not None
+    exported = restored.to_json()
+    assert (
+        cast(JSONObject, exported["grounding_context"])["context_digest"] == context.context_digest
+    )
+    attempts = cast(list[JSONObject], exported["review_history"])
+    assert len(attempts) == repair_rounds + 1
+    assert [attempt["grounding_context_digest"] for attempt in attempts] == [
+        context.context_digest
+    ] * (repair_rounds + 1)
 
 
 def test_repairable_review_produces_a_new_approved_draft_revision(tmp_path: Path) -> None:

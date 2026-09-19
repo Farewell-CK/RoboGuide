@@ -82,6 +82,7 @@ class ProvenanceFailure(StrEnum):
     REQUEST_RECORD_MISMATCH = "request_record_mismatch"
     MI_GENERATION_EVIDENCE_MISSING = "mi_generation_evidence_missing"
     MI_RUN_PLAN_DIGEST_MISMATCH = "mi_run_plan_digest_mismatch"
+    MI_REVIEW_CONTEXT_MISMATCH = "mi_review_context_mismatch"
     PLAN_MISSING = "plan_missing"
     PLAN_DIGEST_MISMATCH = "plan_digest_mismatch"
     FINAL_REVIEW_MISMATCH = "final_review_mismatch"
@@ -245,11 +246,24 @@ def scoped_execution_evidence(
 
 
 def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure]:
-    """Bind generation and final review to the current immutable draft."""
+    """Bind every review to frozen grounding, and final approval to the current draft."""
     failures: list[ProvenanceFailure] = []
+    history = request.get("review_history", [])
+    if not isinstance(history, list):
+        failures.append(ProvenanceFailure.FINAL_REVIEW_MISMATCH)
+        history = []
+    context_digest = _object(request.get("grounding_context")).get("context_digest")
+    for item in history:
+        review_context_digest = _object(item).get("grounding_context_digest")
+        if (
+            not isinstance(review_context_digest, str)
+            or _DIGEST.fullmatch(review_context_digest) is None
+            or review_context_digest != context_digest
+        ):
+            failures.append(ProvenanceFailure.MI_REVIEW_CONTEXT_MISMATCH)
     plan = _object(request.get("plan"))
     if not plan:
-        return [] if early else [ProvenanceFailure.PLAN_MISSING]
+        return failures if early else [*failures, ProvenanceFailure.PLAN_MISSING]
     if (
         request.get("draft_digest") != plan_digest(plan)
         or type(request.get("draft_revision")) is not int
@@ -258,10 +272,6 @@ def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure
         failures.append(ProvenanceFailure.MI_RUN_PLAN_DIGEST_MISMATCH)
     if _object(plan.get("mission")).get("id") != request.get("mission_id"):
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
-    history = request.get("review_history", [])
-    if not isinstance(history, list):
-        failures.append(ProvenanceFailure.FINAL_REVIEW_MISMATCH)
-        history = []
     revisions: list[int] = []
     for item in history:
         attempt = _object(item)
