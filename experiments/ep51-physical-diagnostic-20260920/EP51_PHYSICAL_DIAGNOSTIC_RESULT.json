@@ -1,0 +1,43 @@
+{
+  "schema": "roboguide.e1.ep51-physical-diagnostic/v0.1",
+  "run_directory": "/data/workspace/code/roboguide-ep51-diag-20260920/b1-diag-ep51-seed40",
+  "diagnostics_branch": "zcode/e1-ep51-physical-diagnostics@6bb098d",
+  "main_baseline": "63961378b77378728d6e91accce03a662236692b",
+  "execution_policy": {
+    "runs_executed": 1,
+    "rerun_policy": "no-rerun-on-model-output-change",
+    "counted_in_formal_statistics": false
+  },
+  "run_outcome": {
+    "failure_boundary": "mission_intelligence_plan_validation",
+    "failure_issue": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+    "physical_episode_executed": false,
+    "diagnostic_files_produced": false,
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "system_outcome": "FAILURE",
+    "event_archive_state": "not_required",
+    "exit_code": 0
+  },
+  "preflight": {
+    "emos_llm_model_matches_spec": true,
+    "key_source": "emos.env",
+    "cuda_device": "0",
+    "diagnostics_flag": "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1"
+  },
+  "questions": {
+    "A_fetch_step1000_stop": "unreached-episode-never-started",
+    "B_fetch_arrival": "unreached-episode-never-started",
+    "C_official_goal_timelines": "unreached-episode-never-started",
+    "D_spot_post_step90": "unreached-episode-never-started",
+    "E_goal_truth_at_key_steps": "unreached-episode-never-started",
+    "F_new_finding": "MI nondeterministic plan structure can violate v0.8 context-mode/shared-view pairing and fail B1 before any physical execution; rejected draft is not persisted (plan=null, draft_revision=0, no review evidence)"
+  },
+  "diagnostics_capability": {
+    "module": "integrations/habitat-local-eaios/habitat_local_eaios/diagnostics.py",
+    "offline_tests": 8,
+    "offline_result": "pass",
+    "repo_tests": "711 passed",
+    "predicate_truth_source": "official habitat Predicate.is_true per goal conjunct"
+  }
+}
