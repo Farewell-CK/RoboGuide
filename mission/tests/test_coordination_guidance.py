@@ -11,7 +11,11 @@ from mission.contract_values import MissionPlanError
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.rejected_draft import RejectedPlanError
-from mission.responses import ResponsesMissionPlanner, ResponsesMissionRepairer
+from mission.responses import (
+    ResponsesMissionPlanner,
+    ResponsesMissionRepairer,
+    ResponsesMissionReviewer,
+)
 from mission.review import MissionPlanReview
 from test_planners import (
     FakeTransport,
@@ -117,18 +121,25 @@ def _intent(raw: JSONObject) -> GroundedIntent:
 
 
 def _guidance(instructions: str) -> str:
-    """Extract the common rules while excluding Planner-only regeneration instructions."""
+    """Extract shared semantics before each role-specific instruction section."""
     return (
         instructions.split("## Coordination mode and Group shared view\n", 1)[1]
-        .split("\nThese rules apply both to initial planning", 1)[0]
+        .split("\n## ", 1)[0]
         .strip()
     )
 
 
-def test_all_writer_paths_receive_the_same_coordination_contract() -> None:
-    """Initial planning, regeneration, and semantic repair receive identical common rules."""
+def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None:
+    """All four adapter paths deliver identical semantics without claiming model adherence."""
     raw = _coordination_plan()
-    transport = FakeTransport([_response(_provider_plan(raw)) for _ in range(3)])
+    transport = FakeTransport(
+        [
+            _response(_provider_plan(raw)),
+            _response(_provider_plan(raw)),
+            _response({"approved": True, "issues": []}),
+            _response(_provider_plan(raw)),
+        ]
+    )
     settings = _local_settings()
     planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
     repairer = ResponsesMissionRepairer(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
@@ -141,6 +152,8 @@ def test_all_writer_paths_receive_the_same_coordination_contract() -> None:
         planner.regenerate("mission-inspection", intent, catalog, grounding, previous, errors)
         == plan
     )
+    reviewer = ResponsesMissionReviewer(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    assert reviewer.review(intent, plan, catalog, grounding).approved
     assert (
         repairer.repair(
             "mission-inspection",
@@ -163,7 +176,7 @@ def test_all_writer_paths_receive_the_same_coordination_contract() -> None:
         "`sequential-handoff` expresses a real before/after handoff",
         "a legal `shared_view`, and at least one semantically justified execution `relation`",
         "a valid `peer_channel`, and at least two ContextRoles",
-        "a Task-level `independent` override does not remove a Context's required",
+        "A Task-level `independent` override does not remove a Context's required",
         "`execution` bindings expose Runtime logical execution state",
         "They do not provide pose or velocity observations",
         "It cannot substitute for required pose or velocity sharing",
@@ -178,9 +191,22 @@ def test_all_writer_paths_receive_the_same_coordination_contract() -> None:
         "or physical robots",
         "Never fabricate relations, exports, or peer contracts",
         "Never remove a genuine dependency or required state observation",
+        "a joint terminal-state conjunction alone does not require executions "
+        "to stay active together",
+        "Parallelism, a previous draft, and a validation error are not such a basis",
+        "check whether the source completing while the target is still running "
+        "would violate that requirement",
+        "not continued physical occupancy or persistence of a completed Task's effect",
+        "if the supplied operation contracts support that requirement",
     ):
         assert requirement in rules
-    assert "Do not mechanically add a view" in instructions[1]
+    assert "Do not mechanically add a view or relation" in instructions[1]
+    assert "Validation may report only the first defect" in instructions[1]
+    review_rules = " ".join(instructions[2].split())
+    assert "Review semantic necessity separately from structural validity" in review_rules
+    assert "use `RejectDraft`: this is a deployment contract gap" in review_rules
+    assert "Report all observed blockers together" in review_rules
+    assert "invalid mechanism is not an unaffected constraint" in instructions[3]
     inputs = [json.loads(cast(str, request[2]["input"])) for request in transport.requests]
     for model_input in inputs:
         assert model_input["grounded_intent"] == intent.to_json()

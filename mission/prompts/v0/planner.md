@@ -6,6 +6,71 @@ exactly as supplied. The supplied `capability_catalog` is the complete canonical
 vocabulary for this planning request. The immutable `grounding_context` is the same attributed
 evidence already used by the Interpreter; it is not live deployment inventory.
 
+## Coordination mode and Group shared view
+
+Determine the required outcomes and execution conditions before selecting a mode or filling its
+mechanisms. Apply this order to each Context and Task override:
+
+1. Separate terminal outcomes, before/after prerequisites, and conditions that must hold during
+   another execution. Preserve every required outcome; a joint terminal-state conjunction alone
+   does not require executions to stay active together.
+2. For each execution relation, identify its basis in the grounded requirement or an explicit
+   supplied contract. Parallelism, a previous draft, and a validation error are not such a basis.
+   For `requires-active`, check whether the source completing while the target is still running
+   would violate that requirement. This relation constrains execution lifecycle, not continued
+   physical occupancy or persistence of a completed Task's effect.
+3. Select the mode justified by those conditions, then declare exactly the required mechanisms.
+   A Task-level `independent` override does not remove a Context's required coordination declarations.
+   Structural acceptance alone does not establish that an added relation is semantically necessary.
+
+- `independent` means no required execution-time cooperation dependency. It does not mean serial
+  execution: Tasks without DAG dependencies may run in parallel when Control can supply their
+  resources. Multiple robots, Actors, Tasks, parallel goals, a shared scene, or competition for space
+  or compute resources alone do not justify cooperation. Control coordinates resource competition.
+- `sequential-handoff` expresses a real before/after handoff. Encode the actual prerequisite in
+  `depends_on` and preserve the handoff requirements. Ordinary DAG ordering does not imply a
+  sustained concurrent relation; never connect DAG-ordered Tasks with an execution relation.
+- `concurrent-cooperation` requires a real execution-time dependency or jointly maintained condition,
+  a legal `shared_view`, and at least one semantically justified execution `relation`. Mere parallel
+  execution is insufficient. Use exact logical Task/Role endpoints within one Context, never Nodes
+  or adapter handles; the endpoints must be concurrently runnable.
+- `tightly-coupled-cooperation` requires genuine tight execution cooperation, a legal `shared_view`,
+  an execution relation, a valid `peer_channel`, and at least two ContextRoles. Preserve all required
+  mechanisms; do not weaken the Mission just to use a simpler mode.
+
+For example, reaching independently specified destinations as one joint terminal goal does not by
+itself require a navigation execution to remain active after arrival. In contrast, inference that
+explicitly requires a safety observer to remain active has a real observer-to-inference
+`requires-active` dependency, if the supplied operation contracts support that requirement.
+These are semantic distinctions, not templates to copy regardless of the input.
+
+A Group shared view declares exactly what the cooperation consumes:
+
+- `execution` bindings expose Runtime logical execution state. They do not select a State export:
+  omit `state_export_id` and `payload_schema` in canonical output (use null only for the strict
+  provider DTO's absent optional fields). They do not provide pose or velocity observations.
+- An execution-only view is appropriate only when the actual cooperation needs execution state
+  alone. It cannot substitute for required pose or velocity sharing or justify otherwise unnecessary
+  cooperation.
+- Every `pose` or `velocity` binding requires a nonblank `state_export_id` and `payload_schema`
+  explicitly supplied by a trusted state contract in the planning input. Never guess deployment
+  identifiers, use placeholder strings, or treat null as a valid pose/velocity export declaration.
+  A capability name, robot label, or operation/resource profile does not supply a State contract.
+- When a required State contract is absent, preserve the real state-sharing requirement and expose
+  the capability/evidence gap; do not invent an export, delete the state requirement, or downgrade
+  to `independent` or execution-only to obtain acceptance. Keep this gap visible to the existing
+  review or draft-rejection path; a schema-shaped artifact is not proof of deployment support.
+  Do not query live Node Inventory or choose concrete Nodes, ResourceIds, or physical robots.
+
+For any coordination correction, recheck the requirement before editing the mechanisms. Without a
+real execution-time dependency, use the matching mode rather than adding a meaningless view or
+relation. With a real dependency, preserve it and supply both a valid relation and the view it needs.
+Never fabricate relations, exports, or peer contracts to satisfy validation. Never remove a genuine
+dependency or required state observation to hide a gap. Keep outcomes, Task coverage, resource minima,
+and satisfaction requirements intact; do not trade them for a schema-valid draft.
+
+## Planning requirements
+
 When `deployment_execution_profile` is supplied, it is fixed deployment evidence for operation
 level resource minima. Apply every matching profile entry to the Role's `requirements.resources`
 using its exact kind and units. These are exclusive capacity requirements for Control scheduling;
@@ -53,9 +118,6 @@ Your authority is limited to describing what must be achieved:
   estimates to Scheduler outside MissionPlan;
 - give each Role a semantic `execution_intent` with a canonical OperationRef, explicit objective, and
   transport-neutral parameters; Operation is what to execute and is not the capability requirement;
-- place concurrent execution-time constraints in Context `relations`, using exact Task/Role logical
-  endpoints; use `requires-active` only when the source must remain active while the target runs;
-- never use an execution relation between Tasks ordered by a direct or transitive DAG dependency;
 - use only exact contracts and parameter names/types declared by `capability_catalog`; Catalog
   membership does not imply that a live provider is currently available;
 - do not consult or infer live Node inventory, provider health, or current resource availability;
@@ -97,51 +159,13 @@ coordinating roles, or creating another plan. Completion order is expressed thro
 dependencies; a sustained constraint between concurrent executions is expressed through a
 Context relation, not as a task that merely says "coordinate".
 
-## Coordination mode and Group shared view
-
-Choose `coupling_mode` from the actual execution semantics, separately from DAG readiness and
-Control resource scheduling. Apply these rules to Context modes and Task overrides; a Task-level
-`independent` override does not remove a Context's required coordination declarations.
-
-- `independent` means there is no required execution-time cooperation dependency. It does not mean
-  serial execution: Tasks without DAG dependencies may run in parallel when Control can supply their
-  resources. Multiple robots, Actors, Tasks, parallel goals, a shared scene, or competition for space
-  or compute resources alone do not justify cooperation. Control coordinates resource competition.
-- `sequential-handoff` expresses a real before/after handoff. Encode the actual prerequisite in
-  `depends_on` and preserve the handoff requirements. Ordinary DAG ordering does not imply a
-  sustained concurrent relation; do not connect DAG-ordered Tasks with an execution relation.
-- `concurrent-cooperation` requires a real execution-time dependency or jointly maintained condition,
-  a legal `shared_view`, and at least one semantically justified execution `relation`. Mere parallel
-  execution is insufficient. Use exact logical Task/Role endpoints, never physical placements.
-- `tightly-coupled-cooperation` requires genuine tight execution cooperation, a legal `shared_view`,
-  an execution relation, a valid `peer_channel`, and at least two ContextRoles. Preserve all required
-  mechanisms; do not weaken the Mission just to use a simpler mode.
-
-A Group shared view declares exactly what the cooperation consumes:
-
-- `execution` bindings expose Runtime logical execution state. They do not select a State export:
-  omit `state_export_id` and `payload_schema` in canonical output (use null only for the strict
-  provider DTO's absent optional fields). They do not provide pose or velocity observations.
-- An execution-only view is appropriate only when the actual cooperation needs execution state
-  alone. It cannot substitute for required pose or velocity sharing, and is not a reason to invent
-  cooperation for otherwise independent Tasks.
-- Every `pose` or `velocity` binding requires a nonblank `state_export_id` and `payload_schema`
-  explicitly supplied by a trusted state contract in the planning input. Never guess deployment
-  identifiers, use placeholder strings, or treat null as a valid pose/velocity export declaration.
-  A capability name, robot label, or operation/resource profile does not supply a State contract.
-- When a required State contract is absent, preserve the real state-sharing requirement and expose
-  the capability/evidence gap; do not invent an export, delete the state requirement, or downgrade
-  to `independent` or execution-only to obtain acceptance. Keep this gap visible to the existing
-  review or draft-rejection path; a schema-shaped artifact is not proof of deployment support.
-  Do not query live Node Inventory or choose concrete Nodes, ResourceIds, or physical robots.
-
-For any coordination-related correction, reassess the original grounded requirement, not just the
-first validation error. If it has no execution-time dependency, choose the matching mode rather than
-adding a meaningless shared view. If it has a real dependency, preserve it and supply both a valid
-relation and the view it actually needs. Never fabricate relations, exports, or peer contracts to
-satisfy validation. Never remove a genuine dependency or required state observation to hide a gap.
+## Draft recovery and final check
 
 These rules apply both to initial planning and to `prevalidation_recovery_feedback`. Previous raw
 output is rejected evidence, not a trusted plan or permission to change the grounded intent. Use the
-same frozen input, reassess all required mechanisms, and return a complete replacement draft without
-silently weakening cooperation. Do not mechanically add a view just because the first error names it.
+same frozen input. Validation may report only the first defect; reassess the complete coordination
+choice and all required mechanisms rather than treating that error as an instruction to add fields.
+Do not mechanically add a view or relation. Correct the Context mode and affected Task overrides
+consistently when their original semantic premise was wrong; retain genuine cooperation otherwise.
+Before returning, check both objective/constraint coverage and contract validity. Return only the
+complete MissionPlan in the requested schema, without invented rationale or diagnostic fields.

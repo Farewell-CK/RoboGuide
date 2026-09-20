@@ -3,6 +3,8 @@
 状态：实现与离线回归；真实模型遵循率尚未验证。开发基线：
 `02f164b8831be873eedd923bc28d737301b8453e`。
 
+前文记录第一版 `6623799` 的修复与验证；后续优化见文末“第二版：语义依据与 Review 一致性”。
+
 ## 修复依据与边界
 
 历史审计报告位于原工作区
@@ -101,7 +103,7 @@ cargo test -p orchestration
 本轮不调用真实 Provider、不启动 Habitat、不提交真实 Mission Request，不能对下一次模型输出
 是否稳定选择正确模式、物理协作能否完成或官方 benchmark 成功作出承诺。
 
-## 本次实际结果
+## 第一版实际结果
 
 - 新增 30 项参数展开后的回归；上述 MI targeted 集合 118 passed。
 - 全量 Python：815 passed。
@@ -118,3 +120,77 @@ cargo test -p orchestration
 显式检查 MI 源码与 evaluation 单独检查时对 MI import 的处理不同，会暴露既有跨包类型问题。
 使用独立的未修改 `02f164b` worktree、同一个 mypy 二进制和 `--no-incremental` 对照确认，
 未将这些错误归为本次新增，也没有修改无关模块来消除它们。
+
+
+## 第二版：语义依据与 Review 一致性
+
+开发基线：`6623799da53870445db7383db6dfb77c683b4c68`。分支：
+`codex/mi-prompt-refinement`。本版只修改三份 Prompt、相关测试和本文，不改变
+Provider schema、生产适配器、校验器、Core 或协议；没有新的真实模型调用。
+
+### 证据与设计理由
+
+上一轮真实对照的 A3 位于：
+
+- `/data/workspace/code/roboguide-ep51-mi-prompt-ab-20260920T124627Z/A/state/final-plan.json`：
+  `contexts[0].relations[0]` 为导航任务之间的 `requires-active`，两个 Task 无 DAG 依赖。
+- 同根目录 `A/evidence/attempt-03/attempt-result.json`：完整确定性 MI 校验 PASS。
+- 同根目录 `frozen/base-input.json`：联合终态目标，没有要求一个导航 execution 在另一个
+  执行期间保持活跃。原始文件保持不变。
+- [已发布的对照报告](https://github.com/Farewell-CK/RoboGuide/blob/codex/ep51-mi-prompt-ab-report/experiments/ep51-mi-prompt-ab-20260920/EP51_MI_PROMPT_AB_REPORT.md)：
+  A3 增加了无输入依据的限制；B1 首次生成 independent 并保留目标。
+
+`core/runtime/src/relation/manager.rs::derive_relation_state` 明确区分 execution 生命周期：
+RequiresActive 的 target 为 Accepted/Running 时，source Completed/Failed/Cancelled 会得到
+Violated。该关系不表达“导航已完成但仍在目标位置”。因此问题不能仅靠合法字段或 endpoint
+引用来识别，必须检查约束是否来自真实任务。本轮没有证据表明旧 Reviewer 曾实际放过 A3：
+上一轮没有调用 Reviewer，不能把未测能力写成已确认运行漏洞。
+
+三份 Prompt 现在共享同一规则块，并把它放在各自的主要操作规则之前：
+
+1. 先区分终态、先后交接、执行期间必须成立的条件，再选择模式和机制。
+2. 对 requires-active 检查：source 提前完成而 target 继续执行，是否真的违反输入需求？
+   joint terminal goal 不自动要求 execution 同时活跃。
+3. 使用一对通用正反例说明区别：独立到达目标，与确实要求安全观察者持续活跃的推理任务。
+   不含 episode、机器人名称或数量特例，不将示例强制套用到输入。
+4. Reviewer 同时检查不必要的关系和被遗漏的真实合作条件。issue 必须指出具体路径、输入
+   依据及新增限制/遗漏条件；现有 action 路由保持不变。缺部署状态契约使用 RejectDraft，
+   仅用户能补充的任务语义才使用 RequestClarification；live provider 缺席仍由 Control 处理。
+5. regenerate 不把第一条错误当成新增机制的命令；Repairer 修复同一问题关联的 mode、Task
+   override、relation 和 view，仍保留未受影响的任务、目标、资源和 satisfaction requirement。
+
+真正的执行期依赖及 pose/velocity 需求不得因“更容易通过”而删除。既有紧密合作、peer
+channel、State export/schema、物理身份和权限边界规则均保留。没有新增 rationale 字段，也没有
+为 Planner 引入尚不存在的 gap 返回类型。相同规则块由四条调用路径的交付测试防止漂移。
+本版没有压缩成最短文本：保留必要契约信息，重排判断顺序，新增有证据依据的语义检查。
+
+### 离线验证与能力边界
+
+`test_coordination_guidance.py` 检查 Planner 初次、regenerate、Reviewer、Repairer 实际 adapter
+请求都收到相同规则，并保留冻结 intent/context 和真实 recovery feedback。
+`test_coordination_review.py` 新增五个参数展开案例：
+
+- 同样的合法 relation/view，在无持续依赖和有真实持续依赖两种输入下，完整结构校验都可
+  通过；将完整输入交给 Review。预设 Review 分别给出 RepairPlan/Approved，验证已有路由和
+  Repair 输入、原草案不可变、未受影响 Task 不变。
+- 真实位姿需求分别被 independent、execution-only、猜测的非空 export 标识符掩盖时，
+  结构校验仍可能通过。Review 仍收到完整需求，预设 RejectDraft 保留部署合同缺口。
+
+**这些测试故意暴露结构校验的边界，不宣称新增了语义确定性拒绝机制。**
+预设 Review/Repair 输出仅验证证据交付与现有路由，不证明真实 Reviewer 能识别全部反例，
+也不证明 Planner 会持续选择正确模式。真实需要共享状态的任务是否被忠实保留，仍需以后
+单独批准、预注册的模型测试；本版没有消耗新 Provider 调用预算。
+
+历史两份合法 independent 与三份拒稿的完整回放继续使用原 fixture。原有合法/非法契约、
+Provider normalization、资源分配、Runtime relation 等回归仍按原规则执行。
+
+验证命令在前述 targeted 集合中增加 `mission/tests/test_coordination_review.py`；
+Rust 检查为 `cargo test -p runtime -p orchestration`。实际结果：
+
+- MI targeted：123 passed；全量 Python：820 passed。
+- Rust：Orchestration 58 passed，Runtime 24 passed；两包 Clippy all-targets、warnings denied 通过。
+- Ruff format/check：Mission、service、quality、两个 adapter、evaluation，175 文件通过。
+- strict mypy 按 AGENTS.md 分组：Mission/集成 74 文件、evaluation 51 文件通过。
+- Python function-doc、`git diff --check`、架构 PNG 文件检查通过。
+- 初次 Ruff 检查发现新增测试的一行超长，折行后重新执行通过。
+- 没有运行真实 Provider、Mission Service、Control、Node 或 Habitat；没有修改历史证据。
