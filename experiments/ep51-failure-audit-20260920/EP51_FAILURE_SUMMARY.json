@@ -1,0 +1,406 @@
+{
+  "schema": "roboguide.analysis.ep51-failure-summary/v0.1",
+  "analysis_mode": "offline_read_only",
+  "run_baseline": "edc773c9be19e951792c471c47d7c132b25178a6",
+  "production_code_modified": false,
+  "experiments_executed": 0,
+  "evidence": {
+    "b1_summary": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/shared-world-summary.json",
+    "b1_trace": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/action_trace.jsonl",
+    "b1_request": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/b1-request-record.json",
+    "b1_submission": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/b1-request-observations.json",
+    "controller_events": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/control-events-complete.json",
+    "adapter_log": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/shared-bridge.log",
+    "assignment_arrival": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/assignment-arrival.jsonl",
+    "b1_scene": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/scene_description.txt",
+    "b1_chat_agent_0": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/chat-history/51/agent_0_action_history.json",
+    "b1_chat_agent_1": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/chat-history/51/agent_1_action_history.json",
+    "bridge_b_store": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-b.sqlite3",
+    "node_b_journal": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-b/execution-journal.sqlite3",
+    "mission": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/mission.json",
+    "attempts": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/execution-attempts.json",
+    "b1_child_config": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/runtime-observations.jsonl",
+    "b1_routing": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/stage2-proxy-routing.json",
+    "emos_manifest": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/manifest.json",
+    "emos_metrics": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/metrics.json",
+    "emos_stdout": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/stdout.log",
+    "emos_stderr": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/stderr.log",
+    "emos_model_usage": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/raw-evidence/token_usage_details-51.jsonl",
+    "shared_world_source": "/data/workspace/code/RoboGuide/integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py",
+    "model_source": "/data/workspace/code/emos-baseline/habitat-mas/habitat_mas/utils/models.py",
+    "skill_source": "/data/workspace/code/emos-baseline/habitat-baselines/habitat_baselines/rl/hrl/skills/skill.py",
+    "skill_config": "/data/workspace/code/emos-baseline/habitat-baselines/habitat_baselines/config/habitat_baselines/rl/policy/hierarchical_policy/defined_skills/oracle_skills_multi_agent.yaml"
+  },
+  "verified_facts": {
+    "workload": {
+      "episode_id": "51",
+      "habitat_seed": 40,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "simulator_steps": 3000,
+      "evidence": "b1_summary#/identity"
+    },
+    "official_outcome": {
+      "pddl_success": false,
+      "per_goal_terminal_values": {
+        "any_at(any_targets|0)": null,
+        "any_at(TARGET_any_targets|0)": null
+      },
+      "per_goal_status": "not_recorded_in_run_bound_official_evidence",
+      "evidence": "b1_summary#/official_pddl_success"
+    },
+    "node_b_direct_failure": {
+      "basis": "episode-terminated-before-success",
+      "detail": "Habitat episode terminated before the assigned shared navigation completed",
+      "condition": "episode_done_and_joint_pddl_false_and_no_previously_captured_local_completion",
+      "step": 3000,
+      "evidence": [
+        "b1_summary#/outcomes/1",
+        "controller_events#sequence=390",
+        "bridge_b_store#executions.detail",
+        "node_b_journal#executions.reason",
+        "shared_world_source#lines235-270"
+      ]
+    },
+    "node_outcomes": {
+      "0": {
+        "node": "node-a",
+        "state": "COMPLETED",
+        "initial_position": [
+          -0.16678085923194885,
+          2.3214714527130127,
+          3.768552780151367
+        ],
+        "recorded_outcome_position": [
+          -0.4552406668663025,
+          2.9140219688415527,
+          -1.4644842147827148
+        ],
+        "position_sample_step": 90,
+        "episode_final_position": null,
+        "initial_orientation": null,
+        "terminal_orientation": null,
+        "local_skill_completed": true,
+        "terminal_basis": "oracle-nav-skill",
+        "evidence": "b1_summary#/outcomes/0"
+      },
+      "1": {
+        "node": "node-b",
+        "state": "FAILED",
+        "initial_position": [
+          4.056283950805664,
+          2.8338050842285156,
+          -1.6121662855148315
+        ],
+        "recorded_outcome_position": [
+          1.3818612098693848,
+          2.833804130554199,
+          -3.0569705963134766
+        ],
+        "position_sample_step": 3000,
+        "episode_final_position": [
+          1.3818612098693848,
+          2.833804130554199,
+          -3.0569705963134766
+        ],
+        "initial_orientation": null,
+        "terminal_orientation": null,
+        "local_skill_completed": false,
+        "terminal_basis": "episode-terminated-before-success",
+        "evidence": "b1_summary#/outcomes/1"
+      }
+    },
+    "skill_segments": {
+      "values": [
+        {
+          "first_step": 1,
+          "last_step": 91,
+          "skills": [
+            "nav_to_obj",
+            "nav_to_obj"
+          ]
+        },
+        {
+          "first_step": 92,
+          "last_step": 1000,
+          "skills": [
+            "wait",
+            "nav_to_obj"
+          ]
+        },
+        {
+          "first_step": 1001,
+          "last_step": 3000,
+          "skills": [
+            "wait",
+            "wait"
+          ]
+        }
+      ],
+      "evidence": "b1_trace#line_equals_simulator_step"
+    },
+    "first_local_outcome_divergence": {
+      "step": 90,
+      "description": "agent_0_local_navigation_completed_while_agent_1_had_no_completion",
+      "first_distinct_skill_pair_step": 92,
+      "evidence": [
+        "b1_summary#/outcomes/0/simulator_steps",
+        "b1_trace#step92"
+      ]
+    },
+    "node_b_model_actions": {
+      "ordered_tools": [
+        "nav_to_obj",
+        "wait",
+        "send_request",
+        "wait",
+        "wait"
+      ],
+      "nav_target": "TARGET_any_targets|0",
+      "second_navigation_observed": false,
+      "last_navigation_skill_step": 1000,
+      "last_physical_displacement_step": null,
+      "last_recorded_skill": "wait",
+      "evidence": [
+        "b1_chat_agent_1#outer_indices2-6",
+        "b1_trace#steps1000-3000"
+      ]
+    },
+    "b1_agent_arguments": {
+      "values": [
+        {
+          "robot_id": "agent_0",
+          "robot_type": "SpotRobot",
+          "task_description": "Reach the semantic object identified as any_targets|0.",
+          "subtask_description": "Reach the semantic object identified as any_targets|0.",
+          "chat_history_status": "empty",
+          "source_line": 4172
+        },
+        {
+          "robot_id": "agent_1",
+          "robot_type": "FetchRobot",
+          "task_description": "Reach the semantic goal receptacle position identified as TARGET_any_targets|0.",
+          "subtask_description": "Reach the semantic goal receptacle position identified as TARGET_any_targets|0.",
+          "chat_history_status": "empty",
+          "source_line": 4214
+        }
+      ],
+      "evidence": "adapter_log#lines4172,4214"
+    },
+    "plan_submission": {
+      "draft_revision": 1,
+      "reviewed_at_ms": 1789837690936,
+      "submitted_at_ms": 1789837691071,
+      "controller_http_status": 202,
+      "no_task_dependencies": true,
+      "executor_constraints": [],
+      "space_units_per_role": 1,
+      "evidence": [
+        "b1_request#/plan",
+        "b1_submission#/submission_evidence"
+      ]
+    },
+    "assignments": {
+      "values": [
+        {
+          "task_ref": {
+            "mission_id": "mission-f61a99ca9fc1416094e6c00206f8ba0c",
+            "task_id": "reach-object"
+          },
+          "assignments": [
+            {
+              "role_id": "object-move-role",
+              "node_id": "e1-shared-node-a",
+              "resource_ids": [
+                "habitat-navigation-slot-a"
+              ]
+            }
+          ]
+        },
+        {
+          "task_ref": {
+            "mission_id": "mission-f61a99ca9fc1416094e6c00206f8ba0c",
+            "task_id": "reach-goal"
+          },
+          "assignments": [
+            {
+              "role_id": "goal-move-role",
+              "node_id": "e1-shared-node-b",
+              "resource_ids": [
+                "habitat-navigation-slot-b"
+              ]
+            }
+          ]
+        }
+      ],
+      "event_sequences": [
+        137,
+        143
+      ],
+      "evidence": "controller_events"
+    },
+    "early_completion_publication": {
+      "agent_0_outcome_captured_step": 90,
+      "published_after_joint_run_returns": true,
+      "evidence": [
+        "b1_summary#/outcomes/0",
+        "shared_world_source#lines962-966"
+      ]
+    },
+    "tool_success_text": {
+      "meaning": "model_wrapper_appends_Success_when_selecting_tool_before_physical_execution",
+      "is_official_navigation_result": false,
+      "evidence": "model_source#lines222-250"
+    },
+    "emos_success_run": {
+      "run_id": "20260916T142636Z-52b4e640a10a",
+      "episode_id": "51",
+      "seed": 40,
+      "official_steps": 130,
+      "official_pddl_success": true,
+      "official_batch_size": 1,
+      "evidence": [
+        "emos_manifest#/command",
+        "emos_stdout#lines56,197",
+        "emos_stderr#line69"
+      ]
+    },
+    "emos_agent_arguments": {
+      "values": [
+        {
+          "robot_id": "agent_0",
+          "robot_type": "SpotRobot",
+          "task_description": "The task requires multiple robots to collaboratively execute a sequence of actions to accomplish specific goals. Each robot may be responsible for interacting with multiple objects or, in some cases, none, depending on its capability. \nThe goals are defined by the following |goal conditions| :\n\nGoal of this episode is the logical operation and of the following conditions:\n0. Any robot is currently at the location of 'any_targets|0'.\n1. Any robot is currently at the location of 'TARGET_any_targets|0'.",
+          "subtask_description": "Navigate to and be at the locations of objects 'TARGET_any_targets|0' and 'any_targets|0', traversing between floors as necessary.",
+          "chat_history_status": "inherited_stage1_exchange",
+          "source_line": 101
+        },
+        {
+          "robot_id": "agent_1",
+          "robot_type": "FetchRobot",
+          "task_description": "The task requires multiple robots to collaboratively execute a sequence of actions to accomplish specific goals. Each robot may be responsible for interacting with multiple objects or, in some cases, none, depending on its capability. \nThe goals are defined by the following |goal conditions| :\n\nGoal of this episode is the logical operation and of the following conditions:\n0. Any robot is currently at the location of 'any_targets|0'.\n1. Any robot is currently at the location of 'TARGET_any_targets|0'.",
+          "subtask_description": "Nothing to do",
+          "chat_history_status": "inherited_stage1_exchange",
+          "source_line": 146
+        }
+      ],
+      "evidence": "emos_stdout#lines101,146"
+    },
+    "emos_ordered_model_actions": {
+      "agent_0": [
+        "nav_to_obj(any_targets|0)",
+        "nav_to_obj(TARGET_any_targets|0)"
+      ],
+      "agent_1": [
+        "wait"
+      ],
+      "transition_simulator_steps": null,
+      "numeric_initial_and_terminal_pose": null,
+      "evidence": "emos_stdout#lines141,185,192"
+    },
+    "earliest_comparison_difference": {
+      "stage": "initial_scene_context_before_organization",
+      "roboguide": {
+        "agent_0": "living room_21 / floor3",
+        "agent_1": "kitchen_23 / floor3"
+      },
+      "emos": {
+        "agent_0": "bedroom_2 / floor1",
+        "agent_1": "living room_21 / floor3"
+      },
+      "evidence": [
+        "b1_scene#lines7-8",
+        "emos_stdout#lines67-68"
+      ]
+    },
+    "provider_configuration": {
+      "requested_stage2_model_both": "gpt-5.6-luna",
+      "logical_chat_endpoint_both": "http://101.43.45.215:8080/v1/chat/completions",
+      "backend_model_revision_verified": false,
+      "sampling_state_verified_equal": false,
+      "evidence": [
+        "b1_child_config#line1",
+        "b1_routing#/logical_provider_endpoint",
+        "emos_manifest#/environment_overrides",
+        "emos_stdout#line138",
+        "emos_model_usage#lines12-16"
+      ]
+    },
+    "emos_usage_file_mixed_runs": {
+      "prior_run_lines": [
+        1,
+        8
+      ],
+      "current_run_lines": [
+        9,
+        16
+      ],
+      "current_stage2_lines": [
+        12,
+        16
+      ],
+      "evidence": "emos_model_usage#request_utc"
+    },
+    "paired_fairness": {
+      "complete_pairing_supported": false,
+      "organization_causal_attribution_supported": false,
+      "reason": "initial_scene_states_differ_and_exact_pose_rng_backend_version_evidence_is_incomplete",
+      "evidence": [
+        "b1_scene#lines7-8",
+        "emos_stdout#lines67-68",
+        "emos_manifest#/llm/reported_model"
+      ]
+    }
+  },
+  "unverified_hypotheses": [
+    {
+      "id": "H1",
+      "statement": "Fetch switched back to high-level planning on the 1000-step skill timeout, and generic success/completion feedback contributed to subsequent waiting.",
+      "support": "Strong source/trajectory alignment; termination flags and causal model belief not recorded.",
+      "evidence": [
+        "b1_trace#steps1000-1001",
+        "skill_source#lines181-205",
+        "skill_config#lines71-80",
+        "model_source#lines222-250"
+      ]
+    },
+    {
+      "id": "H2",
+      "statement": "Fetch failed to reach the goal because of physical path, collision, navmesh projection, or completion threshold behavior.",
+      "support": "Unknown; no continuous pose/path/collision data.",
+      "evidence": [
+        "b1_summary#/outcomes/1",
+        "b1_trace"
+      ]
+    },
+    {
+      "id": "H3",
+      "statement": "Adapter missed a completion pulse or consumed different completion evidence from the original skill.",
+      "support": "Unknown; raw finished sensor and skill_done flags are absent.",
+      "evidence": [
+        "shared_world_source#lines207-234",
+        "b1_summary#/outcomes/1/local_skill_completed"
+      ]
+    },
+    {
+      "id": "H4",
+      "statement": "Assignment wording or lack of joint-goal context changed local replanning.",
+      "support": "Input difference is verified, causal impact is not controlled; initial state also differs.",
+      "evidence": [
+        "adapter_log#lines4172,4214",
+        "emos_stdout#lines101,146",
+        "b1_scene#lines7-8",
+        "emos_stdout#lines67-68"
+      ]
+    }
+  ],
+  "evidence_gaps": [
+    "B1 official per-goal terminal truth",
+    "agent_0 episode-final position",
+    "both B1 initial/final orientations",
+    "continuous pose/action/path/collision trace",
+    "skill timeout/finished sensor branch flags",
+    "exact env termination reason",
+    "EMOS numeric initial/final poses and per-step action trace",
+    "model backend revision and matching RNG state"
+  ]
+}
