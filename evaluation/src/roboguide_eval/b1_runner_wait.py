@@ -442,18 +442,30 @@ def recover_request_id_from_store(store_path: Path, instruction: str) -> str | N
         return None
     finally:
         connection.close()
-    for request_id, document_json in rows:
-        try:
-            document = json.loads(str(document_json))
-        except ValueError:
-            continue
-        dialogue = document.get("dialogue")
-        if not isinstance(dialogue, list) or not dialogue:
-            continue
-        first = dialogue[0].get("content") if isinstance(dialogue[0], dict) else None
-        if first == instruction:
-            return str(request_id)
-    return None
+    # MissionRequestStore persists an atomic storage envelope containing the
+    # public request projection under "request", not at document root. An
+    # exclusive B1 run submits exactly one request; multiple rows are ambiguous.
+    if len(rows) != 1:
+        return None
+    request_id, document_json = rows[0]
+    try:
+        document = json.loads(str(document_json))
+    except ValueError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    if document.get("schema_version") == "roboguide.mission-request-storage/v0.1":
+        request = document.get("request")
+    else:
+        request = document  # Legacy request rows predate the envelope.
+    if not isinstance(request, dict) or request.get("request_id") != request_id:
+        return None
+    dialogue = request.get("dialogue")
+    if not isinstance(dialogue, list) or not dialogue or not isinstance(dialogue[0], dict):
+        return None
+    if dialogue[0].get("content") != instruction.strip():
+        return None
+    return request_id if isinstance(request_id, str) and request_id else None
 
 
 def post_instruction(
