@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
+from roboguide_eval.b1_event_archive import ARCHIVE_FILE, archive_evidence_error
 from roboguide_eval.b1_provenance import (
     PROVENANCE_SCHEMA_VERSION,
     RUN_FAILURE_SCHEMA,
@@ -87,6 +88,9 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
 def assess_b1_directory(run: Path) -> dict[str, Any]:
     """Verify archived execution evidence, then apply the one admission authority."""
     documents = {name: load_document(run / name) for name in B1_FILES}
+    archive_status = load_document(run / ARCHIVE_FILE)
+    if (run / ARCHIVE_FILE).exists():
+        documents[ARCHIVE_FILE] = archive_status
     request = observed_request(
         documents["b1-request-record.json"], documents["b1-request-observations.json"]
     )
@@ -113,6 +117,9 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
     )
     failures = [item.value for item in provenance.failures]
+    archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)
+    if archive_error:
+        failures.append(archive_error)
     if raw_failure is not None and not failure:
         failures.append("failure_evidence_unscoped_or_malformed")
     mi_failure = request_failure(request)
@@ -166,6 +173,11 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
             "valid_for_benchmark_population": admission.valid_for_benchmark_population,
         },
         "context": {
+            **(
+                {"event_archive": archive_status, "event_archive_error": archive_error}
+                if archive_status is not None or archive_error
+                else {}
+            ),
             "provenance_failures": failures,
             "semantic_goal_diagnostic": list(provenance.semantic_diagnostics),
             "controller_receipt": scoped,

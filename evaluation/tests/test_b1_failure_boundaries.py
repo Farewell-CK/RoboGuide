@@ -119,17 +119,18 @@ def test_collector_requires_matching_request_and_observations(
             request,
             observations,
             json.loads((run / "mission.json").read_text()),
-            json.loads((run / "events.json").read_text()),
             json.loads((run / "execution-attempts.json").read_text()),
         ]
     )
     monkeypatch.setattr("roboguide_eval.b1_artifacts._fetch", fetch)
+    # Event HTTP acquisition is independently exercised by test_b1_event_archive.
+    monkeypatch.setattr("roboguide_eval.b1_artifacts.collect_controller_events", Mock())
     result = collect_b1_artifacts(
         run,
         request_id=request["request_id"],
         mission_endpoint="http://unused",
         controller_endpoint="http://unused",
     )
-    assert fetch.call_count == 7
+    assert fetch.call_count == 6
     assert observations["request_record_digest"] == plan_digest(request)
     assert result["admission"]["provenance_valid"] is True

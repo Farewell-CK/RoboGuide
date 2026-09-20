@@ -276,7 +276,7 @@ if [[ "$LIFECYCLE" == "Accepted" ]]; then
     sleep 3
     curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
 fi
-curl -sf http://127.0.0.1:28060/v1/events -o "$RUN/events.json" || true
+# Event evidence is collected only by the bounded, completeness-checked EXIT collector.
 curl -sf http://127.0.0.1:28060/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
 
 # EXIT always collects observations, provenance and canonical B1 admission before cleanup.
