@@ -238,49 +238,67 @@ INSTRUCTION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["in
 FAILURE_REASON=mission_ingress_failed
 SUBMITTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "submission_start_utc=$SUBMITTED_AT" > "$RUN/b1-timing.txt"
-REQUEST_JSON=$(curl -sS -X POST http://127.0.0.1:8070/v1/mission-requests \
-    -H 'Content-Type: application/json' \
-    -d "{\"instruction\": $(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$INSTRUCTION")}")
-REQUEST_ID=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["request_id"])' "$REQUEST_JSON" 2>/dev/null || echo "")
-MISSION_ID=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["mission_id"])' "$REQUEST_JSON" 2>/dev/null || echo "")
-if [[ -z "$REQUEST_ID" ]]; then
-    echo "$REQUEST_JSON" > "$RUN/b1-request-record.json"
-    echo "B1 ingress failed before a request id was minted" >&2
-    exit 1
-fi
-echo "$REQUEST_JSON" > "$RUN/b1-request-record.json"
-echo "request_id=$REQUEST_ID" >> "$RUN/b1-timing.txt"
 
-# Wait for the pre-execution lifecycle with a state-driven, monotonic-clock
-# observer. The budget is derived once, at run start, from the exact configs
-# this Mission Service uses, then frozen into run evidence before any launch.
+# One frozen observation budget covers the synchronous POST and any polling.
+# Mission Service executes the whole MI chain before its POST returns, so
+# this client bound — not the server's per-call timeouts — decides when the
+# runner stops observing. The value is a deployment-chosen experiment
+# boundary (default 1800s; the MI worst-case derivation is archived beside
+# it for reasoning, never used as the wait). Frozen before submission.
+MI_OBSERVATION_BUDGET_SECONDS="${ROBOGUIDE_B1_MI_OBSERVATION_BUDGET_SECONDS:-1800}"
 MI_WAIT_BUDGET_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
     --budget-only --mission-config "$REPO/config/mission.toml" \
     --service-config "$RUN/mission-service-b1.toml")" \
     || { FAILURE_REASON=mi_wait_budget_derivation_failed; exit 1; }
-printf '%s\n' "$MI_WAIT_BUDGET_JSON" > "$RUN/mi-wait-budget.json"
 MI_WAIT_BUDGET_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["total_seconds"])')
+MI_STALL_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["stall_seconds"])')
+python3 - "$MI_OBSERVATION_BUDGET_SECONDS" "$MI_WAIT_BUDGET_JSON" <<'PYEOF'
+import json, sys
+deployment_budget = {
+    "schema_version": "roboguide.e1.mi-observation-budget/v0.1",
+    "observation_budget_seconds": float(sys.argv[1]),
+    "basis": "deployment-chosen experiment observation boundary; not the MI "
+    "theoretical worst-case and not a claim about MI execution time",
+    "mi_worst_case_derivation": json.loads(sys.argv[2]),
+}
+with open("mi-wait-budget.json", "w", encoding="utf-8") as output:
+    json.dump(deployment_budget, output, ensure_ascii=False, indent=2, sort_keys=True)
+    output.write("\n")
+PYEOF
 
-# The mission-service PID is the last background child started for MI.
+# Submit and observe under the one budget. A POST client timeout never
+# fails MI: this run's request store recovers the identity and observation
+# continues; the runner never resubmits the instruction.
 MI_PID="${PIDS[${#PIDS[@]}-1]}"
 MI_WAIT_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
-    --endpoint http://127.0.0.1:8070 --request-id "$REQUEST_ID" \
-    --budget-seconds "$MI_WAIT_BUDGET_SECONDS" --service-pid "$MI_PID" \
-    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2)" \
+    --submit-and-wait --endpoint http://127.0.0.1:8070 \
+    --instruction "$INSTRUCTION" \
+    --budget-seconds "$MI_OBSERVATION_BUDGET_SECONDS" \
+    --service-pid "$MI_PID" --store-path "$RUN/mission-service.sqlite3" \
+    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2 \
+    --stall-seconds "$MI_STALL_SECONDS")" \
     || MI_WAIT_EXIT=$? || true
 printf '%s\n' "$MI_WAIT_JSON" > "$RUN/mi-wait-outcome.json"
 MI_OUTCOME=$(printf '%s\n' "$MI_WAIT_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])' 2>/dev/null || echo invalid_response)
 LIFECYCLE=$(printf '%s\n' "$MI_WAIT_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["lifecycle"])' 2>/dev/null || echo unknown)
+REQUEST_ID=$(printf '%s\n' "$MI_WAIT_JSON" \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["request_id"])' 2>/dev/null || echo "")
+if [[ -n "$REQUEST_ID" ]]; then
+    echo "request_id=$REQUEST_ID" >> "$RUN/b1-timing.txt"
+    curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
+        -o "$RUN/b1-request-record.json" || true
+    MISSION_ID=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["mission_id"])' \
+        "$RUN/b1-request-record.json" 2>/dev/null || echo "")
+else
+    echo "request_id=unavailable" >> "$RUN/b1-timing.txt"
+    MISSION_ID=""
+fi
 echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
 echo "mi_wait_outcome=$MI_OUTCOME" >> "$RUN/b1-timing.txt"
-# Refresh the archived request snapshot from the still-running service before
-# any attribution; the EXIT collector re-reads it and never overwrites newer
-# observations with stale ones.
-curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
-    -o "$RUN/b1-request-record.json" || true
 
 case "$MI_OUTCOME" in
     accepted)
@@ -303,6 +321,27 @@ case "$MI_OUTCOME" in
         FAILURE_OWNER=EXTERNAL_INFRA
         FAILURE_COMPONENT=harness
         FAILURE_REASON=runner_mi_observation_timeout
+        ;;
+    stalled_no_progress)
+        # MI alive but one lifecycle state held far past any legitimate
+        # single-call ceiling: a wedged or slow-drip provider call.
+        FAILURE_OWNER=EXTERNAL_INFRA
+        FAILURE_COMPONENT=external_provider
+        FAILURE_REASON=mi_stalled_no_progress
+        ;;
+    request_id_unavailable)
+        # The synchronous POST exceeded the client budget before any
+        # response and no persisted identity matched this instruction.
+        # The server may still be executing; nothing is resubmitted and
+        # no MI failure is invented.
+        FAILURE_OWNER=EXTERNAL_INFRA
+        FAILURE_COMPONENT=harness
+        FAILURE_REASON=runner_post_observation_timeout_request_id_unavailable
+        ;;
+    http_unusable)
+        FAILURE_OWNER=SUT_SYSTEM
+        FAILURE_COMPONENT=mission_service
+        FAILURE_REASON=mission_request_submit_http_unusable
         ;;
     service_exited)
         FAILURE_OWNER=SUT_SYSTEM

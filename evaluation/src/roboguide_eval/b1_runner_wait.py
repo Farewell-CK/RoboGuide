@@ -1,29 +1,25 @@
 """State-driven MI lifecycle waiting for the B1 scenario runner.
 
-The runner waits for Mission Intelligence with a monotonic-clock
-deadline derived from the configuration this run's Mission Service
-actually uses — never a stale constant. Every poll records bounded
-JSONL evidence (request id, lifecycle, HTTP health, service liveness,
-remaining budget), and the outcome separates MI's own terminal states
-from runner observation timeouts, service-process exits, and unusable
-responses, so the scenario can attribute failures without inventing an
-MI ``Failed``.
+Mission Service's ``POST /v1/mission-requests`` is synchronous: the
+response returns only after ``engine.create()`` finishes the whole
+deliberation chain. The runner therefore faces two distinct windows:
 
-Worst-case budget derivation (per ``mission`` and ``service`` config
-actually passed to this run's Mission Service):
+1. the POST window (no request id yet) — bounded by the same frozen
+   observation budget, with the Mission Service's own request store as
+   the only trustworthy source for recovering this run's identity when
+   the client budget expires while the server is still executing; and
+2. the post-response window — the response already carries a stable
+   lifecycle; only genuinely non-terminal states need further polling,
+   funded by whatever budget the POST did not consume.
 
-- grounding capture: 2 sources x ``grounding_acquisition_attempts`` x
-  ``grounding_timeout_seconds``;
-- Interpreter: 1 x ``timeout_seconds``;
-- Planner: (1 + ``prevalidation_recovery_attempts``) x ``timeout_seconds``;
-- Reviewer: (``max_repair_attempts`` + 1) x ``timeout_seconds``;
-- Repairer: ``max_repair_attempts`` x ``timeout_seconds``;
-- Controller submission: ``controller_timeout_seconds``;
-- plus a fixed scheduling/polling margin.
-
-Retry or clarification turns are separate HTTP calls that restart the
-observation externally; the budget covers one deliberation pass, which
-is what this runner triggers.
+The budget is one deployment-chosen observation boundary for the run
+(default 1800s, overridable via ``ROBOGUIDE_B1_MI_OBSERVATION_BUDGET_SECONDS``),
+frozen before submission and persisted as evidence. It is deliberately
+NOT the MI theoretical worst-case chain (that derivation remains
+available via ``--budget-only`` for deployment reasoning); the historic
+sample of completed E1 MI chains is minutes-scale (two observations,
+insufficient for percentiles), so the boundary is a conservative
+experiment-scoped choice, not a claim about MI execution time.
 """
 
 from __future__ import annotations
@@ -31,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 import tomllib
@@ -69,11 +66,17 @@ class WaitBudget:
 
     Attributes:
         total_seconds: The monotonic deadline budget for one pass.
+        stall_seconds: The no-progress bound: any lifecycle state held
+            longer than this without a transition means MI is stuck in
+            one provider call beyond its configured per-call ceiling
+            (urllib timeouts are socket-level, so a slow-drip provider
+            has no wall-clock cap of its own).
         components: The per-stage contributions actually used.
         sources: The configuration files the numbers came from.
     """
 
     total_seconds: float
+    stall_seconds: float
     components: dict[str, float]
     sources: dict[str, str]
 
@@ -82,6 +85,7 @@ class WaitBudget:
         return {
             "schema_version": BUDGET_SCHEMA,
             "total_seconds": self.total_seconds,
+            "stall_seconds": self.stall_seconds,
             "components": self.components,
             "sources": self.sources,
             "derivation": (
@@ -131,8 +135,13 @@ def derive_wait_budget(mission_config_path: Path, service_config_path: Path) -> 
         "controller_submission": controller_timeout,
         "scheduling_margin": SCHEDULING_MARGIN_SECONDS,
     }
+    # A slow-drip provider can hold one socket-level call open far past
+    # timeout_seconds; two nominal call ceilings bound any legitimate gap
+    # between observable lifecycle transitions.
+    stall_seconds = 2.0 * timeout
     return WaitBudget(
         total_seconds=sum(components.values()),
+        stall_seconds=stall_seconds,
         components=components,
         sources={
             "mission_config": str(mission_config_path),
@@ -288,6 +297,7 @@ def wait_for_lifecycle(
     poll_interval_seconds: float = POLL_INTERVAL_SECONDS,
     log_path: Path | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    stall_seconds: float | None = None,
 ) -> WaitResult:
     """Wait until MI reaches a classified state or the frozen budget ends.
 
@@ -302,6 +312,8 @@ def wait_for_lifecycle(
     logged = 0
     dropped = 0
     first_timeout_at: float | None = None
+    last_transition_at = deadline_clock()
+    observed_lifecycle: str | None = None
 
     def record(now: float, http_ok: bool, alive: bool) -> None:
         """Append one bounded poll row, counting skipped rows honestly."""
@@ -367,10 +379,32 @@ def wait_for_lifecycle(
                 first_timeout_at=first_timeout_at,
             )
         polled_lifecycle, error = poll(endpoint, request_id, 5.0)
-        if polled_lifecycle is not None:
+        if polled_lifecycle is not None and polled_lifecycle != observed_lifecycle:
+            observed_lifecycle = polled_lifecycle
+            last_transition_at = deadline_clock()
+            lifecycle = polled_lifecycle
+        elif polled_lifecycle is not None:
             lifecycle = polled_lifecycle
         last_error = last_error if error is None else error
-        record(deadline_clock(), lifecycle is not None, service_pid_alive(pid))
+        now = deadline_clock()
+        record(now, polled_lifecycle is not None, service_pid_alive(pid))
+        if (
+            stall_seconds is not None
+            and lifecycle is not None
+            and observed_lifecycle is not None
+            and now - last_transition_at > stall_seconds
+        ):
+            # MI is alive but held one lifecycle state far past any
+            # legitimate single-call ceiling: a slow-drip or wedged
+            # provider call, not a legal deliberation still in progress.
+            return WaitResult(
+                outcome="stalled_no_progress",
+                lifecycle=lifecycle,
+                request_id=request_id,
+                last_error=last_error,
+                records_logged=logged,
+                records_dropped=dropped,
+            )
         if lifecycle is not None:
             classified = _classify(lifecycle)
             if classified is not None:
@@ -388,10 +422,199 @@ def wait_for_lifecycle(
         sleep(poll_interval_seconds)
 
 
+def recover_request_id_from_store(store_path: Path, instruction: str) -> str | None:
+    """Read this run's persisted request identity from its Mission store.
+
+    The store file lives inside this run's exclusive directory and this
+    runner submits exactly one request, so at most one row exists; the
+    first dialogue instruction must equal the submitted text before the
+    identity is accepted. Never guesses latest-record across runs.
+    """
+    try:
+        connection = sqlite3.connect(f"file:{store_path}?mode=ro", uri=True, timeout=2.0)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = connection.execute(
+            "SELECT request_id, document_json FROM mission_requests"
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+    for request_id, document_json in rows:
+        try:
+            document = json.loads(str(document_json))
+        except ValueError:
+            continue
+        dialogue = document.get("dialogue")
+        if not isinstance(dialogue, list) or not dialogue:
+            continue
+        first = dialogue[0].get("content") if isinstance(dialogue[0], dict) else None
+        if first == instruction:
+            return str(request_id)
+    return None
+
+
+def post_instruction(
+    endpoint: str, instruction: str, timeout_seconds: float
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Submit the synchronous create POST under one client-side bound.
+
+    Returns the decoded response object, or (None, error class) where the
+    class names the failure: ``post_timeout`` (client budget expired;
+    the server may still be executing), ``transport`` (connection broken,
+    refused, or HTTP protocol error), or ``invalid_response`` (non-JSON
+    or non-object body).
+    """
+    url = f"{endpoint.rstrip('/')}/v1/mission-requests"
+    payload = json.dumps({"instruction": instruction}, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(  # noqa: S310
+        url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+    except TimeoutError:
+        return None, "post_timeout"
+    except (OSError, HTTPException) as error:
+        if isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError):
+            return None, "post_timeout"
+        return None, "transport"
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return None, "invalid_response"
+    if not isinstance(document, dict):
+        return None, "invalid_response"
+    return document, None
+
+
+def submit_and_wait(
+    *,
+    endpoint: str,
+    instruction: str,
+    budget_seconds: float,
+    store_path: Path,
+    pid: int = 0,
+    deadline_clock: Callable[[], float] = time.monotonic,
+    poll: Callable[[str, str, float], tuple[str | None, str | None]] = fetch_lifecycle,
+    post: Callable[[str, str, float], tuple[dict[str, Any] | None, str | None]] = post_instruction,
+    recover: Callable[[Path, str], str | None] = recover_request_id_from_store,
+    sleep: Callable[[float], None] = time.sleep,
+    log_path: Path | None = None,
+    poll_interval_seconds: float = POLL_INTERVAL_SECONDS,
+    stall_seconds: float | None = None,
+) -> WaitResult:
+    """Submit the synchronous MI request and observe it under one budget.
+
+    The single frozen budget starts at submission and covers both the
+    POST window and any post-response polling. A POST that exhausts the
+    client budget does not fail MI: the run's identity is recovered from
+    this run's request store and observation continues until a real
+    state, the budget, or process exit ends it; without a trustworthy
+    identity the run is archived as ``request_id_unavailable``. Nothing
+    here ever resubmits the instruction.
+    """
+    start = deadline_clock()
+    deadline = start + budget_seconds
+    response, error = post(endpoint, instruction, budget_seconds)
+    if error == "post_timeout":
+        request_id = recover(store_path, instruction)
+        if request_id is None:
+            return WaitResult(
+                outcome="request_id_unavailable",
+                lifecycle="unknown",
+                request_id="",
+                last_error="post client budget expired before any response; "
+                "no persisted request identity matched this instruction",
+            )
+        remaining = deadline - deadline_clock()
+        if remaining <= 0:
+            return WaitResult(
+                outcome="observation_timeout",
+                lifecycle="unknown",
+                request_id=request_id,
+                last_error="post client budget expired; identity recovered after deadline",
+            )
+        return wait_for_lifecycle(
+            endpoint=endpoint,
+            request_id=request_id,
+            budget_seconds=remaining,
+            deadline_clock=deadline_clock,
+            poll=poll,
+            pid=pid,
+            poll_interval_seconds=poll_interval_seconds,
+            log_path=log_path,
+            sleep=sleep,
+            stall_seconds=stall_seconds,
+        )
+    if error in {"transport", "invalid_response"}:
+        alive = service_pid_alive(pid)
+        if not alive:
+            return WaitResult(
+                outcome="service_exited",
+                lifecycle="unknown",
+                request_id="",
+                last_error=f"mission service exited before responding ({error})",
+            )
+        return WaitResult(
+            outcome="http_unusable",
+            lifecycle="unknown",
+            request_id="",
+            last_error=f"submit failed with {error}",
+        )
+    assert response is not None
+    request_id = response.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        return WaitResult(
+            outcome="http_unusable",
+            lifecycle="unknown",
+            request_id="",
+            last_error="submit response lacks a request id",
+        )
+    lifecycle = response.get("lifecycle")
+    if isinstance(lifecycle, str) and lifecycle:
+        classified = _classify(lifecycle)
+        if classified is not None:
+            return WaitResult(
+                outcome=classified,
+                lifecycle=lifecycle,
+                request_id=request_id,
+                last_error=None,
+            )
+    # Synchronous create returns stable states; a non-terminal value here
+    # means polling is genuinely required. Fund it with the unspent share
+    # of the one frozen budget, never a fresh full window.
+    remaining = deadline - deadline_clock()
+    if remaining <= 0:
+        return WaitResult(
+            outcome="observation_timeout",
+            lifecycle=str(lifecycle or "unknown"),
+            request_id=request_id,
+            last_error="budget exhausted by the synchronous submit itself",
+        )
+    return wait_for_lifecycle(
+        endpoint=endpoint,
+        request_id=request_id,
+        budget_seconds=remaining,
+        deadline_clock=deadline_clock,
+        poll=poll,
+        pid=pid,
+        poll_interval_seconds=poll_interval_seconds,
+        log_path=log_path,
+        sleep=sleep,
+        stall_seconds=stall_seconds,
+    )
+
+
 def _main(argv: list[str] | None = None) -> int:
     """Run one state-driven MI wait and print the JSON outcome."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--budget-only", action="store_true")
+    parser.add_argument("--submit-and-wait", action="store_true")
+    parser.add_argument("--instruction", default="")
+    parser.add_argument("--store-path", type=Path)
     parser.add_argument("--mission-config", type=Path)
     parser.add_argument("--service-config", type=Path)
     parser.add_argument("--endpoint")
@@ -400,6 +623,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--service-pid", type=int, default=0)
     parser.add_argument("--log-path", type=Path, default=None)
     parser.add_argument("--poll-interval-seconds", type=float, default=POLL_INTERVAL_SECONDS)
+    parser.add_argument("--stall-seconds", type=float, default=None)
     arguments = parser.parse_args(argv)
     if arguments.budget_only:
         return _budget_main(
@@ -410,6 +634,28 @@ def _main(argv: list[str] | None = None) -> int:
                 str(arguments.service_config),
             ]
         )
+    if arguments.submit_and_wait:
+        result = submit_and_wait(
+            endpoint=arguments.endpoint or "",
+            instruction=arguments.instruction,
+            budget_seconds=arguments.budget_seconds,
+            store_path=arguments.store_path or Path("unused.sqlite3"),
+            pid=arguments.service_pid,
+            log_path=arguments.log_path,
+            poll_interval_seconds=arguments.poll_interval_seconds,
+            stall_seconds=arguments.stall_seconds,
+        )
+        print(json.dumps(result.to_json(), ensure_ascii=False, sort_keys=True))
+        return (
+            0
+            if result.outcome
+            in {
+                "accepted",
+                "mi_terminal",
+                "awaiting_interaction",
+            }
+            else 3
+        )
     result = wait_for_lifecycle(
         endpoint=arguments.endpoint or "",
         request_id=arguments.request_id,
@@ -417,6 +663,7 @@ def _main(argv: list[str] | None = None) -> int:
         pid=arguments.service_pid,
         poll_interval_seconds=arguments.poll_interval_seconds,
         log_path=arguments.log_path,
+        stall_seconds=arguments.stall_seconds,
     )
     print(json.dumps(result.to_json(), ensure_ascii=False, sort_keys=True))
     return 0 if result.outcome in {"accepted", "mi_terminal", "awaiting_interaction"} else 3
