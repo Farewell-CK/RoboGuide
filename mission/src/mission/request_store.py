@@ -41,6 +41,16 @@ def _restore_record(document: object) -> MissionRequestRecord:
     if not isinstance(drafts_value, list):
         raise MissionRequestError("rejected draft evidence must be a list")
     rejected_drafts = tuple(RejectedDraftEvidence.from_json(draft) for draft in drafts_value)
+    seen_indexes: set[int] = set()
+    seen_ids: set[str] = set()
+    for draft in rejected_drafts:
+        if draft.request_id != record.request_id or draft.mission_id != record.mission_id:
+            raise MissionRequestError("rejected draft evidence belongs to another request")
+        if draft.attempt_index in seen_indexes or draft.attempt_id in seen_ids:
+            raise MissionRequestError("rejected draft evidence contains duplicate attempts")
+        seen_indexes.add(draft.attempt_index)
+        seen_ids.add(draft.attempt_id)
+        draft.verify_integrity()
     return replace(
         record,
         submission_evidence=(

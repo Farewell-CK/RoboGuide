@@ -22,7 +22,13 @@ from mission.request_engine import MissionRequestEngine
 from mission.request_record import IntentAssessment
 from mission.request_store import MissionRequestStore
 from mission.submission_evidence import canonical_plan_digest
-from test_requests import FakeController, FakeInterpreter, SequenceClock, SequenceIds
+from test_planners import _current_catalog
+from test_requests import (
+    FakeController,
+    FakeInterpreter,
+    SequenceClock,
+    SequenceIds,
+)
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
 CATALOG = CanonicalCapabilityCatalog.load(Path("contracts/capability/v0.3/catalog.json"))
@@ -188,11 +194,12 @@ def _engine(
     planner: Any,
     *,
     budget: int = 0,
+    assessments: int = 1,
 ) -> MissionRequestEngine:
     """Compose one engine with a real store and the given recovery budget."""
     return MissionRequestEngine(
         MissionRequestStore(tmp_path / "requests.sqlite3"),
-        FakeInterpreter([_assessment()]),
+        FakeInterpreter([_assessment() for _ in range(assessments)]),
         planner,
         FakeController(_controller_inventory()),
         CATALOG,
@@ -542,3 +549,260 @@ def test_oversized_provider_output_is_truncated_with_marker() -> None:
     )
     assert evidence.provider_output["truncated"] is True
     assert evidence.provider_output_digest == canonical_plan_digest(huge)
+
+
+def _planner_with(transport_responses: list[JSONObject]) -> Any:
+    """Build a real ResponsesMissionPlanner over a scripted fake transport."""
+    from mission.responses import ResponsesMissionPlanner
+    from test_planners import FakeTransport, _local_settings  # noqa: F401
+
+    return ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        FakeTransport(transport_responses),
+    )
+
+
+def _grounding() -> GroundingContextSnapshot:
+    """Build one deterministic grounding snapshot for planner calls."""
+    from test_planners import _grounding as planners_grounding
+
+    return planners_grounding()
+
+
+V08_FIXTURE = Path("scenarios/e1-shared-world-episode-51/mission-plan.json")
+
+
+def _dto_output(entries: list[JSONObject], version: str | None = None) -> JSONObject:
+    """Wrap parameter entries as a raw provider MissionPlan output."""
+    raw: JSONObject = json.loads(V08_FIXTURE.read_text(encoding="utf-8"))
+    raw["schema_version"] = version or "roboguide.mission-plan/v0.8"
+    raw_tasks: Any = raw["tasks"]
+    raw_roles: Any = raw_tasks[0]["roles"]
+    intent: Any = raw_roles[0]["execution_intent"]
+    intent["parameters"] = entries
+    return raw
+
+
+def test_duplicate_parameter_keys_become_rejected_normalization_drafts() -> None:
+    """Duplicate DTO keys are model-draft defects with full evidence (R1)."""
+    from test_planners import _response
+
+    output = _dto_output(
+        [
+            cast(JSONObject, {"key": "destination", "value": "dock"}),
+            cast(JSONObject, {"key": "destination", "value": "bay"}),
+        ]
+    )
+    planner = _planner_with([_response(output)])
+    with pytest.raises(RejectedPlanError) as caught:
+        planner.plan(
+            "m-dup",
+            GroundedIntent("objective", (), ()),
+            _current_catalog(),
+            _grounding(),
+        )
+    error = caught.value
+    assert error.stage == "normalization"
+    assert error.normalized_output is None
+    assert "duplicate key" in str(error)
+    assert error.provider_output == output
+
+
+def test_non_scalar_parameter_values_are_rejected_normalization() -> None:
+    """Nested parameter values classify as model DTO defects (R1)."""
+    from test_planners import _response
+
+    output = _dto_output([cast(JSONObject, {"key": "waypoints", "value": [{"x": 1}]})])
+    planner = _planner_with([_response(output)])
+    with pytest.raises(RejectedPlanError) as caught:
+        planner.plan(
+            "m-shape",
+            GroundedIntent("objective", (), ()),
+            _current_catalog(),
+            _grounding(),
+        )
+    assert caught.value.stage == "normalization"
+    assert caught.value.provider_output == output
+
+
+def test_unsupported_output_version_is_rejected_normalization() -> None:
+    """A model-emitted unsupported version is a recoverable draft defect (R1)."""
+    from test_planners import _response
+
+    output = _dto_output([], version="roboguide.mission-plan/v0.1")
+    planner = _planner_with([_response(output)])
+    with pytest.raises(RejectedPlanError) as caught:
+        planner.plan(
+            "m-version",
+            GroundedIntent("objective", (), ()),
+            _current_catalog(),
+            _grounding(),
+        )
+    assert caught.value.stage == "normalization"
+    assert "must use" in str(caught.value)
+
+
+def test_local_schema_configuration_fault_stays_unrecoverable() -> None:
+    """Canonical-schema adaptation faults are not draft defects (R1)."""
+    from mission.provider_mission_plan import ProviderMissionPlanError
+    from mission.responses import ResponsesMissionPlanner
+    from test_planners import FakeTransport, _local_settings
+
+    planner = ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        FakeTransport([]),
+    )
+    broken = cast(
+        JSONObject, json.loads(Path("contracts/mission/v0.8/mission-plan.schema.json").read_text())
+    )
+    properties = cast(JSONObject, broken["properties"])
+    schema_version = cast(JSONObject, properties["schema_version"])
+    schema_version["const"] = "roboguide.mission-plan/v99.9"
+    planner._client._load_schema = lambda: broken  # type: ignore[method-assign]
+    with pytest.raises(ProviderMissionPlanError) as caught:
+        planner.plan(
+            "m-schema",
+            GroundedIntent("objective", (), ()),
+            _current_catalog(),
+            _grounding(),
+        )
+    assert not isinstance(caught.value, RejectedPlanError)
+
+
+class ProviderFaultAfterRejectionPlanner(ScriptedRecoveryPlanner):
+    """Fail regeneration like a real HTTP 401 after one rejected draft."""
+
+    def __init__(self) -> None:
+        """Schedule one structure rejection and a provider fault."""
+        from mission.responses import MissionProviderError
+
+        super().__init__([_rejection()])
+        self._provider_error = MissionProviderError("provider returned HTTP 401: unauthorized")
+
+    def regenerate(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        previous_provider_output: JSONObject,
+        validation_errors: list[JSONObject],
+    ) -> MissionPlan:
+        """Record the call, then fail with the provider fault (R2)."""
+        self.regenerate_calls.append({"mission_id": mission_id})
+        raise self._provider_error
+
+
+def test_provider_fault_during_recovery_keeps_prior_evidence(tmp_path: Path) -> None:
+    """A 401 during regeneration preserves the first rejection (R2)."""
+    planner = ProviderFaultAfterRejectionPlanner()
+    engine = _engine(tmp_path, planner, budget=2)
+    record = engine.create("deliver the payload through the approved route")
+    assert record.lifecycle.value == "Failed"
+    assert planner.plan_calls == 1
+    assert len(planner.regenerate_calls) == 1  # no third model call
+    assert len(record.rejected_drafts) == 1
+    assert record.rejected_drafts[0].attempt_index == 1
+    assert "401" in record.issues[0]
+    assert record.failure_evidence is not None
+    assert "401" in str(record.failure_evidence)
+    reopened = MissionRequestStore(tmp_path / "requests.sqlite3")
+    restored = reopened.get(record.request_id)
+    assert restored is not None and len(restored.rejected_drafts) == 1
+
+
+def test_retry_cycle_keeps_unique_attempt_identities(tmp_path: Path) -> None:
+    """A second Planner cycle after retry extends, not overwrites (R3)."""
+    planner = ScriptedRecoveryPlanner([_rejection()])
+    engine = _engine(tmp_path, planner, budget=0, assessments=2)
+    record = engine.create("deliver the payload through the approved route")
+    assert record.lifecycle.value == "Failed"
+    assert [draft.attempt_index for draft in record.rejected_drafts] == [1]
+    second = ScriptedRecoveryPlanner([_rejection("second rejection")])
+    engine._planner = second
+    retried = engine.retry(record.request_id)
+    assert retried.lifecycle.value == "Failed"
+    indexes = [draft.attempt_index for draft in retried.rejected_drafts]
+    assert indexes == [1, 2]
+    ids = [draft.attempt_id for draft in retried.rejected_drafts]
+    assert len(set(ids)) == 2
+    reopened = MissionRequestStore(tmp_path / "requests.sqlite3")
+    restored = reopened.get(record.request_id)
+    assert restored is not None
+    assert [draft.attempt_index for draft in restored.rejected_drafts] == [1, 2]
+
+
+def test_retry_budget_is_not_reduced_by_history(tmp_path: Path) -> None:
+    """A retry cycle keeps its full configured recovery budget (R3)."""
+    planner = ScriptedRecoveryPlanner([_rejection()])
+    engine = _engine(tmp_path, planner, budget=0, assessments=2)
+    record = engine.create("deliver the payload through the approved route")
+    second = ScriptedRecoveryPlanner(
+        [_rejection()],
+        [_rejection("a"), _rejection("b")],
+    )
+    engine._planner = second
+    # The first cycle ran under budget 0; a retried cycle gets the full
+    # configured budget regardless of historical draft count.
+    engine._prevalidation_recovery_attempts = 2
+    retried = engine.retry(record.request_id)
+    # Budget 2 means this cycle may regenerate twice after the first attempt.
+    assert len(second.regenerate_calls) == 2
+    assert [d.attempt_index for d in retried.rejected_drafts] == [1, 2, 3, 4]
+
+
+def test_restored_evidence_rejects_digest_tampering(tmp_path: Path) -> None:
+    """A raw payload edited after persistence fails integrity (R4)."""
+    planner = ScriptedRecoveryPlanner([_rejection()])
+    engine = _engine(tmp_path, planner, budget=0)
+    record = engine.create("deliver the payload through the approved route")
+    store = MissionRequestStore(tmp_path / "requests.sqlite3")
+    row = (
+        store._connect()
+        .execute(
+            "SELECT document_json FROM mission_requests WHERE request_id = ?",
+            (record.request_id,),
+        )
+        .fetchone()[0]
+    )
+    document = json.loads(row)
+    draft = document["observations"]["rejected_drafts"][0]
+    draft["provider_output"]["mission"]["id"] = "tampered"
+    connection = store._connect()
+    connection.execute(
+        "UPDATE mission_requests SET document_json = ? WHERE request_id = ?",
+        (json.dumps(document, ensure_ascii=False, sort_keys=True), record.request_id),
+    )
+    connection.commit()
+    reopened = MissionRequestStore(tmp_path / "requests.sqlite3")
+    with pytest.raises(ValueError, match="does not match its digest"):
+        reopened.get(record.request_id)
+
+
+def test_restored_evidence_rejects_foreign_request_drafts(tmp_path: Path) -> None:
+    """Evidence from another request cannot attach here (R4)."""
+    planner = ScriptedRecoveryPlanner([_rejection()])
+    engine = _engine(tmp_path, planner, budget=0)
+    record = engine.create("deliver the payload through the approved route")
+    store = MissionRequestStore(tmp_path / "requests.sqlite3")
+    row = (
+        store._connect()
+        .execute(
+            "SELECT document_json FROM mission_requests WHERE request_id = ?",
+            (record.request_id,),
+        )
+        .fetchone()[0]
+    )
+    document = json.loads(row)
+    document["observations"]["rejected_drafts"][0]["request_id"] = "request-other"
+    connection = store._connect()
+    connection.execute(
+        "UPDATE mission_requests SET document_json = ? WHERE request_id = ?",
+        (json.dumps(document, ensure_ascii=False, sort_keys=True), record.request_id),
+    )
+    connection.commit()
+    reopened = MissionRequestStore(tmp_path / "requests.sqlite3")
+    with pytest.raises(Exception, match="another request"):
+        reopened.get(record.request_id)

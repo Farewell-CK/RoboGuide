@@ -18,6 +18,7 @@ from mission.grounding_context import GroundingContextSnapshot, admitted_physica
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.provider_mission_plan import (
+    ProviderMissionPlanError,
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
@@ -355,7 +356,11 @@ class ResponsesMissionPlanner:
         provider_output = self._client._extract_output_json(response)
         try:
             normalized = normalize_mission_plan_provider_output(provider_output, canonical_schema)
-        except MissionPlanError as error:
+        except (MissionPlanError, ProviderMissionPlanError) as error:
+            # Both families here describe defects in the model's DTO output
+            # (shape, duplicate parameter keys, unsupported version); local
+            # canonical-schema configuration faults are raised earlier, when
+            # the provider schema is adapted, and never enter this branch.
             raise RejectedPlanError(
                 str(error),
                 stage="normalization",

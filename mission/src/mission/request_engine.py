@@ -347,63 +347,74 @@ class MissionRequestEngine:
         ``RejectedPlanError`` and never trigger recovery. Budget exhaustion
         re-raises the last rejection so the caller records the MI failure.
         """
-        attempts = 0
+        cycle_attempts = 0
+        attempt_base = len(record.rejected_drafts)
         last_error: RejectedPlanError | None = None
-        while True:
-            try:
-                if last_error is None:
-                    return (
-                        self._planner.plan(
+        try:
+            while True:
+                try:
+                    if last_error is None:
+                        return (
+                            self._planner.plan(
+                                mission_id=record.mission_id,
+                                grounded_intent=grounded_intent,
+                                capability_catalog=self._capability_catalog,
+                                grounding_context=grounding_context,
+                            ),
+                            record,
+                        )
+                    regenerator = getattr(self._planner, "regenerate", None)
+                    if not callable(regenerator):
+                        raise last_error
+                    regenerated_plan = cast(
+                        MissionPlan,
+                        regenerator(
                             mission_id=record.mission_id,
                             grounded_intent=grounded_intent,
                             capability_catalog=self._capability_catalog,
                             grounding_context=grounding_context,
+                            previous_provider_output=last_error.provider_output,
+                            validation_errors=[
+                                {"stage": last_error.stage, "message": str(last_error)}
+                            ],
                         ),
-                        record,
                     )
-                regenerator = getattr(self._planner, "regenerate", None)
-                if not callable(regenerator):
-                    raise last_error
-                regenerated_plan = cast(
-                    MissionPlan,
-                    regenerator(
-                        mission_id=record.mission_id,
-                        grounded_intent=grounded_intent,
-                        capability_catalog=self._capability_catalog,
-                        grounding_context=grounding_context,
-                        previous_provider_output=last_error.provider_output,
-                        validation_errors=[{"stage": last_error.stage, "message": str(last_error)}],
-                    ),
-                )
-                return regenerated_plan, record
-            except RejectedPlanError as error:
-                attempts += 1
-                last_error = error
-                record = self._update(
-                    record,
-                    rejected_drafts=(
-                        *record.rejected_drafts,
-                        build_rejected_draft_evidence(
-                            request_id=record.request_id,
-                            mission_id=record.mission_id,
-                            attempt_index=attempts,
-                            error=error,
-                            grounding_context_digest=grounding_context.context_digest,
-                            semantic_evidence_digest=(
-                                grounding_context.semantic_evidence.evidence_digest
-                                if grounding_context.semantic_evidence is not None
-                                else None
+                    return regenerated_plan, record
+                except RejectedPlanError as error:
+                    cycle_attempts += 1
+                    last_error = error
+                    # Attempt identities are unique and increasing across the
+                    # whole request history; the budget counts this cycle only.
+                    attempt_index = attempt_base + cycle_attempts
+                    record = self._update(
+                        record,
+                        rejected_drafts=(
+                            *record.rejected_drafts,
+                            build_rejected_draft_evidence(
+                                request_id=record.request_id,
+                                mission_id=record.mission_id,
+                                attempt_index=attempt_index,
+                                error=error,
+                                grounding_context_digest=grounding_context.context_digest,
+                                semantic_evidence_digest=(
+                                    grounding_context.semantic_evidence.evidence_digest
+                                    if grounding_context.semantic_evidence is not None
+                                    else None
+                                ),
+                                provider_identity=self._provider_identity,
+                                persisted_at_ms=self._clock(),
                             ),
-                            provider_identity=self._provider_identity,
-                            persisted_at_ms=self._clock(),
                         ),
-                    ),
-                )
-                if attempts > self._prevalidation_recovery_attempts:
-                    # Attach the evidence-carrying record so the outer failure
-                    # transition persists drafts instead of a stale snapshot.
-                    error.record = record  # type: ignore[attr-defined]
-                    raise
+                    )
+                    if cycle_attempts > self._prevalidation_recovery_attempts:
+                        raise
+        except Exception as error:
+            # Any exception leaving the loop — budget exhaustion, a provider
+            # fault during regeneration, or an unexpected error — carries the
+            # newest persisted record so the caller's failure transition never
+            # overwrites already-saved drafts with a stale snapshot.
+            error.record = record  # type: ignore[attr-defined]
+            raise
 
     @contextmanager
     def _locked_request(self, request_id: str) -> Iterator[None]:

@@ -99,6 +99,36 @@ class RejectedDraftEvidence:
     persisted_at_ms: int
     schema_version: str = REJECTED_DRAFT_SCHEMA
 
+    def verify_integrity(self) -> None:
+        """Check that stored content still matches its recorded digests.
+
+        Untruncated raw and normalized payloads must rehash to their
+        recorded digests; truncated raw payloads skip content rehashing
+        (the digest deliberately covers the untruncated bytes) but must
+        carry the explicit truncation marker. Raises ``ValueError`` on any
+        mismatch or malformed marker so restore fails closed instead of
+        trusting a bare digest string.
+        """
+        raw = self.provider_output
+        truncated = raw.get("truncated") if isinstance(raw, dict) else None
+        if truncated is True:
+            if not isinstance(raw.get("byte_length"), int):
+                raise ValueError("truncated rejected draft lacks its byte length")
+        elif (
+            canonical_plan_digest(raw) != self.provider_output_digest
+            if isinstance(raw, dict)
+            else True
+        ):
+            raise ValueError("rejected draft raw output does not match its digest")
+        normalized = self.normalized_output
+        if normalized is not None:
+            digest_value = self.normalized_output_digest
+            if (
+                not isinstance(digest_value, str)
+                or canonical_plan_digest(normalized) != digest_value
+            ):
+                raise ValueError("rejected draft normalized output does not match its digest")
+
     def to_json(self) -> JSONObject:
         """Serialize the evidence document for durable observations."""
         document: JSONObject = {
