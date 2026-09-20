@@ -28,6 +28,7 @@ from .backend import (
     initial_agent_positions,
 )
 from .crabagent_backend import CrabAgentBackendConfig
+from .diagnostics import PhysicalDiagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .semantic_evidence import build_authoritative_semantic_evidence
@@ -43,6 +44,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """Retain both Habitat agent identities served by the shared world."""
         super().__init__(config)
         self._agent_ids = agent_ids
+        self._diagnostics = PhysicalDiagnostics(
+            self._evidence_dir(), agent_ids, diagnostics_enabled()
+        )
 
     def initialize(self) -> None:
         """Initialize the environment and publish authoritative semantics before readiness."""
@@ -82,6 +86,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             observations = gym_env.reset()
             if isinstance(observations, tuple):
                 observations = observations[0]
+            self._diagnostics.record_reset(habitat_env, self._config)
             episode_started_at = time.time()
             text_context = habitat_env.task.get_task_text_context()
             text_context["episode_id"] = habitat_env.current_episode.episode_id
@@ -204,6 +209,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     1, *access.masks_shape
                 )
                 self._append_action_trace(steps, current_skills, info)
+                self._diagnostics.record_step(
+                    steps, current_skills, env_action, habitat_env, actor, done, info, observations
+                )
                 for agent_id in agent_ids:
                     if agent_id in outcomes:
                         continue
@@ -276,11 +284,32 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         step_result = gym_env.step(env_action * 0)
                         observations, done, info = self._gym_step_result(step_result)
                         steps += 1
+                        self._diagnostics.record_step(
+                            steps,
+                            current_skills,
+                            env_action * 0,
+                            habitat_env,
+                            actor,
+                            done,
+                            info,
+                            observations,
+                        )
                     break
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
         finally:
             module.group_discussion = original_group_discussion
+        self._diagnostics.record_terminal(
+            habitat_env,
+            steps,
+            "cancellation"
+            if cancelled
+            else "episode_done"
+            if done
+            else "step_budget_exhausted"
+            if steps >= self._config.max_steps
+            else "skills_completed_settled",
+        )
         if cancelled:
             for agent_id in agent_ids:
                 if agent_id not in outcomes:
