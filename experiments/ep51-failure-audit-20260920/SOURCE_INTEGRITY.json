@@ -1,0 +1,182 @@
+[
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/shared-world-summary.json",
+    "bytes": 2647,
+    "sha256": "2752cf88f8567ac0fa902c856d2591f66effecbb5c26a5817a80dbe153a241c6"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/action_trace.jsonl",
+    "bytes": 266439,
+    "sha256": "df599bf7a69f41a8e72b85d6c6a99a8148de820d03d59335b5b639602036f6b9"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/assignment-arrival.jsonl",
+    "bytes": 331,
+    "sha256": "b02d2e3a026b03d96d0b36b26267cc850562862b58d8ebf9a2d7720a1d82d862"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/scene_description.txt",
+    "bytes": 1084,
+    "sha256": "bbe20efc3090fd6fd3f23d7dff6029eafbbcf06eefc44c1256d5204116671bf7"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/subtask-agent-0.txt",
+    "bytes": 54,
+    "sha256": "d0ccf99e2dc3f3c8722ba3a73e4d20335fb1617b7448a2790019f596cd7e80e5"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/subtask-agent-1.txt",
+    "bytes": 79,
+    "sha256": "fc87355a1b0fdbd443b06aa4d474c4c00764627f60b15f96aa983cf4fab94a1d"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/authoritative-semantic-evidence.json",
+    "bytes": 1223,
+    "sha256": "da7011533aa4daaaa0351aa921d9a1c6c87cd4d904a09de6fa4b7dd393810036"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/chat-history/51/agent_0_action_history.json",
+    "bytes": 12465,
+    "sha256": "1240bed1bb1b063a148665221060910d08456df2217f6795dfa5bc7c1d5d08ad"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/evidence/chat-history/51/agent_1_action_history.json",
+    "bytes": 10543,
+    "sha256": "7a3d8659c57027dcc127f120a0667402f87d759ebac8b287d57ad3d18a0dcf03"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/mission.json",
+    "bytes": 421,
+    "sha256": "b8e555f0ebb5a3163a04f3d13de120a9dcb0b1a820b513d48c628605d90dbf5a"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/execution-attempts.json",
+    "bytes": 870,
+    "sha256": "3795a00f29c08802819cd7e93f372e9414b33b60f8f3e87f5c418b4d57d145d5"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/b1-request-record.json",
+    "bytes": 8865,
+    "sha256": "2cac613dc1cbd3db70119e5e9bfd9805bd295cc18160f14fd737a8e6f6cef3ee"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/b1-request-observations.json",
+    "bytes": 1018,
+    "sha256": "74c8e5e13291857601e90924dccc1704c27f27faf4b45d537eb28a3f8b67517e"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/shared-bridge.log",
+    "bytes": 3991373,
+    "sha256": "f8c09aba674c5e6311e937d0a31b46b72019757cb6e4b1283499860380a54fa2"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/control-events-complete.json",
+    "bytes": 167424,
+    "sha256": "8fd254835427345ca4eb80f8973b8ad4646bee12733ec70ebfc5bb7a0bb952b2"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/preflight-report.json",
+    "bytes": 6052,
+    "sha256": "c0b05522aec3dc6fea173e1438f00f73aedad81f2034a439c35c06613caa7449"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/runtime-observations.jsonl",
+    "bytes": 2028,
+    "sha256": "0957df8ffc006977b1c3c6739deb44284c2c9cb850262d7d5c56501595249660"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/provider-diagnosis.json",
+    "bytes": 3798,
+    "sha256": "686f6d696debe19e91a056a8ba5ac512442ed388a197ffebf375a6787a1ba491"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/stage2-proxy-routing.json",
+    "bytes": 724,
+    "sha256": "9e11d81ee3586118c0f4a907f462abf4ce835bd31285cc01d067903c825d56f0"
+  },
+  {
+    "path": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/manifest.json",
+    "bytes": 2870,
+    "sha256": "0cc48aab542282bbc2d7a0a6fcd0c4d0473a77b0cb13badaa0d247b6650fdae3"
+  },
+  {
+    "path": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/metrics.json",
+    "bytes": 2937,
+    "sha256": "1a53efcbdee30103e99688b0a9559ac59c80ea10be17154930e7c5efb901b3b2"
+  },
+  {
+    "path": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/stdout.log",
+    "bytes": 22384,
+    "sha256": "c6522d9896471ef44bcb23de8702f6e4c81fe7482505e7cb7cf70c3082a6ffaa"
+  },
+  {
+    "path": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/stderr.log",
+    "bytes": 6982,
+    "sha256": "c09a7b6f72f0f5f409378e43c06f9a4e529604361dbd883578492606507c9815"
+  },
+  {
+    "path": "/data/workspace/code/RoboGuide/evaluation/e1/paired-smoke/e1-habitat-mas-mobility/20260916T142636Z-52b4e640a10a/raw-evidence/token_usage_details-51.jsonl",
+    "bytes": 6722,
+    "sha256": "380fbfa1d923560af417ae2b9c6b994cc5020ab030ef2e5daeffe207ecc3e235"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-a.sqlite3",
+    "bytes": 16384,
+    "sha256": "cc73a95f66807c29462b5a6f168d0abfa4ada67fbea7c3d2fb85e0d0a2582eeb"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-a.sqlite3-wal",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-a.sqlite3-shm",
+    "bytes": 32768,
+    "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-b.sqlite3",
+    "bytes": 16384,
+    "sha256": "b8e4e42a5edf63c84e3b8c931fc2684db1901c8ad1ec6230bf7a11d806535482"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-b.sqlite3-wal",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/bridge-b.sqlite3-shm",
+    "bytes": 32768,
+    "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-a/execution-journal.sqlite3",
+    "bytes": 4096,
+    "sha256": "edbee11a2e909b4413b8e2265b665c0f156aaba120e5c715a11d8fc30ba789d7"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-a/execution-journal.sqlite3-wal",
+    "bytes": 103032,
+    "sha256": "a67839c9f97f63ef572b03c48e6b305cb1578bfea0150aab0aefd1230a89ffb6"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-a/execution-journal.sqlite3-shm",
+    "bytes": 32768,
+    "sha256": "b1468faca1679790bf7ff95b228b274e2bd3c8fd5b1e3556e0e14fe921dce53e"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-b/execution-journal.sqlite3",
+    "bytes": 4096,
+    "sha256": "edbee11a2e909b4413b8e2265b665c0f156aaba120e5c715a11d8fc30ba789d7"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-b/execution-journal.sqlite3-wal",
+    "bytes": 103032,
+    "sha256": "660249a840badcd5a46a27f005546fb9f6a6f3157c6b1a5873a98b4aa14eccde"
+  },
+  {
+    "path": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/node-state-b/execution-journal.sqlite3-shm",
+    "bytes": 32768,
+    "sha256": "820594be14fde61b68491a2f58542cedcf9fc443ae80072778d4d7a123b0395d"
+  }
+]
