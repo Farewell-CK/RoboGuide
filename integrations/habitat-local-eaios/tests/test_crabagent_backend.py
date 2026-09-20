@@ -217,6 +217,25 @@ def test_oracle_finish_reads_local_action_authority(tmp_path: Path) -> None:
     assert not runtime._oracle_nav_finished()
 
 
+def test_action_trace_is_batched_and_write_failures_are_observational(tmp_path: Path) -> None:
+    """Legacy action evidence cannot perform per-step writes or fail physical execution."""
+    runtime = EmosStage2Runtime(_config(tmp_path))
+    for step in range(1, 4):
+        runtime._append_action_trace(step, ["wait", "nav_to_obj"], {"pddl_success": False})
+    assert not (tmp_path / "evidence/action_trace.jsonl").exists()
+    runtime._flush_action_trace()
+    assert len((tmp_path / "evidence/action_trace.jsonl").read_text().splitlines()) == 3
+
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    failed = EmosStage2Runtime(_config(blocked))
+    for step in range(1, 33):
+        failed._append_action_trace(step, ["wait", "nav_to_obj"], {})
+    stats = failed._action_trace_stats()
+    assert stats["records_dropped"] == 32
+    assert stats["write_failures"] == 1
+
+
 def test_local_outcome_keeps_success_layers_distinct() -> None:
     """Local completion must not fabricate benchmark or episode success."""
     outcome = FakeStage2Runtime(_config(Path("."))).execute(

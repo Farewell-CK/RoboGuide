@@ -16,6 +16,7 @@ from habitat_local_eaios.diagnostics import (  # noqa: E402
     DIAGNOSTICS_ENV_FLAG,
     DIAGNOSTICS_MAX_RECORD_BYTES,
     DIAGNOSTICS_SCHEMA,
+    BufferedJsonlWriter,
     PhysicalDiagnostics,
     create_physical_diagnostics,
     diagnostics_enabled,
@@ -174,7 +175,7 @@ class FakeActor:
 
 def make_diagnostics(tmp_path: Path, enabled: bool = True) -> PhysicalDiagnostics:
     """Build one recorder over a fresh evidence directory."""
-    return PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled, 3_050)
+    return PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled, 3_050, write_batch_records=1)
 
 
 def test_diagnostics_environment_flag_is_default_off(monkeypatch: Any) -> None:
@@ -378,6 +379,49 @@ def test_step_records_stream_without_unbounded_accumulation(tmp_path: Path) -> N
     assert not hasattr(diagnostics, "_step_records")
 
 
+def test_step_records_use_a_bounded_batch_until_terminal_flush(tmp_path: Path) -> None:
+    """Default collection avoids serialization and disk I/O on every simulator step."""
+    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), True, 3_050)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    for step in range(1, 4):
+        diagnostics.record_step(
+            step,
+            ["wait", "nav_to_obj"],
+            [FakeVec([1.0]), FakeVec([1.0])],
+            env,
+            actor,
+            False,
+            {},
+            {},
+        )
+    assert not (tmp_path / "evidence/diagnostics-steps.jsonl").exists()
+    diagnostics.record_terminal(env, 3, "episode_done")
+    rows = (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert len(rows) == 3
+    assert terminal["collection_stats"]["writer"]["records_written"] == 3
+    assert terminal["collection_stats"]["dropped_step_records"] == 0
+    assert terminal["collection_stats"]["sampling_period_simulator_steps"] == 1
+
+
+def test_buffered_writer_drops_failed_batches_without_raising(tmp_path: Path) -> None:
+    """A blocked evidence path records loss accounting instead of failing execution."""
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    writer = BufferedJsonlWriter(blocked / "trace.jsonl", batch_records=2)
+    writer.append({"simulator_step": 1})
+    writer.append({"simulator_step": 2})
+    stats = writer.stats()
+    assert stats["batch_capacity_records"] == 2
+    assert stats["flushes"] == 0
+    assert stats["pending_records"] == 0
+    assert stats["records_dropped"] == 2
+    assert stats["records_written"] == 0
+    assert stats["write_failures"] == 1
+    assert stats["write_seconds"] >= 0.0
+
+
 def test_initialization_failure_degrades_to_unavailable(tmp_path: Path, monkeypatch: Any) -> None:
     """A recorder-construction failure produces unavailable evidence, not an exception."""
     original_init = PhysicalDiagnostics.__init__
@@ -410,6 +454,10 @@ def test_reset_and_terminal_top_level_failures_do_not_escape(tmp_path: Path) -> 
     diagnostics.record_reset(BrokenEnv(), None)
     diagnostics.record_terminal(BrokenEnv(), 1, "episode_done")
     assert diagnostics._dropped_records == 2
+    initial = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert initial["_status"] == "unavailable"
+    assert terminal["_status"] == "unavailable"
 
 
 def test_predicate_failure_is_explicitly_unavailable(tmp_path: Path) -> None:
@@ -530,7 +578,8 @@ def test_file_write_failures_do_not_escape(tmp_path: Path) -> None:
         {},
     )
     diagnostics.record_terminal(env, 1, "episode_done")
-    assert diagnostics._dropped_records == 3
+    assert diagnostics._dropped_records == 2
+    assert diagnostics._step_writer.stats()["records_dropped"] == 1
 
 
 def test_early_episode_end_and_continued_shared_world_are_recorded(tmp_path: Path) -> None:
@@ -584,7 +633,7 @@ def test_early_episode_end_and_continued_shared_world_are_recorded(tmp_path: Pat
 
 def test_record_budget_is_bounded_and_explicit(tmp_path: Path) -> None:
     """The configured row budget emits one unavailable marker and stops growth."""
-    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), True, 1)
+    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), True, 1, write_batch_records=1)
     env = FakeEnv([FakePredicate("target", False)])
     actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
     for step in range(1, 4):

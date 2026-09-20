@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
+from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 
@@ -24,6 +25,7 @@ class EmosStage2Runtime:
         self._actor: Any | None = None
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
+        self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
     def initialize(self) -> None:
         """Build the policy and transformed environment used by EMOS evaluation."""
@@ -299,6 +301,7 @@ class EmosStage2Runtime:
                     time.sleep(self._config.step_period_ms / 1_000)
         finally:
             module.group_discussion = original_group_discussion
+            self._flush_action_trace()
         return self._outcome(
             "FAILED",
             f"EMOS Stage2 exceeded {self._config.max_steps} simulator steps",
@@ -416,6 +419,7 @@ class EmosStage2Runtime:
         terminal_basis: str,
     ) -> LocalExecutionOutcome:
         """Capture distinct local-skill, benchmark, episode, and model evidence."""
+        self._flush_action_trace()
         habitat_env = self._habitat_env
         metrics = habitat_env.get_metrics() if habitat_env is not None else {}
         benchmark_achieved = bool(metrics.get("pddl_success", False))
@@ -427,6 +431,7 @@ class EmosStage2Runtime:
             "controlled-outcome.json",
             {
                 "benchmark_task_achieved": benchmark_achieved,
+                "action_trace_collection": self._action_trace_stats(),
                 "episode_terminated": episode_terminated,
                 "local_skill_completed": local_skill_completed,
                 "local_state": state,
@@ -552,16 +557,24 @@ class EmosStage2Runtime:
         return calls
 
     def _append_action_trace(self, steps: int, skills: list[str], info: dict[str, Any]) -> None:
-        """Persist one compact observation of original policy skill choices."""
+        """Queue one compact policy observation without per-step serialization or I/O."""
         record = {
             "benchmark_task_achieved": bool(info.get("pddl_success", False)),
             "simulator_step": steps,
             "skills": skills,
         }
-        path = self._evidence_dir() / "action_trace.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as output:
-            output.write(json.dumps(record, sort_keys=True) + "\n")
+        self._action_trace_writer.append(record)
+
+    def _flush_action_trace(self) -> None:
+        """Best-effort flush action evidence without affecting physical execution."""
+        self._action_trace_writer.flush()
+
+    def _action_trace_stats(self) -> dict[str, Any]:
+        """Expose action-trace buffering and loss accounting as evidence."""
+        return {
+            "sampling_period_simulator_steps": 1,
+            **self._action_trace_writer.stats(),
+        }
 
     def _subtask(self, invocation: CanonicalMobilityInvocation) -> str:
         """Return the configured semantic assignment without Local How."""

@@ -136,7 +136,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             )
             identity["episode_terminated"] = bool(done or habitat_env.episode_over)
             identity["simulator_steps"] = steps
-            return outcomes, {"identity": identity, "final_info": info}
+            return outcomes, {
+                "action_trace_collection": self._action_trace_stats(),
+                "identity": identity,
+                "final_info": info,
+            }
         except IntegrationError:
             raise
         except Exception as error:
@@ -314,6 +318,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     time.sleep(self._config.step_period_ms / 1_000)
         finally:
             module.group_discussion = original_group_discussion
+            self._flush_action_trace()
         self._diagnostics.record_terminal(
             habitat_env,
             steps,
@@ -1015,6 +1020,7 @@ class SharedWorldCoordinator:
             # downstream consumers never read a synthetic false.
             raw_pddl = metrics.get("pddl_success")
             summary_document: dict[str, object] = {
+                "action_trace_collection": summary.get("action_trace_collection", {}),
                 "identity": summary["identity"],
                 "outcomes": {
                     str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()

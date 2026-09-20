@@ -19,16 +19,92 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import is_dataclass, replace
+from pathlib import Path
 from typing import Any, cast
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.1"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.2"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
+DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
 
 _UNAVAILABLE = "unavailable"
 _READ_ONLY_OFFICIAL_PREDICATES = frozenset({"any_at"})
+
+
+class BufferedJsonlWriter:
+    """Append bounded JSONL batches without making evidence I/O execution authority.
+
+    Documents remain in a fixed-size pending batch until the batch fills or
+    ``flush`` is called at an execution boundary. Serialization and disk I/O
+    therefore never occur on every simulator step. Any serialization or write
+    failure drops only diagnostic records and is exposed through ``stats``.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        batch_records: int = DIAGNOSTICS_WRITE_BATCH_RECORDS,
+        serializer: Callable[[dict[str, Any]], str] | None = None,
+    ) -> None:
+        """Bind one bounded writer without touching the filesystem."""
+        if batch_records <= 0:
+            raise ValueError("batch_records must be positive")
+        self._path = path
+        self._batch_records = batch_records
+        self._serializer = serializer or self._serialize
+        self._pending: list[dict[str, Any]] = []
+        self._records_written = 0
+        self._records_dropped = 0
+        self._flushes = 0
+        self._write_failures = 0
+        self._write_seconds = 0.0
+
+    @staticmethod
+    def _serialize(document: dict[str, Any]) -> str:
+        """Encode one compact deterministic JSONL document."""
+        return json.dumps(document, ensure_ascii=False, sort_keys=True) + "\n"
+
+    def append(self, document: dict[str, Any]) -> None:
+        """Queue one record and flush only when the fixed batch is full."""
+        self._pending.append(document)
+        if len(self._pending) >= self._batch_records:
+            self.flush()
+
+    def flush(self) -> None:
+        """Best-effort flush one batch while suppressing all diagnostics failures."""
+        if not self._pending:
+            return
+        pending = self._pending
+        self._pending = []
+        started = time.perf_counter()
+        try:
+            encoded = "".join(self._serializer(document) for document in pending)
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with self._path.open("a", encoding="utf-8") as output:
+                output.write(encoded)
+            self._records_written += len(pending)
+            self._flushes += 1
+        except Exception:  # noqa: BLE001 - evidence I/O must not change execution
+            self._records_dropped += len(pending)
+            self._write_failures += 1
+        finally:
+            self._write_seconds += time.perf_counter() - started
+
+    def stats(self) -> dict[str, Any]:
+        """Return bounded-buffer and persistence accounting for run evidence."""
+        return {
+            "batch_capacity_records": self._batch_records,
+            "flushes": self._flushes,
+            "pending_records": len(self._pending),
+            "records_dropped": self._records_dropped,
+            "records_written": self._records_written,
+            "write_failures": self._write_failures,
+            "write_seconds": self._write_seconds,
+        }
 
 
 def diagnostics_enabled() -> bool:
@@ -139,13 +215,13 @@ def _over_max_len(current: Any, maximum: Any) -> dict[str, Any]:
 class PhysicalDiagnostics:
     """Record initial, per-step, and terminal physical execution evidence.
 
-    All output is appended to JSONL/JSON files under the run evidence
-    directory, so evidence produced before a crash or early termination is
-    already durable. Per-step records are streamed; memory use does not
-    grow with episode length. A deployment-provided step-record budget and
-    per-document byte cap bound disk use; a capped or unserializable record
-    is represented as unavailable rather than silently fabricated. The only
-    retained cross-step state is one previous skill name per configured agent.
+    Output uses bounded JSONL batches plus initial/terminal JSON snapshots.
+    Full batches are durable before episode termination; the terminal path
+    flushes the last partial batch. A deployment-provided step-record budget,
+    fixed batch capacity, and per-document byte cap bound memory and disk use.
+    A capped or unserializable record is represented as unavailable rather
+    than silently fabricated. Cross-step state is limited to the pending
+    batch, counters, and one previous skill name per configured agent.
     """
 
     def __init__(
@@ -154,6 +230,7 @@ class PhysicalDiagnostics:
         agent_ids: tuple[int, ...],
         enabled: bool,
         max_step_records: int,
+        write_batch_records: int = DIAGNOSTICS_WRITE_BATCH_RECORDS,
     ) -> None:
         """Bind diagnostics to one run's evidence directory."""
         if max_step_records < 0:
@@ -167,6 +244,15 @@ class PhysicalDiagnostics:
         self._step_records_written = 0
         self._step_budget_reported = False
         self._previous_skills: dict[int, str] = {}
+        self._step_observations = 0
+        self._step_samples_dropped = 0
+        self._capture_seconds = 0.0
+        self._capture_max_seconds = 0.0
+        self._step_writer = BufferedJsonlWriter(
+            self._dir / "diagnostics-steps.jsonl",
+            batch_records=write_batch_records,
+            serializer=lambda document: self._serialize_document(document, indent=None),
+        )
 
     def _unavailable_document(self, document: dict[str, Any], reason: str) -> dict[str, Any]:
         """Build a bounded record when a requested diagnostic document is unavailable."""
@@ -210,11 +296,45 @@ class PhysicalDiagnostics:
             self._serialize_document(document, indent=2), encoding="utf-8"
         )
 
-    def _append_jsonl(self, name: str, document: dict[str, Any]) -> None:
-        """Stream one diagnostics record without buffering the whole episode."""
-        self._dir.mkdir(parents=True, exist_ok=True)
-        with (self._dir / name).open("a", encoding="utf-8") as output:
-            output.write(self._serialize_document(document, indent=None))
+    def _append_step(self, document: dict[str, Any]) -> None:
+        """Queue one bounded step record for batched persistence."""
+        self._step_writer.append(document)
+
+    def _collection_stats(self) -> dict[str, Any]:
+        """Report sampling, buffering, loss, and observer overhead explicitly."""
+        writer = self._step_writer.stats()
+        return {
+            "capture_max_seconds": self._capture_max_seconds,
+            "capture_seconds": self._capture_seconds,
+            "dropped_step_records": self._step_samples_dropped + int(writer["records_dropped"]),
+            "max_record_bytes": DIAGNOSTICS_MAX_RECORD_BYTES,
+            "sampling_period_simulator_steps": 1,
+            "step_observations": self._step_observations,
+            "step_records_accepted": self._step_records_written,
+            "writer": writer,
+        }
+
+    def _write_unavailable_snapshot(
+        self, name: str, phase: str, error: Exception, step: int | None = None
+    ) -> None:
+        """Best-effort one unavailable snapshot after a top-level read failure."""
+        try:
+            document: dict[str, Any] = {
+                "_status": _UNAVAILABLE,
+                "phase": phase,
+                "reason": f"{type(error).__name__}: {error}",
+                "schema_version": DIAGNOSTICS_SCHEMA,
+                "simulator_step": step,
+            }
+            if phase == "terminal_world_state":
+                document["collection_stats"] = self._collection_stats()
+                document["dropped_diagnostic_records"] = self._dropped_records
+            self._write_json(
+                name,
+                document,
+            )
+        except Exception:  # noqa: BLE001 - storage may itself be unavailable
+            return
 
     def _load_predicates(self, problem: Any) -> None:
         """Load goal conjunct references or retain an empty unavailable state."""
@@ -383,6 +503,11 @@ class PhysicalDiagnostics:
                 "goal_conjunct_values": self._official_conjunct_values(problem),
                 "goal_entity_positions": {},
                 "official_pddl_success": self._metrics(habitat_env).get("pddl_success"),
+                "collection_configuration": {
+                    "max_step_records": self._max_step_records,
+                    "sampling_period_simulator_steps": 1,
+                    "write_batch_records": self._step_writer.stats()["batch_capacity_records"],
+                },
             }
             sim_info = getattr(problem, "sim_info", None)
             if sim_info is not None:
@@ -396,8 +521,11 @@ class PhysicalDiagnostics:
                             )
                 document["goal_entity_positions"] = entity_positions
             self._write_json("diagnostics-initial.json", document)
-        except Exception:  # noqa: BLE001 - diagnostics must never break execution
+        except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
+            self._write_unavailable_snapshot(
+                "diagnostics-initial.json", "initial_world_state", error
+            )
 
     def record_step(
         self,
@@ -414,12 +542,14 @@ class PhysicalDiagnostics:
         """Stream one post-step observation row with official predicate truth."""
         if not self._enabled:
             return
+        started = time.perf_counter()
+        self._step_observations += 1
         try:
             if self._step_records_written >= self._max_step_records:
                 self._record_failure()
+                self._step_samples_dropped += 1
                 if not self._step_budget_reported:
-                    self._append_jsonl(
-                        "diagnostics-steps.jsonl",
+                    self._append_step(
                         self._unavailable_document(
                             {"simulator_step": step},
                             f"step-record budget {self._max_step_records} exhausted",
@@ -475,15 +605,21 @@ class PhysicalDiagnostics:
                     ),
                 }
             document["agents"] = agent_records
-            self._append_jsonl("diagnostics-steps.jsonl", document)
+            self._append_step(document)
             self._step_records_written += 1
         except Exception:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
+            self._step_samples_dropped += 1
+        finally:
+            elapsed = time.perf_counter() - started
+            self._capture_seconds += elapsed
+            self._capture_max_seconds = max(self._capture_max_seconds, elapsed)
 
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record the true final world state at episode termination."""
         if not self._enabled:
             return
+        self._step_writer.flush()
         try:
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim
@@ -502,10 +638,14 @@ class PhysicalDiagnostics:
                 "goal_conjunct_values": self._official_conjunct_values(problem),
                 "official_metrics": self._metrics(habitat_env),
                 "dropped_diagnostic_records": self._dropped_records,
+                "collection_stats": self._collection_stats(),
             }
             self._write_json("diagnostics-terminal.json", document)
-        except Exception:  # noqa: BLE001 - diagnostics must never break execution
+        except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
+            self._write_unavailable_snapshot(
+                "diagnostics-terminal.json", "terminal_world_state", error, steps
+            )
 
 
 class UnavailablePhysicalDiagnostics:
