@@ -251,31 +251,72 @@ fi
 echo "$REQUEST_JSON" > "$RUN/b1-request-record.json"
 echo "request_id=$REQUEST_ID" >> "$RUN/b1-timing.txt"
 
-# Wait for the pre-execution lifecycle to settle (accepted = submitted to Control).
-LIFECYCLE=""
-for _ in $(seq 1 240); do
-    curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
-        -o "$RUN/b1-request-record.json" || true
-    LIFECYCLE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["lifecycle"])' \
-        "$RUN/b1-request-record.json" 2>/dev/null || echo unknown)
-    case "$LIFECYCLE" in
-        Accepted|Blocked|Failed|NeedsClarification|AwaitingApproval|Cancelled)
-            break ;;
-    esac
-    sleep 2
-done
-echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
+# Wait for the pre-execution lifecycle with a state-driven, monotonic-clock
+# observer. The budget is derived once, at run start, from the exact configs
+# this Mission Service uses, then frozen into run evidence before any launch.
+MI_WAIT_BUDGET_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
+    --budget-only --mission-config "$REPO/config/mission.toml" \
+    --service-config "$RUN/mission-service-b1.toml")" \
+    || { FAILURE_REASON=mi_wait_budget_derivation_failed; exit 1; }
+printf '%s\n' "$MI_WAIT_BUDGET_JSON" > "$RUN/mi-wait-budget.json"
+MI_WAIT_BUDGET_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["total_seconds"])')
 
-if [[ "$LIFECYCLE" == "Accepted" ]]; then
-    # A Ready/Deferred Mission may outlive this observation budget. Only actual
-    # process exit or persisted terminal failure evidence can attribute SUT failure.
-    FAILURE_OWNER=NONE
-    FAILURE_COMPONENT=""
-    FAILURE_REASON=""
-    wait_mission_terminal "$RUN/mission.json" 1800
-    sleep 3
-    curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
-fi
+# The mission-service PID is the last background child started for MI.
+MI_PID="${PIDS[${#PIDS[@]}-1]}"
+MI_WAIT_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
+    --endpoint http://127.0.0.1:8070 --request-id "$REQUEST_ID" \
+    --budget-seconds "$MI_WAIT_BUDGET_SECONDS" --service-pid "$MI_PID" \
+    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2)" \
+    || MI_WAIT_EXIT=$? || true
+printf '%s\n' "$MI_WAIT_JSON" > "$RUN/mi-wait-outcome.json"
+MI_OUTCOME=$(printf '%s\n' "$MI_WAIT_JSON" \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])' 2>/dev/null || echo invalid_response)
+LIFECYCLE=$(printf '%s\n' "$MI_WAIT_JSON" \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["lifecycle"])' 2>/dev/null || echo unknown)
+echo "lifecycle=$LIFECYCLE" >> "$RUN/b1-timing.txt"
+echo "mi_wait_outcome=$MI_OUTCOME" >> "$RUN/b1-timing.txt"
+# Refresh the archived request snapshot from the still-running service before
+# any attribution; the EXIT collector re-reads it and never overwrites newer
+# observations with stale ones.
+curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
+    -o "$RUN/b1-request-record.json" || true
+
+case "$MI_OUTCOME" in
+    accepted)
+        # MI submitted Control; keep the existing mission observation budget,
+        # starting from this moment, with its own attribution semantics.
+        FAILURE_OWNER=NONE
+        FAILURE_COMPONENT=""
+        FAILURE_REASON=""
+        wait_mission_terminal "$RUN/mission.json" 1800
+        sleep 3
+        curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
+        ;;
+    mi_terminal|awaiting_interaction)
+        # Real MI terminal or interaction-required states are archived as
+        # themselves; the run result reflects MI's own state and evidence.
+        ;;
+    observation_timeout)
+        # Runner observation timeout is external infra evidence, never a
+        # fabricated MI failure; collection proceeds before any cleanup.
+        FAILURE_OWNER=EXTERNAL_INFRA
+        FAILURE_COMPONENT=harness
+        FAILURE_REASON=runner_mi_observation_timeout
+        ;;
+    service_exited)
+        FAILURE_OWNER=SUT_SYSTEM
+        FAILURE_COMPONENT=mission_service
+        FAILURE_REASON=mission_service_process_exited_before_terminal_lifecycle
+        ;;
+    *)
+        # Unknown outcome or malformed response: fail closed with the raw
+        # observed value retained in mi-wait-outcome.json.
+        FAILURE_OWNER=SUT_SYSTEM
+        FAILURE_COMPONENT=mission_service
+        FAILURE_REASON="mission_request_unusable_response:$LIFECYCLE"
+        ;;
+esac
 # Event evidence is collected only by the bounded, completeness-checked EXIT collector.
 curl -sf http://127.0.0.1:28060/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
 

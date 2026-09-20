@@ -20,12 +20,12 @@ def observation_boundary(run: Path, *, dead_controller: bool = False) -> dict[st
     """Run the script's actual polling/EXIT code with offline reads and no SUT launch."""
     script = (ROOT / "scenarios/e1-shared-world-episode-51/run-b1-roboguide.sh").read_text()
     functions = script[script.index("finish_run() {") : script.index('\nmkdir -p "$RUN"')]
-    accepted = script[script.index('if [[ "$LIFECYCLE" == "Accepted" ]]; then') :]
+    accepted = script[script.index('case "$MI_OUTCOME" in') :]
     # Only the existing functions and post-submission wait are executed. Stubs bound
     # the polling loop to one read and capture collection arguments before cleanup.
     offline = r"""
 set -euo pipefail
-RUN="$1" REPO="$2" REQUEST_ID=request MISSION_ID=mission LIFECYCLE=Accepted
+RUN="$1" REPO="$2" REQUEST_ID=request MISSION_ID=mission LIFECYCLE=Accepted MI_OUTCOME=accepted
 FAILURE_OWNER=SUT_SYSTEM FAILURE_COMPONENT=mission_service FAILURE_REASON=mission_ingress_failed
 PIDS=(123) COMPONENTS=(controller)
 DEAD_CONTROLLER="$3"
