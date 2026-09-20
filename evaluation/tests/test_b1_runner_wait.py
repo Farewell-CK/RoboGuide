@@ -499,6 +499,22 @@ def test_post_malformed_response_fails_closed() -> None:
     assert result.outcome == "http_unusable"
 
 
+@pytest.mark.parametrize("post_error", ["transport", "invalid_response"])
+def test_ambiguous_post_failure_recovers_single_persisted_identity(post_error: str) -> None:
+    """A disconnected POST may still have created a durable request."""
+    calls: list[float] = []
+    result, polls = _submit(
+        post_result=(None, post_error),
+        post_calls=calls,
+        recovered_id="request-durable",
+        poll_script=[("Accepted", None)],
+    )
+    assert len(calls) == 1  # Never create a duplicate request.
+    assert result.request_id == "request-durable"
+    assert result.outcome == "accepted"
+    assert polls == ["request-durable"]
+
+
 def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
     """Recovery reads the real MissionRequestStore envelope, not a flat fake row."""
     import sqlite3
