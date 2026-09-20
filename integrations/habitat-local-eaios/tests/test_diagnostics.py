@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,12 @@ if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
 from habitat_local_eaios.diagnostics import (  # noqa: E402
+    DIAGNOSTICS_ENV_FLAG,
+    DIAGNOSTICS_MAX_RECORD_BYTES,
     DIAGNOSTICS_SCHEMA,
     PhysicalDiagnostics,
+    create_physical_diagnostics,
+    diagnostics_enabled,
 )
 
 
@@ -42,19 +47,24 @@ class FakePredicate:
 
     def __init__(self, name: str, truth: bool) -> None:
         """Store the label and the truth this conjunct reports."""
-        self.name = name
+        self.name = "any_at"
+        self.target = name
         self.truth = truth
         self.evaluated = 0
         self._arg_values = [type("Entity", (), {"name": name})()]
 
     def __repr__(self) -> str:
         """Render the conjunct label the way a real predicate would."""
-        return f"any_at({self.name})"
+        return f"{self.name}({self.target})"
 
     def is_true(self, sim_info: Any) -> bool:
         """Report official truth and count evaluations."""
         self.evaluated += 1
         return self.truth
+
+    def clone(self) -> FakePredicate:
+        """Return an isolated expression instance for diagnostic evaluation."""
+        return type(self)(self.target, self.truth)
 
 
 class FakeProblem:
@@ -76,7 +86,7 @@ class FakeAgent:
     def __init__(self) -> None:
         """Start at a distinct base pose."""
         self.base_pos = [0.5, 1.0, 2.0]
-        self.base_rot = [0.0, 0.0, 0.0, 1.0]
+        self.base_rot = 0.25
 
 
 class FakeSim:
@@ -164,7 +174,17 @@ class FakeActor:
 
 def make_diagnostics(tmp_path: Path, enabled: bool = True) -> PhysicalDiagnostics:
     """Build one recorder over a fresh evidence directory."""
-    return PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled)
+    return PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled, 3_050)
+
+
+def test_diagnostics_environment_flag_is_default_off(monkeypatch: Any) -> None:
+    """Only the exact deployment opt-in value enables physical diagnostics."""
+    monkeypatch.delenv(DIAGNOSTICS_ENV_FLAG, raising=False)
+    assert diagnostics_enabled() is False
+    monkeypatch.setenv(DIAGNOSTICS_ENV_FLAG, "true")
+    assert diagnostics_enabled() is False
+    monkeypatch.setenv(DIAGNOSTICS_ENV_FLAG, "1")
+    assert diagnostics_enabled() is True
 
 
 def test_disabled_diagnostics_write_nothing_and_read_nothing(tmp_path: Path) -> None:
@@ -192,7 +212,7 @@ def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> Non
     values = document["goal_conjunct_values"]
     assert values["any_at(any_targets|0)"] is True
     assert values["any_at(TARGET_any_targets|0)"] is False
-    assert first.evaluated >= 1 and second.evaluated >= 1
+    assert first.evaluated == 0 and second.evaluated == 0
     assert document["schema_version"] == DIAGNOSTICS_SCHEMA
     assert document["seed"] is None  # config stub carries no seed
     assert document["habitat_seed_config"] == 40
@@ -228,6 +248,11 @@ def test_skill_timeout_and_real_completion_are_distinguishable(tmp_path: Path) -
     diagnostics = make_diagnostics(tmp_path)
     env = FakeEnv([FakePredicate("any_targets|0", False)])
     actor = FakeActor([FakeSkill(3, 1000), FakeSkill(1000, 1000)], ["wait", "nav_to_obj"])
+    actor._active_policies[1]._cur_call_high_level = [True]
+    observations = {
+        "agent_0_has_finished_oracle_nav": [False],
+        "agent_1_has_finished_oracle_nav": [False],
+    }
     diagnostics.record_step(
         1000,
         ["wait", "nav_to_obj"],
@@ -236,13 +261,22 @@ def test_skill_timeout_and_real_completion_are_distinguishable(tmp_path: Path) -
         actor,
         False,
         {},
-        {},
+        observations,
+        observations,
     )
     row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()[0])
     fetch = row["agents"]["1"]["skill_state"]
     spot = row["agents"]["0"]["skill_state"]
     assert fetch["cur_skill_step"] == 1000.0 and fetch["max_skill_steps"] == 1000
     assert fetch["force_end_on_timeout"] is False
+    assert fetch["over_max_len"] == {
+        "_status": "inferred",
+        "basis": "max_skill_steps > 0 and cur_skill_step >= max_skill_steps",
+        "value": True,
+    }
+    exit_reason = row["agents"]["1"]["skill_exit_reason"]
+    assert exit_reason["_status"] == "inferred"
+    assert exit_reason["candidates"] == ["skill_step_budget"]
     assert spot["cur_skill_step"] == 3.0
     assert row["agents"]["1"]["oracle_flags"]["oracle_skill_done"] is False
 
@@ -340,4 +374,272 @@ def test_step_records_stream_without_unbounded_accumulation(tmp_path: Path) -> N
         )
     lines = (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
     assert len(lines) == 20
-    assert len(diagnostics.__dict__) == 5  # no per-step state was accumulated
+    assert len(diagnostics._predicates) == 1
+    assert not hasattr(diagnostics, "_step_records")
+
+
+def test_initialization_failure_degrades_to_unavailable(tmp_path: Path, monkeypatch: Any) -> None:
+    """A recorder-construction failure produces unavailable evidence, not an exception."""
+    original_init = PhysicalDiagnostics.__init__
+
+    def fail_init(*args: Any, **kwargs: Any) -> None:
+        """Raise the deterministic initialization failure under test."""
+        raise RuntimeError("diagnostics init failed")
+
+    monkeypatch.setattr(PhysicalDiagnostics, "__init__", fail_init)
+    diagnostics = create_physical_diagnostics(tmp_path / "evidence", (0, 1), True, 10)
+    monkeypatch.setattr(PhysicalDiagnostics, "__init__", original_init)
+    diagnostics.record_reset(FakeEnv([FakePredicate("target", False)]), None)
+    document = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    assert document["_status"] == "unavailable"
+    assert "diagnostics initialization failed" in document["reason"]
+
+
+def test_reset_and_terminal_top_level_failures_do_not_escape(tmp_path: Path) -> None:
+    """Unreadable reset/terminal roots are isolated from the physical execution path."""
+    diagnostics = make_diagnostics(tmp_path)
+
+    class BrokenEnv:
+        """Expose a simulator property whose read always fails."""
+
+        @property
+        def sim(self) -> Any:
+            """Raise the deterministic root-read failure under test."""
+            raise RuntimeError("sim root unavailable")
+
+    diagnostics.record_reset(BrokenEnv(), None)
+    diagnostics.record_terminal(BrokenEnv(), 1, "episode_done")
+    assert diagnostics._dropped_records == 2
+
+
+def test_predicate_failure_is_explicitly_unavailable(tmp_path: Path) -> None:
+    """One failed official predicate read is recorded as unavailable."""
+
+    class BrokenPredicate(FakePredicate):
+        """Official predicate stub whose computation fails."""
+
+        def is_true(self, sim_info: Any) -> bool:
+            """Raise the deterministic predicate failure under test."""
+            raise RuntimeError("predicate sensor unavailable")
+
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(FakeEnv([BrokenPredicate("target", False)]), None)
+    document = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    value = document["goal_conjunct_values"]["any_at(target)"]
+    assert value["_status"] == "unavailable"
+    assert "predicate sensor unavailable" in value["reason"]
+
+
+def test_unadmitted_predicate_is_not_evaluated(tmp_path: Path) -> None:
+    """Predicates without a proven read-only path remain explicitly unavailable."""
+    predicate = FakePredicate("target", True)
+    predicate.name = "is_detected"
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(FakeEnv([predicate]), None)
+    document = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    value = document["goal_conjunct_values"]["is_detected(target)"]
+    assert value["_status"] == "unavailable"
+    assert "not admitted" in value["reason"]
+    assert predicate.evaluated == 0
+
+
+def test_predicate_reads_do_not_mutate_official_cache(tmp_path: Path) -> None:
+    """Diagnostic Predicate.is_true calls cannot populate Habitat's official cache."""
+
+    @dataclass
+    class CachedSimInfo:
+        """Minimal dataclass matching Habitat's optional predicate cache field."""
+
+        pred_truth_cache: dict[str, bool] | None
+
+    class CachingPredicate(FakePredicate):
+        """Mimic Habitat Predicate.is_true cache population."""
+
+        def is_true(self, sim_info: CachedSimInfo) -> bool:
+            """Write only when the supplied diagnostic view exposes a cache."""
+            if sim_info.pred_truth_cache is not None:
+                sim_info.pred_truth_cache[repr(self)] = self.truth
+            return self.truth
+
+    predicate = CachingPredicate("target", True)
+    env = FakeEnv([predicate])
+    official_cache = {"existing": False}
+    env.task.pddl_problem.sim_info = CachedSimInfo(official_cache)
+    make_diagnostics(tmp_path).record_reset(env, None)
+    assert official_cache == {"existing": False}
+
+
+def test_serialization_failure_writes_one_unavailable_jsonl_row(tmp_path: Path) -> None:
+    """An unserializable step becomes one bounded unavailable JSONL record."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    diagnostics.record_step(
+        1,
+        [object()],  # type: ignore[list-item]
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {},
+        {},
+    )
+    lines = (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["_status"] == "unavailable"
+
+
+def test_oversized_record_writes_one_unavailable_jsonl_row(tmp_path: Path) -> None:
+    """A step over the byte cap becomes one bounded unavailable JSONL record."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    diagnostics.record_step(
+        1,
+        ["x" * (DIAGNOSTICS_MAX_RECORD_BYTES + 1)],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {},
+        {},
+    )
+    lines = (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    document = json.loads(lines[0])
+    assert document["_status"] == "unavailable"
+    assert "byte limit" in document["reason"]
+
+
+def test_file_write_failures_do_not_escape(tmp_path: Path) -> None:
+    """Reset, step, and terminal write failures never alter execution control flow."""
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    diagnostics = PhysicalDiagnostics(blocked / "evidence", (0, 1), True, 10)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    diagnostics.record_reset(env, None)
+    diagnostics.record_step(
+        1,
+        ["wait", "nav_to_obj"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        True,
+        {},
+        {},
+    )
+    diagnostics.record_terminal(env, 1, "episode_done")
+    assert diagnostics._dropped_records == 3
+
+
+def test_early_episode_end_and_continued_shared_world_are_recorded(tmp_path: Path) -> None:
+    """Early local completion remains distinct from a later joint episode end."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)], metrics={"pddl_success": False})
+    actor = FakeActor([FakeSkill(2, 10), FakeSkill(2, 10)], ["wait", "nav_to_obj"])
+    first_observations = {
+        "agent_0_has_finished_oracle_nav": [True],
+        "agent_1_has_finished_oracle_nav": [False],
+    }
+    diagnostics.record_step(
+        2,
+        ["wait", "nav_to_obj"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {"pddl_success": False},
+        first_observations,
+        first_observations,
+    )
+    env.sim._agents[0].base_pos = [4.0, 5.0, 6.0]
+    diagnostics.record_step(
+        3,
+        ["wait", "nav_to_obj"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        True,
+        {"pddl_success": False},
+        first_observations,
+        first_observations,
+    )
+    diagnostics.record_terminal(env, 3, "episode_done")
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
+    ]
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert len(rows) == 2 and rows[0]["done"] is False and rows[1]["done"] is True
+    assert rows[0]["agents"]["0"]["oracle_nav_finished_sensor_post_step"] is True
+    assert rows[1]["agents"]["0"]["position"] == [4.0, 5.0, 6.0]
+    assert rows[1]["agents"]["0"]["rotation"] == {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 0.25,
+    }
+    assert terminal["termination_reason"] == "episode_done"
+
+
+def test_record_budget_is_bounded_and_explicit(tmp_path: Path) -> None:
+    """The configured row budget emits one unavailable marker and stops growth."""
+    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), True, 1)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    for step in range(1, 4):
+        diagnostics.record_step(
+            step,
+            ["wait", "nav_to_obj"],
+            [FakeVec([1.0]), FakeVec([1.0])],
+            env,
+            actor,
+            False,
+            {},
+            {},
+        )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "evidence/diagnostics-steps.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 2
+    assert rows[1]["_status"] == "unavailable"
+    assert "budget 1 exhausted" in rows[1]["reason"]
+
+
+def test_enabled_and_disabled_recorders_preserve_actions_and_outcome(tmp_path: Path) -> None:
+    """Observation does not add policy/step calls or change a deterministic result."""
+
+    def execute(enabled: bool, directory: Path) -> tuple[list[int], bool, int, int]:
+        """Run a tiny fixed loop and return its action/result/call evidence."""
+        diagnostics = PhysicalDiagnostics(directory, (0, 1), enabled, 2)
+        env = FakeEnv([FakePredicate("target", True)], metrics={"pddl_success": True})
+        actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+        actor_calls = 0
+        step_calls = 0
+        selected: list[int] = []
+        observations = {
+            "agent_0_has_finished_oracle_nav": [False],
+            "agent_1_has_finished_oracle_nav": [False],
+        }
+        diagnostics.record_reset(env, None)
+        for step in range(1, 3):
+            actor_calls += 1
+            action = [FakeVec([1.0, 0.0]), FakeVec([0.0, 1.0])]
+            selected.extend(int(row.argmax()) for row in action)
+            step_calls += 1
+            diagnostics.record_step(
+                step,
+                ["wait", "nav_to_obj"],
+                action,
+                env,
+                actor,
+                step == 2,
+                {"pddl_success": step == 2},
+                observations,
+                observations,
+            )
+        diagnostics.record_terminal(env, 2, "episode_done")
+        return selected, bool(env.get_metrics()["pddl_success"]), actor_calls, step_calls
+
+    assert execute(False, tmp_path / "disabled") == execute(True, tmp_path / "enabled")

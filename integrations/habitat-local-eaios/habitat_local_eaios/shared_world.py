@@ -28,7 +28,7 @@ from .backend import (
     initial_agent_positions,
 )
 from .crabagent_backend import CrabAgentBackendConfig
-from .diagnostics import PhysicalDiagnostics, diagnostics_enabled
+from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .semantic_evidence import build_authoritative_semantic_evidence
@@ -44,8 +44,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """Retain both Habitat agent identities served by the shared world."""
         super().__init__(config)
         self._agent_ids = agent_ids
-        self._diagnostics = PhysicalDiagnostics(
-            self._evidence_dir(), agent_ids, diagnostics_enabled()
+        self._diagnostics = create_physical_diagnostics(
+            self._evidence_dir(),
+            agent_ids,
+            diagnostics_enabled(),
+            # The original loop can settle for at most 50 extra steps after
+            # both local skills finish, so this is the complete stream bound.
+            config.max_steps + 50,
         )
 
     def initialize(self) -> None:
@@ -181,6 +186,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 if cancellation_requested():
                     cancelled = True
                     break
+                policy_input_observations = observations
                 action_data = actor.act(
                     batch,
                     hidden,
@@ -210,7 +216,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 )
                 self._append_action_trace(steps, current_skills, info)
                 self._diagnostics.record_step(
-                    steps, current_skills, env_action, habitat_env, actor, done, info, observations
+                    steps,
+                    current_skills,
+                    env_action,
+                    habitat_env,
+                    actor,
+                    done,
+                    info,
+                    observations,
+                    policy_input_observations,
                 )
                 for agent_id in agent_ids:
                     if agent_id in outcomes:
@@ -293,6 +307,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                             done,
                             info,
                             observations,
+                            None,
                         )
                     break
                 if self._config.step_period_ms:
