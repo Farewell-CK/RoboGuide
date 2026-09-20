@@ -5,6 +5,9 @@ schema_path = "contracts/mission/v0.8/mission-plan.schema.json"
 capability_catalog_path = "contracts/capability/v0.3/catalog.json"
 review_enabled = true
 max_repair_attempts = 2
+# Bounded pre-validation draft-structure regeneration budget, frozen at
+# startup; independent of the post-validation Review/Repair budget.
+prevalidation_recovery_attempts = 2
 
 [mission.satisfaction_policy]
 # ADR-0039: five-second RoboGuide receive-age acceptance window, not physical validity or duration.

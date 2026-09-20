@@ -84,6 +84,7 @@ class MissionSettings:
     capability_catalog_path: Path
     review_enabled: bool
     max_repair_attempts: int
+    prevalidation_recovery_attempts: int
     prompts: PromptSettings
     llm: LlmSettings
     provider: ProviderSettings
@@ -167,6 +168,9 @@ def load_settings(
         review_enabled=_boolean(mission, "review_enabled", "mission"),
         max_repair_attempts=_bounded_nonnegative_integer(
             mission, "max_repair_attempts", "mission", 10
+        ),
+        prevalidation_recovery_attempts=_bounded_nonnegative_integer(
+            mission, "prevalidation_recovery_attempts", "mission", 2
         ),
         prompts=PromptSettings(
             version=_string(prompts, "version", "mission.prompts"),

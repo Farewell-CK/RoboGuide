@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.rejected_draft import RejectedDraftEvidence
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 from mission.submission_evidence import (
     ControllerSubmissionEvidence,
@@ -211,6 +212,7 @@ class MissionRequestRecord:
     grounding_context: GroundingContextSnapshot | None = None
     submission_evidence: ControllerSubmissionEvidence | None = None
     failure_evidence: JSONObject | None = None
+    rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
@@ -256,6 +258,7 @@ class MissionRequestRecord:
             canonical_plan_digest(self.to_json()),
             self.submission_evidence,
             self.failure_evidence,
+            self.rejected_drafts,
         )
 
     @classmethod

@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Protocol
+from typing import Protocol, cast
 
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
@@ -22,6 +22,11 @@ from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundi
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
+from mission.rejected_draft import (
+    RejectedDraftEvidence,
+    RejectedPlanError,
+    build_rejected_draft_evidence,
+)
 from mission.request_record import (
     DialogueSpeaker,
     DialogueTurn,
@@ -102,10 +107,14 @@ class MissionRequestEngine:
         repairer: MissionPlanRepairer | None = None,
         max_repair_attempts: int = 0,
         grounding_reader: MissionGroundingReader | None = None,
+        prevalidation_recovery_attempts: int = 0,
+        provider_identity: JSONObject | None = None,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
             raise MissionRequestError("max_repair_attempts must be nonnegative")
+        if prevalidation_recovery_attempts < 0:
+            raise MissionRequestError("prevalidation recovery attempts must be nonnegative")
         if max_repair_attempts > 0 and (reviewer is None or repairer is None):
             raise MissionRequestError("automatic repair requires Reviewer and Repairer ports")
         self._store = store
@@ -123,6 +132,8 @@ class MissionRequestEngine:
         self._reviewer = reviewer
         self._repairer = repairer
         self._max_repair_attempts = max_repair_attempts
+        self._prevalidation_recovery_attempts = prevalidation_recovery_attempts
+        self._provider_identity = provider_identity or {}
         self._grounding_reader = grounding_reader or EmptyMissionGroundingReader()
         self._identity_lock = threading.Lock()
         self._request_locks_guard = threading.Lock()
@@ -303,15 +314,13 @@ class MissionRequestEngine:
             record = self._update(record, assessment=assessment)
             grounded_intent = assessment.grounded_intent()
             stage = "planner"
-            plan = self._planner.plan(
-                mission_id=record.mission_id,
-                grounded_intent=grounded_intent,
-                capability_catalog=self._capability_catalog,
-                grounding_context=grounding_context,
-            )
+            plan, record = self._plan_with_recovery(record, grounded_intent, grounding_context)
             stage = "draft_validation"
             record = self._record_draft(record, assessment, grounded_intent, plan)
         except Exception as error:
+            latest = getattr(error, "record", None)
+            if isinstance(latest, MissionRequestRecord):
+                record = latest
             return self._update(
                 record,
                 lifecycle=MissionRequestLifecycle.FAILED,
@@ -320,6 +329,81 @@ class MissionRequestEngine:
                 failure_evidence=self._failure_evidence(record, stage, str(error)),
             )
         return self._review_and_advance(record, grounded_intent)
+
+    def _plan_with_recovery(
+        self,
+        record: MissionRequestRecord,
+        grounded_intent: GroundedIntent,
+        grounding_context: GroundingContextSnapshot,
+    ) -> tuple[MissionPlan, MissionRequestRecord]:
+        """Plan with bounded pre-validation regeneration for structure failures.
+
+        The initial attempt runs the frozen Planner inputs unchanged. A
+        ``RejectedPlanError`` (model-draft structure failure) is persisted as
+        rejected-draft evidence, then regenerated with structured feedback
+        under a separate, startup-frozen budget; every attempt re-runs full
+        normalization and MissionPlan validation. Provider transport,
+        authentication, and task-identity failures are not
+        ``RejectedPlanError`` and never trigger recovery. Budget exhaustion
+        re-raises the last rejection so the caller records the MI failure.
+        """
+        attempts = 0
+        last_error: RejectedPlanError | None = None
+        while True:
+            try:
+                if last_error is None:
+                    return (
+                        self._planner.plan(
+                            mission_id=record.mission_id,
+                            grounded_intent=grounded_intent,
+                            capability_catalog=self._capability_catalog,
+                            grounding_context=grounding_context,
+                        ),
+                        record,
+                    )
+                regenerator = getattr(self._planner, "regenerate", None)
+                if not callable(regenerator):
+                    raise last_error
+                regenerated_plan = cast(
+                    MissionPlan,
+                    regenerator(
+                        mission_id=record.mission_id,
+                        grounded_intent=grounded_intent,
+                        capability_catalog=self._capability_catalog,
+                        grounding_context=grounding_context,
+                        previous_provider_output=last_error.provider_output,
+                        validation_errors=[{"stage": last_error.stage, "message": str(last_error)}],
+                    ),
+                )
+                return regenerated_plan, record
+            except RejectedPlanError as error:
+                attempts += 1
+                last_error = error
+                record = self._update(
+                    record,
+                    rejected_drafts=(
+                        *record.rejected_drafts,
+                        build_rejected_draft_evidence(
+                            request_id=record.request_id,
+                            mission_id=record.mission_id,
+                            attempt_index=attempts,
+                            error=error,
+                            grounding_context_digest=grounding_context.context_digest,
+                            semantic_evidence_digest=(
+                                grounding_context.semantic_evidence.evidence_digest
+                                if grounding_context.semantic_evidence is not None
+                                else None
+                            ),
+                            provider_identity=self._provider_identity,
+                            persisted_at_ms=self._clock(),
+                        ),
+                    ),
+                )
+                if attempts > self._prevalidation_recovery_attempts:
+                    # Attach the evidence-carrying record so the outer failure
+                    # transition persists drafts instead of a stale snapshot.
+                    error.record = record  # type: ignore[attr-defined]
+                    raise
 
     @contextmanager
     def _locked_request(self, request_id: str) -> Iterator[None]:
@@ -576,6 +660,7 @@ class MissionRequestEngine:
         grounding_context: GroundingContextSnapshot | None | _Unset = _UNSET,
         submission_evidence: ControllerSubmissionEvidence | None | _Unset = _UNSET,
         failure_evidence: JSONObject | None | _Unset = _UNSET,
+        rejected_drafts: tuple[RejectedDraftEvidence, ...] | None = None,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
@@ -596,6 +681,9 @@ class MissionRequestEngine:
                 record.repair_attempts if repair_attempts is None else repair_attempts
             ),
             review_history=(record.review_history if review_history is None else review_history),
+            rejected_drafts=(
+                record.rejected_drafts if rejected_drafts is None else rejected_drafts
+            ),
             approval_reasons=(
                 record.approval_reasons if approval_reasons is None else approval_reasons
             ),

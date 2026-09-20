@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from mission.grounding_context import GroundingContextSnapshot
+from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
 from mission.submission_evidence import (
     OBSERVATIONS_SCHEMA,
@@ -36,12 +37,17 @@ def _restore_record(document: object) -> MissionRequestRecord:
         raise MissionRequestError("request observations are detached from durable request")
     submission = observations.get("submission_evidence")
     failure = observations.get("failure_evidence")
+    drafts_value = observations.get("rejected_drafts", [])
+    if not isinstance(drafts_value, list):
+        raise MissionRequestError("rejected draft evidence must be a list")
+    rejected_drafts = tuple(RejectedDraftEvidence.from_json(draft) for draft in drafts_value)
     return replace(
         record,
         submission_evidence=(
             ControllerSubmissionEvidence.from_json(submission) if submission else None
         ),
         failure_evidence=(_json_object(failure, "failure evidence") if failure else None),
+        rejected_drafts=rejected_drafts,
     )
 
 

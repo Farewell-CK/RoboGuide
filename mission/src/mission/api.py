@@ -58,6 +58,13 @@ def build_engine(
         controller,
         capability_catalog,
         service_settings.approval_policy,
+        prevalidation_recovery_attempts=planner_settings.prevalidation_recovery_attempts,
+        provider_identity={
+            "provider": planner_settings.llm.model_provider,
+            "model": planner_settings.llm.model,
+            "review_model": planner_settings.llm.review_model,
+            "reasoning_effort": planner_settings.llm.reasoning_effort,
+        },
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=(planner_settings.max_repair_attempts if reviewer is not None else 0),

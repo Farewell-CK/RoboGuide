@@ -6,9 +6,12 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from mission.models import JSONObject
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only dependency keeps the modules acyclic
+    from mission.rejected_draft import RejectedDraftEvidence
 
 SUBMISSION_EVIDENCE_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.1"
@@ -69,8 +72,13 @@ class MissionRequestObservations:
     request_record_digest: str
     submission_evidence: ControllerSubmissionEvidence | None
     failure_evidence: JSONObject | None
+    rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
     schema_version: str = OBSERVATIONS_SCHEMA
 
     def to_json(self) -> JSONObject:
         """Bind the observations to the exact public request projection."""
-        return cast(JSONObject, asdict(self))
+        document = cast(JSONObject, asdict(self))
+        drafts = document["rejected_drafts"]
+        if isinstance(drafts, tuple | list):
+            document["rejected_drafts"] = list(drafts)
+        return document

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
@@ -11,14 +12,16 @@ from typing import Protocol, cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
+from mission.contract_values import MissionPlanError
 from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
-from mission.models import JSONObject, MissionPlan
+from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.provider_mission_plan import (
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
+from mission.rejected_draft import RejectedPlanError
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 from mission.satisfaction_policy import MissionSatisfactionPolicy, validate_satisfaction_policy
@@ -268,43 +271,116 @@ class ResponsesMissionPlanner:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate a strict MissionPlan from the complete resolved Mission intent."""
+        return self._plan_attempt(
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+            grounding_context,
+            feedback=None,
+        )
+
+    def regenerate(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        previous_provider_output: JSONObject,
+        validation_errors: list[JSONObject],
+    ) -> MissionPlan:
+        """Regenerate one draft from the frozen inputs plus structured rejection feedback.
+
+        This is the bounded pre-validation recovery port: it receives the raw
+        rejected provider output (never an invalid MissionPlan object) and
+        re-runs the full normalization and validation chain. It stays
+        distinct from the post-validation Reviewer/Repairer, whose inputs
+        are always already-valid MissionPlans.
+        """
+        return self._plan_attempt(
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+            grounding_context,
+            feedback=cast(
+                JSONValue,
+                {
+                    "previous_rejected_provider_output": previous_provider_output,
+                    "validation_errors": validation_errors,
+                },
+            ),
+        )
+
+    def _plan_attempt(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        feedback: JSONValue | None,
+    ) -> MissionPlan:
+        """Run one provider attempt, attaching raw outputs to structure failures.
+
+        Provider transport/identity failures stay ``MissionProviderError``
+        and never carry draft payloads; only model-draft structure failures
+        (``MissionPlanError``) are wrapped into ``RejectedPlanError`` with
+        the raw and normalized outputs for evidence and recovery.
+        """
         canonical_schema = self._client._load_schema()
+        payload: dict[str, JSONValue] = {
+            "mission_id": mission_id,
+            "grounded_intent": grounded_intent.to_json(),
+            "satisfaction_policy": self._client._satisfaction_policy_input(),
+            "capability_catalog": capability_catalog.to_json(),
+            "grounding_context": grounding_context.to_json(),
+            **(
+                {"deployment_execution_profile": self._execution_profile.to_json()}
+                if self._execution_profile is not None
+                else {}
+            ),
+        }
+        if feedback is not None:
+            payload["prevalidation_recovery_feedback"] = feedback
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
             input_text=json.dumps(
-                _with_semantic_goal(
-                    {
-                        "mission_id": mission_id,
-                        "grounded_intent": grounded_intent.to_json(),
-                        "satisfaction_policy": self._client._satisfaction_policy_input(),
-                        "capability_catalog": capability_catalog.to_json(),
-                        "grounding_context": grounding_context.to_json(),
-                        **(
-                            {"deployment_execution_profile": self._execution_profile.to_json()}
-                            if self._execution_profile is not None
-                            else {}
-                        ),
-                    },
-                    grounding_context,
-                ),
+                _with_semantic_goal(payload, grounding_context),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
             schema_name="mission_plan_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema),
         )
-        return _validate_plan_output(
-            normalize_mission_plan_provider_output(
-                self._client._extract_output_json(response), canonical_schema
-            ),
-            mission_id,
-            grounded_intent,
-            capability_catalog,
-            self._settings.satisfaction_policy,
-            grounding_context,
-            self._execution_profile,
-        )
+        generated_at_ms = int(time.time() * 1000)
+        provider_output = self._client._extract_output_json(response)
+        try:
+            normalized = normalize_mission_plan_provider_output(provider_output, canonical_schema)
+        except MissionPlanError as error:
+            raise RejectedPlanError(
+                str(error),
+                stage="normalization",
+                provider_output=provider_output,
+                normalized_output=None,
+                generated_at_ms=generated_at_ms,
+            ) from error
+        try:
+            return _validate_plan_output(
+                normalized,
+                mission_id,
+                grounded_intent,
+                capability_catalog,
+                self._settings.satisfaction_policy,
+                grounding_context,
+                self._execution_profile,
+            )
+        except MissionPlanError as error:
+            raise RejectedPlanError(
+                str(error),
+                stage="plan_validation",
+                provider_output=provider_output,
+                normalized_output=normalized,
+                generated_at_ms=generated_at_ms,
+            ) from error
 
 
 class ResponsesMissionReviewer:
