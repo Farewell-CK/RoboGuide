@@ -252,8 +252,6 @@ MI_WAIT_BUDGET_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runn
     || { FAILURE_REASON=mi_wait_budget_derivation_failed; exit 1; }
 MI_WAIT_BUDGET_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["total_seconds"])')
-MI_STALL_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
-    | python3 -c 'import json,sys;print(json.load(sys.stdin)["stall_seconds"])')
 python3 - "$MI_OBSERVATION_BUDGET_SECONDS" "$MI_WAIT_BUDGET_JSON" <<'PYEOF'
 import json, sys
 deployment_budget = {
@@ -277,8 +275,7 @@ MI_WAIT_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait
     --instruction "$INSTRUCTION" \
     --budget-seconds "$MI_OBSERVATION_BUDGET_SECONDS" \
     --service-pid "$MI_PID" --store-path "$RUN/mission-service.sqlite3" \
-    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2 \
-    --stall-seconds "$MI_STALL_SECONDS")" \
+    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2)" \
     || MI_WAIT_EXIT=$? || true
 printf '%s\n' "$MI_WAIT_JSON" > "$RUN/mi-wait-outcome.json"
 MI_OUTCOME=$(printf '%s\n' "$MI_WAIT_JSON" \
@@ -321,13 +318,6 @@ case "$MI_OUTCOME" in
         FAILURE_OWNER=EXTERNAL_INFRA
         FAILURE_COMPONENT=harness
         FAILURE_REASON=runner_mi_observation_timeout
-        ;;
-    stalled_no_progress)
-        # MI alive but one lifecycle state held far past any legitimate
-        # single-call ceiling: a wedged or slow-drip provider call.
-        FAILURE_OWNER=EXTERNAL_INFRA
-        FAILURE_COMPONENT=external_provider
-        FAILURE_REASON=mi_stalled_no_progress
         ;;
     request_id_unavailable)
         # The synchronous POST exceeded the client budget before any
