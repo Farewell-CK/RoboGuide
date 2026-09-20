@@ -12,6 +12,31 @@ Formal B1 的 provenance、failure owner 和 population 规则见
 admission，Harness 消费并核对已持久化 verdict。自定义 B1 启动 wrapper 须显式配置
 `ROBOGUIDE_EVAL_PROTOCOL=B1`，使缺少 artifacts 时仍执行 B1 gate。
 
+### B1 Controller 事件归档
+
+场景脚本在 EXIT trap 中、停止本次子进程之前调用 `b1_artifacts`。事件采集复用
+`GET /v1/events?after=<sequence>&limit=100`，按实际末尾 sequence 前进；合法序号间隔
+不会补造事件。短页也继续读取，在相同游标得到两次空页后才结束；期间若出现新事件，
+继续分页并重新确认尾部。采集前后必须读到身份一致、状态不变的终态 Mission
+（Completed / Failed / Cancelled）。
+
+现有 API 没有 snapshot token 或全局高水位。这里确认的是 **终态 Mission 的已持久化
+事件前缀**（`terminal_durable_prefix`），不保证未来无心跳或迟到事件，也不宣称全局一致
+快照。Running、终态无法确认、持续写入导致预算耗尽，都显式归档为 incomplete。
+MI 提交前的已记录失败及 Controller 启动失败按既有协议处理，无需伪造空事件快照。
+
+默认最多 256 个事件页、单次响应 8 MiB、累计响应 64 MiB、采集预算 30 秒，单次
+socket 等待至多 2 秒；大小探测最多额外保留一个字节。每次尝试在
+`controller-event-pages/attempt-*/` 保留原始响应字节、HTTP 元数据和结果。
+只有完整采集才原子发布 `events.json`；失败不覆盖已有事件文件。
+`controller-event-archive.json`（v0.1）记录完整性、边界、游标与 events digest。
+缺失、损坏、未完成的本轮状态或不匹配的 digest 使 evidence gate 失败；保留既有文件
+不能掩盖失败重采集。无此 sidecar 和采集目录的历史归档仍走原有 verifier。
+
+归档异常记为 `context.event_archive_error`，CLI 返回 2，不改写 `run-failure.json`
+中的 SUT failure owner。Formal admission、semantic goal diagnostic 与官方 benchmark
+判定规则保持不变；完整分页仍不能使缺少真实任务注册事件的归档通过 provenance。
+
 ## 边界（必须遵守）
 
 - Eval Harness 不属于 RoboGuide Core、Runtime、Control Plane、State & Memory
