@@ -1,0 +1,287 @@
+{
+  "error": null,
+  "results": {
+    "A3": {
+      "approved": false,
+      "calls": 1,
+      "elapsed_seconds": 88.93117782939225,
+      "issues": [
+        {
+          "code": "unjustified-concurrent-cooperation",
+          "message": "The Context declares concurrent-cooperation, but the grounded requirement contains only two terminal reach predicates. Reaching the two destinations does not require execution-time cooperation; multiple robots and a shared scene do not establish such a dependency. The Context should use independent coordination.",
+          "path": "/contexts/0/coupling_mode",
+          "required_action": "RepairPlan"
+        },
+        {
+          "code": "unjustified-requires-active",
+          "message": "The requires-active relation between the two reach Tasks is not grounded. Nothing in the joint terminal-state requirement would fail if one move completed while the other was still running, so this relation adds an unsupported lifecycle restriction. Remove it rather than using it to represent ordinary parallel execution.",
+          "path": "/contexts/0/relations/0",
+          "required_action": "RepairPlan"
+        },
+        {
+          "code": "unnecessary-shared-view",
+          "message": "The execution-only shared view has no required semantic consumer. The two terminal outcomes do not require shared execution state, and the view cannot justify the cooperation mode or relation. Remove the shared view when correcting the Context to independent.",
+          "path": "/contexts/0/shared_view",
+          "required_action": "RepairPlan"
+        },
+        {
+          "code": "unjustified-task-cooperation",
+          "message": "This Task declares concurrent-cooperation even though its reach outcome has no execution-time cooperation dependency. It may run independently, including in parallel with the other Task when resources permit; the task-level mode should not encode cooperation.",
+          "path": "/tasks/0/coupling_mode",
+          "required_action": "RepairPlan"
+        },
+        {
+          "code": "unjustified-task-cooperation",
+          "message": "This Task likewise declares concurrent-cooperation without a grounded execution-time dependency. Its independent terminal reach outcome does not require cooperation with the other Task; correct the task-level mode consistently with the independent Context.",
+          "path": "/tasks/1/coupling_mode",
+          "required_action": "RepairPlan"
+        }
+      ],
+      "plan_sha256": "fe756acd49febc1bf6b30354a8221d9cd67bc029d1116ee9fe442de99a4967b5",
+      "response_model": "gpt-5.6-luna",
+      "response_usage": {
+        "attribution": {
+          "items": {
+            "msg_0e4e35e0cd23555d016aaff04ffe4c87d08fafc6dea4f05d5e": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 4302,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 4302,
+              "output_tokens": 0
+            },
+            "msg_0e4e35e0cd23555d016aaff09f314c87d0b60ba0e3b6aa8b33": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 389
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 389
+            },
+            "rs_0e4e35e0cd23555d016aaff05073b887d0b04675dc7dde6544": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0e4e35e0cd23555d016aaff059d8f887d09cc2b575ea3f743b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff06319dc87d0aba2a2cfc3d161de": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff06c6a4887d0b57fd69f2a7a5e63": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff075c8fc87d0afb89b6caadcc116": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff07f13ac87d0bda4db7343677dca": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff088640887d0b41c2199da11b1a3": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff091baa087d0abd0e914c01dd51d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0e4e35e0cd23555d016aaff09b0a8c87d0acf5e54e7ebe54f1": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 225
+            }
+          },
+          "request_fields": {
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2452,
+              "output_tokens": 0
+            },
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 6838,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 4756,
+        "output_tokens_details": {
+          "reasoning_tokens": 4367
+        },
+        "total_tokens": 11594
+      },
+      "review_sha256": "aefa63441a577633dc1184b082bd53209fe630fe6560851c30daa270bc341b2b",
+      "route": "Repair"
+    },
+    "B1": {
+      "approved": true,
+      "calls": 1,
+      "elapsed_seconds": 93.75298647675663,
+      "issues": [],
+      "plan_sha256": "0e32e4e530f1a255a0ae6398dec0b23aa8a2dc9ac7e78ef64440a00c95da8bcf",
+      "response_model": "gpt-5.6-luna",
+      "response_usage": {
+        "attribution": {
+          "items": {
+            "msg_0cc971d9c17fc5b4016aaff0a7b5ec87d0a5cf3ef91d2fd769": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 4179,
+                  "output_tokens": 0
+                }
+              ],
+              "input_tokens": 4179,
+              "output_tokens": 0
+            },
+            "msg_0cc971d9c17fc5b4016aaff10378e087d08ae998f90556bcfd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "content": [
+                {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 20
+                }
+              ],
+              "input_tokens": 0,
+              "output_tokens": 20
+            },
+            "rs_0cc971d9c17fc5b4016aaff0a8605c87d0b0b40365a62bcdbd": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2,
+              "output_tokens": 516
+            },
+            "rs_0cc971d9c17fc5b4016aaff0b1ad7087d09e97f3cba50ce281": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0bb009087d0a428cef032163131": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0c454c087d0b7f287a6c793d754": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0cda93c87d0ba1964df8ff2b0fb": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0d6fb8087d0a91f762222b8022d": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0e0669c87d0a102849574285bcf": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0ea36d887d0acceacc3d03f7b7b": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0f2efdc87d0b7d81baa6929155c": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 518
+            },
+            "rs_0cc971d9c17fc5b4016aaff0fc447c87d0a1f481c4de79d858": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 394
+            }
+          },
+          "request_fields": {
+            "instructions": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 2452,
+              "output_tokens": 0
+            },
+            "text.format": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0,
+              "input_tokens": 82,
+              "output_tokens": 0
+            }
+          }
+        },
+        "input_tokens": 6715,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 5074,
+        "output_tokens_details": {
+          "reasoning_tokens": 5054
+        },
+        "total_tokens": 11789
+      },
+      "review_sha256": "9af6f29e5d7ce8fc5bf544da57c95734b37563f0a1efc4d299af189aff34fa1d",
+      "route": "Approved"
+    }
+  },
+  "total_calls": 2
+}

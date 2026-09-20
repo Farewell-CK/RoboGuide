@@ -1,0 +1,29 @@
+{
+  "study": "Episode51 Reviewer-only real-model semantic validation",
+  "code_sha": "28a3dcda5eb44d48df83700d13b4e0b1b601ea97",
+  "history_evidence_sha": "322bb8d39f839ff095a1df086e66b105dea307a4",
+  "reviewer_prompt_file_sha256": "daa7238177c93aa54c903cc4411d3c0d041009fa7644cb987d88bb4007956c1e",
+  "reviewer_prompt_sent_sha256": "f84caceb5c9f6d33e3a00df987a95920b7f7655fde8d5f205ca9e6cb39a93f63",
+  "provider_calls": 2,
+  "order": ["A3", "B1"],
+  "A3": {
+    "approved": false,
+    "issue_count": 5,
+    "identified_unjustified_requires_active": true,
+    "relation_issue_path": "/contexts/0/relations/0",
+    "relation_required_action": "RepairPlan",
+    "route": "Repair",
+    "plan_sha256": "fe756acd49febc1bf6b30354a8221d9cd67bc029d1116ee9fe442de99a4967b5"
+  },
+  "B1": {
+    "approved": true,
+    "issue_count": 0,
+    "route": "Approved",
+    "plan_sha256": "0e32e4e530f1a255a0ae6398dec0b23aa8a2dc9ac7e78ef64440a00c95da8bcf"
+  },
+  "full_mission_request_executed": false,
+  "planner_called": false,
+  "repairer_called": false,
+  "control_submission": false,
+  "formal_benchmark": false
+}

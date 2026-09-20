@@ -1,0 +1,15 @@
+{
+  "arms": {
+    "A3": {
+      "from_json": "PASS",
+      "plan_binding": true,
+      "route": "Repair"
+    },
+    "B1": {
+      "from_json": "PASS",
+      "plan_binding": true,
+      "route": "Approved"
+    }
+  },
+  "provider_calls": 0
+}

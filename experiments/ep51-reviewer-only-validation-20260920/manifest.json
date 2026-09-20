@@ -1,0 +1,39 @@
+{
+  "code_sha": "28a3dcda5eb44d48df83700d13b4e0b1b601ea97",
+  "credential_source": "previous authorized session source",
+  "frozen_sources": {
+    "A3": "/tmp/roboguide-ep51-mi-prompt-ab-report/experiments/ep51-mi-prompt-ab-20260920/A/state/final-plan.json",
+    "B1": "/tmp/roboguide-ep51-mi-prompt-ab-report/experiments/ep51-mi-prompt-ab-20260920/B/state/final-plan.json"
+  },
+  "history_report_sha": "322bb8d39f839ff095a1df086e66b105dea307a4",
+  "maximum_provider_calls": 2,
+  "mission_plan_sha256": {
+    "A3": "fe756acd49febc1bf6b30354a8221d9cd67bc029d1116ee9fe442de99a4967b5",
+    "B1": "0e32e4e530f1a255a0ae6398dec0b23aa8a2dc9ac7e78ef64440a00c95da8bcf"
+  },
+  "network_calls_before_execution": 0,
+  "order": [
+    "A3",
+    "B1"
+  ],
+  "provider": {
+    "base_url": "http://101.43.45.215:8080",
+    "disable_response_storage": true,
+    "max_output_tokens": 4096,
+    "model": "gpt-5.6-luna",
+    "name": "OpenAI",
+    "reasoning_effort": "xhigh",
+    "responses_path": "/responses",
+    "timeout_seconds": 600.0,
+    "wire_api": "responses"
+  },
+  "request_common_sha256": "abb2af960f073ba28e5b21916b2b4765cf97a1dc5bf775cf0b21282498a80cf9",
+  "request_public_input_sha256": {
+    "A3": "52930a25168f77dc9a13e74815de0912c86c70b9ade40e8ed9bde1467ad2215f",
+    "B1": "bff2983e1de1d5a8dbfc5758d52e9a8d89129a0fa1bab51c911fd45c08920a3a"
+  },
+  "reviewer_prompt_path": "/tmp/roboguide-mi-prompt-refinement/mission/prompts/v0/reviewer.md",
+  "reviewer_prompt_sent_sha256": "f84caceb5c9f6d33e3a00df987a95920b7f7655fde8d5f205ca9e6cb39a93f63",
+  "reviewer_prompt_sha256": "daa7238177c93aa54c903cc4411d3c0d041009fa7644cb987d88bb4007956c1e",
+  "study": "Episode51 Reviewer-only real-model semantic validation"
+}

@@ -1,0 +1,16 @@
+{
+  "provider_calls": 0,
+  "checks": {
+    "A3": {
+      "full_mi_validation": "PASS",
+      "task_count": 2,
+      "context_coupling_mode": "concurrent-cooperation"
+    },
+    "B1": {
+      "full_mi_validation": "PASS",
+      "task_count": 2,
+      "context_coupling_mode": "independent"
+    }
+  },
+  "interpretation": "Both plans pass deterministic identity, execution-profile, implementation-support, physical-grounding, capability-catalog, and satisfaction-policy checks. This does not establish semantic necessity of an execution relation."
+}
