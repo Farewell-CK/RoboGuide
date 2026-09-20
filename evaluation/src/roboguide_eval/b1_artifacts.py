@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from roboguide_eval.b1_admission import FailureOwner
+from roboguide_eval.b1_event_archive import collect_controller_events
 from roboguide_eval.b1_provenance import (
     RUN_FAILURE_SCHEMA,
     build_b1_provenance_record,
     load_document,
+    observed_request,
     plan_digest,
     write_b1_provenance,
 )
@@ -70,11 +72,12 @@ def collect_b1_artifacts(
     mission_id = request.get("mission_id")
     if isinstance(mission_id, str):
         _write(run / "mission.json", _fetch(f"{controller_endpoint}/v1/missions/{mission_id}"))
-    for filename, endpoint in (
-        ("events.json", "events"),
-        ("execution-attempts.json", "execution-attempts"),
-    ):
-        _write(run / filename, _fetch(f"{controller_endpoint}/v1/{endpoint}"))
+    collect_controller_events(
+        run,
+        controller_endpoint,
+        observed_request(request, load_document(run / "b1-request-observations.json")),
+    )
+    _write(run / "execution-attempts.json", _fetch(f"{controller_endpoint}/v1/execution-attempts"))
     if owner is not FailureOwner.NONE:
         observations = load_document(run / "b1-request-observations.json") or {}
         sent = observations.get("submission_evidence") or {}
@@ -130,6 +133,8 @@ def main() -> None:
         reason=args.reason,
     )
     print(json.dumps(result, indent=2))
+    if result["context"].get("event_archive_error"):
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

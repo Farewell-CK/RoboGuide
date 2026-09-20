@@ -84,6 +84,9 @@ def archive_boundary(
 ) -> dict[str, Any]:
     """Feed the shell's actual attribution into the canonical archive/verdict path."""
     monkeypatch.setattr("roboguide_eval.b1_artifacts._fetch", Mock(return_value=None))
+    # These cases consume pre-existing offline evidence without recollecting it.
+    # Live acquisition (including an unconfirmed terminal view) has separate tests.
+    monkeypatch.setattr("roboguide_eval.b1_artifacts.collect_controller_events", Mock())
     request = json.loads((run / "b1-request-record.json").read_text())
     return collect_b1_artifacts(
         run,
