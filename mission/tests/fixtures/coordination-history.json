@@ -1,0 +1,1045 @@
+{
+  "A": {
+    "source": "/data/workspace/code/roboguide-stage2-provider-_hyz84nd/b1-preflight-episode51-seed40/b1-request-record.json",
+    "source_sha256": "2cac613dc1cbd3db70119e5e9bfd9805bd295cc18160f14fd737a8e6f6cef3ee",
+    "assessment": {
+      "objective": "Achieve the joint terminal state in which at least one available robot reaches the object identified as any_targets|0 and at least one available robot reaches the goal receptacle position identified as TARGET_any_targets|0.",
+      "constraints": [
+        "Operate with the legged Spot and wheeled Fetch in their shared multi-floor scene.",
+        "The system may decide how to assign the two reach conditions between the available robots."
+      ],
+      "assumptions": [
+        "The two reach conditions may be satisfied by the same robot or by different robots; the user has not required distinct assignments.",
+        "No manipulation, transport, handoff, or other action beyond reaching the specified object and goal position is required."
+      ],
+      "open_questions": []
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.2",
+      "context_digest": "sha256:612177ba37d897343b27c8fc7368b0b40e436c28c45fe4fbb8f5f83e2a7c8d16",
+      "request_id": "request-2c8ce3b51ccd49588fde9ae4dc161411",
+      "dialogue_digest": "sha256:ff75f572dc070d503e26a700fbf382eee9eceab9ebc8e431b2b179ce02ad739f",
+      "captured_at_ms": 1789837377480,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": [],
+      "semantic_evidence": {
+        "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+        "authority": "environment-authoritative",
+        "identity": {
+          "run_id": "b1-preflight-episode51-seed40",
+          "episode_id": "51",
+          "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+          "dataset_revision": "mobility_episodes_1",
+          "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+        },
+        "objective_scope": "joint_terminal_state",
+        "goal": {
+          "kind": "logical",
+          "operator": "and",
+          "operands": [
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "any_targets|0"
+              ]
+            },
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "TARGET_any_targets|0"
+              ]
+            }
+          ],
+          "quantifier": null,
+          "variables": []
+        },
+        "world_context": {
+          "agent_ids": [
+            0,
+            1
+          ],
+          "entity_catalog": [
+            "TARGET_any_targets|0",
+            "agent_0",
+            "agent_1",
+            "any_targets|0"
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+        },
+        "digest": "sha256:07d2a3a56ffc6320c16a184e08252db46851539ac32b4bdf2404de44ba3c464f"
+      }
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.8",
+      "mission": {
+        "id": "mission-f61a99ca9fc1416094e6c00206f8ba0c",
+        "objective": "Achieve the joint terminal state in which at least one available robot reaches the object identified as any_targets|0 and at least one available robot reaches the goal receptacle position identified as TARGET_any_targets|0.",
+        "actors": [
+          {
+            "id": "reach-executor-a"
+          },
+          {
+            "id": "reach-executor-b"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "reach-scene",
+          "roles": [
+            {
+              "id": "object-reach-executor",
+              "actor": "reach-executor-a"
+            },
+            {
+              "id": "goal-reach-executor",
+              "actor": "reach-executor-b"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent",
+          "executor_constraints": []
+        }
+      ],
+      "tasks": [
+        {
+          "id": "reach-object",
+          "description": "At least one of the user-specified available robots, the legged Spot or wheeled Fetch, reaches the object identified as any_targets|0 in the shared multi-floor scene, establishing any_at(any_targets|0).",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "object-move-role",
+              "context_role": "object-reach-executor",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "Reach the semantic object identified as any_targets|0.",
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "reach-scene",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "The predicate any_at(any_targets|0) holds.",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "reach-goal",
+          "description": "At least one of the user-specified available robots, the legged Spot or wheeled Fetch, reaches the goal receptacle position identified as TARGET_any_targets|0 in the shared multi-floor scene, establishing any_at(TARGET_any_targets|0).",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "goal-move-role",
+              "context_role": "goal-reach-executor",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "Reach the semantic goal receptacle position identified as TARGET_any_targets|0.",
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "reach-scene",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "The predicate any_at(TARGET_any_targets|0) holds.",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "plan_digest": "sha256:2e9ccf382a84ca0a2192105a9f3914789dd360ece6a3b3c5dc9c80189bc5e5ae"
+  },
+  "B": {
+    "source": "/data/workspace/code/roboguide-b1-resource-ready-ns8nlo34/b1-request-record.json",
+    "source_sha256": "fd479f5f69527356595bc23af4a163bbb3f4214795d6412956a6c63d0ff5e8ba",
+    "assessment": {
+      "objective": "Carry out the mission so that, in the shared multi-floor scene, at least one available robot reaches any_targets|0 and at least one available robot reaches TARGET_any_targets|0.",
+      "constraints": [
+        "The mission concerns the shared multi-floor scene.",
+        "The available robots are the heterogeneous legged Spot and wheeled Fetch.",
+        "The terminal state must include a robot at any_targets|0 and a robot at TARGET_any_targets|0.",
+        "The user has not prescribed which robot performs either reach condition."
+      ],
+      "assumptions": [
+        "Robot assignment and work division are delegated to planning; the two reach conditions may be fulfilled by the same robot or by different robots.",
+        "No object transport, handoff, delivery, or other action beyond reaching the specified entities is required."
+      ],
+      "open_questions": []
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.2",
+      "context_digest": "sha256:69fa2d77f0841c92c3aa7bc92b48009cb6d5994360530f4f03b001e58663aff4",
+      "request_id": "request-2ab93556ab524997b8f04a4efb5bd6d0",
+      "dialogue_digest": "sha256:1e2f207332997bb49039723cea54ddc95a35b89feeaa88b3cb61239e4e59ea59",
+      "captured_at_ms": 1789834973120,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": [],
+      "semantic_evidence": {
+        "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+        "authority": "environment-authoritative",
+        "identity": {
+          "run_id": "roboguide-b1-resource-ready-ns8nlo34",
+          "episode_id": "51",
+          "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+          "dataset_revision": "mobility_episodes_1",
+          "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+        },
+        "objective_scope": "joint_terminal_state",
+        "goal": {
+          "kind": "logical",
+          "operator": "and",
+          "operands": [
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "any_targets|0"
+              ]
+            },
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "TARGET_any_targets|0"
+              ]
+            }
+          ],
+          "quantifier": null,
+          "variables": []
+        },
+        "world_context": {
+          "agent_ids": [
+            0,
+            1
+          ],
+          "entity_catalog": [
+            "TARGET_any_targets|0",
+            "agent_0",
+            "agent_1",
+            "any_targets|0"
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+        },
+        "digest": "sha256:b6a76d117fb7dc97f8d068786dcccd369ac5a7293d4a20bed106f281fc296887"
+      }
+    },
+    "plan": {
+      "schema_version": "roboguide.mission-plan/v0.8",
+      "mission": {
+        "id": "mission-9cf93258cb4a4f49ba14b43315d42a82",
+        "objective": "Carry out the mission so that, in the shared multi-floor scene, at least one available robot reaches any_targets|0 and at least one available robot reaches TARGET_any_targets|0.",
+        "actors": [
+          {
+            "id": "actor-a"
+          },
+          {
+            "id": "actor-b"
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "id": "shared-multi-floor-scene",
+          "roles": [
+            {
+              "id": "reach-executor-a",
+              "actor": "actor-a"
+            },
+            {
+              "id": "reach-executor-b",
+              "actor": "actor-b"
+            }
+          ],
+          "relations": [],
+          "coupling_mode": "independent",
+          "executor_constraints": []
+        }
+      ],
+      "tasks": [
+        {
+          "id": "reach-any-targets-0",
+          "description": "A robot is at any_targets|0 in the shared multi-floor scene.",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "reach-any-targets-0-role",
+              "context_role": "reach-executor-a",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "Reach any_targets|0 in the shared multi-floor scene.",
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "shared-multi-floor-scene",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "A robot is at any_targets|0 in the shared multi-floor scene.",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        },
+        {
+          "id": "reach-target-any-targets-0",
+          "description": "A robot is at TARGET_any_targets|0 in the shared multi-floor scene.",
+          "depends_on": [],
+          "roles": [
+            {
+              "id": "reach-target-any-targets-0-role",
+              "context_role": "reach-executor-b",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "contract": {
+                      "namespace": "mobility",
+                      "name": "move",
+                      "version": "v1"
+                    },
+                    "constraints": []
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "execution_intent": {
+                "operation": {
+                  "namespace": "mobility",
+                  "name": "move",
+                  "version": "v1"
+                },
+                "objective": "Reach TARGET_any_targets|0 in the shared multi-floor scene.",
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "context_id": "shared-multi-floor-scene",
+          "coupling_mode": "independent",
+          "timing": {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null
+          },
+          "satisfaction": {
+            "expected_effect": "A robot is at TARGET_any_targets|0 in the shared multi-floor scene.",
+            "basis": "execution-report",
+            "verifier": null
+          }
+        }
+      ]
+    },
+    "plan_digest": "sha256:9e634d2446915290266350fcbdbb927739970715a4c1db904f2f1706449825d5"
+  },
+  "D": {
+    "source": "/data/workspace/code/roboguide-ep51-diag2-20260920/b1-diag-ep51-seed40/b1-request-record.json",
+    "source_sha256": "7906b2cc3e8da3a5e631cc1d1948fda7428d553766ff1e753ed80dafa6261785",
+    "assessment": {
+      "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0.",
+      "constraints": [
+        "Operate within the shared multi-floor scene using the available legged Spot and wheeled Fetch robots.",
+        "The user delegates robot selection and division of work between the two robots.",
+        "The required terminal condition is jointly: a robot is at any_targets|0, and a robot is at TARGET_any_targets|0."
+      ],
+      "assumptions": [
+        "The two reach conditions may be satisfied by the same robot or by different robots; the system may choose the assignment that achieves the joint terminal state.",
+        "No object transport, manipulation, handoff, or confirmation beyond reaching the two specified locations is required."
+      ],
+      "open_questions": []
+    },
+    "grounding_context": {
+      "schema_version": "roboguide.grounding-context/v0.2",
+      "context_digest": "sha256:992f5eca78d43d3d398ba0bd2db24714448d35df898e7772d1436e8d7f235478",
+      "request_id": "request-a64292ee0cf54b0a9312c7b87a96d72e",
+      "dialogue_digest": "sha256:c7b0551f34d60030406811c6355a5dcb11bc6006f3e2cf7170427166b4ad5f81",
+      "captured_at_ms": 1789898455836,
+      "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "state_evidence": [],
+      "memory_evidence": [],
+      "gaps": [],
+      "semantic_evidence": {
+        "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+        "authority": "environment-authoritative",
+        "identity": {
+          "run_id": "b1-diag-ep51-seed40",
+          "episode_id": "51",
+          "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+          "dataset_revision": "mobility_episodes_1",
+          "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+        },
+        "objective_scope": "joint_terminal_state",
+        "goal": {
+          "kind": "logical",
+          "operator": "and",
+          "operands": [
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "any_targets|0"
+              ]
+            },
+            {
+              "kind": "predicate",
+              "name": "any_at",
+              "arguments": [
+                "TARGET_any_targets|0"
+              ]
+            }
+          ],
+          "quantifier": null,
+          "variables": []
+        },
+        "world_context": {
+          "agent_ids": [
+            0,
+            1
+          ],
+          "entity_catalog": [
+            "TARGET_any_targets|0",
+            "agent_0",
+            "agent_1",
+            "any_targets|0"
+          ],
+          "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+        },
+        "digest": "sha256:efad4d24f94a6ce0f2464c4da7a8307b2b0d3262f5998746060e521974cc185b"
+      }
+    },
+    "dialogue": [
+      {
+        "turn_id": "turn-0001",
+        "speaker": "User",
+        "kind": "Instruction",
+        "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+        "created_at_ms": 1789898455727,
+        "in_reply_to": null
+      }
+    ],
+    "request_id": "request-a64292ee0cf54b0a9312c7b87a96d72e",
+    "mission_id": "mission-deba13bb19d6422db398b1cb916f6462",
+    "observations_source": "/data/workspace/code/roboguide-ep51-diag2-20260920/b1-diag-ep51-seed40/b1-request-observations.json",
+    "observations_source_sha256": "86e383ad1a752077add75cdf58dc1575b5c73be2dec8f21493c1bd775eb6a9e7",
+    "rejected_drafts": [
+      {
+        "attempt_index": 1,
+        "provider_output": {
+          "contexts": [
+            {
+              "coupling_mode": "concurrent-cooperation",
+              "executor_constraints": [],
+              "id": "shared_scene",
+              "peer_channel": null,
+              "relations": [],
+              "roles": [
+                {
+                  "actor": "actor_0",
+                  "id": "robot_slot_0"
+                },
+                {
+                  "actor": "actor_1",
+                  "id": "robot_slot_1"
+                }
+              ],
+              "shared_view": null
+            }
+          ],
+          "mission": {
+            "actors": [
+              {
+                "id": "actor_0",
+                "physical_entity": null
+              },
+              {
+                "id": "actor_1",
+                "physical_entity": null
+              }
+            ],
+            "id": "mission-deba13bb19d6422db398b1cb916f6462",
+            "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0."
+          },
+          "schema_version": "roboguide.mission-plan/v0.8",
+          "tasks": [
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_a",
+              "roles": [
+                {
+                  "context_role": "robot_slot_0",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_a",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The mission-assigned embodied system for this task is at any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            },
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at TARGET_any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_b",
+              "roles": [
+                {
+                  "context_role": "robot_slot_1",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination TARGET_any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "TARGET_any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_b",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The mission-assigned embodied system for this task is at TARGET_any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            }
+          ]
+        },
+        "provider_output_digest": "sha256:37edb18b02386600a5d42823c61e35da00173eebabfc7174812171ec3c3796de",
+        "normalized_output_digest": "sha256:08756fae3366d9dc6fc0a9f62477fe64a57e096ec4a4c27a55aa5052ddf34f08",
+        "validation_errors": [
+          {
+            "message": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+            "stage": "plan_validation"
+          }
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "provider_output": {
+          "contexts": [
+            {
+              "coupling_mode": "concurrent-cooperation",
+              "executor_constraints": [],
+              "id": "shared_scene",
+              "peer_channel": null,
+              "relations": [],
+              "roles": [
+                {
+                  "actor": "actor_0",
+                  "id": "robot_slot_0"
+                },
+                {
+                  "actor": "actor_1",
+                  "id": "robot_slot_1"
+                }
+              ],
+              "shared_view": {
+                "bindings": [
+                  {
+                    "context_role_id": "robot_slot_0",
+                    "field": "pose",
+                    "payload_schema": null,
+                    "state_export_id": null
+                  },
+                  {
+                    "context_role_id": "robot_slot_1",
+                    "field": "pose",
+                    "payload_schema": null,
+                    "state_export_id": null
+                  },
+                  {
+                    "context_role_id": "robot_slot_0",
+                    "field": "execution",
+                    "payload_schema": null,
+                    "state_export_id": null
+                  },
+                  {
+                    "context_role_id": "robot_slot_1",
+                    "field": "execution",
+                    "payload_schema": null,
+                    "state_export_id": null
+                  }
+                ],
+                "include_freshness": true,
+                "spatial_reference": null
+              }
+            }
+          ],
+          "mission": {
+            "actors": [
+              {
+                "id": "actor_0",
+                "physical_entity": null
+              },
+              {
+                "id": "actor_1",
+                "physical_entity": null
+              }
+            ],
+            "id": "mission-deba13bb19d6422db398b1cb916f6462",
+            "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0."
+          },
+          "schema_version": "roboguide.mission-plan/v0.8",
+          "tasks": [
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_a",
+              "roles": [
+                {
+                  "context_role": "robot_slot_0",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_a",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The mission-assigned embodied system for this task is at any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            },
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at TARGET_any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_b",
+              "roles": [
+                {
+                  "context_role": "robot_slot_1",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination TARGET_any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "TARGET_any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_b",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The mission-assigned embodied system for this task is at TARGET_any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            }
+          ]
+        },
+        "provider_output_digest": "sha256:026d01544391748b5e91823086f291208736af50fa32ca7877676f59f4a209b7",
+        "normalized_output_digest": "sha256:664c37c07a9c4da55d3e6fb729eabfa29aa90861aabe609080a2df1ba6fb9789",
+        "validation_errors": [
+          {
+            "message": "contexts[0].shared_view.bindings[0].state_export_id must be nonblank text",
+            "stage": "plan_validation"
+          }
+        ]
+      },
+      {
+        "attempt_index": 3,
+        "provider_output": {
+          "contexts": [
+            {
+              "coupling_mode": "concurrent-cooperation",
+              "executor_constraints": [],
+              "id": "shared_scene",
+              "peer_channel": null,
+              "relations": [],
+              "roles": [
+                {
+                  "actor": "actor_0",
+                  "id": "robot_slot_0"
+                },
+                {
+                  "actor": "actor_1",
+                  "id": "robot_slot_1"
+                }
+              ],
+              "shared_view": null
+            }
+          ],
+          "mission": {
+            "actors": [
+              {
+                "id": "actor_0",
+                "physical_entity": null
+              },
+              {
+                "id": "actor_1",
+                "physical_entity": null
+              }
+            ],
+            "id": "mission-deba13bb19d6422db398b1cb916f6462",
+            "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0."
+          },
+          "schema_version": "roboguide.mission-plan/v0.8",
+          "tasks": [
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_a",
+              "roles": [
+                {
+                  "context_role": "robot_slot_0",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_a",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The embodied system assigned to this task is at any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            },
+            {
+              "context_id": "shared_scene",
+              "coupling_mode": "independent",
+              "depends_on": [],
+              "description": "At least one mission-assigned embodied system is at TARGET_any_targets|0 in the shared multi-floor scene.",
+              "id": "reach_target_b",
+              "roles": [
+                {
+                  "context_role": "robot_slot_1",
+                  "execution_intent": {
+                    "objective": "Reach the semantic destination TARGET_any_targets|0.",
+                    "operation": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    },
+                    "parameters": [
+                      {
+                        "key": "destination",
+                        "value": "TARGET_any_targets|0"
+                      }
+                    ]
+                  },
+                  "id": "move_to_target_b",
+                  "requirements": {
+                    "capabilities": [
+                      {
+                        "constraints": [],
+                        "contract": {
+                          "name": "move",
+                          "namespace": "mobility",
+                          "version": "v1"
+                        }
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "kind": "space",
+                        "units": 1
+                      }
+                    ]
+                  },
+                  "resource_scope": "task"
+                }
+              ],
+              "satisfaction": {
+                "basis": "execution-report",
+                "expected_effect": "The embodied system assigned to this task is at TARGET_any_targets|0 in the shared multi-floor scene.",
+                "verifier": null
+              },
+              "timing": {
+                "completion_deadline_offset_ms": null,
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": null
+              }
+            }
+          ]
+        },
+        "provider_output_digest": "sha256:2afa9794b7c10d623f8ce571b6c4251d8336177c6a1ea6a315e2734f37fa6514",
+        "normalized_output_digest": "sha256:47c18ec017f425e4cb63a22da0460604ab703ffa0e92c18b3663a4bb95957883",
+        "validation_errors": [
+          {
+            "message": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+            "stage": "plan_validation"
+          }
+        ]
+      }
+    ]
+  }
+}
