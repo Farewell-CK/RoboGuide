@@ -2,6 +2,8 @@
   "schema": "roboguide.e1.ep51-physical-diagnostic/v0.1",
   "run_directory": "/data/workspace/code/roboguide-ep51-diag-20260920/b1-diag-ep51-seed40",
   "diagnostics_branch": "zcode/e1-ep51-physical-diagnostics@6bb098d",
+  "reviewed_head": "15f48cfa69aeb08152e10eb07e72bf46b27db4dc",
+  "acceptance_fix": "a4a1d6ed239ae33a0b9aab9eb1e00a55292b088d",
   "main_baseline": "63961378b77378728d6e91accce03a662236692b",
   "execution_policy": {
     "runs_executed": 1,
@@ -11,11 +13,16 @@
   "run_outcome": {
     "failure_boundary": "mission_intelligence_plan_validation",
     "failure_issue": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+    "habitat_process_initialized": true,
     "physical_episode_executed": false,
+    "episode_reset_observed": false,
     "diagnostic_files_produced": false,
     "provenance_valid": true,
     "valid_for_formal_population": true,
+    "valid_for_benchmark_population": false,
     "system_outcome": "FAILURE",
+    "benchmark_outcome": "BENCHMARK_UNAVAILABLE",
+    "benchmark_success": null,
     "event_archive_state": "not_required",
     "exit_code": 0
   },
@@ -35,9 +42,23 @@
   },
   "diagnostics_capability": {
     "module": "integrations/habitat-local-eaios/habitat_local_eaios/diagnostics.py",
-    "offline_tests": 8,
+    "diagnostics_tests": 20,
+    "adapter_tests": 60,
     "offline_result": "pass",
-    "repo_tests": "711 passed",
-    "predicate_truth_source": "official habitat Predicate.is_true per goal conjunct"
+    "repo_tests": "723 passed",
+    "predicate_truth_source": "official Habitat Predicate.is_true for the side-effect-audited any_at predicate, evaluated on a cloned expression and cache-isolated sim_info",
+    "unsupported_predicate_behavior": "explicitly unavailable",
+    "skill_exit_reason_status": "inferred candidates; original Stage2 exposes no durable exit-cause event",
+    "record_bounds": {
+      "maximum_step_records": "configured max_steps plus 50 settle steps",
+      "maximum_bytes_per_document": 65536
+    }
+  },
+  "acceptance_quality_gates": {
+    "ruff_format": "pass",
+    "ruff_check": "pass",
+    "mypy_strict": "pass (69 source files)",
+    "function_docs": "pass",
+    "git_diff_check": "pass"
   }
 }

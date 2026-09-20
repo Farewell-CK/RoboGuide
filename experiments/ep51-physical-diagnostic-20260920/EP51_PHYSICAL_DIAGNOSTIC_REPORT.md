@@ -1,7 +1,9 @@
 # Episode51 / seed40 物理执行诊断报告
 
 日期：2026-09-20。诊断开发分支：`zcode/e1-ep51-physical-diagnostics@6bb098d`
-（基于 main `6396137`）。运行目录：
+（报告 HEAD `15f48cfa69aeb08152e10eb07e72bf46b27db4dc`，基于 main
+`63961378b77378728d6e91accce03a662236692b`）。独立验收修复：
+`a4a1d6ed239ae33a0b9aab9eb1e00a55292b088d`。运行目录：
 `/data/workspace/code/roboguide-ep51-diag-20260920/b1-diag-ep51-seed40`。
 本次运行为故障研究，不计入正式 E1 Pilot 或组织效果统计。
 
@@ -13,6 +15,8 @@ episode 从未启动，诊断观测文件因此没有产生。按预先固定的
 （"只执行一次，不因失败、模型输出变化或初始状态不同而反复重跑"），
 本次运行终止并归档，未重跑。任务书中的物理问题 A–E 本轮**均无法回答**；
 诊断能力本身已完成实现与离线验证，等待下一次真实运行触达物理层。
+本次 benchmark outcome 是 `BENCHMARK_UNAVAILABLE`，benchmark_success
+为 null；它不是一次 Habitat `pddl_success=False`。
 
 ## 1. 已由本次真实执行直接证明的事实
 
@@ -29,7 +33,9 @@ episode 从未启动，诊断观测文件因此没有产生。按预先固定的
    valid_for_formal_population=true、system_outcome=FAILURE——一次合法的
    MI 语义失败被如实记录为系统观察，没有被静默丢弃，也没有被错误
    归因为 Control/Node/Stage2。桥健康/语义证据正常发布（ONLINE）。
-   [b1-verdict.json：`admission`；shared-bridge.log]
+   valid_for_benchmark_population=false，benchmark_authority_available=false，
+   benchmark_outcome=`BENCHMARK_UNAVAILABLE`。[b1-verdict.json：`admission`、
+   `benchmark_outcome`；shared-bridge.log]
 4. **环境预检一致**：emos.env 的 `EMOS_LLM_MODEL` 与正式 EMOS arm 的
    spec 值逐字一致（gpt-5.6-luna，核对通过）；OPENAI_BASE_URL/KEY
    由同一 emos.env 注入；无 401 类认证故障（MI 完成了完整的
@@ -71,19 +77,29 @@ issues 字符串，无法事后审计模型当时生成的完整计划结构。
 
 ## 5. 诊断能力交付状态（已实现、离线验证、未触达）
 
-- `habitat_local_eaios/diagnostics.py`：`ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1`
-  开关（默认关）；初始世界状态（真实位姿/朝向、目标实体位置、官方
-  逐谓词 `Predicate.is_true` 真值、联合 pddl_success、消费的 seed）、
+- `habitat_local_eaios/diagnostics.py`：仅在
+  `ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1` 时开启，默认关闭；
+  初始世界状态（真实位姿/朝向、目标实体位置、官方
+  `any_at` 逐谓词 `Predicate.is_true` 真值、联合 pddl_success、消费的 seed）、
   每步 JSONL 流式记录（技能、动作摘要、位姿、cur_skill_step/
   max_skill_steps/force_end_on_timeout/high-level 调用标志、原始
-  oracle skill_done、逐谓词真值、双通道联合真值、done/episode_over，
-  含 settle 步）、终态真实世界状态（独立于早期本地完成快照）。
-- 只读保证：全部通过既有只读属性读取，不改变 act/step/技能切换/
-  终态判断调用顺序，不调用任何改变模拟器状态或 RNG 的 API；缺失
-  字段降级为显式 unavailable；行级故障计数不中断执行；流式无界
-  内存风险。
-- 离线验证 8 项全部通过（test_diagnostics.py）；全仓库 711 passed、
-  ruff/mypy-strict/docstring 门禁全绿。
+  oracle skill_done、finished sensor、逐谓词真值、双通道联合真值、
+  done/episode_over，含 settle 步）、终态真实世界状态（独立于早期
+  本地完成快照）。朝向按当前 Habitat 的 yaw 弧度表示记录。
+- 只读保证：不开启时不读写诊断数据。开启时不新增 `actor.act()` 或
+  `gym_env.step()` 调用，不改变技能切换或终态判断。官方 `any_at`
+  谓词在克隆表达式及禁用 truth cache 的 `sim_info` 副本上计算；尚未
+  证明无副作用的其他谓词明确记为 unavailable，不调用其计算路径。
+- 异常隔离：初始化、reset、逐步读取、逐谓词计算、JSON 序列化、文件
+  写入和 terminal 记录失败均不会逃逸到原物理执行路径。技能退出原因
+  仅记录为 inferred candidates，因为原始 Stage2 没有持久化直接退出
+  原因事件。
+- 边界：每条文档最多 65,536 bytes；逐步记录预算为 max_steps 加最多
+  50 个 settle steps；内存只保留每个 agent 的上一技能名。
+- 独立验收：`test_diagnostics.py` 20 项、Habitat adapter 60 项及全仓库
+  723 项测试全部通过；Ruff format/check、strict mypy（69 个源文件）、
+  function-doc check 和 `git diff --check` 全部通过。本轮未运行 Habitat
+  或模型 Provider。
 
 ## 6. 下一步修复建议（按优先级，均附证据）
 
