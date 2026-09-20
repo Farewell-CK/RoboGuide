@@ -562,6 +562,31 @@ def submit_and_wait(
             stall_seconds=stall_seconds,
         )
     if error in {"transport", "invalid_response"}:
+        # A dropped connection or unusable response does not prove that the
+        # synchronous server-side create() failed. Recover this run's sole
+        # persisted request before attributing a transport-only outcome.
+        recovered_id = recover(store_path, instruction)
+        if recovered_id is not None:
+            remaining = deadline - deadline_clock()
+            if remaining <= 0:
+                return WaitResult(
+                    outcome="observation_timeout",
+                    lifecycle="unknown",
+                    request_id=recovered_id,
+                    last_error=f"submit returned {error}; request recovered after deadline",
+                )
+            return wait_for_lifecycle(
+                endpoint=endpoint,
+                request_id=recovered_id,
+                budget_seconds=remaining,
+                deadline_clock=deadline_clock,
+                poll=poll,
+                pid=pid,
+                poll_interval_seconds=poll_interval_seconds,
+                log_path=log_path,
+                sleep=sleep,
+                stall_seconds=stall_seconds,
+            )
         alive = service_pid_alive(pid)
         if not alive:
             return WaitResult(
