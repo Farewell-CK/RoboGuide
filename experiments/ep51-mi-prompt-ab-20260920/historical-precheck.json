@@ -1,0 +1,51 @@
+[
+  {
+    "path": "/data/workspace/code/roboguide-ep51-diag-20260920/b1-diag-ep51-seed40/b1-request-record.json",
+    "sha256": "ba69ce5c8047597e7ed4486d2280e9fff5896ebef88509631a122ffebdb6e169",
+    "request_id": "request-596b31cdecf94d30a1785d478d080c97",
+    "mission_id": "mission-fdc8bfb3c3914808869aa465551ae4a0",
+    "lifecycle": "Failed",
+    "issues": [
+      "contexts[0] mode concurrent-cooperation requires a Group shared view"
+    ],
+    "raw_rejected_draft_count": 0,
+    "controller_submission": null,
+    "assessment": {
+      "objective": "Complete the benchmark by achieving a joint terminal state in which at least one available robot reaches any_targets|0 and at least one available robot reaches TARGET_any_targets|0.",
+      "constraints": [
+        "The mission concerns the shared multi-floor scene with the available legged Spot and wheeled Fetch robots.",
+        "The terminal condition is joint: a robot must be at any_targets|0 and a robot must be at TARGET_any_targets|0."
+      ],
+      "assumptions": [
+        "Reaching the object and reaching the goal receptacle position are the only required effects; pickup, transport, handoff, or confirmation is not additionally required.",
+        "Robot assignment and coordination are delegated to the system, as requested."
+      ],
+      "open_questions": []
+    }
+  },
+  {
+    "path": "/data/workspace/code/roboguide-ep51-diag2-20260920/b1-diag-ep51-seed40/b1-request-record.json",
+    "sha256": "7906b2cc3e8da3a5e631cc1d1948fda7428d553766ff1e753ed80dafa6261785",
+    "request_id": "request-a64292ee0cf54b0a9312c7b87a96d72e",
+    "mission_id": "mission-deba13bb19d6422db398b1cb916f6462",
+    "lifecycle": "Failed",
+    "issues": [
+      "contexts[0] mode concurrent-cooperation requires a Group shared view"
+    ],
+    "raw_rejected_draft_count": 3,
+    "controller_submission": null,
+    "assessment": {
+      "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0.",
+      "constraints": [
+        "Operate within the shared multi-floor scene using the available legged Spot and wheeled Fetch robots.",
+        "The user delegates robot selection and division of work between the two robots.",
+        "The required terminal condition is jointly: a robot is at any_targets|0, and a robot is at TARGET_any_targets|0."
+      ],
+      "assumptions": [
+        "The two reach conditions may be satisfied by the same robot or by different robots; the system may choose the assignment that achieves the joint terminal state.",
+        "No object transport, manipulation, handoff, or confirmation beyond reaching the two specified locations is required."
+      ],
+      "open_questions": []
+    }
+  }
+]

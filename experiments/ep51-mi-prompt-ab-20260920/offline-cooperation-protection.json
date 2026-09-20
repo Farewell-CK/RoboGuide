@@ -1,0 +1,161 @@
+{
+  "source": "mission/tests/test_coordination_guidance.py::_coordination_plan(cooperative=True)",
+  "code_sha": "6623799da53870445db7383db6dfb77c683b4c68",
+  "fixture": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-inspection",
+      "objective": "Infer a result while the safety observer remains active.",
+      "actors": [
+        {
+          "id": "watch"
+        },
+        {
+          "id": "infer"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "inspection",
+        "roles": [
+          {
+            "id": "watch",
+            "actor": "watch"
+          },
+          {
+            "id": "infer",
+            "actor": "infer"
+          }
+        ],
+        "relations": [
+          {
+            "id": "observer-active",
+            "kind": "requires-active",
+            "source": {
+              "task_id": "watch",
+              "role_id": "watch"
+            },
+            "target": {
+              "task_id": "infer",
+              "role_id": "infer"
+            }
+          }
+        ],
+        "executor_constraints": [],
+        "coupling_mode": "concurrent-cooperation",
+        "shared_view": {
+          "bindings": [
+            {
+              "context_role_id": "watch",
+              "field": "execution"
+            }
+          ],
+          "include_freshness": true
+        }
+      }
+    ],
+    "tasks": [
+      {
+        "id": "watch",
+        "description": "Infer a result while the safety observer remains active.",
+        "context_id": "inspection",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "watch",
+            "context_role": "watch",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "safety",
+                    "name": "observe",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": []
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "safety",
+                "name": "observe",
+                "version": "v1"
+              },
+              "objective": "Infer a result while the safety observer remains active.",
+              "parameters": {
+                "mode": "continuous"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Infer a result while the safety observer remains active.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "infer",
+        "description": "Infer a result while the safety observer remains active.",
+        "context_id": "inspection",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "infer",
+            "context_role": "infer",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "compute",
+                    "name": "infer",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": []
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "compute",
+                "name": "infer",
+                "version": "v1"
+              },
+              "objective": "Infer a result while the safety observer remains active.",
+              "parameters": {
+                "model": "inspection"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Infer a result while the safety observer remains active.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "canonical_roundtrip_unchanged": true,
+  "implementation_support": "PASS",
+  "catalog_validation": "PASS",
+  "provider_calls": 0,
+  "scope": "Deterministic semantic fixture; not evidence of real-model behavior on this task",
+  "pytest_log": "offline-protection-tests.log"
+}

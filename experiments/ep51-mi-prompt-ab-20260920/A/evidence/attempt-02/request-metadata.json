@@ -1,0 +1,11 @@
+{
+  "attempt_index": 2,
+  "authorization_present": true,
+  "body_sha256": "917ee84a16960328ad9af0e37cf9a8590fef2cbe825eae8aa3cc4095b5bb3859",
+  "content_type": "application/json",
+  "kind": "regenerate",
+  "method": "POST",
+  "started_at": "2026-09-20T12:54:15.689972+00:00",
+  "timeout_seconds": 600.0,
+  "url": "http://101.43.45.215:8080/responses"
+}

@@ -1,0 +1,168 @@
+{
+  "contexts": [
+    {
+      "coupling_mode": "concurrent-cooperation",
+      "executor_constraints": [],
+      "id": "shared-multi-floor-scene",
+      "peer_channel": null,
+      "relations": [],
+      "roles": [
+        {
+          "actor": "actor-a",
+          "id": "context-role-a"
+        },
+        {
+          "actor": "actor-b",
+          "id": "context-role-b"
+        }
+      ],
+      "shared_view": {
+        "bindings": [
+          {
+            "context_role_id": "context-role-a",
+            "field": "execution",
+            "payload_schema": null,
+            "state_export_id": null
+          },
+          {
+            "context_role_id": "context-role-b",
+            "field": "execution",
+            "payload_schema": null,
+            "state_export_id": null
+          }
+        ],
+        "include_freshness": false,
+        "spatial_reference": null
+      }
+    }
+  ],
+  "mission": {
+    "actors": [
+      {
+        "id": "actor-a",
+        "physical_entity": null
+      },
+      {
+        "id": "actor-b",
+        "physical_entity": null
+      }
+    ],
+    "id": "mission-deba13bb19d6422db398b1cb916f6462",
+    "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0."
+  },
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "tasks": [
+    {
+      "context_id": "shared-multi-floor-scene",
+      "coupling_mode": "concurrent-cooperation",
+      "depends_on": [],
+      "description": "A participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+      "id": "reach-any-targets",
+      "roles": [
+        {
+          "context_role": "context-role-a",
+          "execution_intent": {
+            "objective": "A participating robot reaches any_targets|0 so that any_at(any_targets|0) holds.",
+            "operation": {
+              "name": "move",
+              "namespace": "mobility",
+              "version": "v1"
+            },
+            "parameters": [
+              {
+                "key": "destination",
+                "value": "any_targets|0"
+              }
+            ]
+          },
+          "id": "reach-any-targets-role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "The participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    },
+    {
+      "context_id": "shared-multi-floor-scene",
+      "coupling_mode": "concurrent-cooperation",
+      "depends_on": [],
+      "description": "A participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+      "id": "reach-target-any-targets",
+      "roles": [
+        {
+          "context_role": "context-role-b",
+          "execution_intent": {
+            "objective": "A participating robot reaches TARGET_any_targets|0 so that any_at(TARGET_any_targets|0) holds.",
+            "operation": {
+              "name": "move",
+              "namespace": "mobility",
+              "version": "v1"
+            },
+            "parameters": [
+              {
+                "key": "destination",
+                "value": "TARGET_any_targets|0"
+              }
+            ]
+          },
+          "id": "reach-target-any-targets-role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "The participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    }
+  ]
+}

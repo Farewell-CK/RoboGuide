@@ -1,0 +1,35 @@
+{
+  "scope": "MI-only diagnostic A/B; not formal E1 benchmark",
+  "code_sha": "6623799da53870445db7383db6dfb77c683b4c68",
+  "A": {
+    "prompt_commit": "02f164b8831be873eedd923bc28d737301b8453e",
+    "initial_calls": 1,
+    "regenerate_calls": 2,
+    "final_mi_validation": "PASS",
+    "final_context_mode": "concurrent-cooperation",
+    "both_goal_references_preserved": true,
+    "semantic_fidelity_assessment": "Unsupported requires-active dependency introduced on final recovery; not semantic success"
+  },
+  "B": {
+    "prompt_commit": "6623799da53870445db7383db6dfb77c683b4c68",
+    "initial_calls": 1,
+    "regenerate_calls": 0,
+    "final_mi_validation": "PASS",
+    "final_context_mode": "independent",
+    "both_goal_references_preserved": true,
+    "semantic_fidelity_assessment": "No unsupported dependency or goal omission found by evidence review"
+  },
+  "total_provider_calls": 4,
+  "new_prompt_initial_generation_improved_in_this_sample": true,
+  "new_prompt_real_regeneration_improvement": "NOT_TESTED",
+  "causal_attribution": "NOT_ESTABLISHED; one fixed-order comparison; historical requests/backend versions incomplete",
+  "offline_protection_tests_passed": 30,
+  "backend_version": "UNAVAILABLE; response alias matched",
+  "provider_limit_observation": "Sent max_output_tokens=4096; response echo null; A usage exceeds request; server enforcement unverified",
+  "services_started": [],
+  "official_pddl_success": null,
+  "formal_population_verdict": "NOT_APPLICABLE",
+  "report": "EP51_MI_PROMPT_AB_REPORT.md",
+  "manifest": "manifest.json",
+  "next_full_chain_diagnosis": "Planner-level evidence supports consideration after user review; no execution authorized by this artifact"
+}

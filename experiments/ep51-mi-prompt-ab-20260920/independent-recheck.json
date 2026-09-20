@@ -1,0 +1,635 @@
+{
+  "attempts": [
+    {
+      "arm": "A",
+      "attempt": "attempt-01",
+      "both_target_references_present": true,
+      "changed_paths_since_previous": null,
+      "context_modes": [
+        "concurrent-cooperation"
+      ],
+      "destination_references": [
+        "any_targets|0",
+        "TARGET_any_targets|0"
+      ],
+      "elapsed_seconds": 207.71192564163357,
+      "relations": [],
+      "reported_model": "gpt-5.6-luna",
+      "request_matches_frozen_except_recovery_feedback": true,
+      "response_id": "resp_0def784fd812c4da016aafd6a9c92487d0aafc6ab331b83748",
+      "response_parameter_echoes": {
+        "max_output_tokens": null,
+        "reasoning": {
+          "context": "all_turns",
+          "effort": "xhigh",
+          "mode": "standard",
+          "summary": null
+        },
+        "service_tier": "default",
+        "store": false,
+        "system_fingerprint": null,
+        "temperature": 1.0,
+        "top_p": 0.98
+      },
+      "semantic_note": "Target-reference coverage is not proof of official terminal satisfaction or semantic fidelity.",
+      "shared_views": [
+        null
+      ],
+      "status": "REJECTED",
+      "task_count": 2,
+      "tasks": [
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-a",
+              "execution_intent": {
+                "objective": "A participating robot reaches any_targets|0 so that any_at(any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "id": "reach-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        },
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-target-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-b",
+              "execution_intent": {
+                "objective": "A participating robot reaches TARGET_any_targets|0 so that any_at(TARGET_any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "id": "reach-target-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 6383,
+        "output_tokens": 5723,
+        "output_tokens_details": {
+          "reasoning_tokens": 5064
+        },
+        "total_tokens": 12106
+      },
+      "validation_errors": [
+        {
+          "message": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+          "stage": "plan_validation"
+        }
+      ]
+    },
+    {
+      "arm": "A",
+      "attempt": "attempt-02",
+      "both_target_references_present": true,
+      "changed_paths_since_previous": [
+        "/contexts/0/shared_view"
+      ],
+      "context_modes": [
+        "concurrent-cooperation"
+      ],
+      "destination_references": [
+        "any_targets|0",
+        "TARGET_any_targets|0"
+      ],
+      "elapsed_seconds": 104.28842922579497,
+      "relations": [],
+      "reported_model": "gpt-5.6-luna",
+      "request_matches_frozen_except_recovery_feedback": true,
+      "response_id": "resp_016dd00dd54713f1016aafd77872d087d0bb43f7723372047a",
+      "response_parameter_echoes": {
+        "max_output_tokens": null,
+        "reasoning": {
+          "context": "all_turns",
+          "effort": "xhigh",
+          "mode": "standard",
+          "summary": null
+        },
+        "service_tier": "default",
+        "store": false,
+        "system_fingerprint": null,
+        "temperature": 1.0,
+        "top_p": 0.98
+      },
+      "semantic_note": "Target-reference coverage is not proof of official terminal satisfaction or semantic fidelity.",
+      "shared_views": [
+        {
+          "bindings": [
+            {
+              "context_role_id": "context-role-a",
+              "field": "execution"
+            },
+            {
+              "context_role_id": "context-role-b",
+              "field": "execution"
+            }
+          ],
+          "include_freshness": false,
+          "spatial_reference": null
+        }
+      ],
+      "status": "REJECTED",
+      "task_count": 2,
+      "tasks": [
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-a",
+              "execution_intent": {
+                "objective": "A participating robot reaches any_targets|0 so that any_at(any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "id": "reach-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        },
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-target-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-b",
+              "execution_intent": {
+                "objective": "A participating robot reaches TARGET_any_targets|0 so that any_at(TARGET_any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "id": "reach-target-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 7199,
+        "output_tokens": 5683,
+        "output_tokens_details": {
+          "reasoning_tokens": 4963
+        },
+        "total_tokens": 12882
+      },
+      "validation_errors": [
+        {
+          "message": "contexts[0] mode concurrent-cooperation requires an execution relation",
+          "stage": "plan_validation"
+        }
+      ]
+    },
+    {
+      "arm": "A",
+      "attempt": "attempt-03",
+      "both_target_references_present": true,
+      "changed_paths_since_previous": [
+        "/contexts/0/relations"
+      ],
+      "context_modes": [
+        "concurrent-cooperation"
+      ],
+      "destination_references": [
+        "any_targets|0",
+        "TARGET_any_targets|0"
+      ],
+      "elapsed_seconds": 239.74585216864944,
+      "profile_or_canonical_changes": [
+        "/contexts/0/shared_view/spatial_reference"
+      ],
+      "relations": [
+        {
+          "id": "reach-tasks-concurrent",
+          "kind": "requires-active",
+          "source": {
+            "role_id": "reach-any-targets-role",
+            "task_id": "reach-any-targets"
+          },
+          "target": {
+            "role_id": "reach-target-any-targets-role",
+            "task_id": "reach-target-any-targets"
+          }
+        }
+      ],
+      "reported_model": "gpt-5.6-luna",
+      "request_matches_frozen_except_recovery_feedback": true,
+      "response_id": "resp_026809e0dc603cf5016aafd7e0ce6087d0b7c73d7990b7ac79",
+      "response_parameter_echoes": {
+        "max_output_tokens": null,
+        "reasoning": {
+          "context": "all_turns",
+          "effort": "xhigh",
+          "mode": "standard",
+          "summary": null
+        },
+        "service_tier": "default",
+        "store": false,
+        "system_fingerprint": null,
+        "temperature": 1.0,
+        "top_p": 0.98
+      },
+      "semantic_note": "Target-reference coverage is not proof of official terminal satisfaction or semantic fidelity.",
+      "shared_views": [
+        {
+          "bindings": [
+            {
+              "context_role_id": "context-role-a",
+              "field": "execution"
+            },
+            {
+              "context_role_id": "context-role-b",
+              "field": "execution"
+            }
+          ],
+          "include_freshness": false,
+          "spatial_reference": null
+        }
+      ],
+      "status": "PASS",
+      "task_count": 2,
+      "tasks": [
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-a",
+              "execution_intent": {
+                "objective": "A participating robot reaches any_targets|0 so that any_at(any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "id": "reach-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        },
+        {
+          "coupling_mode": "concurrent-cooperation",
+          "depends_on": [],
+          "description": "A participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+          "id": "reach-target-any-targets",
+          "roles": [
+            {
+              "context_role": "context-role-b",
+              "execution_intent": {
+                "objective": "A participating robot reaches TARGET_any_targets|0 so that any_at(TARGET_any_targets|0) holds.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "id": "reach-target-any-targets-role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The participating robot is at the semantic destination TARGET_any_targets|0 in the shared multi-floor scene.",
+            "verifier": null
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 7273,
+        "output_tokens": 6885,
+        "output_tokens_details": {
+          "reasoning_tokens": 6086
+        },
+        "total_tokens": 14158
+      },
+      "validation_errors": []
+    },
+    {
+      "arm": "B",
+      "attempt": "attempt-01",
+      "both_target_references_present": true,
+      "changed_paths_since_previous": null,
+      "context_modes": [
+        "independent"
+      ],
+      "destination_references": [
+        "any_targets|0",
+        "TARGET_any_targets|0"
+      ],
+      "elapsed_seconds": 73.46807215176523,
+      "profile_or_canonical_changes": [],
+      "relations": [],
+      "reported_model": "gpt-5.6-luna",
+      "request_matches_frozen_except_recovery_feedback": true,
+      "response_id": "resp_036563fd818ac9da016aafd8d0718087d0a2a8dbcbe257033c",
+      "response_parameter_echoes": {
+        "max_output_tokens": null,
+        "reasoning": {
+          "context": "all_turns",
+          "effort": "xhigh",
+          "mode": "standard",
+          "summary": null
+        },
+        "service_tier": "default",
+        "store": false,
+        "system_fingerprint": null,
+        "temperature": 1.0,
+        "top_p": 0.98
+      },
+      "semantic_note": "Target-reference coverage is not proof of official terminal satisfaction or semantic fidelity.",
+      "shared_views": [
+        null
+      ],
+      "status": "PASS",
+      "task_count": 2,
+      "tasks": [
+        {
+          "coupling_mode": "independent",
+          "depends_on": [],
+          "description": "Within the shared multi-floor scene, the executor assigned to this task is at semantic location any_targets|0, contributing the first any_at predicate of the joint terminal state.",
+          "id": "reach_any_targets_0",
+          "roles": [
+            {
+              "context_role": "scene_role_a",
+              "execution_intent": {
+                "objective": "Place the assigned executor at semantic location any_targets|0.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "any_targets|0"
+                }
+              },
+              "id": "reach_any_targets_0_role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The executor assigned to this task is at semantic location any_targets|0.",
+            "verifier": null
+          }
+        },
+        {
+          "coupling_mode": "independent",
+          "depends_on": [],
+          "description": "Within the shared multi-floor scene, the executor assigned to this task is at semantic location TARGET_any_targets|0, contributing the second any_at predicate of the joint terminal state.",
+          "id": "reach_TARGET_any_targets_0",
+          "roles": [
+            {
+              "context_role": "scene_role_b",
+              "execution_intent": {
+                "objective": "Place the assigned executor at semantic location TARGET_any_targets|0.",
+                "operation": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                },
+                "parameters": {
+                  "destination": "TARGET_any_targets|0"
+                }
+              },
+              "id": "reach_TARGET_any_targets_0_role",
+              "requirements": {
+                "capabilities": [
+                  {
+                    "constraints": [],
+                    "contract": {
+                      "name": "move",
+                      "namespace": "mobility",
+                      "version": "v1"
+                    }
+                  }
+                ],
+                "resources": [
+                  {
+                    "kind": "space",
+                    "units": 1
+                  }
+                ]
+              },
+              "resource_scope": "task"
+            }
+          ],
+          "satisfaction": {
+            "basis": "execution-report",
+            "expected_effect": "The executor assigned to this task is at semantic location TARGET_any_targets|0.",
+            "verifier": null
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 7153,
+        "output_tokens": 3971,
+        "output_tokens_details": {
+          "reasoning_tokens": 3320
+        },
+        "total_tokens": 11124
+      },
+      "validation_errors": []
+    }
+  ],
+  "frozen_files_unchanged": true,
+  "provider_calls": 4
+}

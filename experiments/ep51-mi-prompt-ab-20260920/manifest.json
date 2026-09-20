@@ -1,0 +1,78 @@
+{
+  "actual_endpoint": "http://101.43.45.215:8080/responses",
+  "allowed_provider_calls_maximum": 6,
+  "asset_origins": "assessment/context/mission_id from diagnostic D; catalog/profile/policy/schema/config from equal OLD and NEW Git assets",
+  "audit_report_sha256": "2641f673dd80248e19bed2134aa0823136b919858266dbcc2106963c35b699f4",
+  "base_input_sha256": "bc9a073e88a21d6898882200eb940e954ef3ffd2f6415c431fc479f492456cd9",
+  "code_sha": "6623799da53870445db7383db6dfb77c683b4c68",
+  "created_at": "2026-09-20T12:49:34.710755+00:00",
+  "credential_source": "Same previously user-authorized OPENAI_API_KEY source as archived launch.py; in-memory only",
+  "formal_e1_benchmark": false,
+  "frozen_files_sha256": {
+    "frozen/base-input.json": "bc9a073e88a21d6898882200eb940e954ef3ffd2f6415c431fc479f492456cd9",
+    "frozen/config/mission.toml": "d32c90bb0e966c9a4d390aefaa653ce5baaa7eceaa475e64c039ab142a4a10f0",
+    "frozen/contracts/capability/v0.3/catalog.json": "9e77d3f4b75e400aed4643ac5870eac6635a0fe7a0230de9c878cd0937365705",
+    "frozen/contracts/mission/v0.8/mission-plan.schema.json": "67a0102ac20a8a32a393774e45405ae1fd5bd8dd38a9694a9c9f424b76c1d822",
+    "frozen/historical-planning-record.json": "4d6faff2b58ade6a3310f2fdb78bd6d4c96547fa61d4415e5b37be995aaa83bb",
+    "frozen/historical-rejected-drafts.json": "859fce50395fb50812389ac234457cb925eca5ab358220562732cd58fa5fc260",
+    "frozen/initial-request-A.json": "1dbc8c37c2a7293085051b8351740c14940c60d2e0536812a8d5252e212b4389",
+    "frozen/initial-request-B.json": "05ef6be1e97fdde3bdaf51d74b5e8823f0368bcf9b47bb54e33ee74b348c5054",
+    "frozen/planner-A.md": "a1d02bf81597412e59bd91f629ad8c6263fc69e1665fae3d522323bd20b86f92",
+    "frozen/planner-B.md": "14dc683c40ae46dd64101d0ff9d0d502f3f21688bbe79ef43df6c406e77e67cc",
+    "frozen/provider-output-schema.json": "12f22a994e0bb6009376c3869a828dfd829d0b096e4ac9072a42697695916ea2",
+    "frozen/scenarios/e1-shared-world-episode-51/execution-profile.json": "2e0aaa5857cb208050241df0ccc04315c09bfdf2d97dab141e56c9e79535b504"
+  },
+  "http_opt_in": "Matches existing run-b1-roboguide.sh line 227; endpoint is unchanged",
+  "identity_limit": "Matching alias is not proof of an immutable backend model version",
+  "identity_stop_rule": "Every completed response must report model exactly equal to configured model alias; absent or changed identity stops study",
+  "initial_calls_per_arm": 1,
+  "llm": {
+    "disable_response_storage": true,
+    "max_output_tokens": 4096,
+    "model": "gpt-5.6-luna",
+    "model_provider": "OpenAI",
+    "network_access": "enabled",
+    "reasoning_effort": "xhigh",
+    "review_model": "gpt-5.6-luna",
+    "timeout_seconds": 600.0
+  },
+  "max_regenerate_per_arm": 2,
+  "mission_request_created": false,
+  "no_provider_retries": true,
+  "order": [
+    "A",
+    "B"
+  ],
+  "prompt_commits": {
+    "A": "02f164b8831be873eedd923bc28d737301b8453e",
+    "B": "6623799da53870445db7383db6dfb77c683b4c68"
+  },
+  "prompt_file_sha256": {
+    "A": "a1d02bf81597412e59bd91f629ad8c6263fc69e1665fae3d522323bd20b86f92",
+    "B": "14dc683c40ae46dd64101d0ff9d0d502f3f21688bbe79ef43df6c406e77e67cc"
+  },
+  "prompt_sent_sha256": {
+    "A": "ac9ba1b3dc5fbefa2f1ebee126a62fb35d5b010b3100212134acbed0d2a9ce76",
+    "B": "21a4688d2789a3400a4b2badc0f3ec826a919cf2096cd2ac98d674168dc237e5"
+  },
+  "provider": {
+    "api_key_env": "OPENAI_API_KEY",
+    "base_url": "http://101.43.45.215:8080",
+    "name": "OpenAI",
+    "requires_openai_auth": true,
+    "responses_path": "/responses",
+    "wire_api": "responses"
+  },
+  "request_common_except_instructions_sha256": "de70cb4fb6a5346db1256047531a4218dda35a1ff5b64d9b33ec9cbcc5e8e342",
+  "request_timeout_seconds": 600.0,
+  "retry_only": "RejectedPlanError; same previous raw output plus stage/message",
+  "semantic_protection_extra_provider_calls": 0,
+  "services_started": [],
+  "source_observations": "/data/workspace/code/roboguide-ep51-diag2-20260920/b1-diag-ep51-seed40/b1-request-observations.json",
+  "source_observations_sha256": "86e383ad1a752077add75cdf58dc1575b5c73be2dec8f21493c1bd775eb6a9e7",
+  "source_record": "/data/workspace/code/roboguide-ep51-diag2-20260920/b1-diag-ep51-seed40/b1-request-record.json",
+  "source_record_sha256": "7906b2cc3e8da3a5e631cc1d1948fda7428d553766ff1e753ed80dafa6261785",
+  "stop_entire_study_on_infrastructure_or_identity_error": true,
+  "stop_on_first_valid_plan": true,
+  "study": "reconstructed MI-only diagnostic input; not byte-identical historical Provider request"
+}

@@ -1,0 +1,20 @@
+{
+  "attempt_index": 3,
+  "elapsed_seconds": 239.74585216864944,
+  "full_mi_validation_passed": true,
+  "kind": "regenerate",
+  "normalized_digest": "sha256:78124f2918a3a5a9bed415154c762cd644263f0317b26d5c396ff71ea27f126c",
+  "raw_digest": "sha256:9591d61137d131ec14920181e55d3ef21aec482f0399d27e0daef12901107e83",
+  "status": "PASS",
+  "validation": {
+    "canonical_contract": "PASS",
+    "catalog": "PASS",
+    "execution_profile": "PASS",
+    "implementation_support": "PASS",
+    "mission_identity": "PASS",
+    "normalization": "PASS",
+    "physical_grounding": "PASS",
+    "satisfaction_policy": "PASS"
+  },
+  "validation_errors": []
+}

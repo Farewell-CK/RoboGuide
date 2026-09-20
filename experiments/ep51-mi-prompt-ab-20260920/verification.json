@@ -1,0 +1,11 @@
+{
+  "report_links_exist": true,
+  "frozen_input_and_validation_replay": "PASS",
+  "offline_protection_tests": "30 passed",
+  "credentials_scan": "no credential values found in study artifacts",
+  "historical_source_hashes_unchanged": true,
+  "no_production_source_or_prompt_modification": true,
+  "provider_calls": 4,
+  "repository_status": "## codex/b1-event-archival...origin/codex/b1-event-archival\n?? experiments/configs/\n?? experiments/e5_comuros/\n?? experiments/e6_scalability/\n?? experiments/ep51-history-vs-current-mi-audit-20260920/\n",
+  "code_view_status": "## codex/mi-coordination-guidance...origin/codex/mi-coordination-guidance\n"
+}

@@ -1,0 +1,75 @@
+{
+  "assessment": {
+    "assumptions": [
+      "The two reach conditions may be satisfied by the same robot or by different robots; the system may choose the assignment that achieves the joint terminal state.",
+      "No object transport, manipulation, handoff, or confirmation beyond reaching the two specified locations is required."
+    ],
+    "constraints": [
+      "Operate within the shared multi-floor scene using the available legged Spot and wheeled Fetch robots.",
+      "The user delegates robot selection and division of work between the two robots.",
+      "The required terminal condition is jointly: a robot is at any_targets|0, and a robot is at TARGET_any_targets|0."
+    ],
+    "objective": "Ensure that the joint terminal state holds in the shared multi-floor scene: at least one available robot reaches any_targets|0, and at least one available robot reaches TARGET_any_targets|0.",
+    "open_questions": []
+  },
+  "grounding_context": {
+    "captured_at_ms": 1789898455836,
+    "context_digest": "sha256:992f5eca78d43d3d398ba0bd2db24714448d35df898e7772d1436e8d7f235478",
+    "dialogue_digest": "sha256:c7b0551f34d60030406811c6355a5dcb11bc6006f3e2cf7170427166b4ad5f81",
+    "gaps": [],
+    "memory_evidence": [],
+    "request_id": "request-a64292ee0cf54b0a9312c7b87a96d72e",
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "semantic_evidence": {
+      "authority": "environment-authoritative",
+      "digest": "sha256:efad4d24f94a6ce0f2464c4da7a8307b2b0d3262f5998746060e521974cc185b",
+      "goal": {
+        "kind": "logical",
+        "operands": [
+          {
+            "arguments": [
+              "any_targets|0"
+            ],
+            "kind": "predicate",
+            "name": "any_at"
+          },
+          {
+            "arguments": [
+              "TARGET_any_targets|0"
+            ],
+            "kind": "predicate",
+            "name": "any_at"
+          }
+        ],
+        "operator": "and",
+        "quantifier": null,
+        "variables": []
+      },
+      "identity": {
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "run_id": "b1-diag-ep51-seed40"
+      },
+      "objective_scope": "joint_terminal_state",
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      }
+    },
+    "state_evidence": []
+  },
+  "mission_id": "mission-deba13bb19d6422db398b1cb916f6462"
+}

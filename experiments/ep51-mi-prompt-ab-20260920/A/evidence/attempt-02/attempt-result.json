@@ -1,0 +1,19 @@
+{
+  "attempt_index": 2,
+  "elapsed_seconds": 104.28842922579497,
+  "full_mi_validation_passed": false,
+  "kind": "regenerate",
+  "normalized_digest": "sha256:973ded97eafc705c8520fa7d0fb7190bddf6f8a119913473235461079fc58b79",
+  "raw_digest": "sha256:d3504f9b5f2b5b54bbaf7831cc526a3f8e12da7d574ed2849ceb590490e0b3ca",
+  "status": "REJECTED",
+  "validation": {
+    "failed_stage": "plan_validation",
+    "later_checks": "not completed after first rejection"
+  },
+  "validation_errors": [
+    {
+      "message": "contexts[0] mode concurrent-cooperation requires an execution relation",
+      "stage": "plan_validation"
+    }
+  ]
+}

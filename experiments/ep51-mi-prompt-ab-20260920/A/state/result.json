@@ -1,0 +1,65 @@
+{
+  "attempts": [
+    {
+      "attempt_index": 1,
+      "elapsed_seconds": 207.71192564163357,
+      "full_mi_validation_passed": false,
+      "kind": "initial",
+      "normalized_digest": "sha256:19e98836517e6b3b96a4f42b37197b7b7c1a6f7ce2418f248f187540eb69c1f6",
+      "raw_digest": "sha256:7def65ca8e81751d82bad93fb431e8d82beb67ac9d785e4c8959660b9397bc8f",
+      "status": "REJECTED",
+      "validation": {
+        "failed_stage": "plan_validation",
+        "later_checks": "not completed after first rejection"
+      },
+      "validation_errors": [
+        {
+          "message": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+          "stage": "plan_validation"
+        }
+      ]
+    },
+    {
+      "attempt_index": 2,
+      "elapsed_seconds": 104.28842922579497,
+      "full_mi_validation_passed": false,
+      "kind": "regenerate",
+      "normalized_digest": "sha256:973ded97eafc705c8520fa7d0fb7190bddf6f8a119913473235461079fc58b79",
+      "raw_digest": "sha256:d3504f9b5f2b5b54bbaf7831cc526a3f8e12da7d574ed2849ceb590490e0b3ca",
+      "status": "REJECTED",
+      "validation": {
+        "failed_stage": "plan_validation",
+        "later_checks": "not completed after first rejection"
+      },
+      "validation_errors": [
+        {
+          "message": "contexts[0] mode concurrent-cooperation requires an execution relation",
+          "stage": "plan_validation"
+        }
+      ]
+    },
+    {
+      "attempt_index": 3,
+      "elapsed_seconds": 239.74585216864944,
+      "full_mi_validation_passed": true,
+      "kind": "regenerate",
+      "normalized_digest": "sha256:78124f2918a3a5a9bed415154c762cd644263f0317b26d5c396ff71ea27f126c",
+      "raw_digest": "sha256:9591d61137d131ec14920181e55d3ef21aec482f0399d27e0daef12901107e83",
+      "status": "PASS",
+      "validation": {
+        "canonical_contract": "PASS",
+        "catalog": "PASS",
+        "execution_profile": "PASS",
+        "implementation_support": "PASS",
+        "mission_identity": "PASS",
+        "normalization": "PASS",
+        "physical_grounding": "PASS",
+        "satisfaction_policy": "PASS"
+      },
+      "validation_errors": []
+    }
+  ],
+  "full_mi_validation_passed": true,
+  "initial_calls": 1,
+  "regenerate_calls": 2
+}

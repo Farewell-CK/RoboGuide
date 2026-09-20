@@ -1,0 +1,27 @@
+{
+  "proxy_configuration_without_credentials": {
+    "no": "localhost,127.0.0.1,::1",
+    "https": {
+      "scheme": "http",
+      "hostname": "127.0.0.1",
+      "port": 7890,
+      "authentication_present": false
+    },
+    "http": {
+      "scheme": "http",
+      "hostname": "127.0.0.1",
+      "port": 7890,
+      "authentication_present": false
+    },
+    "all": {
+      "scheme": "socks5h",
+      "hostname": "127.0.0.1",
+      "port": 7891,
+      "authentication_present": false
+    }
+  },
+  "client": "mission.responses.UrllibJsonTransport",
+  "runtime": "CPython 3.13.5 via /tmp/roboguide-mi-coordination/.venv/bin/python",
+  "single_process_for_both_arms": true,
+  "provider_override_variables": "The MI endpoint comes from frozen config/mission.toml, not OPENAI_BASE_URL"
+}

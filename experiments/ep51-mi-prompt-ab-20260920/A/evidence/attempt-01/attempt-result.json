@@ -1,0 +1,19 @@
+{
+  "attempt_index": 1,
+  "elapsed_seconds": 207.71192564163357,
+  "full_mi_validation_passed": false,
+  "kind": "initial",
+  "normalized_digest": "sha256:19e98836517e6b3b96a4f42b37197b7b7c1a6f7ce2418f248f187540eb69c1f6",
+  "raw_digest": "sha256:7def65ca8e81751d82bad93fb431e8d82beb67ac9d785e4c8959660b9397bc8f",
+  "status": "REJECTED",
+  "validation": {
+    "failed_stage": "plan_validation",
+    "later_checks": "not completed after first rejection"
+  },
+  "validation_errors": [
+    {
+      "message": "contexts[0] mode concurrent-cooperation requires a Group shared view",
+      "stage": "plan_validation"
+    }
+  ]
+}

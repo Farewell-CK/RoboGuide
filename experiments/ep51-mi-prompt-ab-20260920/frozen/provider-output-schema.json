@@ -1,0 +1,731 @@
+{
+  "name": "mission_plan_v0",
+  "schema": {
+    "$defs": {
+      "capability_requirement": {
+        "additionalProperties": false,
+        "properties": {
+          "constraints": {
+            "items": {
+              "$ref": "#/$defs/constraint"
+            },
+            "type": "array"
+          },
+          "contract": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "required": [
+          "contract",
+          "constraints"
+        ],
+        "type": "object"
+      },
+      "constraint": {
+        "additionalProperties": false,
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "equals",
+              "at-least",
+              "at-most"
+            ]
+          },
+          "value": {
+            "type": [
+              "boolean",
+              "integer",
+              "number",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "attribute",
+          "operator",
+          "value"
+        ],
+        "type": "object"
+      },
+      "context": {
+        "additionalProperties": false,
+        "properties": {
+          "coupling_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "independent",
+                  "sequential-handoff",
+                  "concurrent-cooperation",
+                  "tightly-coupled-cooperation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executor_constraints": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "context_roles": {
+                  "items": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "kind": {
+                  "enum": [
+                    "distinct-physical-entities"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "context_roles"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "peer_channel": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/peer_channel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/$defs/relation"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actor": {
+                  "$ref": "#/$defs/id"
+                },
+                "id": {
+                  "$ref": "#/$defs/id"
+                }
+              },
+              "required": [
+                "id",
+                "actor"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "shared_view": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/shared_view"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "roles",
+          "relations",
+          "executor_constraints",
+          "coupling_mode",
+          "shared_view",
+          "peer_channel"
+        ],
+        "type": "object"
+      },
+      "endpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "role_id": {
+            "$ref": "#/$defs/id"
+          },
+          "task_id": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "required": [
+          "task_id",
+          "role_id"
+        ],
+        "type": "object"
+      },
+      "id": {
+        "type": "string"
+      },
+      "peer_channel": {
+        "additionalProperties": false,
+        "properties": {
+          "message_schema": {
+            "type": "string"
+          },
+          "profile_id": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "required": [
+          "profile_id",
+          "message_schema"
+        ],
+        "type": "object"
+      },
+      "ref": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "relation": {
+        "additionalProperties": false,
+        "properties": {
+          "frame_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "kind": {
+            "enum": [
+              "requires-active",
+              "group-member-state",
+              "shared-spatial-reference",
+              "relative-pose",
+              "relative-distance",
+              "state-requirement",
+              "freshness-requirement"
+            ]
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/spatial_reference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requirement": {
+            "anyOf": [
+              {
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/$defs/endpoint"
+          },
+          "state_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/$defs/endpoint"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state_key",
+          "reference",
+          "frame_id",
+          "requirement",
+          "policy_id",
+          "source",
+          "target"
+        ],
+        "type": "object"
+      },
+      "resource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "space",
+              "compute",
+              "time"
+            ]
+          },
+          "units": {
+            "maximum": 4294967295,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "units"
+        ],
+        "type": "object"
+      },
+      "role": {
+        "additionalProperties": false,
+        "properties": {
+          "context_role": {
+            "$ref": "#/$defs/id"
+          },
+          "execution_intent": {
+            "additionalProperties": false,
+            "properties": {
+              "objective": {
+                "type": "string"
+              },
+              "operation": {
+                "$ref": "#/$defs/ref"
+              },
+              "parameters": {
+                "description": "Provider DTO entries for the canonical parameters map; keys must be unique.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "operation",
+              "objective",
+              "parameters"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "requirements": {
+            "additionalProperties": false,
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "$ref": "#/$defs/capability_requirement"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "resources": {
+                "items": {
+                  "$ref": "#/$defs/resource"
+                },
+                "maxItems": 3,
+                "type": "array"
+              }
+            },
+            "required": [
+              "capabilities",
+              "resources"
+            ],
+            "type": "object"
+          },
+          "resource_scope": {
+            "enum": [
+              "task",
+              "context"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "context_role",
+          "resource_scope",
+          "requirements",
+          "execution_intent"
+        ],
+        "type": "object"
+      },
+      "satisfaction": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "description": "execution-report accepts successful canonical Local EAIOS completion under Mission policy; verifier-evidence requires independent admitted evidence.",
+            "enum": [
+              "execution-report",
+              "verifier-evidence"
+            ]
+          },
+          "expected_effect": {
+            "type": "string"
+          },
+          "verifier": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "contract": {
+                    "$ref": "#/$defs/ref"
+                  },
+                  "max_evidence_age_ms": {
+                    "maximum": 18446744073709551615,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "predicate": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contract",
+                  "predicate",
+                  "max_evidence_age_ms"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_effect",
+          "basis",
+          "verifier"
+        ],
+        "type": "object"
+      },
+      "shared_view": {
+        "additionalProperties": false,
+        "properties": {
+          "bindings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "context_role_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "field": {
+                  "enum": [
+                    "pose",
+                    "velocity",
+                    "execution"
+                  ]
+                },
+                "payload_schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state_export_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "context_role_id",
+                "field",
+                "state_export_id",
+                "payload_schema"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "include_freshness": {
+            "type": "boolean"
+          },
+          "spatial_reference": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/spatial_reference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spatial_reference",
+          "include_freshness",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "spatial_reference": {
+        "additionalProperties": false,
+        "properties": {
+          "frame_id": {
+            "type": "string"
+          },
+          "map_id": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "map_id",
+          "revision_id",
+          "frame_id"
+        ],
+        "type": "object"
+      },
+      "task": {
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "$ref": "#/$defs/id"
+          },
+          "coupling_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "independent",
+                  "sequential-handoff",
+                  "concurrent-cooperation",
+                  "tightly-coupled-cooperation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "depends_on": {
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/$defs/role"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "satisfaction": {
+            "$ref": "#/$defs/satisfaction"
+          },
+          "timing": {
+            "$ref": "#/$defs/timing"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "context_id",
+          "depends_on",
+          "roles",
+          "coupling_mode",
+          "timing",
+          "satisfaction"
+        ],
+        "type": "object"
+      },
+      "timing": {
+        "additionalProperties": false,
+        "properties": {
+          "completion_deadline_offset_ms": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "earliest_start_offset_ms": {
+            "description": "Zero is the canonical neutral default meaning no additional earliest-start lower bound; positive values are grounded Mission constraints relative to Mission acceptance.",
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "latest_start_offset_ms": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "earliest_start_offset_ms",
+          "latest_start_offset_ms",
+          "completion_deadline_offset_ms"
+        ],
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "contexts": {
+        "items": {
+          "$ref": "#/$defs/context"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "mission": {
+        "additionalProperties": false,
+        "properties": {
+          "actors": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/id"
+                },
+                "physical_entity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "physical_entity"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "objective": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "objective",
+          "actors"
+        ],
+        "type": "object"
+      },
+      "schema_version": {
+        "enum": [
+          "roboguide.mission-plan/v0.8"
+        ]
+      },
+      "tasks": {
+        "items": {
+          "$ref": "#/$defs/task"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "mission",
+      "contexts",
+      "tasks"
+    ],
+    "type": "object"
+  },
+  "strict": true,
+  "type": "json_schema"
+}
