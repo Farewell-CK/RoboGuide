@@ -500,7 +500,7 @@ def test_post_malformed_response_fails_closed() -> None:
 
 
 def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
-    """Only the persisted request whose instruction matches is recovered."""
+    """Recovery reads the real MissionRequestStore envelope, not a flat fake row."""
     import sqlite3
 
     from roboguide_eval.b1_runner_wait import recover_request_id_from_store
@@ -511,16 +511,53 @@ def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
         "CREATE TABLE mission_requests(request_id TEXT, mission_id TEXT, "
         "document_json TEXT, updated_at_ms INTEGER)"
     )
-    other = json.dumps({"dialogue": [{"content": "a different instruction"}]})
-    ours = json.dumps({"dialogue": [{"content": "do the task"}]})
-    connection.executemany(
+    request = {
+        "request_id": "request-ours",
+        "mission_id": "mission-ours",
+        "dialogue": [{"content": "do the task"}],
+    }
+    envelope = {
+        "schema_version": "roboguide.mission-request-storage/v0.1",
+        "request": request,
+        "observations": {"request_id": "request-ours"},
+    }
+    connection.execute(
         "INSERT INTO mission_requests VALUES (?,?,?,?)",
-        [("request-other", "m1", other, 1), ("request-ours", "m2", ours, 2)],
+        ("request-ours", "mission-ours", json.dumps(envelope), 1),
     )
     connection.commit()
     connection.close()
     assert recover_request_id_from_store(store, "do the task") == "request-ours"
     assert recover_request_id_from_store(store, "unsubmitted text") is None
+    assert recover_request_id_from_store(store, "  do the task  ") == "request-ours"
+
+
+def test_store_recovery_rejects_ambiguous_requests(tmp_path: Path) -> None:
+    """Multiple rows cannot be attributed to one submission by instruction alone."""
+    import sqlite3
+
+    from roboguide_eval.b1_runner_wait import recover_request_id_from_store
+
+    store = tmp_path / "mission-service.sqlite3"
+    connection = sqlite3.connect(store)
+    connection.execute(
+        "CREATE TABLE mission_requests(request_id TEXT, mission_id TEXT, "
+        "document_json TEXT, updated_at_ms INTEGER)"
+    )
+    for request_id in ("r1", "r2"):
+        request = {"request_id": request_id, "dialogue": [{"content": "do the task"}]}
+        envelope = {
+            "schema_version": "roboguide.mission-request-storage/v0.1",
+            "request": request,
+            "observations": {},
+        }
+        connection.execute(
+            "INSERT INTO mission_requests VALUES (?,?,?,?)",
+            (request_id, f"m-{request_id}", json.dumps(envelope), 1),
+        )
+    connection.commit()
+    connection.close()
+    assert recover_request_id_from_store(store, "do the task") is None
 
 
 def test_poll_failure_http_ok_is_false_in_log(tmp_path: Path) -> None:
