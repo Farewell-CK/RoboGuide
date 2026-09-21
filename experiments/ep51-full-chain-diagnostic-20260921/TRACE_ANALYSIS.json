@@ -1,0 +1,372 @@
+{
+  "agents": {
+    "0": {
+      "final_position_step_3000": [
+        -0.4552406668663025,
+        2.9140219688415527,
+        -1.4644842147827148
+      ],
+      "final_rotation_step_3000": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 1.3268406391143799
+      },
+      "finished_sensor_policy_input_true_steps": [
+        91
+      ],
+      "finished_sensor_post_step_true_steps": [
+        90
+      ],
+      "first_moving_step": 15,
+      "initial_position_reset": [
+        -0.16678085923194885,
+        2.3214714527130127,
+        3.768552780151367
+      ],
+      "last_moving_step": 85,
+      "moving_step_count": 63,
+      "net_displacement_steps_1_3000": 5.267387492883564,
+      "oracle_skill_done_true_steps": [
+        90
+      ],
+      "path_distance_steps_1_3000": 5.555339111540446,
+      "position_step_1": [
+        -0.16678085923194885,
+        2.3872528076171875,
+        3.768552780151367
+      ],
+      "rotation_step_1": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 2.743502378463745
+      }
+    },
+    "1": {
+      "final_position_step_3000": [
+        1.3818612098693848,
+        2.833804130554199,
+        -3.1388485431671143
+      ],
+      "final_rotation_step_3000": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 3.0945487022399902
+      },
+      "finished_sensor_policy_input_true_steps": [],
+      "finished_sensor_post_step_true_steps": [],
+      "first_moving_step": 24,
+      "initial_position_reset": [
+        4.056283950805664,
+        2.8338050842285156,
+        -1.6121662855148315
+      ],
+      "last_moving_step": 2100,
+      "moving_step_count": 1044,
+      "net_displacement_steps_1_3000": 3.079496016082403,
+      "oracle_skill_done_true_steps": [],
+      "path_distance_steps_1_3000": 6.654932366894003,
+      "position_step_1": [
+        4.056283950805664,
+        2.833804130554199,
+        -1.6121662855148315
+      ],
+      "rotation_step_1": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 1.1778807640075684
+      }
+    }
+  },
+  "contiguous_steps": true,
+  "controller_events": [
+    {
+      "event": "TaskExecutionRegistered",
+      "payload": {
+        "context_id": "ctx_reach_conditions",
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 154
+    },
+    {
+      "event": "TaskExecutionRegistered",
+      "payload": {
+        "context_id": "ctx_reach_conditions",
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_target"
+        }
+      },
+      "sequence": 155
+    },
+    {
+      "event": "TaskSchedulingSelected",
+      "payload": {
+        "assignments": [
+          {
+            "node_id": "e1-shared-node-a",
+            "resource_ids": [
+              "habitat-navigation-slot-a"
+            ],
+            "role_id": "role_reach_object"
+          }
+        ],
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 159
+    },
+    {
+      "event": "PlanCommitted",
+      "payload": {
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 161
+    },
+    {
+      "event": "TaskSchedulingSelected",
+      "payload": {
+        "assignments": [
+          {
+            "node_id": "e1-shared-node-b",
+            "resource_ids": [
+              "habitat-navigation-slot-b"
+            ],
+            "role_id": "role_reach_target"
+          }
+        ],
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_target"
+        }
+      },
+      "sequence": 165
+    },
+    {
+      "event": "PlanCommitted",
+      "payload": {
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_target"
+        }
+      },
+      "sequence": 167
+    },
+    {
+      "event": "TaskExecutionActivated",
+      "payload": {
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_target"
+        }
+      },
+      "sequence": 172
+    },
+    {
+      "event": "TaskExecutionActivated",
+      "payload": {
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 173
+    },
+    {
+      "event": "TaskExecutionCompleted",
+      "payload": {
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 315
+    },
+    {
+      "event": "TaskSatisfied",
+      "payload": {
+        "basis": {
+          "basis": "execution-report"
+        },
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 316
+    },
+    {
+      "event": "TaskExecutionFailed",
+      "payload": {
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_target"
+        }
+      },
+      "sequence": 319
+    },
+    {
+      "event": "ExecutionGroupFailed",
+      "payload": {
+        "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+        "reason": "Mission execution policy declared final failure",
+        "task_ref": {
+          "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+          "task_id": "task_reach_object"
+        }
+      },
+      "sequence": 321
+    }
+  ],
+  "evidence_quality": {
+    "action_summary_unavailable_rows": 3000,
+    "action_trace_collection": {
+      "batch_capacity_records": 32,
+      "flushes": 94,
+      "pending_records": 0,
+      "records_dropped": 0,
+      "records_written": 3000,
+      "sampling_period_simulator_steps": 1,
+      "write_failures": 0,
+      "write_seconds": 0.046891714446246624
+    },
+    "diagnostic_step_rows_complete": true,
+    "physical_diagnostic_capture_overhead": "unavailable_terminal_snapshot_serialization",
+    "position_rotation_predicate_rows_available": 3000,
+    "reset_snapshot_status": "unavailable_numpy_float32_serialization",
+    "skill_state_unavailable_rows_per_agent": {
+      "0": 3000,
+      "1": 3000
+    },
+    "terminal_snapshot_status": "unavailable_numpy_float32_serialization"
+  },
+  "official_pddl_success_true_step_count": 0,
+  "official_predicates": {
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": {
+      "first_true_step": null,
+      "last_true_step": null,
+      "true_step_count": 0
+    },
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": {
+      "first_true_step": null,
+      "last_true_step": null,
+      "true_step_count": 0
+    }
+  },
+  "outcome": {
+    "mission_status": "Failed",
+    "node_a": "Completed",
+    "node_b": "Failed",
+    "official_pddl_success": false,
+    "provenance_valid": true,
+    "valid_for_benchmark_population": true,
+    "valid_for_formal_population": true
+  },
+  "row_count": 3000,
+  "run_code_sha": "c4258266d9f9bd4cd1bb1b2dba52f97816b81181",
+  "run_id": "b1-diag-ep51-seed40",
+  "schema_version": "roboguide.e1.ep51-trace-analysis/v0.1",
+  "skill_segments": [
+    {
+      "end_step": 91,
+      "length": 91,
+      "skills": [
+        "nav_to_obj",
+        "nav_to_obj"
+      ],
+      "start_step": 1
+    },
+    {
+      "end_step": 1000,
+      "length": 909,
+      "skills": [
+        "wait",
+        "nav_to_obj"
+      ],
+      "start_step": 92
+    },
+    {
+      "end_step": 1100,
+      "length": 100,
+      "skills": [
+        "wait",
+        "pick"
+      ],
+      "start_step": 1001
+    },
+    {
+      "end_step": 2100,
+      "length": 1000,
+      "skills": [
+        "wait",
+        "nav_to_obj"
+      ],
+      "start_step": 1101
+    },
+    {
+      "end_step": 2200,
+      "length": 100,
+      "skills": [
+        "wait",
+        "place"
+      ],
+      "start_step": 2101
+    },
+    {
+      "end_step": 2201,
+      "length": 1,
+      "skills": [
+        "wait",
+        "reset_arm"
+      ],
+      "start_step": 2201
+    },
+    {
+      "end_step": 3000,
+      "length": 799,
+      "skills": [
+        "wait",
+        "wait"
+      ],
+      "start_step": 2202
+    }
+  ],
+  "stage2": {
+    "agent_0_assigned_destination": "any_targets|0",
+    "agent_0_first_tool_action": {
+      "name": "nav_to_obj",
+      "target_obj": "any_targets|0"
+    },
+    "agent_1_assigned_destination": "TARGET_any_targets|0",
+    "agent_1_first_tool_action": {
+      "name": "nav_to_obj",
+      "target_obj": "any_targets|0"
+    },
+    "local_llm_calls": {
+      "0": 2,
+      "1": 8
+    },
+    "local_replans": {
+      "0": 0,
+      "1": 6
+    }
+  },
+  "step_range": [
+    1,
+    3000
+  ]
+}

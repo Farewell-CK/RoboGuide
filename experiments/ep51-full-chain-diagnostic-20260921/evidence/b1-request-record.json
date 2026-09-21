@@ -1,0 +1,248 @@
+{
+  "schema_version": "roboguide.mission-request/v0.4",
+  "request_id": "request-9b361cdb7fea41dd8e25cb33555f48fd",
+  "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+  "dialogue": [
+    {
+      "turn_id": "turn-0001",
+      "speaker": "User",
+      "kind": "Instruction",
+      "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+      "created_at_ms": 1789959127322,
+      "in_reply_to": null
+    }
+  ],
+  "lifecycle": "Accepted",
+  "assessment": {
+    "objective": "Achieve the joint terminal state in which a robot is at the object any_targets|0 and a robot is at the goal receptacle position TARGET_any_targets|0, coordinating Spot and Fetch as appropriate.",
+    "constraints": [
+      "Use the available Spot and Fetch robots operating in the shared multi-floor scene.",
+      "The system may choose how to divide the work between the robots."
+    ],
+    "assumptions": [
+      "The same robot may satisfy both reach conditions; no distinct-robot requirement is imposed.",
+      "No additional manipulation, transport, handoff, or verification is required beyond the two specified reach conditions."
+    ],
+    "open_questions": []
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+      "objective": "Achieve the joint terminal state in which a robot is at the object any_targets|0 and a robot is at the goal receptacle position TARGET_any_targets|0, coordinating Spot and Fetch as appropriate.",
+      "actors": [
+        {
+          "id": "actor_spot"
+        },
+        {
+          "id": "actor_fetch"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "ctx_reach_conditions",
+        "roles": [
+          {
+            "id": "ctxrole_spot",
+            "actor": "actor_spot"
+          },
+          {
+            "id": "ctxrole_fetch",
+            "actor": "actor_fetch"
+          }
+        ],
+        "relations": [],
+        "coupling_mode": "independent",
+        "executor_constraints": []
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task_reach_object",
+        "description": "A robot is at the object any_targets|0, establishing the first terminal predicate of the joint goal.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "role_reach_object",
+            "context_role": "ctxrole_spot",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Move a robot to the semantic object any_targets|0.",
+              "parameters": {
+                "destination": "any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "ctx_reach_conditions",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The terminal predicate any_at(any_targets|0) holds: a robot is at the object any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "task_reach_target",
+        "description": "A robot is at the goal receptacle position TARGET_any_targets|0, establishing the second terminal predicate of the joint goal.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "role_reach_target",
+            "context_role": "ctxrole_fetch",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Move a robot to the goal receptacle position TARGET_any_targets|0.",
+              "parameters": {
+                "destination": "TARGET_any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "ctx_reach_conditions",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The terminal predicate any_at(TARGET_any_targets|0) holds: a robot is at the goal receptacle position TARGET_any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "grounding_context": {
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "context_digest": "sha256:388785af7a2a39b5f3ac2a8471da33f28a78fd53291274b09d125d95cc86f4c5",
+    "request_id": "request-9b361cdb7fea41dd8e25cb33555f48fd",
+    "dialogue_digest": "sha256:94644e6cc9f45d9600fd5366db02f6c27b97fcdcdc87283e22b4f6cd796654cf",
+    "captured_at_ms": 1789959127438,
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "state_evidence": [],
+    "memory_evidence": [],
+    "gaps": [],
+    "semantic_evidence": {
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "authority": "environment-authoritative",
+      "identity": {
+        "run_id": "b1-diag-ep51-seed40",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+      },
+      "objective_scope": "joint_terminal_state",
+      "goal": {
+        "kind": "logical",
+        "operator": "and",
+        "operands": [
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "quantifier": null,
+        "variables": []
+      },
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      },
+      "digest": "sha256:efad4d24f94a6ce0f2464c4da7a8307b2b0d3262f5998746060e521974cc185b"
+    }
+  },
+  "draft_revision": 1,
+  "draft_digest": "sha256:4a011aca91767784929d8fa11d369c0d026d8f63469edb0bf6c2f48ee03e1176",
+  "approval_required": false,
+  "approval_reasons": [],
+  "issues": [],
+  "repair_attempts": 0,
+  "review_history": [
+    {
+      "draft_revision": 1,
+      "draft_digest": "sha256:4a011aca91767784929d8fa11d369c0d026d8f63469edb0bf6c2f48ee03e1176",
+      "grounding_context_digest": "sha256:388785af7a2a39b5f3ac2a8471da33f28a78fd53291274b09d125d95cc86f4c5",
+      "review": {
+        "approved": true,
+        "issues": []
+      },
+      "reviewed_at_ms": 1789959500180
+    }
+  ],
+  "created_at_ms": 1789959127322,
+  "updated_at_ms": 1789959500459
+}

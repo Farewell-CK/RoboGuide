@@ -1,0 +1,19 @@
+{
+  "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+  "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+  "peer_channels": [],
+  "relations": [],
+  "status": "Failed",
+  "tasks": [
+    {
+      "context_id": "ctx_reach_conditions",
+      "status": "Completed",
+      "task_id": "task_reach_object"
+    },
+    {
+      "context_id": "ctx_reach_conditions",
+      "status": "Failed",
+      "task_id": "task_reach_target"
+    }
+  ]
+}

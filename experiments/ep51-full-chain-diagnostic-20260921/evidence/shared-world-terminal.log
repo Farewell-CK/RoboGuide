@@ -1,0 +1,170 @@
+2026-09-21 11:04:09,441 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,496 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,496 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,498 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,498 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,657 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,657 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,658 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,658 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,728 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,728 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,730 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,730 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,791 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,791 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,801 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,806 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,851 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,851 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,880 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,880 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,916 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,916 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,962 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:09,963 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:09,990 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:09,995 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,035 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:10,035 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+2026-09-21 11:04:10,063 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:10,063 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,095 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:10,095 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,130 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:10,130 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,157 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:10,158 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,188 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:10,189 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+pybullet build time: Sep  8 2026 08:34:54
+2026-09-21 11:04:10,240 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:10,240 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,243 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:10,244 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,329 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:10,329 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:10,329 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:10,329 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,011 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-21 11:04:11,048 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,048 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,049 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-21 11:04:11,119 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.move HTTP/1.1" 200 -
+2026-09-21 11:04:11,120 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,121 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-21 11:04:11,122 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,123 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-21 11:04:11,124 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.move HTTP/1.1" 200 -
+2026-09-21 11:04:11,175 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,175 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,179 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,179 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,235 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,235 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,235 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,236 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,291 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,291 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,292 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,292 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,348 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,348 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,348 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,349 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,539 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,539 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,540 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,541 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,596 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,597 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,597 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,597 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,653 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,654 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,654 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,654 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,710 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,711 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,712 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,712 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,767 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,768 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,768 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,768 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,825 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,825 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,826 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,826 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,891 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,892 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,892 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,893 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,950 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:11,950 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:11,950 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:11,950 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,009 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,009 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,011 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,012 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,069 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,074 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,074 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,075 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,142 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,142 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,143 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,143 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,205 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,205 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,206 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,206 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,266 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,267 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,267 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,267 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,322 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,322 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,330 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,330 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,378 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,378 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,385 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,385 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,573 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,573 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,574 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,574 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,629 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,629 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,630 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,630 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,686 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,686 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,687 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,687 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,748 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: RUNNING
+2026-09-21 11:04:12,748 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,751 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,751 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+2026-09-21 11:04:12,805 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,806 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,860 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: RUNNING
+2026-09-21 11:04:12,860 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:12,909 INFO node-a status observed for habitat-80ddf5faa6bcaad0259a83ee: COMPLETED
+2026-09-21 11:04:12,910 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:13,095 INFO node-b status observed for habitat-0b33d11b0b413f13ae62a7bf: FAILED
+2026-09-21 11:04:13,095 INFO 127.0.0.1 - "POST /v1/executions/status HTTP/1.1" 200 -
+2026-09-21 11:04:15,391 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-21 11:04:15,393 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.move HTTP/1.1" 200 -
+2026-09-21 11:04:15,394 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-21 11:04:15,509 INFO 127.0.0.1 - "GET /v1/health HTTP/1.1" 200 -
+2026-09-21 11:04:15,511 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.navigate HTTP/1.1" 200 -
+2026-09-21 11:04:15,512 INFO 127.0.0.1 - "GET /v1/capabilities/mobility.move HTTP/1.1" 200 -

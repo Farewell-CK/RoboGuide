@@ -1,0 +1,20 @@
+{
+  "request_id": "request-9b361cdb7fea41dd8e25cb33555f48fd",
+  "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+  "request_record_digest": "sha256:1264a4b2f8906fa216904b902c3ac5f09a4f3254547e08b4633c8f4c7dfc87e4",
+  "submission_evidence": {
+    "submitted_plan_digest": "sha256:4a011aca91767784929d8fa11d369c0d026d8f63469edb0bf6c2f48ee03e1176",
+    "raw_request_body_sha256": "sha256:bc59fcd1f6d52355e21dafb69ec23eb9314f34f8eb08e8ea6ddb777351d5774d",
+    "submitted_mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+    "submitted_at_ms": 1789959500291,
+    "request_id": "request-9b361cdb7fea41dd8e25cb33555f48fd",
+    "controller_status_code": 202,
+    "controller_mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+    "controller_group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+    "transport_error": null,
+    "schema_version": "roboguide.controller-submission-evidence/v0.1"
+  },
+  "failure_evidence": null,
+  "rejected_drafts": [],
+  "schema_version": "roboguide.mission-request-observations/v0.1"
+}

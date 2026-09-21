@@ -1,0 +1,28 @@
+{
+  "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+  "run_id": "b1-diag-ep51-seed40",
+  "state": "complete",
+  "failure_owner": null,
+  "attempt_directory": "controller-event-pages/attempt-hjda4ata",
+  "limits": {
+    "page_size": 100,
+    "max_pages": 256,
+    "max_page_bytes": 8388608,
+    "max_total_bytes": 67108864,
+    "timeout_seconds": 2.0,
+    "budget_seconds": 30.0,
+    "tail_confirmation_seconds": 0.1
+  },
+  "reason": "terminal_tail_confirmed",
+  "scope": "terminal_durable_prefix",
+  "terminal_mission": {
+    "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+    "group_id": "group-mission-80218eeee66e4f52986b4ecd10a5a353",
+    "status": "Failed"
+  },
+  "events_digest": "sha256:5ab522ce9efea3c7c50ccdf86c86d9f959134af3b42683924dfbff2167bd1f3c",
+  "tail_confirmations": 2,
+  "event_count": 324,
+  "last_sequence": 324,
+  "pages": 6
+}

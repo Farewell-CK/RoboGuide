@@ -1,0 +1,7 @@
+{
+  "_status": "unavailable",
+  "phase": "initial_world_state",
+  "reason": "JSON serialization failed: Object of type float32 is not JSON serializable",
+  "schema_version": "roboguide.e1.physical-diagnostics/v0.2",
+  "simulator_step": null
+}

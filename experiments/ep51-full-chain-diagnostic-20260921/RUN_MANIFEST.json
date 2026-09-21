@@ -1,0 +1,81 @@
+{
+  "schema_version": "roboguide.e1.ep51-full-chain-diagnostic/v0.1",
+  "run_id": "b1-diag-ep51-seed40",
+  "run_directory": "/data/workspace/code/roboguide-ep51-full-chain-diag-20260921T025132Z/b1-diag-ep51-seed40",
+  "execution": {
+    "started_utc": "2026-09-21T02:52:06Z",
+    "mission_request_count": 1,
+    "request_id": "request-9b361cdb7fea41dd8e25cb33555f48fd",
+    "mission_id": "mission-80218eeee66e4f52986b4ecd10a5a353",
+    "run_code_sha": "c4258266d9f9bd4cd1bb1b2dba52f97816b81181",
+    "post_run_diagnostic_fix_sha": "9ea39c2077308291569e67fd84c3fa40b7640599",
+    "gpu_index": 1,
+    "physical_diagnostics_enabled": true,
+    "mi_observation_budget_seconds": 1800
+  },
+  "workload": {
+    "schema": "roboguide.e1.b1-input/v0.1",
+    "input_sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+    "episode_id": "51",
+    "seed": 40,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "goal_predicates": [
+      "any_at(any_targets|0)",
+      "any_at(TARGET_any_targets|0)"
+    ]
+  },
+  "configuration": {
+    "execution_profile_sha256": "2e0aaa5857cb208050241df0ccc04315c09bfdf2d97dab141e56c9e79535b504",
+    "runner_sha256": "1e326789fb1a0e113cc02676f3aa2839320523c0f9248eb2ae5027bf9b710f2a",
+    "planner_prompt_sha256": "486e4ce0976ef98a9d3aaf2f75bbe8daf1c3a1a1989592b568633543460e8684",
+    "reviewer_prompt_sha256": "693809707dd1217abed456392c52e124122d31cbe31f517f8c05688437971c17",
+    "repairer_prompt_sha256": "df2ac444711d37ecceff12ec679743b091a97b6f74f1ec9df040b112ba6fa190",
+    "mi_model": "gpt-5.6-luna",
+    "mi_reasoning_effort": "xhigh",
+    "stage2_model": "gpt-5.6-luna",
+    "credentials_archived": false
+  },
+  "external_emos": {
+    "path": "/data/workspace/code/emos-baseline",
+    "head": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "tracked_diff_sha256": "172268dd4cf44e8e50ba1d51de2f9f7a4ff5377b32d7aa96bfa21f1b77c0ee78",
+    "model_client_sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+  },
+  "mission_intelligence": {
+    "lifecycle": "Accepted",
+    "draft_revision": 1,
+    "rejected_draft_count": 0,
+    "repair_attempts": 0,
+    "review_approved": true,
+    "coupling_mode": "independent",
+    "executor_constraints": [],
+    "relations": [],
+    "task_count": 2
+  },
+  "outcome": {
+    "mission_status": "Failed",
+    "node_a_status": "Completed",
+    "node_b_status": "Failed",
+    "simulator_steps": 3000,
+    "official_pddl_success": false,
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "valid_for_benchmark_population": true,
+    "benchmark_outcome": "BENCHMARK_FALSE"
+  },
+  "evidence": {
+    "controller_event_count": 324,
+    "controller_last_sequence": 324,
+    "event_archive_state": "complete",
+    "diagnostic_step_count": 3000,
+    "diagnostic_steps_contiguous": true,
+    "diagnostics_steps_raw_sha256": "88f5b53dfaea070e568f5a48fc1ec9c14bae6d5a0a6475f898e7b50671104c0f",
+    "action_trace_raw_sha256": "b92b0e75fe4e284f839b0e530463ede5a381c98b7055a423e67479a5f5604396",
+    "reset_snapshot_complete": false,
+    "terminal_snapshot_complete": false,
+    "incomplete_reason": "NumPy float32 serialization and current HierarchicalPolicy field compatibility",
+    "post_run_fix_real_habitat_validated": false
+  }
+}

@@ -1,0 +1,6 @@
+2026-09-21 10:52:06,628 INFO roboguide.mission_service listening on 127.0.0.1:8070
+2026-09-21 10:52:06,876 INFO roboguide.mission_service 127.0.0.1 - "GET /healthz HTTP/1.1" 200 -
+2026-09-21 10:58:20,590 INFO roboguide.mission_service 127.0.0.1 - "POST /v1/mission-requests HTTP/1.1" 201 -
+2026-09-21 10:58:20,754 INFO roboguide.mission_service 127.0.0.1 - "GET /v1/mission-requests/request-9b361cdb7fea41dd8e25cb33555f48fd HTTP/1.1" 200 -
+2026-09-21 11:04:17,151 INFO roboguide.mission_service 127.0.0.1 - "GET /v1/mission-requests/request-9b361cdb7fea41dd8e25cb33555f48fd HTTP/1.1" 200 -
+2026-09-21 11:04:17,155 INFO roboguide.mission_service 127.0.0.1 - "GET /v1/mission-requests/request-9b361cdb7fea41dd8e25cb33555f48fd/observations HTTP/1.1" 200 -
