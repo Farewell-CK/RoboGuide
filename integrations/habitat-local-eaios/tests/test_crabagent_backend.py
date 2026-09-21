@@ -19,7 +19,10 @@ from habitat_local_eaios.crabagent_backend import (  # noqa: E402
     CrabAgentBackendConfig,
     CrabAgentMobilityBackend,
 )
-from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.emos_stage2 import (  # noqa: E402
+    EmosStage2Runtime,
+    _make_episode_gym_environment,
+)
 from habitat_local_eaios.model import (  # noqa: E402
     CanonicalMobilityInvocation,
     IntegrationError,
@@ -115,6 +118,111 @@ class FakeAgentArguments:
     def __init__(self, **values: Any) -> None:
         """Retain named arguments exactly as supplied by the adapter."""
         self.values = values
+
+
+class FakeEpisodeDataset:
+    """Expose a mutable episode list like a Habitat dataset."""
+
+    def __init__(self, episode_ids: list[str]) -> None:
+        """Create stable fake episodes in the requested order."""
+        self.episodes = [types.SimpleNamespace(episode_id=value) for value in episode_ids]
+
+
+def _habitat_config() -> types.SimpleNamespace:
+    """Build the dataset portion consumed by episode-first initialization."""
+    dataset = types.SimpleNamespace(type="RearrangeDataset-v0")
+    return types.SimpleNamespace(habitat=types.SimpleNamespace(dataset=dataset))
+
+
+def test_requested_episode_is_pinned_before_gym_construction() -> None:
+    """Simulator construction sees only the frozen episode, never a prior scene."""
+    dataset = FakeEpisodeDataset(["80", "51", "12"])
+    observed_at_construction: list[list[str]] = []
+
+    def make_dataset(**options: Any) -> FakeEpisodeDataset:
+        """Return the fake catalog while checking the configured dataset identity."""
+        assert options["id_dataset"] == "RearrangeDataset-v0"
+        assert options["config"] is _habitat_config_value.habitat.dataset
+        return dataset
+
+    def make_gym_from_config(config: Any, *, dataset: FakeEpisodeDataset) -> Any:
+        """Record the episodes visible at the simulator construction boundary."""
+        assert config is _habitat_config_value
+        observed_at_construction.append([str(episode.episode_id) for episode in dataset.episodes])
+        habitat_env = types.SimpleNamespace(episodes=dataset.episodes)
+        return types.SimpleNamespace(habitat_env=habitat_env, close=lambda: None)
+
+    _habitat_config_value = _habitat_config()
+    _, habitat_env, episode = _make_episode_gym_environment(
+        _habitat_config_value,
+        "51",
+        make_dataset,
+        make_gym_from_config,
+    )
+    assert observed_at_construction == [["51"]]
+    assert [item.episode_id for item in habitat_env.episodes] == ["51"]
+    assert episode.episode_id == "51"
+
+
+@pytest.mark.parametrize("episode_ids", [["80"], ["51", "51"]])
+def test_invalid_episode_identity_fails_before_gym_construction(
+    episode_ids: list[str],
+) -> None:
+    """Missing or duplicate frozen identities cannot initialize any simulator."""
+    dataset = FakeEpisodeDataset(episode_ids)
+    gym_calls = 0
+
+    def make_dataset(**options: Any) -> FakeEpisodeDataset:
+        """Return the malformed fake dataset without interpreting options."""
+        del options
+        return dataset
+
+    def make_gym_from_config(config: Any, *, dataset: FakeEpisodeDataset) -> Any:
+        """Fail the test if construction crosses an invalid identity boundary."""
+        nonlocal gym_calls
+        del config, dataset
+        gym_calls += 1
+        raise AssertionError("Gym construction must not run")
+
+    with pytest.raises(IntegrationError, match="not uniquely available"):
+        _make_episode_gym_environment(
+            _habitat_config(),
+            "51",
+            make_dataset,
+            make_gym_from_config,
+        )
+    assert gym_calls == 0
+
+
+def test_gym_must_retain_the_single_startup_episode() -> None:
+    """A factory that loses the pinned episode is closed and rejected."""
+    dataset = FakeEpisodeDataset(["51"])
+    closed = False
+
+    def make_dataset(**options: Any) -> FakeEpisodeDataset:
+        """Return one valid frozen episode without interpreting options."""
+        del options
+        return dataset
+
+    def close() -> None:
+        """Record cleanup of the invalid constructed environment."""
+        nonlocal closed
+        closed = True
+
+    def make_gym_from_config(config: Any, *, dataset: FakeEpisodeDataset) -> Any:
+        """Emulate a factory that substitutes an unexpected episode."""
+        del config, dataset
+        habitat_env = types.SimpleNamespace(episodes=[types.SimpleNamespace(episode_id="80")])
+        return types.SimpleNamespace(habitat_env=habitat_env, close=close)
+
+    with pytest.raises(IntegrationError, match="sole startup episode"):
+        _make_episode_gym_environment(
+            _habitat_config(),
+            "51",
+            make_dataset,
+            make_gym_from_config,
+        )
+    assert closed
 
 
 def test_wrapper_delegates_to_persistent_original_stage2(

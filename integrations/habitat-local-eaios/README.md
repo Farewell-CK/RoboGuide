@@ -56,6 +56,12 @@ and RoboGuide execution state as separate evidence. `COMPLETED` retains an expli
 reported semantic task success and ended the assigned operation first. Mission completion never
 fabricates either local fact, and local skill completion never implies benchmark success.
 
+The deployment-selected episode is resolved uniquely from the configured Habitat dataset before
+the Gym environment constructs Habitat-Sim. This keeps the simulator's initial scene and the first
+seed-controlled reset bound to the same frozen episode. Pinning an episode only after simulator
+construction is invalid: Habitat may already have initialized a different scene, and equal
+`habitat.seed` values would then not produce a comparable initial state.
+
 The bridge currently supports one active simulator execution and one deployment-selected episode
 and robot. That is an intentional C1 scope bound, not a canonical operation constraint. Node Service
 performs bounded status reacquisition for transient observation failures without redispatching the

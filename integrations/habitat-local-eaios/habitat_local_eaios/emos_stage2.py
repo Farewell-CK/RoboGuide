@@ -13,6 +13,48 @@ from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 
+def _make_episode_gym_environment(
+    config: Any,
+    episode_id: str,
+    make_dataset: Callable[..., Any],
+    make_gym_from_config: Callable[..., Any],
+) -> tuple[Any, Any, Any]:
+    """Construct Habitat with exactly the requested episode loaded from startup.
+
+    Habitat-Sim initializes scene-specific state while the Gym environment is
+    constructed.  Replacing ``habitat_env.episodes`` afterwards changes the
+    episode used by ``reset()``, but it does not reproduce a simulator that was
+    created with that episode initially.  Load and uniquely select the frozen
+    episode before creating the simulator so seed-controlled agent placement is
+    comparable with the native EMOS path.
+
+    Raises:
+        IntegrationError: If the configured dataset does not contain exactly
+            one episode with the requested identity, or if the constructed
+            environment does not retain that exact selection.
+    """
+    dataset = make_dataset(
+        id_dataset=config.habitat.dataset.type,
+        config=config.habitat.dataset,
+    )
+    matches = [episode for episode in dataset.episodes if str(episode.episode_id) == episode_id]
+    if len(matches) != 1:
+        raise IntegrationError(f"Habitat episode {episode_id!r} is not uniquely available")
+    episode = matches[0]
+    dataset.episodes = [episode]
+    gym_env = make_gym_from_config(config, dataset=dataset)
+    habitat_env = gym_env.habitat_env
+    loaded = [
+        candidate for candidate in habitat_env.episodes if str(candidate.episode_id) == episode_id
+    ]
+    if len(habitat_env.episodes) != 1 or len(loaded) != 1:
+        gym_env.close()
+        raise IntegrationError(
+            f"Habitat episode {episode_id!r} was not retained as the sole startup episode"
+        )
+    return gym_env, habitat_env, loaded[0]
+
+
 class EmosStage2Runtime:
     """Own one official EMOS policy, skill stack, and Habitat environment."""
 
@@ -33,6 +75,7 @@ class EmosStage2Runtime:
             return
         try:
             import torch  # type: ignore[import-not-found]
+            from habitat import make_dataset  # type: ignore[import-not-found]
             from habitat.gym import make_gym_from_config  # type: ignore[import-not-found]
             from habitat_baselines.common.env_spec import (  # type: ignore[import-not-found]
                 EnvironmentSpec,
@@ -57,22 +100,15 @@ class EmosStage2Runtime:
                 str(self._config.config_path),
                 overrides=habitat_config_overrides(self._config.seed),
             )
-            gym_env = make_gym_from_config(config)
-            habitat_env = gym_env.habitat_env
-            matches = [
-                episode
-                for episode in habitat_env.episodes
-                if str(episode.episode_id) == self._config.episode_id
-            ]
-            if len(matches) != 1:
-                gym_env.close()
-                raise IntegrationError(
-                    f"Habitat episode {self._config.episode_id!r} is not uniquely available"
-                )
+            gym_env, habitat_env, episode = _make_episode_gym_environment(
+                config,
+                self._config.episode_id,
+                make_dataset,
+                make_gym_from_config,
+            )
             if self._config.agent_id >= len(config.habitat.simulator.agents_order):
                 gym_env.close()
                 raise IntegrationError("configured Habitat agent_id is out of range")
-            habitat_env.episodes = matches
             transforms = get_active_obs_transforms(config)
             observation_space = apply_obs_transforms_obs_space(
                 gym_env.observation_space, transforms
@@ -95,7 +131,7 @@ class EmosStage2Runtime:
             access.eval()
             self._gym_env = gym_env
             self._habitat_env = habitat_env
-            self._episode = matches[0]
+            self._episode = episode
             self._actor = actor
             self._agent_access = access
             self._runtime = {
