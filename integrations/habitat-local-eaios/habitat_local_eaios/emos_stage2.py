@@ -11,6 +11,12 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .stage2_contract import (
+    Stage2ActionAudit,
+    Stage2ContractViolation,
+    Stage2ExecutionContract,
+    install_stage2_contract_guard,
+)
 
 
 def _make_episode_gym_environment(
@@ -244,7 +250,12 @@ class EmosStage2Runtime:
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
         module, original_group_discussion = self._install_assignment(assignment)
+        contract_restore: Callable[[], None] | None = None
+        contract_failure: Stage2ContractViolation | None = None
         try:
+            contract_restore = self._install_execution_contract(
+                self._single_execution_contracts(assignment, invocation), lambda: steps
+            )
             while steps < self._config.max_steps:
                 if cancellation_requested():
                     return self._outcome(
@@ -335,9 +346,27 @@ class EmosStage2Runtime:
                     )
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
+        except Stage2ContractViolation as error:
+            contract_failure = error
         finally:
-            module.group_discussion = original_group_discussion
-            self._flush_action_trace()
+            try:
+                if contract_restore is not None:
+                    contract_restore()
+            finally:
+                module.group_discussion = original_group_discussion
+                self._flush_action_trace()
+        if contract_failure is not None:
+            return self._outcome(
+                "FAILED",
+                str(contract_failure),
+                invocation,
+                scene_id,
+                steps,
+                initial,
+                skill_sequence,
+                local_skill_completed=False,
+                terminal_basis="local-contract-failure",
+            )
         return self._outcome(
             "FAILED",
             f"EMOS Stage2 exceeded {self._config.max_steps} simulator steps",
@@ -403,6 +432,52 @@ class EmosStage2Runtime:
 
         multi_llm_policy.group_discussion = committed_assignment
         return multi_llm_policy, original
+
+    def _single_execution_contracts(
+        self,
+        assignment: dict[str, Any],
+        invocation: CanonicalMobilityInvocation,
+    ) -> dict[str, Stage2ExecutionContract]:
+        """Build contracts for the assigned agent and idle sibling agents."""
+        target = f"agent_{self._config.agent_id}"
+        contracts: dict[str, Stage2ExecutionContract] = {}
+        for agent_name in assignment:
+            contracts[agent_name] = (
+                Stage2ExecutionContract.for_invocation(invocation)
+                if agent_name == target
+                else Stage2ExecutionContract.idle()
+            )
+        return contracts
+
+    def _install_execution_contract(
+        self,
+        contracts: dict[str, Stage2ExecutionContract],
+        completed_steps: Callable[[], int],
+    ) -> Callable[[], None]:
+        """Install one scoped guard around the original EMOS action boundary."""
+        if self._actor is None:
+            raise IntegrationError("Stage2 contract requires an initialized actor")
+        audit = Stage2ActionAudit(self._evidence_dir())
+        agents = [policy._high_level_policy.llm_agent for policy in self._actor._active_policies]
+
+        def record(document: dict[str, Any]) -> None:
+            """Bind the action decision to the last completed simulator step and local time."""
+            audit.record(
+                dict(
+                    document, completed_simulator_steps=completed_steps(), observed_unix=time.time()
+                )
+            )
+
+        restore_guard = install_stage2_contract_guard(agents, contracts, record)
+
+        def restore() -> None:
+            """Close per-call evidence and restore instance hooks on every exit."""
+            try:
+                restore_guard()
+            finally:
+                audit.close()
+
+        return restore
 
     def _batch(self, observations: Any) -> Any:
         """Apply the same batching and transforms as the EMOS evaluator."""
