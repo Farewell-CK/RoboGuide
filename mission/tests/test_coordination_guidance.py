@@ -8,6 +8,13 @@ from typing import cast
 
 import pytest
 from mission.contract_values import MissionPlanError
+from mission.grounding_context import (
+    PHYSICAL_ENTITY_REFERENCE_SCHEMA,
+    GroundingContextSnapshot,
+    GroundingFreshness,
+    StateGroundingEvidence,
+    grounding_selection_policy_ref,
+)
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.rejected_draft import RejectedPlanError
@@ -17,6 +24,7 @@ from mission.responses import (
     ResponsesMissionReviewer,
 )
 from mission.review import MissionPlanReview
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 from test_planners import (
     FakeTransport,
     _current_catalog,
@@ -25,6 +33,7 @@ from test_planners import (
     _provider_plan,
     _response,
     _review_output,
+    _semantic_grounding,
 )
 
 
@@ -120,6 +129,61 @@ def _intent(raw: JSONObject) -> GroundedIntent:
     return GroundedIntent(cast(str, cast(JSONObject, raw["mission"])["objective"]), (), ())
 
 
+def _physical_entity_evidence(entity_id: str, sequence: int) -> StateGroundingEvidence:
+    """Create one fresh deployment identity admitted into an immutable snapshot."""
+    return StateGroundingEvidence(
+        evidence_id=f"state-{entity_id}",
+        object_type="physical-entity",
+        object_id=entity_id,
+        semantic="observed",
+        source="test-deployment-world",
+        channel_id="entity-reference",
+        payload_schema=PHYSICAL_ENTITY_REFERENCE_SCHEMA,
+        value={"entity_id": entity_id},
+        source_observed_at_ms=None,
+        received_at_ms=10,
+        valid_for_ms=20,
+        freshness=GroundingFreshness.FRESH,
+        confidence_millionths=None,
+        source_epoch=None,
+        sequence=sequence,
+    )
+
+
+def _entity_grounded_semantics(
+    goal_arguments: tuple[str, str] = ("entity-observer", "entity-inference"),
+) -> GroundingContextSnapshot:
+    """Bind two explicit physical identities into one authoritative objective."""
+    entities = ("entity-observer", "entity-inference")
+    evidence = AuthoritativeSemanticEvidence.create(
+        run_id="run-entities",
+        episode_id="episode-entities",
+        revision="goal-entities",
+        dataset_revision="dataset-entities",
+        dataset_sha256="b" * 64,
+        goal=SemanticExpression.logical(
+            "and",
+            tuple(
+                SemanticExpression.predicate("assigned", (argument,)) for argument in goal_arguments
+            ),
+        ),
+        world_context={"scene_id": "scene-entities", "agent_ids": [0, 1]},
+    )
+    return GroundingContextSnapshot.create(
+        request_id="request-test",
+        dialogue_digest="sha256:" + "0" * 64,
+        captured_at_ms=10,
+        selection_policy_ref=grounding_selection_policy_ref(
+            frozenset({PHYSICAL_ENTITY_REFERENCE_SCHEMA})
+        ),
+        state_evidence=tuple(
+            _physical_entity_evidence(entity, index)
+            for index, entity in enumerate(entities, start=1)
+        ),
+        semantic_evidence=evidence,
+    )
+
+
 def _guidance(instructions: str) -> str:
     """Extract shared semantics before each role-specific instruction section."""
     return (
@@ -200,6 +264,9 @@ def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None
         "if the supplied operation contracts support that requirement",
     ):
         assert requirement in rules
+    for instructions_for_role in instructions:
+        normalized = " ".join(instructions_for_role.split())
+        assert "goal and admitted physical-entity evidence jointly ground" in normalized
     assert "Do not mechanically add a view or relation" in instructions[1]
     assert "Validation may report only the first defect" in instructions[1]
     review_rules = " ".join(instructions[2].split())
@@ -215,6 +282,156 @@ def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None
         "previous_rejected_provider_output": previous,
         "validation_errors": errors,
     }
+
+
+def test_authoritative_goal_rejects_ungrounded_executor_distinctness() -> None:
+    """A hard executor constraint cannot strengthen an authoritative joint objective."""
+    raw = _coordination_plan(cooperative=False)
+    _context(raw)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    transport = FakeTransport([_response(_provider_plan(raw))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    with pytest.raises(RejectedPlanError, match="lacks authoritative physical-entity grounding"):
+        planner.plan(
+            "mission-inspection",
+            _intent(raw),
+            _current_catalog(),
+            _semantic_grounding(),
+        )
+
+
+def test_recovery_removes_only_unsupported_authoritative_constraint() -> None:
+    """Regeneration can retain Tasks and outcomes while removing unsupported strengthening."""
+    rejected = _coordination_plan(cooperative=False)
+    _context(rejected)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    accepted = _coordination_plan(cooperative=False)
+    transport = FakeTransport(
+        [_response(_provider_plan(rejected)), _response(_provider_plan(accepted))]
+    )
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    intent, catalog, grounding = _intent(rejected), _current_catalog(), _semantic_grounding()
+    with pytest.raises(RejectedPlanError) as caught:
+        planner.plan("mission-inspection", intent, catalog, grounding)
+    recovered = planner.regenerate(
+        "mission-inspection",
+        intent,
+        catalog,
+        grounding,
+        caught.value.provider_output,
+        [{"stage": caught.value.stage, "message": str(caught.value)}],
+    )
+    assert recovered.contexts[0].executor_constraints == ()
+    assert [task.task_id for task in recovered.tasks] == ["watch", "infer"]
+    accepted_tasks = cast(list[JSONObject], accepted["tasks"])
+    assert [task.satisfaction.expected_effect for task in recovered.tasks] == [
+        cast(str, cast(JSONObject, task["satisfaction"])["expected_effect"])
+        for task in accepted_tasks
+    ]
+
+
+def test_authoritative_distinctness_accepts_exact_grounded_entities() -> None:
+    """Exact goal-bound identities preserve valid physical executor requirements."""
+    raw = _coordination_plan(cooperative=False)
+    actors = cast(list[JSONObject], cast(JSONObject, raw["mission"])["actors"])
+    actors[0]["physical_entity"] = "entity-observer"
+    actors[1]["physical_entity"] = "entity-inference"
+    _context(raw)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    transport = FakeTransport([_response(_provider_plan(raw))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    plan = planner.plan(
+        "mission-inspection",
+        _intent(raw),
+        _current_catalog(),
+        _entity_grounded_semantics(),
+    )
+    assert plan.contexts[0].executor_constraints
+
+
+def test_authoritative_distinctness_rejects_entities_absent_from_goal() -> None:
+    """Deployment-known identities alone cannot strengthen an authoritative objective."""
+    raw = _coordination_plan(cooperative=False)
+    actors = cast(list[JSONObject], cast(JSONObject, raw["mission"])["actors"])
+    actors[0]["physical_entity"] = "entity-observer"
+    actors[1]["physical_entity"] = "entity-inference"
+    _context(raw)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    transport = FakeTransport([_response(_provider_plan(raw))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    with pytest.raises(RejectedPlanError, match="lacks authoritative physical-entity grounding"):
+        planner.plan(
+            "mission-inspection",
+            _intent(raw),
+            _current_catalog(),
+            _entity_grounded_semantics(("target-a", "target-b")),
+        )
+
+
+def test_authoritative_distinctness_rejects_duplicate_physical_identity() -> None:
+    """Distinct ContextRoles cannot satisfy hard distinctness through one entity."""
+    raw = _coordination_plan(cooperative=False)
+    actors = cast(list[JSONObject], cast(JSONObject, raw["mission"])["actors"])
+    actors[0]["physical_entity"] = "entity-observer"
+    actors[1]["physical_entity"] = "entity-observer"
+    _context(raw)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    transport = FakeTransport([_response(_provider_plan(raw))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    with pytest.raises(RejectedPlanError, match="pairwise distinct authoritative entities"):
+        planner.plan(
+            "mission-inspection",
+            _intent(raw),
+            _current_catalog(),
+            _entity_grounded_semantics(),
+        )
+
+
+def test_non_authoritative_mission_retains_general_distinctness_contract() -> None:
+    """The new authority fence does not narrow ordinary reviewed v0.8 Missions."""
+    raw = _coordination_plan(cooperative=False)
+    _context(raw)["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["watch", "infer"],
+        }
+    ]
+    transport = FakeTransport([_response(_provider_plan(raw))])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    plan = planner.plan("mission-inspection", _intent(raw), _current_catalog(), _grounding())
+    assert plan.contexts[0].executor_constraints
 
 
 @pytest.mark.parametrize("sequential", [False, True])

@@ -20,6 +20,7 @@ from test_planners import (
     _current_catalog,
     _current_schema,
     _local_settings,
+    _provider_plan,
     _response,
     _shared_world_execution_profile,
 )
@@ -144,3 +145,75 @@ def test_three_historical_drafts_fail_without_rewriting_or_submission(tmp_path: 
             assert feedback["validation_errors"] == drafts[index - 1]["validation_errors"]
         else:
             assert "prevalidation_recovery_feedback" not in model_input
+
+
+def test_authoritative_executor_strengthening_recovers_before_submission(tmp_path: Path) -> None:
+    """The production adapter rejects unsupported distinctness and preserves the joint goal."""
+    historical_plan = cast(JSONObject, _case("B")["plan"])
+    current = _case("D")
+    assessment = IntentAssessment.from_json(cast(JSONObject, current["assessment"]))
+    mission_id = cast(str, current["mission_id"])
+    rejected = cast(JSONObject, json.loads(json.dumps(historical_plan)))
+    rejected_mission = cast(JSONObject, rejected["mission"])
+    rejected_mission["id"] = mission_id
+    rejected_mission["objective"] = assessment.objective
+    rejected_context = cast(list[JSONObject], rejected["contexts"])[0]
+    rejected_context["executor_constraints"] = [
+        {
+            "kind": "distinct-physical-entities",
+            "context_roles": ["reach-executor-a", "reach-executor-b"],
+        }
+    ]
+    accepted = cast(JSONObject, json.loads(json.dumps(rejected)))
+    accepted_context = cast(list[JSONObject], accepted["contexts"])[0]
+    accepted_context["executor_constraints"] = []
+    rejected_provider = _provider_plan(rejected)
+    accepted_provider = _provider_plan(accepted)
+    transport = FakeTransport([_response(rejected_provider), _response(accepted_provider)])
+    planner = ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        transport,
+        _shared_world_execution_profile(),
+    )
+    reader = ArchivedGroundingReader(
+        GroundingContextSnapshot.from_json(cast(JSONObject, current["grounding_context"]))
+    )
+    controller = FakeController(_inventory())
+    tokens = iter(
+        [cast(str, current[key]).split("-", 1)[1] for key in ("request_id", "mission_id")]
+    )
+    dialogue = cast(list[JSONObject], current["dialogue"])
+    engine = MissionRequestEngine(
+        MissionRequestStore(tmp_path / "semantic-admission.sqlite3"),
+        FakeInterpreter([assessment]),
+        planner,
+        controller,
+        _current_catalog(),
+        frozenset(),
+        id_generator=lambda: next(tokens),
+        clock=lambda: cast(int, dialogue[0]["created_at_ms"]),
+        grounding_reader=reader,
+        prevalidation_recovery_attempts=2,
+    )
+
+    record = engine.create(cast(str, dialogue[0]["content"]))
+
+    assert record.lifecycle.value == "Accepted", record.issues
+    assert record.plan is not None
+    assert record.plan.contexts[0].executor_constraints == ()
+    assert [task.task_id for task in record.plan.tasks] == [
+        "reach-any-targets-0",
+        "reach-target-any-targets-0",
+    ]
+    assert record.grounding_context is not None
+    assert record.grounding_context.semantic_evidence == reader.snapshot.semantic_evidence
+    assert len(record.rejected_drafts) == 1
+    assert "lacks authoritative physical-entity grounding" in str(
+        record.rejected_drafts[0].validation_errors[0]["message"]
+    )
+    assert len(transport.requests) == 2
+    recovery_input = json.loads(cast(str, transport.requests[1][2]["input"]))
+    feedback = cast(JSONObject, recovery_input["prevalidation_recovery_feedback"])
+    assert feedback["previous_rejected_provider_output"] == rejected_provider
+    assert controller.submissions == [record.plan]
