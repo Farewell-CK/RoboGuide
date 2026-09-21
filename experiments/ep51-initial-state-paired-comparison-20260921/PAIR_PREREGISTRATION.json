@@ -1,0 +1,50 @@
+{
+  "created_utc": "2026-09-21T08:44:06.249624+00:00",
+  "emos": {
+    "config_sha256": "afe7843f45379c06a626ca1036ed13f6265c315e9222070692c5dbdc04f8f143",
+    "deployment_worktree_preserved": true,
+    "git_sha": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "tracked_worktree_clean": false
+  },
+  "order": [
+    "emos-native",
+    "roboguide"
+  ],
+  "per_arm_attempt_budget": 1,
+  "provider": {
+    "credentials_archived": false,
+    "native_config_source": "deployment-local emos.env",
+    "roboguide_config_source": "config/mission.toml plus deployment-local credential environment"
+  },
+  "roboguide": {
+    "execution_directory": "roboguide-execution",
+    "git_sha": "a24feeba4b84336d870a235e56c46fb91b2d6d67",
+    "input_sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+    "physical_diagnostics": true
+  },
+  "schema_version": "roboguide.e1.ep51-initial-state-paired-comparison/v0.1",
+  "setup_attempts": [
+    {
+      "arm": "roboguide",
+      "directory": "roboguide",
+      "failure_owner": "EXTERNAL_INFRA",
+      "mission_request_created": false,
+      "reached_habitat": false,
+      "reason": "emos_checkout_missing",
+      "resolution": "set explicit ROBOGUIDE_EMOS_ROOT to verified deployment checkout"
+    }
+  ],
+  "status": "preregistered",
+  "stopping_rules": [
+    "do not retry either arm",
+    "preserve actual failure",
+    "do not modify workload, initial pose, goal, seed, or step budget"
+  ],
+  "workload": {
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "episode_id": "51",
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "seed": 40
+  }
+}

@@ -1,0 +1,1948 @@
+{
+  "events": [
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-1",
+      "payload": {
+        "NodeRegistered": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 1,
+      "timestamp_ms": 1789980546433
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-2",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 2,
+      "timestamp_ms": 1789980546489
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-3",
+      "payload": {
+        "NodeRegistered": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 3,
+      "timestamp_ms": 1789980546540
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-4",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 4,
+      "timestamp_ms": 1789980546582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-5",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 5,
+      "timestamp_ms": 1789980551492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-6",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 6,
+      "timestamp_ms": 1789980551581
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-7",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 7,
+      "timestamp_ms": 1789980556491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-8",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 8,
+      "timestamp_ms": 1789980556582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-9",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 9,
+      "timestamp_ms": 1789980561491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-10",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 10,
+      "timestamp_ms": 1789980561583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-11",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 11,
+      "timestamp_ms": 1789980566491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-12",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 12,
+      "timestamp_ms": 1789980566581
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-13",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 13,
+      "timestamp_ms": 1789980571491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-14",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 14,
+      "timestamp_ms": 1789980571582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-15",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 15,
+      "timestamp_ms": 1789980576491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-16",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 16,
+      "timestamp_ms": 1789980576583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-17",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 17,
+      "timestamp_ms": 1789980581492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-18",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 18,
+      "timestamp_ms": 1789980581582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-19",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 19,
+      "timestamp_ms": 1789980586492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-20",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 20,
+      "timestamp_ms": 1789980586583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-21",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 21,
+      "timestamp_ms": 1789980591491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-22",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 22,
+      "timestamp_ms": 1789980591582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-23",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 23,
+      "timestamp_ms": 1789980596491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-24",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 24,
+      "timestamp_ms": 1789980596582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-25",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 25,
+      "timestamp_ms": 1789980601492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-26",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 26,
+      "timestamp_ms": 1789980601582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-27",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 27,
+      "timestamp_ms": 1789980606492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-28",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 28,
+      "timestamp_ms": 1789980606582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-29",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 29,
+      "timestamp_ms": 1789980611491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-30",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 30,
+      "timestamp_ms": 1789980611582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-31",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 31,
+      "timestamp_ms": 1789980616492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-32",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 32,
+      "timestamp_ms": 1789980616582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-33",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 33,
+      "timestamp_ms": 1789980621491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-34",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 34,
+      "timestamp_ms": 1789980621584
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-35",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 35,
+      "timestamp_ms": 1789980626491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-36",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 36,
+      "timestamp_ms": 1789980626583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-37",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 37,
+      "timestamp_ms": 1789980631492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-38",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 38,
+      "timestamp_ms": 1789980631581
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-39",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 39,
+      "timestamp_ms": 1789980636490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-40",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 40,
+      "timestamp_ms": 1789980636583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-41",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 41,
+      "timestamp_ms": 1789980641491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-42",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 42,
+      "timestamp_ms": 1789980641583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-43",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 43,
+      "timestamp_ms": 1789980646490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-44",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 44,
+      "timestamp_ms": 1789980646584
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-45",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 45,
+      "timestamp_ms": 1789980651491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-46",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 46,
+      "timestamp_ms": 1789980651583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-47",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 47,
+      "timestamp_ms": 1789980656491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-48",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 48,
+      "timestamp_ms": 1789980656583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-49",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 49,
+      "timestamp_ms": 1789980661492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-50",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 50,
+      "timestamp_ms": 1789980661583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-51",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 51,
+      "timestamp_ms": 1789980666490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-52",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 52,
+      "timestamp_ms": 1789980666582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-53",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 53,
+      "timestamp_ms": 1789980671491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-54",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 54,
+      "timestamp_ms": 1789980671583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-55",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 55,
+      "timestamp_ms": 1789980676491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-56",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 56,
+      "timestamp_ms": 1789980676583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-57",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 57,
+      "timestamp_ms": 1789980681491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-58",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 58,
+      "timestamp_ms": 1789980681582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-59",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 59,
+      "timestamp_ms": 1789980686490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-60",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 60,
+      "timestamp_ms": 1789980686583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-61",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 61,
+      "timestamp_ms": 1789980691492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-62",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 62,
+      "timestamp_ms": 1789980691582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-63",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 63,
+      "timestamp_ms": 1789980696491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-64",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 64,
+      "timestamp_ms": 1789980696582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-65",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 65,
+      "timestamp_ms": 1789980701491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-66",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 66,
+      "timestamp_ms": 1789980701583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-67",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 67,
+      "timestamp_ms": 1789980706492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-68",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 68,
+      "timestamp_ms": 1789980706583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-69",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 69,
+      "timestamp_ms": 1789980711490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-70",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 70,
+      "timestamp_ms": 1789980711583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-71",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 71,
+      "timestamp_ms": 1789980716491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-72",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 72,
+      "timestamp_ms": 1789980716583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-73",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 73,
+      "timestamp_ms": 1789980721492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-74",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 74,
+      "timestamp_ms": 1789980721584
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-75",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 75,
+      "timestamp_ms": 1789980726492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-76",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 76,
+      "timestamp_ms": 1789980726582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-77",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 77,
+      "timestamp_ms": 1789980731491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-78",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 78,
+      "timestamp_ms": 1789980731583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-79",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 79,
+      "timestamp_ms": 1789980736492
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-80",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 80,
+      "timestamp_ms": 1789980736583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "submit-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-81",
+      "payload": {
+        "ExecutionGroupCreated": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 81,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "submit-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-82",
+      "payload": {
+        "TaskExecutionRegistered": {
+          "context_id": "shared_scene",
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 82,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "submit-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-83",
+      "payload": {
+        "TaskExecutionRegistered": {
+          "context_id": "shared_scene",
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 83,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "submit-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-84",
+      "payload": {
+        "TaskExecutionReady": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 84,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "submit-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-85",
+      "payload": {
+        "TaskExecutionReady": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 85,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-86",
+      "payload": {
+        "CandidatesMatched": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 86,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-87",
+      "payload": {
+        "TaskSchedulingSelected": {
+          "assignments": [
+            {
+              "node_id": "e1-shared-node-a",
+              "resource_ids": [
+                "habitat-navigation-slot-a"
+              ],
+              "role_id": "role_reach_any_target"
+            }
+          ],
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 87,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-88",
+      "payload": {
+        "ProposalCreated": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 88,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-89",
+      "payload": {
+        "PlanCommitted": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 89,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-90",
+      "payload": {
+        "ExecutionGroupBound": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 90,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-91",
+      "payload": {
+        "MissionActorBound": {
+          "actor_id": "actor_target_reach",
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "node_id": "e1-shared-node-a",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 91,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-92",
+      "payload": {
+        "CandidatesMatched": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 92,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-93",
+      "payload": {
+        "TaskSchedulingSelected": {
+          "assignments": [
+            {
+              "node_id": "e1-shared-node-b",
+              "resource_ids": [
+                "habitat-navigation-slot-b"
+              ],
+              "role_id": "role_reach_goal_receptacle"
+            }
+          ],
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 93,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-94",
+      "payload": {
+        "ProposalCreated": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 94,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-95",
+      "payload": {
+        "PlanCommitted": {
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 95,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-96",
+      "payload": {
+        "ExecutionGroupBound": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 96,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "dispatch-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "event_id": "event-97",
+      "payload": {
+        "MissionActorBound": {
+          "actor_id": "actor_receptacle_reach",
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "node_id": "e1-shared-node-b",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 97,
+      "timestamp_ms": 1789980741048
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-98",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 98,
+      "timestamp_ms": 1789980741547
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-99",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 99,
+      "timestamp_ms": 1789980741660
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-100",
+      "payload": {
+        "TaskExecutionActivated": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 100,
+      "timestamp_ms": 1789980741724
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-101",
+      "payload": {
+        "TaskExecutionActivated": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 101,
+      "timestamp_ms": 1789980741774
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-102",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 102,
+      "timestamp_ms": 1789980746489
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-103",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 103,
+      "timestamp_ms": 1789980746608
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-104",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 104,
+      "timestamp_ms": 1789980751490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-105",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 105,
+      "timestamp_ms": 1789980751582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-106",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 106,
+      "timestamp_ms": 1789980756490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-107",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 107,
+      "timestamp_ms": 1789980756581
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-108",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 108,
+      "timestamp_ms": 1789980761490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-109",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 109,
+      "timestamp_ms": 1789980761583
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-110",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 110,
+      "timestamp_ms": 1789980766491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-111",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 111,
+      "timestamp_ms": 1789980766582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-112",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 112,
+      "timestamp_ms": 1789980771490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-113",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 113,
+      "timestamp_ms": 1789980771582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-114",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 114,
+      "timestamp_ms": 1789980776490
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-115",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 115,
+      "timestamp_ms": 1789980776582
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-116",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 116,
+      "timestamp_ms": 1789980781525
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-117",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 117,
+      "timestamp_ms": 1789980781609
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-118",
+      "payload": {
+        "NodeObservation": {
+          "TaskCompleted": {
+            "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "node_id": "e1-shared-node-a",
+            "role_id": "role_reach_any_target",
+            "task_ref": {
+              "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+              "task_id": "task_reach_any_target"
+            }
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 118,
+      "timestamp_ms": 1789980783997
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-119",
+      "payload": {
+        "TaskExecutionCompleted": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 119,
+      "timestamp_ms": 1789980783997
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-120",
+      "payload": {
+        "TaskSatisfied": {
+          "basis": {
+            "basis": "execution-report"
+          },
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 120,
+      "timestamp_ms": 1789980783997
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-121",
+      "payload": {
+        "TaskExecutionBindingsReleased": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "resource_ids": [
+            "habitat-navigation-slot-a"
+          ],
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 121,
+      "timestamp_ms": 1789980783997
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-122",
+      "payload": {
+        "NodeObservation": {
+          "TaskCompleted": {
+            "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "node_id": "e1-shared-node-b",
+            "role_id": "role_reach_goal_receptacle",
+            "task_ref": {
+              "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+              "task_id": "task_reach_goal_receptacle"
+            }
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 122,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-123",
+      "payload": {
+        "TaskExecutionCompleted": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 123,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-124",
+      "payload": {
+        "TaskSatisfied": {
+          "basis": {
+            "basis": "execution-report"
+          },
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 124,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-125",
+      "payload": {
+        "TaskExecutionBindingsReleased": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "resource_ids": [
+            "habitat-navigation-slot-b"
+          ],
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_goal_receptacle"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 125,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-126",
+      "payload": {
+        "ContextBindingsReleased": {
+          "context_id": "shared_scene",
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "resource_ids": []
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 126,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-127",
+      "payload": {
+        "ExecutionGroupCompleted": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 127,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-128",
+      "payload": {
+        "ExecutionGroupReleased": {
+          "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+          "resource_ids": [],
+          "task_ref": {
+            "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+            "task_id": "task_reach_any_target"
+          }
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 128,
+      "timestamp_ms": 1789980784156
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-129",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-1",
+          "node_id": "e1-shared-node-b"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 129,
+      "timestamp_ms": 1789980786491
+    },
+    {
+      "causation_id": null,
+      "correlation_id": "integration-server",
+      "event_id": "event-130",
+      "payload": {
+        "NodeHeartbeatAccepted": {
+          "lease_id": "grpc-lease-185268-1789980545322265945-2",
+          "node_id": "e1-shared-node-a"
+        }
+      },
+      "payload_schema": "domain.EventPayload.json/v11",
+      "sequence": 130,
+      "timestamp_ms": 1789980786582
+    }
+  ]
+}

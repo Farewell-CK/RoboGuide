@@ -1,0 +1,95 @@
+{
+  "schema": "roboguide.e1-b1-verdict/v0.2",
+  "run_id": "roboguide",
+  "evidence_digest": "3d6e8044c71bdf463c7ce7fb129490f5f60c16610aae45be46b7eef248c032b4",
+  "provenance_schema": "roboguide.e1.b1-provenance/v0.3",
+  "protocol_provenance": "INVALID",
+  "system_outcome": "UNKNOWN",
+  "admission": {
+    "provenance_valid": false,
+    "valid_for_formal_population": false,
+    "benchmark_authority_available": false,
+    "valid_for_benchmark_population": false,
+    "benchmark_outcome": "BENCHMARK_UNAVAILABLE",
+    "run_validity": "INVALID_INFRA",
+    "failure_owner": "EXTERNAL_INFRA",
+    "system_failure": false,
+    "model_failure": false,
+    "reasons": [
+      "semantic_evidence_missing",
+      "mi_run_missing",
+      "submission_evidence_mismatch",
+      "mi_generation_evidence_missing",
+      "plan_missing",
+      "actual_submission_missing",
+      "controller_plan_mismatch",
+      "controller_mission_missing",
+      "controller_group_id_missing",
+      "controller_task_registration_mismatch",
+      "execution_attempts_empty",
+      "emos_checkout_missing",
+      "external_infrastructure_failure_explicit",
+      "benchmark_authority_unavailable"
+    ],
+    "schema_version": "roboguide.e1.b1-admission/v0.1"
+  },
+  "checks": {
+    "provenance_chain_passed": false,
+    "valid_for_formal_population": false,
+    "valid_for_benchmark_population": false
+  },
+  "context": {
+    "event_archive": {
+      "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+      "run_id": "roboguide",
+      "state": "not_required",
+      "failure_owner": null,
+      "attempt_directory": "controller-event-pages/attempt-75l1q7w_",
+      "limits": {
+        "page_size": 100,
+        "max_pages": 256,
+        "max_page_bytes": 8388608,
+        "max_total_bytes": 67108864,
+        "timeout_seconds": 2.0,
+        "budget_seconds": 30.0,
+        "tail_confirmation_seconds": 0.1
+      },
+      "reason": "pre_submission_boundary",
+      "event_count": 0,
+      "last_sequence": 0,
+      "pages": 0
+    },
+    "event_archive_error": null,
+    "provenance_failures": [
+      "semantic_evidence_missing",
+      "mi_run_missing",
+      "submission_evidence_mismatch",
+      "mi_generation_evidence_missing",
+      "plan_missing",
+      "actual_submission_missing",
+      "controller_plan_mismatch",
+      "controller_mission_missing",
+      "controller_group_id_missing",
+      "controller_task_registration_mismatch",
+      "execution_attempts_empty"
+    ],
+    "semantic_goal_diagnostic": [
+      {
+        "diagnostic_only": true,
+        "status": "unavailable",
+        "reason": "authoritative_goal_predicates_unavailable"
+      }
+    ],
+    "controller_receipt": {
+      "mission_id": null,
+      "group_id": null,
+      "registered_task_ids": [],
+      "execution_ids": [],
+      "mission_status": null
+    },
+    "benchmark_tri_state": "BENCHMARK_UNAVAILABLE",
+    "benchmark_outcome_reason": "authority_document_missing_or_malformed"
+  },
+  "verdict": "FAIL",
+  "verdict_basis": "formal_protocol_admission"
+}

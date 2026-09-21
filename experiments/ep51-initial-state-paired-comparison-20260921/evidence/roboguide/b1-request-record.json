@@ -1,0 +1,248 @@
+{
+  "schema_version": "roboguide.mission-request/v0.4",
+  "request_id": "request-e84e0cd2bbd54847b2a10ebf78fafce3",
+  "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+  "dialogue": [
+    {
+      "turn_id": "turn-0001",
+      "speaker": "User",
+      "kind": "Instruction",
+      "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+      "created_at_ms": 1789980548412,
+      "in_reply_to": null
+    }
+  ],
+  "lifecycle": "Accepted",
+  "assessment": {
+    "objective": "Achieve the joint terminal state in which a robot reaches any_targets|0 and a robot reaches the goal receptacle position TARGET_any_targets|0.",
+    "constraints": [
+      "Operate within the shared multi-floor scene using the available Spot and Fetch robots.",
+      "The division of work between the robots is delegated to the system."
+    ],
+    "assumptions": [
+      "The two reach conditions may be fulfilled by the same robot or by different robots; robot assignment is left to planning.",
+      "The mission requires reaching the specified object and receptacle positions only; no pickup, transport, handoff, or other interaction is implied."
+    ],
+    "open_questions": []
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "objective": "Achieve the joint terminal state in which a robot reaches any_targets|0 and a robot reaches the goal receptacle position TARGET_any_targets|0.",
+      "actors": [
+        {
+          "id": "actor_target_reach"
+        },
+        {
+          "id": "actor_receptacle_reach"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "shared_scene",
+        "roles": [
+          {
+            "id": "context_role_target_reach",
+            "actor": "actor_target_reach"
+          },
+          {
+            "id": "context_role_receptacle_reach",
+            "actor": "actor_receptacle_reach"
+          }
+        ],
+        "relations": [],
+        "coupling_mode": "independent",
+        "executor_constraints": []
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task_reach_any_target",
+        "description": "A robot reaches semantic destination any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "role_reach_any_target",
+            "context_role": "context_role_target_reach",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Reach semantic destination any_targets|0.",
+              "parameters": {
+                "destination": "any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "shared_scene",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "A robot reaches semantic destination any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "task_reach_goal_receptacle",
+        "description": "A robot reaches the goal receptacle position TARGET_any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "role_reach_goal_receptacle",
+            "context_role": "context_role_receptacle_reach",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Reach the goal receptacle position TARGET_any_targets|0.",
+              "parameters": {
+                "destination": "TARGET_any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "shared_scene",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "A robot reaches the goal receptacle position TARGET_any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "grounding_context": {
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "context_digest": "sha256:912e1652527c49e530899d6698283ceb4e199bc6d28c082509f6aac7827bccfa",
+    "request_id": "request-e84e0cd2bbd54847b2a10ebf78fafce3",
+    "dialogue_digest": "sha256:0fa272ecead8f650b7cb618851d203e1526bb31355ac3eaf2c39feeb02530185",
+    "captured_at_ms": 1789980548533,
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "state_evidence": [],
+    "memory_evidence": [],
+    "gaps": [],
+    "semantic_evidence": {
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "authority": "environment-authoritative",
+      "identity": {
+        "run_id": "roboguide-execution",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+      },
+      "objective_scope": "joint_terminal_state",
+      "goal": {
+        "kind": "logical",
+        "operator": "and",
+        "operands": [
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "quantifier": null,
+        "variables": []
+      },
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      },
+      "digest": "sha256:19da44a9e78132875af1306cd2d48db0f2b1e67467f489270b4a8063cc52f27b"
+    }
+  },
+  "draft_revision": 1,
+  "draft_digest": "sha256:31999d0715af80a8fb34642cd812a48ea41daaab19e04371923ee5a594cca77b",
+  "approval_required": false,
+  "approval_reasons": [],
+  "issues": [],
+  "repair_attempts": 0,
+  "review_history": [
+    {
+      "draft_revision": 1,
+      "draft_digest": "sha256:31999d0715af80a8fb34642cd812a48ea41daaab19e04371923ee5a594cca77b",
+      "grounding_context_digest": "sha256:912e1652527c49e530899d6698283ceb4e199bc6d28c082509f6aac7827bccfa",
+      "review": {
+        "approved": true,
+        "issues": []
+      },
+      "reviewed_at_ms": 1789980740942
+    }
+  ],
+  "created_at_ms": 1789980548412,
+  "updated_at_ms": 1789980741269
+}

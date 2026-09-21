@@ -1,0 +1,2 @@
+{"destination": "any_targets|0", "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22", "node": "node-a", "task_id": "task_reach_any_target", "unix": 1789980741.5055227}
+{"destination": "TARGET_any_targets|0", "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22", "node": "node-b", "task_id": "task_reach_goal_receptacle", "unix": 1789980741.5401754}

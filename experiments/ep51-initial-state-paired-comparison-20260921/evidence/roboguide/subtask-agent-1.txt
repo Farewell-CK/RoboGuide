@@ -1,0 +1,1 @@
+Reach the goal receptacle position TARGET_any_targets|0.

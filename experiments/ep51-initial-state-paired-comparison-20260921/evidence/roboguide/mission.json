@@ -1,0 +1,19 @@
+{
+  "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+  "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+  "peer_channels": [],
+  "relations": [],
+  "status": "Completed",
+  "tasks": [
+    {
+      "context_id": "shared_scene",
+      "status": "Completed",
+      "task_id": "task_reach_any_target"
+    },
+    {
+      "context_id": "shared_scene",
+      "status": "Completed",
+      "task_id": "task_reach_goal_receptacle"
+    }
+  ]
+}

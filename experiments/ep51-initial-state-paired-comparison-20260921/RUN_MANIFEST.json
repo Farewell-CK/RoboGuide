@@ -1,0 +1,53 @@
+{
+  "schema_version": "roboguide.e1.ep51-initial-state-paired-run/v0.1",
+  "status": "completed",
+  "created_utc": "2026-09-21T08:44:06.249624+00:00",
+  "order": ["emos-native", "roboguide"],
+  "attempt_policy": {
+    "full_executions_per_arm": 1,
+    "native_full_executions": 1,
+    "roboguide_full_executions": 1,
+    "roboguide_pre_execution_setup_failures": 1,
+    "setup_failure_reached_provider": false,
+    "setup_failure_created_mission_request": false,
+    "setup_failure_reached_habitat": false
+  },
+  "code": {
+    "roboguide_sha": "a24feeba4b84336d870a235e56c46fb91b2d6d67",
+    "emos_sha": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "emos_tracked_diff_sha256": "172268dd4cf44e8e50ba1d51de2f9f7a4ff5377b32d7aa96bfa21f1b77c0ee78",
+    "emos_model_client_sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+  },
+  "workload": {
+    "episode_id": "51",
+    "seed": 40,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "b1_input_sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6"
+  },
+  "provider": {
+    "model": "gpt-5.6-luna",
+    "credentials_archived": false,
+    "native_wire_path": "chat completions",
+    "roboguide_mi_wire_path": "responses",
+    "roboguide_stage2_wire_path": "chat completions"
+  },
+  "directories": {
+    "raw_root": "/data/workspace/code/roboguide-ep51-paired-20260921T084406Z",
+    "native": "/data/workspace/code/roboguide-ep51-paired-20260921T084406Z/emos-native",
+    "roboguide": "/data/workspace/code/roboguide-ep51-paired-20260921T084406Z/roboguide-execution"
+  },
+  "outcomes": {
+    "native": {"exit_code": 0, "simulator_steps": 108, "official_pddl_success": true},
+    "roboguide": {
+      "exit_code": 0,
+      "simulator_steps": 108,
+      "official_pddl_success": true,
+      "mission_status": "Completed",
+      "provenance_valid": true,
+      "benchmark_outcome": "BENCHMARK_TRUE"
+    }
+  },
+  "credential_scan": {"matches": 0}
+}

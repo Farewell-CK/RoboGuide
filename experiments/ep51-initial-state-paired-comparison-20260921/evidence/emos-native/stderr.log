@@ -1,0 +1,67 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/tensorboard/compat/tensorflow_stub/dtypes.py:326: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  np.bool8: (False, True),
+2026-09-21 16:44:43,703 Initializing dataset RearrangeDataset-v0
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/data/workspace/code/emos-baseline/habitat-lab/habitat/utils/visualizations/maps.py:25: DeprecationWarning: Starting with ImageIO v3 the behavior of this function will switch to that of iio.v3.imread. To keep the current behavior (and make this warning disappear) use `import imageio.v2 as imageio` or call `imageio.v2.imread` directly.
+  AGENT_SPRITE = imageio.imread(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/envs/registration.py:440: UserWarning: [33mWARN: The `registry.env_specs` property along with `EnvSpecTree` is deprecated. Please use `registry` directly as a dictionary instead.[0m
+  logger.warn(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/tensorboard/compat/tensorflow_stub/dtypes.py:326: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  np.bool8: (False, True),
+2026-09-21 16:44:51,945 Initializing dataset RearrangeDataset-v0
+2026-09-21 16:44:51,953 initializing sim RearrangeSim-v0
+2026-09-21 16:45:03,624 Initializing task RearrangePddlTask-v0
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/core.py:317: DeprecationWarning: [33mWARN: Initializing wrapper in old step API which returns one bool instead of two. It is recommended to set `new_step_api=True` to use new step API. This will be the default behaviour in future.[0m
+  deprecation(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/spaces/box.py:128: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/core.py:317: DeprecationWarning: [33mWARN: Initializing wrapper in old step API which returns one bool instead of two. It is recommended to set `new_step_api=True` to use new step API. This will be the default behaviour in future.[0m
+  deprecation(
+/home/duchaoke/miniconda3/envs/habitat/lib/python3.9/site-packages/gym/spaces/box.py:128: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+2026-09-21 16:45:04,952 Number of params to train: 0
+2026-09-21 16:45:04,952 Agent number of parameters: 0
+2026-09-21 16:45:05,006 Number of params to train: 0
+2026-09-21 16:45:05,006 Agent number of parameters: 0
+  0%|          | 0/1 [00:00<?, ?it/s]100%|██████████| 1/1 [00:59<00:00, 59.70s/it]2026-09-21 16:46:07,385 Video created: /data/workspace/code/roboguide-ep51-paired-20260921T084406Z/emos-native/video/episode=51_1-ckpt=0-pddl_success=1.00.mp4
+
+  0%|          | 0/109 [00:00<?, ?it/s][A
+  1%|          | 1/109 [00:00<01:00,  1.80it/s][A
+  6%|▋         | 7/109 [00:00<00:07, 13.58it/s][A
+ 15%|█▍        | 16/109 [00:00<00:03, 30.16it/s][A
+ 22%|██▏       | 24/109 [00:00<00:02, 41.40it/s][A
+ 29%|██▉       | 32/109 [00:00<00:01, 50.43it/s][A
+ 37%|███▋      | 40/109 [00:01<00:01, 56.85it/s][A
+ 44%|████▍     | 48/109 [00:01<00:01, 34.89it/s][A
+ 50%|████▉     | 54/109 [00:01<00:01, 38.50it/s][A
+ 55%|█████▌    | 60/109 [00:01<00:01, 41.67it/s][A
+ 62%|██████▏   | 68/109 [00:01<00:00, 48.58it/s][A
+ 69%|██████▉   | 75/109 [00:01<00:00, 53.40it/s][A
+ 75%|███████▌  | 82/109 [00:02<00:00, 52.94it/s][A
+ 83%|████████▎ | 91/109 [00:02<00:00, 57.78it/s][A
+ 90%|████████▉ | 98/109 [00:02<00:00, 57.88it/s][A
+ 96%|█████████▋| 105/109 [00:02<00:00, 58.32it/s][A100%|██████████| 109/109 [00:02<00:00, 43.44it/s]
+100%|██████████| 1/1 [01:02<00:00, 62.93s/it]
+2026-09-21 16:46:10,608 Average episode pddl_subgoal_reward: 1.0000
+2026-09-21 16:46:10,608 Average episode pddl_success: 1.0000
+2026-09-21 16:46:10,608 Average episode pddl_stage_goals.robot_at_object_0_success: 1.0000
+2026-09-21 16:46:10,608 Average episode pddl_stage_goals.robot_at_receptacle_0_success: 1.0000
+2026-09-21 16:46:10,608 Average episode num_agents_collide: 0.0000
+2026-09-21 16:46:10,608 Average episode rearrange_cooperate_reward: 5.0000
+2026-09-21 16:46:10,608 Average episode reward: 19.9460
+2026-09-21 16:46:10,608 Average episode num_steps: 108.0000
+2026-09-21 16:46:10,608 Average episode did_collide: 0.0000
+2026-09-21 16:46:10,609 Average episode object_to_goal_distance.0: 1.6754

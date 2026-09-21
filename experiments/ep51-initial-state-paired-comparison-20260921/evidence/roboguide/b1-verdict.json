@@ -1,0 +1,102 @@
+{
+  "schema": "roboguide.e1-b1-verdict/v0.2",
+  "run_id": "roboguide-execution",
+  "evidence_digest": "e1788183c17325cd8f77a419b43f7760d00b0635979bfda0c5d75c8536643f3a",
+  "provenance_schema": "roboguide.e1.b1-provenance/v0.3",
+  "protocol_provenance": "VALID",
+  "system_outcome": "COMPLETED",
+  "admission": {
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "benchmark_authority_available": true,
+    "valid_for_benchmark_population": true,
+    "benchmark_outcome": "BENCHMARK_TRUE",
+    "run_validity": "VALID_RUN",
+    "failure_owner": "NONE",
+    "system_failure": false,
+    "model_failure": false,
+    "reasons": [],
+    "schema_version": "roboguide.e1.b1-admission/v0.1"
+  },
+  "checks": {
+    "provenance_chain_passed": true,
+    "valid_for_formal_population": true,
+    "valid_for_benchmark_population": true
+  },
+  "context": {
+    "event_archive": {
+      "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+      "run_id": "roboguide-execution",
+      "state": "complete",
+      "failure_owner": null,
+      "attempt_directory": "controller-event-pages/attempt-7gambnym",
+      "limits": {
+        "page_size": 100,
+        "max_pages": 256,
+        "max_page_bytes": 8388608,
+        "max_total_bytes": 67108864,
+        "timeout_seconds": 2.0,
+        "budget_seconds": 30.0,
+        "tail_confirmation_seconds": 0.1
+      },
+      "reason": "terminal_tail_confirmed",
+      "scope": "terminal_durable_prefix",
+      "terminal_mission": {
+        "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+        "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+        "status": "Completed"
+      },
+      "events_digest": "sha256:3f8ef31d36e74fa9745ddc31c8ece47ccf7fd1d2d7749c6e5a3fd6efabeb9624",
+      "tail_confirmations": 2,
+      "event_count": 130,
+      "last_sequence": 130,
+      "pages": 4
+    },
+    "event_archive_error": null,
+    "provenance_failures": [],
+    "semantic_goal_diagnostic": [
+      {
+        "diagnostic_only": true,
+        "status": "complete",
+        "coverage_basis": "predicate argument text in final MissionPlan semantic outcomes",
+        "objective_scope": "joint_terminal_state",
+        "authoritative_operator": "and",
+        "authoritative_predicate_count": 2,
+        "exactly_covered_predicates": [],
+        "argument_mentioned_predicates": [
+          {
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "missing_predicates": [],
+        "joint_goal_shape_preserved_in_mi_input": true
+      }
+    ],
+    "controller_receipt": {
+      "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+      "registered_task_ids": [
+        "task_reach_any_target",
+        "task_reach_goal_receptacle"
+      ],
+      "execution_ids": [
+        "attempt-46:group-mission-635f703e942e4c11ba7067ca3e7c2e22-21:task_reach_any_target-21:role_reach_any_target-1",
+        "attempt-46:group-mission-635f703e942e4c11ba7067ca3e7c2e22-26:task_reach_goal_receptacle-26:role_reach_goal_receptacle-1"
+      ],
+      "mission_status": "Completed"
+    },
+    "benchmark_tri_state": "BENCHMARK_TRUE",
+    "benchmark_outcome_reason": "official_pddl_success_authoritative"
+  },
+  "verdict": "PASS",
+  "verdict_basis": "formal_protocol_admission"
+}

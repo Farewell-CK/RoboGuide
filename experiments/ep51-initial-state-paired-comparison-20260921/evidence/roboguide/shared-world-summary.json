@@ -1,0 +1,100 @@
+{
+  "action_trace_collection": {
+    "batch_capacity_records": 32,
+    "flushes": 4,
+    "pending_records": 0,
+    "records_dropped": 0,
+    "records_written": 108,
+    "sampling_period_simulator_steps": 1,
+    "write_failures": 0,
+    "write_seconds": 0.0019188402220606804
+  },
+  "authoritative_semantic_evidence_digest": "sha256:19da44a9e78132875af1306cd2d48db0f2b1e67467f489270b4a8063cc52f27b",
+  "identity": {
+    "episode_id": "51",
+    "episode_reset_count": 1,
+    "episode_started_unix": 1789980744.3797562,
+    "episode_terminated": true,
+    "habitat_seed": 40,
+    "initial_agent_positions": {
+      "0": [
+        1.5805046558380127,
+        -2.566195011138916,
+        -4.83552360534668
+      ],
+      "1": [
+        -0.08676141500473022,
+        2.309159994125366,
+        3.6870832443237305
+      ]
+    },
+    "pid": 184628,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "simulator_steps": 108,
+    "simulator_worlds": 1
+  },
+  "official_pddl_success": true,
+  "outcomes": {
+    "0": {
+      "benchmark_task_achieved": true,
+      "destination": "any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": true,
+      "final_position": [
+        -1.334444284439087,
+        -1.775452971458435,
+        -2.5258309841156006
+      ],
+      "initial_position": [
+        1.5805046558380127,
+        -2.566195011138916,
+        -4.83552360534668
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2819,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 108,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "COMPLETED",
+      "terminal_basis": "habitat-pddl-success"
+    },
+    "1": {
+      "benchmark_task_achieved": true,
+      "destination": "TARGET_any_targets|0",
+      "episode_id": "51",
+      "episode_terminated": true,
+      "final_position": [
+        -0.1461477279663086,
+        2.2338037490844727,
+        2.590353012084961
+      ],
+      "initial_position": [
+        -0.08676141500473022,
+        2.309159994125366,
+        3.6870832443237305
+      ],
+      "invalid_outputs": 0,
+      "local_llm_calls": 2,
+      "local_replans": 0,
+      "local_skill_completed": false,
+      "local_tokens": 2855,
+      "message_pipe_activity_count": 0,
+      "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+      "send_request_count": 0,
+      "simulator_steps": 108,
+      "skill_sequence": [
+        "nav_to_obj|nav_to_obj"
+      ],
+      "state": "COMPLETED",
+      "terminal_basis": "habitat-pddl-success"
+    }
+  },
+  "stage1_assignment": "RoboGuide committed assignments (original EMOS group_discussion replaced per execution)"
+}

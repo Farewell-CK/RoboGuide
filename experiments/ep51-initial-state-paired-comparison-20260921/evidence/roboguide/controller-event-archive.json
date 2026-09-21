@@ -1,0 +1,28 @@
+{
+  "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+  "run_id": "roboguide-execution",
+  "state": "complete",
+  "failure_owner": null,
+  "attempt_directory": "controller-event-pages/attempt-7gambnym",
+  "limits": {
+    "page_size": 100,
+    "max_pages": 256,
+    "max_page_bytes": 8388608,
+    "max_total_bytes": 67108864,
+    "timeout_seconds": 2.0,
+    "budget_seconds": 30.0,
+    "tail_confirmation_seconds": 0.1
+  },
+  "reason": "terminal_tail_confirmed",
+  "scope": "terminal_durable_prefix",
+  "terminal_mission": {
+    "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+    "group_id": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+    "status": "Completed"
+  },
+  "events_digest": "sha256:3f8ef31d36e74fa9745ddc31c8ece47ccf7fd1d2d7749c6e5a3fd6efabeb9624",
+  "tail_confirmations": 2,
+  "event_count": 130,
+  "last_sequence": 130,
+  "pages": 4
+}

@@ -1,0 +1,28 @@
+{
+  "agents": [
+    {
+      "agent_idx": 0,
+      "sampled_start_rot": 5.681678493074564,
+      "start_pos": [
+        1.5805046558380127,
+        -2.566195011138916,
+        -4.83552360534668
+      ]
+    },
+    {
+      "agent_idx": 1,
+      "sampled_start_rot": 3.4487898183762367,
+      "start_pos": [
+        -0.08676141500473022,
+        2.309159994125366,
+        3.6870832443237305
+      ]
+    }
+  ],
+  "capture_method": "supervisory read of Habitat w2j output while evaluator progress was 0%; values transcribed from command output",
+  "caveat": "Habitat evaluator reset the same episode after terminal and overwrote initial-agent-state.json; that final file is preserved separately and is not the executed episode initial state.",
+  "episode_id": "51",
+  "observation_phase": "after Episode51 reset and before terminal",
+  "schema_version": "roboguide.e1.native-reset-live-observation/v0.1",
+  "source_file": "/data/workspace/code/roboguide-ep51-paired-20260921T084406Z/emos-native/initial-agent-state.json"
+}

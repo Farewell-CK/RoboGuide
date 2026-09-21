@@ -1,0 +1,104 @@
+{
+  "schema_version": "roboguide.e1.ep51-initial-state-paired-comparison-summary/v0.1",
+  "verdict": {
+    "initialization_fix_acceptance": "PASS",
+    "initial_state_parity": true,
+    "native_official_pddl_success": true,
+    "roboguide_official_pddl_success": true,
+    "roboguide_assignment_adherence": false,
+    "formal_performance_claim": false
+  },
+  "code": {
+    "main_sha": "a24feeba4b84336d870a235e56c46fb91b2d6d67",
+    "origin_main_matches": true,
+    "emos_sha": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "emos_tracked_diff_sha256": "172268dd4cf44e8e50ba1d51de2f9f7a4ff5377b32d7aa96bfa21f1b77c0ee78"
+  },
+  "workload": {
+    "episode_id": "51",
+    "seed": 40,
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+  },
+  "initial_state": {
+    "source_quality": "native live reset observation plus RoboGuide raw sampler and physical diagnostics",
+    "agents": {
+      "0": {
+        "position": [1.5805046558380127, -2.566195011138916, -4.83552360534668],
+        "sampled_rotation_radians": 5.681678493074564
+      },
+      "1": {
+        "position": [-0.08676141500473022, 2.309159994125366, 3.6870832443237305],
+        "sampled_rotation_radians": 3.4487898183762367
+      }
+    },
+    "positions_equal": true,
+    "sampled_rotations_equal": true,
+    "native_archival_caveat": "the evaluator overwrote its w2j file with a post-terminal reset; the executed reset was read live and preserved separately"
+  },
+  "native": {
+    "process_exit_code": 0,
+    "simulator_steps": 108,
+    "official_pddl_success": true,
+    "stage_goals": {
+      "robot_at_object_0_success": 1.0,
+      "robot_at_receptacle_0_success": 1.0
+    },
+    "stage1_assignment": {
+      "agent_0": "both targets",
+      "agent_1": "Nothing to do"
+    },
+    "actual_tool_calls": {
+      "agent_0": [{"name": "nav_to_obj", "target_obj": "TARGET_any_targets|0"}],
+      "agent_1": [{"name": "wait"}]
+    },
+    "llm_calls": 7,
+    "total_tokens": 11997
+  },
+  "roboguide": {
+    "process_exit_code": 0,
+    "mission_request_count": 1,
+    "request_id": "request-e84e0cd2bbd54847b2a10ebf78fafce3",
+    "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+    "plan": {
+      "coupling_mode": "independent",
+      "relations": [],
+      "task_count": 2,
+      "resources_per_task": [{"kind": "space", "units": 1}]
+    },
+    "assignments": {
+      "agent_0": "any_targets|0",
+      "agent_1": "TARGET_any_targets|0"
+    },
+    "actual_tool_calls": {
+      "agent_0": [{"name": "nav_to_obj", "target_obj": "TARGET_any_targets|0"}],
+      "agent_1": [{"name": "nav_to_obj", "target_obj": "TARGET_any_targets|0"}]
+    },
+    "predicate_transitions": [
+      {"simulator_step": 26, "target_any_at": true, "object_any_at": false},
+      {"simulator_step": 108, "target_any_at": true, "object_any_at": true}
+    ],
+    "simulator_steps": 108,
+    "official_pddl_success": true,
+    "mission_status": "Completed",
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "valid_for_benchmark_population": true,
+    "benchmark_outcome": "BENCHMARK_TRUE",
+    "diagnostics": {
+      "step_records": 108,
+      "dropped_records": 0,
+      "write_failures": 0,
+      "capture_seconds": 0.09191254153847694,
+      "capture_max_seconds": 0.0030055250972509384
+    }
+  },
+  "confirmed_issue": {
+    "component": "original EMOS Stage2 behind the RoboGuide adapter",
+    "issue": "agent-0 selected TARGET_any_targets|0 although its canonical destination was any_targets|0",
+    "benchmark_effect_in_this_run": "none because the official 2.0 m any_at regions overlap",
+    "correctness_effect": "global benchmark success does not prove per-assignment adherence or local expected-effect satisfaction"
+  },
+  "raw_run_root": "/data/workspace/code/roboguide-ep51-paired-20260921T084406Z"
+}

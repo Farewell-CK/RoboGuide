@@ -1,0 +1,16 @@
+{
+  "run_id": "roboguide-execution",
+  "input_digest": "82e97b42bdf6741997da1e2250e26fab82ce62069edb195c93c7baad80d1189b",
+  "mi_run_identity": "request-e84e0cd2bbd54847b2a10ebf78fafce3",
+  "accepted_plan_digest": "31999d0715af80a8fb34642cd812a48ea41daaab19e04371923ee5a594cca77b",
+  "mission_id": "mission-635f703e942e4c11ba7067ca3e7c2e22",
+  "controller_submission_identity": "group-mission-635f703e942e4c11ba7067ca3e7c2e22",
+  "execution_identity": "attempt-46:group-mission-635f703e942e4c11ba7067ca3e7c2e22-21:task_reach_any_target-21:role_reach_any_target-1,attempt-46:group-mission-635f703e942e4c11ba7067ca3e7c2e22-26:task_reach_goal_receptacle-26:role_reach_goal_receptacle-1",
+  "request_record_digest": "59076992229606862eef9a723a6bb760a2a59cfff87ee04a6773130d71eb965a",
+  "observations_digest": "c60b618fc2e3ff43cd5c741ad31773bc08fb0b6f124093ae192e7170c9f3a5bc",
+  "submission_evidence_digest": "393c2f5727b7177f44af32cc828d30e0769826d5e08b4015c53ea1e2fde96998",
+  "failure_evidence_digest": "",
+  "semantic_evidence_digest": "sha256:19da44a9e78132875af1306cd2d48db0f2b1e67467f489270b4a8063cc52f27b",
+  "benchmark_evidence_digest": "295e0d4c37c09c44d5143e73daaf09d655e78ce4ffc650a36fb3d716a5cdb29c",
+  "schema_version": "roboguide.e1.b1-provenance/v0.3"
+}
