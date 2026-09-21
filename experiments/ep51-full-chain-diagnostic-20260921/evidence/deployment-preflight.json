@@ -1,0 +1,54 @@
+{
+  "emos": {
+    "dirty_deployment_checkout": true,
+    "head": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "model_client_sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74",
+    "tracked_diff_sha256": "172268dd4cf44e8e50ba1d51de2f9f7a4ff5377b32d7aa96bfa21f1b77c0ee78"
+  },
+  "execution": {
+    "cuda_visible_device": "1",
+    "diagnostics_schema": "roboguide.e1.physical-diagnostics/v0.2",
+    "habitat_conda_env": "habitat",
+    "max_steps": 3000,
+    "mi_observation_budget_seconds": 1800,
+    "physical_diagnostics": true,
+    "required_ports": [
+      8070,
+      25060,
+      28060,
+      28090,
+      28100,
+      28102
+    ],
+    "single_mission_request_required": true,
+    "step_period_ms": 20
+  },
+  "origin_main_sha": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "providers": {
+    "mission": {
+      "base_url": "http://101.43.45.215:8080",
+      "credential_present": true,
+      "model": "gpt-5.6-luna",
+      "path": "/responses",
+      "review_model": "gpt-5.6-luna",
+      "wire_api": "responses"
+    },
+    "stage2": {
+      "base_url": "http://101.43.45.215:8080/v1",
+      "credential_present": true,
+      "model": "gpt-5.6-luna",
+      "wire_api": "chat.completions"
+    }
+  },
+  "run_code_sha": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "schema_version": "roboguide.e1.ep51-deployment-preflight/v0.1",
+  "status": "passed",
+  "workload": {
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "episode_id": "51",
+    "input_sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "seed": 40
+  }
+}

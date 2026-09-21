@@ -1,0 +1,10 @@
+{
+  "draft_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+  "draft_revision": 1,
+  "grounding_context_digest": "sha256:8b3ee680ec44adb92c306a3d9d7266f8e4b585514529e436d73489675654b319",
+  "review": {
+    "approved": true,
+    "issues": []
+  },
+  "reviewed_at_ms": 1789955835523
+}

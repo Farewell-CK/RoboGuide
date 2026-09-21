@@ -1,0 +1,28 @@
+{
+  "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+  "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+  "request_record_digest": "sha256:8338db402c866666d4d9d746a13323525f5879fa713286afaee506304489ddc1",
+  "submission_evidence": {
+    "submitted_plan_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+    "raw_request_body_sha256": "sha256:0959a7db0981db9866b2a25607e36a3fdaab0114196a27d078529c1c656d8487",
+    "submitted_mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+    "submitted_at_ms": 1789955835628,
+    "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+    "controller_status_code": 409,
+    "controller_mission_id": null,
+    "controller_group_id": null,
+    "transport_error": null,
+    "schema_version": "roboguide.controller-submission-evidence/v0.1"
+  },
+  "failure_evidence": {
+    "detail": "control rejected orchestration: invalid proposal: physical entity registry does not cover every constrained candidate Node",
+    "failure_owner": "SUT_SYSTEM",
+    "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+    "observed_at_ms": 1789955835686,
+    "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+    "schema_version": "roboguide.mission-request-failure/v0.1",
+    "stage": "controller_submission"
+  },
+  "rejected_drafts": [],
+  "schema_version": "roboguide.mission-request-observations/v0.1"
+}

@@ -1,0 +1,147 @@
+{
+  "contexts": [
+    {
+      "coupling_mode": "independent",
+      "executor_constraints": [
+        {
+          "context_roles": [
+            "robot_a",
+            "robot_b"
+          ],
+          "kind": "distinct-physical-entities"
+        }
+      ],
+      "id": "shared_scene",
+      "relations": [],
+      "roles": [
+        {
+          "actor": "robot_a",
+          "id": "robot_a"
+        },
+        {
+          "actor": "robot_b",
+          "id": "robot_b"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "actors": [
+      {
+        "id": "robot_a"
+      },
+      {
+        "id": "robot_b"
+      }
+    ],
+    "id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+    "objective": "Achieve the benchmark's joint terminal state by ensuring that at least one robot reaches any_targets|0 and at least one robot reaches the goal receptacle position TARGET_any_targets|0."
+  },
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "tasks": [
+    {
+      "context_id": "shared_scene",
+      "depends_on": [],
+      "description": "The robot assigned to this task is at any_targets|0.",
+      "id": "reach_any_targets",
+      "roles": [
+        {
+          "context_role": "robot_a",
+          "execution_intent": {
+            "objective": "Reach the semantic destination any_targets|0.",
+            "operation": {
+              "name": "move",
+              "namespace": "mobility",
+              "version": "v1"
+            },
+            "parameters": {
+              "destination": "any_targets|0"
+            }
+          },
+          "id": "reach_any_targets_role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "The robot assigned to this task is at any_targets|0.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    },
+    {
+      "context_id": "shared_scene",
+      "depends_on": [],
+      "description": "The robot assigned to this task is at TARGET_any_targets|0.",
+      "id": "reach_target_any_targets",
+      "roles": [
+        {
+          "context_role": "robot_b",
+          "execution_intent": {
+            "objective": "Reach the semantic destination TARGET_any_targets|0.",
+            "operation": {
+              "name": "move",
+              "namespace": "mobility",
+              "version": "v1"
+            },
+            "parameters": {
+              "destination": "TARGET_any_targets|0"
+            }
+          },
+          "id": "reach_target_any_targets_role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "The robot assigned to this task is at TARGET_any_targets|0.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    }
+  ]
+}

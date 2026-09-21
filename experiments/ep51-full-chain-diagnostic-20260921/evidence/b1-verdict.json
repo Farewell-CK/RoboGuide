@@ -1,0 +1,91 @@
+{
+  "schema": "roboguide.e1-b1-verdict/v0.2",
+  "run_id": "b1-diag-ep51-seed40",
+  "evidence_digest": "8fff8e5af12533358b990afa5995db7703f6503ca1bbf3ec0c6bbbf215f8b66f",
+  "provenance_schema": "roboguide.e1.b1-provenance/v0.3",
+  "protocol_provenance": "VALID",
+  "system_outcome": "FAILURE",
+  "admission": {
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "benchmark_authority_available": false,
+    "valid_for_benchmark_population": false,
+    "benchmark_outcome": "BENCHMARK_UNAVAILABLE",
+    "run_validity": "SYSTEM_FAILURE",
+    "failure_owner": "SUT_SYSTEM",
+    "system_failure": true,
+    "model_failure": false,
+    "reasons": [
+      "mission_request_controller_submission_failed",
+      "benchmark_authority_unavailable"
+    ],
+    "schema_version": "roboguide.e1.b1-admission/v0.1"
+  },
+  "checks": {
+    "provenance_chain_passed": true,
+    "valid_for_formal_population": true,
+    "valid_for_benchmark_population": false
+  },
+  "context": {
+    "event_archive": {
+      "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+      "run_id": "b1-diag-ep51-seed40",
+      "state": "not_required",
+      "failure_owner": null,
+      "attempt_directory": "controller-event-pages/attempt-8vjbd3fq",
+      "limits": {
+        "page_size": 100,
+        "max_pages": 256,
+        "max_page_bytes": 8388608,
+        "max_total_bytes": 67108864,
+        "timeout_seconds": 2.0,
+        "budget_seconds": 30.0,
+        "tail_confirmation_seconds": 0.1
+      },
+      "reason": "pre_submission_boundary",
+      "event_count": 0,
+      "last_sequence": 0,
+      "pages": 0
+    },
+    "event_archive_error": null,
+    "provenance_failures": [],
+    "semantic_goal_diagnostic": [
+      {
+        "diagnostic_only": true,
+        "status": "complete",
+        "coverage_basis": "predicate argument text in final MissionPlan semantic outcomes",
+        "objective_scope": "joint_terminal_state",
+        "authoritative_operator": "and",
+        "authoritative_predicate_count": 2,
+        "exactly_covered_predicates": [],
+        "argument_mentioned_predicates": [
+          {
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "missing_predicates": [],
+        "joint_goal_shape_preserved_in_mi_input": true
+      }
+    ],
+    "controller_receipt": {
+      "mission_id": null,
+      "group_id": null,
+      "registered_task_ids": [],
+      "execution_ids": [],
+      "mission_status": null
+    },
+    "benchmark_tri_state": "BENCHMARK_UNAVAILABLE",
+    "benchmark_outcome_reason": "authority_document_missing_or_malformed"
+  },
+  "verdict": "PASS",
+  "verdict_basis": "formal_protocol_admission"
+}

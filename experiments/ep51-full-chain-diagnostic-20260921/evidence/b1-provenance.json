@@ -1,0 +1,16 @@
+{
+  "run_id": "b1-diag-ep51-seed40",
+  "input_digest": "82e97b42bdf6741997da1e2250e26fab82ce62069edb195c93c7baad80d1189b",
+  "mi_run_identity": "request-07f444f230c3465ba9bc852b543c0cb7",
+  "accepted_plan_digest": "e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+  "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+  "controller_submission_identity": "",
+  "execution_identity": "",
+  "request_record_digest": "8338db402c866666d4d9d746a13323525f5879fa713286afaee506304489ddc1",
+  "observations_digest": "d11123aed8a6a181824133f71f348807f1c3286e487b2eccc52c96f40cebea1e",
+  "submission_evidence_digest": "8bf17045f7a62f68ebda6a0f4695b75720dfd8494e449ee6bba43132b0d8a739",
+  "failure_evidence_digest": "",
+  "semantic_evidence_digest": "sha256:efad4d24f94a6ce0f2464c4da7a8307b2b0d3262f5998746060e521974cc185b",
+  "benchmark_evidence_digest": null,
+  "schema_version": "roboguide.e1.b1-provenance/v0.3"
+}

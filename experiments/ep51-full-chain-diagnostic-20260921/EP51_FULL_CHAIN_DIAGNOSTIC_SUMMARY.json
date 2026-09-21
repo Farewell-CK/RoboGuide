@@ -1,0 +1,60 @@
+{
+  "confirmed_causes": [
+    "The accepted MissionPlan declared distinct-physical-entities for its two ContextRoles.",
+    "The B1 Controller process was started without a deployment physical-entity registry.",
+    "Control rejected the constrained candidate set before Mission creation."
+  ],
+  "control_assignments": [],
+  "earliest_confirmed_failure": {
+    "detail": "control rejected orchestration: invalid proposal: physical entity registry does not cover every constrained candidate Node",
+    "http_status": 409,
+    "stage": "controller_submission"
+  },
+  "evidence": {
+    "controller_rejection": "evidence/controller-rejection.json",
+    "manifest": "RUN_MANIFEST.json",
+    "request": "evidence/b1-request-record.json",
+    "review": "evidence/review-result.json",
+    "verdict": "evidence/b1-verdict.json"
+  },
+  "fetch_execution": "unavailable",
+  "habitat_steps": 0,
+  "mission_request": {
+    "executor_constraints": [
+      {
+        "context_roles": [
+          "robot_a",
+          "robot_b"
+        ],
+        "kind": "distinct-physical-entities"
+      }
+    ],
+    "final_plan_coupling_mode": "independent",
+    "lifecycle": "Blocked",
+    "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+    "review_approved": true
+  },
+  "official_pddl_success": null,
+  "official_pddl_success_status": "unavailable",
+  "physical_episode_executed": false,
+  "protocol_result": {
+    "benchmark_authority_available": false,
+    "benchmark_outcome": "BENCHMARK_UNAVAILABLE",
+    "failure_owner": "SUT_SYSTEM",
+    "protocol_provenance": "VALID",
+    "provenance_valid": true,
+    "system_outcome": "FAILURE",
+    "valid_for_benchmark_population": false,
+    "valid_for_formal_population": true
+  },
+  "request_count": 1,
+  "run_code_sha": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "run_id": "b1-diag-ep51-seed40",
+  "schema_version": "roboguide.e1.ep51-full-chain-diagnostic-summary/v0.1",
+  "spot_execution": "unavailable",
+  "stage2_called": false,
+  "unverified_hypotheses": [
+    "Whether a future physical run would reproduce the historical Fetch navigation behavior.",
+    "Whether installing a truthful deployment registry alone is the right remedy; the Mission semantic basis for physical distinctness must be reviewed first."
+  ]
+}

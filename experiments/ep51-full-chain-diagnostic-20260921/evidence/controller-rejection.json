@@ -1,0 +1,17 @@
+{
+  "controller_group_id": null,
+  "controller_mission_event_count": 0,
+  "controller_mission_id": null,
+  "controller_status_code": 409,
+  "execution_attempt_count": 0,
+  "failure_detail": "control rejected orchestration: invalid proposal: physical entity registry does not cover every constrained candidate Node",
+  "failure_owner": "SUT_SYSTEM",
+  "failure_stage": "controller_submission",
+  "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+  "physical_episode_executed": false,
+  "plan_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+  "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+  "request_lifecycle": "Blocked",
+  "schema_version": "roboguide.e1.ep51-controller-rejection/v0.1",
+  "submitted_at_ms": 1789955835628
+}

@@ -1,0 +1,24 @@
+{
+  "basis": "deployment-chosen experiment observation boundary; not the MI theoretical worst-case and not a claim about MI execution time",
+  "mi_worst_case_derivation": {
+    "components": {
+      "controller_submission": 30.0,
+      "grounding_capture": 20.0,
+      "interpreter": 600.0,
+      "planner_with_prevalidation": 1800.0,
+      "repairer": 1200.0,
+      "reviewer": 1800.0,
+      "scheduling_margin": 300.0
+    },
+    "derivation": "grounding 2*attempts*timeout + interpreter timeout + planner (1+prevalidation)*timeout + reviewer (max_repair+1)*timeout + repairer max_repair*timeout + controller timeout + margin",
+    "schema_version": "roboguide.e1.mi-wait-budget/v0.1",
+    "sources": {
+      "mission_config": "/tmp/roboguide-ep51-run-cb3eee1/config/mission.toml",
+      "service_config": "/data/workspace/code/roboguide-ep51-full-chain-diag-20260921T015004Z/b1-diag-ep51-seed40/mission-service-b1.toml"
+    },
+    "stall_seconds": 1200.0,
+    "total_seconds": 5750.0
+  },
+  "observation_budget_seconds": 1800.0,
+  "schema_version": "roboguide.e1.mi-observation-budget/v0.1"
+}

@@ -1,0 +1,182 @@
+{
+  "archived_evidence": [
+    {
+      "bytes": 1213,
+      "path": "evidence/authoritative-semantic-evidence.json",
+      "sha256": "09521d652eeb668236f6d74ad659931ba85df6cdb06bd7af0076e528b4e6e143"
+    },
+    {
+      "bytes": 1543,
+      "path": "evidence/b1-input-used.json",
+      "sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6"
+    },
+    {
+      "bytes": 929,
+      "path": "evidence/b1-provenance.json",
+      "sha256": "d90a9142945203b0086c41b8d21c39ad71440462bfdeba5b50fcc21736bca62f"
+    },
+    {
+      "bytes": 1399,
+      "path": "evidence/b1-request-observations.json",
+      "sha256": "770509c4db8e1d992f1d4608f3a8d7900f74cf53605437b637ca5bf1763fc3f0"
+    },
+    {
+      "bytes": 8705,
+      "path": "evidence/b1-request-record.json",
+      "sha256": "b641691cd90d79b064360e33fe6ed7d18fc0fa404fe45cefc5c44852fe926fb4"
+    },
+    {
+      "bytes": 140,
+      "path": "evidence/b1-timing.txt",
+      "sha256": "ba3ba9e784b78c2c7d97ec8e50dfeabbb48e71cc70df7bd1d7d319b2cff507c9"
+    },
+    {
+      "bytes": 2848,
+      "path": "evidence/b1-verdict.json",
+      "sha256": "89736fb6c3766ec64c35f89edceaf011feee74b1c893df0a9ff587d2bc5051b9"
+    },
+    {
+      "bytes": 537,
+      "path": "evidence/controller-event-archive.json",
+      "sha256": "4242f295b516f27a15dd16e5cd55f7fbaa676f22bf1017b6b9da4b7f526a8478"
+    },
+    {
+      "bytes": 781,
+      "path": "evidence/controller-rejection.json",
+      "sha256": "576fdba11e2cc2ef320355f600265bd95e7cd45bf3cbec422ccb854b98bbb67d"
+    },
+    {
+      "bytes": 1740,
+      "path": "evidence/deployment-preflight.json",
+      "sha256": "53ff40a035433b2aa83f2587afa6cc047bd6a50109e952635873cc12154e1e71"
+    },
+    {
+      "bytes": 77,
+      "path": "evidence/execution-attempts.json",
+      "sha256": "db57905fcddb5ae17b6870d8fc136f68e9fa746ef69076a129ea110da9db8b8e"
+    },
+    {
+      "bytes": 3918,
+      "path": "evidence/final-mission-plan.json",
+      "sha256": "4f632a2078951af884153289a9476449f0e48cf6c6d5f64c0af390f378ecc701"
+    },
+    {
+      "bytes": 1095,
+      "path": "evidence/mi-wait-budget.json",
+      "sha256": "272cb504b0e59acb382c6ba7316f9517416b035337b96e598fdc34b4eaecbc23"
+    },
+    {
+      "bytes": 227,
+      "path": "evidence/mi-wait-outcome.json",
+      "sha256": "96e82b4b063ec8c2fa9b5fd3e668dcf5fb5d41b95c1857be82f124f5c5c95d56"
+    },
+    {
+      "bytes": 317,
+      "path": "evidence/review-result.json",
+      "sha256": "a9c4faa7e884bf47066d357ae73f160f596f3389e7d1ca8cec44b8653d24383c"
+    }
+  ],
+  "controller": {
+    "assignment_count": 0,
+    "execution_attempt_count": 0,
+    "failure_detail": "control rejected orchestration: invalid proposal: physical entity registry does not cover every constrained candidate Node",
+    "mission_accepted": false,
+    "status_code": 409
+  },
+  "external_emos": {
+    "dirty_deployment_checkout": true,
+    "head": "e9501db45d634b087bf5d1a14228266685e8feeb",
+    "model_client_sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74",
+    "tracked_diff_sha256": "172268dd4cf44e8e50ba1d51de2f9f7a4ff5377b32d7aa96bfa21f1b77c0ee78"
+  },
+  "final_plan": {
+    "coupling_mode": "independent",
+    "executor_constraints": [
+      {
+        "context_roles": [
+          "robot_a",
+          "robot_b"
+        ],
+        "kind": "distinct-physical-entities"
+      }
+    ],
+    "relations": [],
+    "task_ids": [
+      "reach_any_targets",
+      "reach_target_any_targets"
+    ],
+    "task_resource_requirements": {
+      "reach_any_targets": [
+        {
+          "kind": "space",
+          "units": 1
+        }
+      ],
+      "reach_target_any_targets": [
+        {
+          "kind": "space",
+          "units": 1
+        }
+      ]
+    }
+  },
+  "frozen_workload": {
+    "dataset_revision": "mobility_episodes_1",
+    "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+    "episode_id": "51",
+    "input_sha256": "1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+    "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+    "seed": 40
+  },
+  "origin_main_at_execution": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "physical_execution": {
+    "executed": false,
+    "habitat_steps": 0,
+    "physical_diagnostics_produced": false,
+    "reason": "Controller rejected the MissionPlan before Mission creation.",
+    "stage2_called": false
+  },
+  "protocol_result": {
+    "benchmark_authority_available": false,
+    "benchmark_outcome": "BENCHMARK_UNAVAILABLE",
+    "failure_owner": "SUT_SYSTEM",
+    "protocol_provenance": "VALID",
+    "provenance_valid": true,
+    "system_outcome": "FAILURE",
+    "valid_for_benchmark_population": false,
+    "valid_for_formal_population": true
+  },
+  "provider_identity": {
+    "mission": {
+      "credential_present": true,
+      "model": "gpt-5.6-luna",
+      "path": "/responses",
+      "review_model": "gpt-5.6-luna",
+      "wire_api": "responses"
+    },
+    "stage2": {
+      "called": false,
+      "credential_present": true,
+      "model": "gpt-5.6-luna",
+      "wire_api": "chat.completions"
+    }
+  },
+  "report_base_sha": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "run_code_sha": "cb3eee10d1aae6fd33a714de4ccfd4e5770f6f38",
+  "run_directory": "/data/workspace/code/roboguide-ep51-full-chain-diag-20260921T015004Z/b1-diag-ep51-seed40",
+  "run_finished_at": "2026-09-21T01:57:16Z",
+  "run_id": "b1-diag-ep51-seed40",
+  "run_started_at": "2026-09-21T01:52:45Z",
+  "schema_version": "roboguide.e1.ep51-full-chain-diagnostic-manifest/v0.1",
+  "single_request": {
+    "draft_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+    "draft_revision": 1,
+    "lifecycle": "Blocked",
+    "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+    "repair_attempts": 0,
+    "request_count": 1,
+    "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+    "review_approved": true,
+    "review_count": 1
+  }
+}

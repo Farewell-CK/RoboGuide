@@ -1,0 +1,257 @@
+{
+  "schema_version": "roboguide.mission-request/v0.4",
+  "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+  "mission_id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+  "dialogue": [
+    {
+      "turn_id": "turn-0001",
+      "speaker": "User",
+      "kind": "Instruction",
+      "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+      "created_at_ms": 1789955566034,
+      "in_reply_to": null
+    }
+  ],
+  "lifecycle": "Blocked",
+  "assessment": {
+    "objective": "Achieve the benchmark's joint terminal state by ensuring that at least one robot reaches any_targets|0 and at least one robot reaches the goal receptacle position TARGET_any_targets|0.",
+    "constraints": [
+      "Use the two robots operating in the shared multi-floor scene: the legged Spot and the wheeled Fetch.",
+      "The division of work between the robots is delegated to the system.",
+      "The joint terminal condition is that a robot is at any_targets|0 and a robot is at TARGET_any_targets|0."
+    ],
+    "assumptions": [
+      "The objective requires positional arrival only: no pickup, transport, placement, or handoff is requested.",
+      "Either robot may satisfy either positional condition; the robot assignment is left open as requested."
+    ],
+    "open_questions": []
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-83c7e24f50cf49f4bda2526b3832d1fc",
+      "objective": "Achieve the benchmark's joint terminal state by ensuring that at least one robot reaches any_targets|0 and at least one robot reaches the goal receptacle position TARGET_any_targets|0.",
+      "actors": [
+        {
+          "id": "robot_a"
+        },
+        {
+          "id": "robot_b"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "shared_scene",
+        "roles": [
+          {
+            "id": "robot_a",
+            "actor": "robot_a"
+          },
+          {
+            "id": "robot_b",
+            "actor": "robot_b"
+          }
+        ],
+        "relations": [],
+        "coupling_mode": "independent",
+        "executor_constraints": [
+          {
+            "kind": "distinct-physical-entities",
+            "context_roles": [
+              "robot_a",
+              "robot_b"
+            ]
+          }
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "id": "reach_any_targets",
+        "description": "The robot assigned to this task is at any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "reach_any_targets_role",
+            "context_role": "robot_a",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Reach the semantic destination any_targets|0.",
+              "parameters": {
+                "destination": "any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "shared_scene",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The robot assigned to this task is at any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "reach_target_any_targets",
+        "description": "The robot assigned to this task is at TARGET_any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "reach_target_any_targets_role",
+            "context_role": "robot_b",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Reach the semantic destination TARGET_any_targets|0.",
+              "parameters": {
+                "destination": "TARGET_any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "shared_scene",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The robot assigned to this task is at TARGET_any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "grounding_context": {
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "context_digest": "sha256:8b3ee680ec44adb92c306a3d9d7266f8e4b585514529e436d73489675654b319",
+    "request_id": "request-07f444f230c3465ba9bc852b543c0cb7",
+    "dialogue_digest": "sha256:e1c37eaecc9d9a2e9f61d1474daf56d6b762c4ba72394a99e573b70763c1b037",
+    "captured_at_ms": 1789955566154,
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "state_evidence": [],
+    "memory_evidence": [],
+    "gaps": [],
+    "semantic_evidence": {
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "authority": "environment-authoritative",
+      "identity": {
+        "run_id": "b1-diag-ep51-seed40",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+      },
+      "objective_scope": "joint_terminal_state",
+      "goal": {
+        "kind": "logical",
+        "operator": "and",
+        "operands": [
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "quantifier": null,
+        "variables": []
+      },
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      },
+      "digest": "sha256:efad4d24f94a6ce0f2464c4da7a8307b2b0d3262f5998746060e521974cc185b"
+    }
+  },
+  "draft_revision": 1,
+  "draft_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+  "approval_required": false,
+  "approval_reasons": [],
+  "issues": [
+    "Controller HTTP 409: control rejected orchestration: invalid proposal: physical entity registry does not cover every constrained candidate Node"
+  ],
+  "repair_attempts": 0,
+  "review_history": [
+    {
+      "draft_revision": 1,
+      "draft_digest": "sha256:e984abede620cfaf062458d0dc57ed86dc8ea9d9ca331ec6ce3ca01675f25724",
+      "grounding_context_digest": "sha256:8b3ee680ec44adb92c306a3d9d7266f8e4b585514529e436d73489675654b319",
+      "review": {
+        "approved": true,
+        "issues": []
+      },
+      "reviewed_at_ms": 1789955835523
+    }
+  ],
+  "created_at_ms": 1789955566034,
+  "updated_at_ms": 1789955835686
+}
