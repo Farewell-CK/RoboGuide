@@ -26,6 +26,7 @@ from mission.rejected_draft import RejectedPlanError
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 from mission.satisfaction_policy import MissionSatisfactionPolicy, validate_satisfaction_policy
+from mission.semantic_admission import validate_authoritative_executor_constraints
 from mission.semantic_evidence import semantic_goal_review_payload
 
 
@@ -93,6 +94,7 @@ def _validate_plan_output(
         plan = execution_profile.apply(plan)
     plan.validate_implementation_support()
     plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
+    validate_authoritative_executor_constraints(plan, grounding_context)
     if plan.mission.mission_id != mission_id:
         raise MissionProviderError("model changed the requested mission id")
     if plan.mission.objective != grounded_intent.objective:

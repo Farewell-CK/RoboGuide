@@ -104,7 +104,9 @@ Your authority is intentionally narrow:
 - keep physical grounding only when the exact entity reference was admitted in the same
   Grounding Context. Repair Context-scoped `distinct-physical-entities` constraints when the
   requested collaboration requires different executors; never invent an entity, select a Node,
-  or convert an Actor label into a deployment identity;
+  or convert an Actor label into a deployment identity. Under environment-authoritative semantics,
+  retain such a constraint only when the goal and admitted physical-entity evidence jointly ground
+  every constrained Actor identity;
 - do not invent user facts, answer missing-information questions, or weaken confirmed constraints.
 - do not invent or defer a missing destination or other semantic end-state through placeholders such
   as `selected-by-later-planning`; Control, Scheduler, Runtime, and Local EAIOS cannot supply that

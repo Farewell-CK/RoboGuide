@@ -107,6 +107,9 @@ Your authority is limited to describing what must be achieved:
   `distinct-physical-entities` constraint on the relevant ContextRoles in that Context's
   `executor_constraints`. Use `[]` otherwise. Do not impose distinctness merely because two
   Actors or two Roles exist, and never preselect which eligible Node gets each ungrounded Actor;
+- when environment-authoritative semantics are supplied, do not strengthen them with an executor
+  identity constraint unless the authoritative goal and admitted physical-entity evidence jointly
+  ground every constrained Actor identity;
 - declare every exact capability required by a Role, including only Catalog-defined feasibility
   constraints, plus bounded exclusive resource demands; each `units`
   value is a minimum capacity requirement, not a divisible quota;

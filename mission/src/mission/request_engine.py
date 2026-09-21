@@ -45,6 +45,7 @@ from mission.review import (
     MissionReviewRoute,
     route_mission_review,
 )
+from mission.semantic_admission import validate_authoritative_executor_constraints
 from mission.submission_evidence import ControllerSubmissionEvidence, canonical_plan_digest
 
 
@@ -445,6 +446,7 @@ class MissionRequestEngine:
         plan.validate_physical_entity_grounding(
             admitted_physical_entity_ids(self._require_grounding_context(record))
         )
+        validate_authoritative_executor_constraints(plan, self._require_grounding_context(record))
         if plan.mission.mission_id != record.mission_id:
             raise MissionRequestError("Planner changed the requested mission id")
         if plan.mission.objective != grounded_intent.objective:

@@ -117,7 +117,9 @@ Approve it only when all of the following hold:
   an exact fresh admitted reference in this Grounding Context, never an invented Node or Host.
   Context `executor_constraints` express required physical distinctness, not a global policy
   to spread Nodes. Do not require distinctness without a semantic reason or fix ungrounded
-  Actors to particular live providers;
+  Actors to particular live providers. Under environment-authoritative semantics, approve such a
+  constraint only when the goal and admitted physical-entity evidence jointly ground every
+  constrained Actor identity;
 - each Role declares all exact capability requirements separately from its canonical semantic
   Operation and contains no adapter-local skill name;
 - every canonical contract and parameter conforms to the supplied Catalog without treating Catalog
