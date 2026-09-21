@@ -122,7 +122,9 @@ def _read(accessor: Callable[..., Any], *args: Any) -> Any:
 
 def _position(sim: Any, agent_id: int) -> Any:
     """Read one agent's articulated base position from the live simulator."""
-    return list(sim.get_agent_data(agent_id).articulated_agent.base_pos)
+    return [
+        float(component) for component in sim.get_agent_data(agent_id).articulated_agent.base_pos
+    ]
 
 
 def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
@@ -155,7 +157,81 @@ def _entity_position(sim_info: Any, problem: Any, name: str) -> Any:
     entity = problem.get_entity(name)
     if entity is None:
         return {"_status": _UNAVAILABLE, "reason": f"entity {name!r} unresolved"}
-    return list(sim_info.get_entity_pos(entity))
+    return [float(component) for component in sim_info.get_entity_pos(entity)]
+
+
+def _json_scalar(value: Any) -> Any:
+    """Convert one array-library scalar without importing a vendor dependency."""
+    item = getattr(value, "item", None)
+    if callable(item):
+        converted = item()
+        if converted is None or isinstance(converted, (bool, int, float, str)):
+            return converted
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _action_row_summary(row: Any) -> dict[str, Any]:
+    """Summarize one indexable action row without interpreting action semantics."""
+    width = len(row)
+    if width <= 0:
+        raise ValueError("action row is empty")
+    return {
+        "argmax": int(row.argmax()),
+        "nonzero": [int(index) for index in range(width) if row[index] != 0],
+    }
+
+
+def _flat_action_values(action: Any) -> list[float]:
+    """Read a flat joint action view for shape-compatible diagnostic fallback."""
+    value = action
+    detach = getattr(value, "detach", None)
+    if callable(detach):
+        value = detach()
+    cpu = getattr(value, "cpu", None)
+    if callable(cpu):
+        value = cpu()
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+
+    flattened: list[float] = []
+
+    def collect(item: Any) -> None:
+        """Collect numeric leaves while rejecting opaque action objects."""
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                collect(child)
+            return
+        scalar = item
+        converter = getattr(scalar, "item", None)
+        if callable(converter):
+            scalar = converter()
+        if not isinstance(scalar, (bool, int, float)):
+            raise TypeError(f"action leaf {type(scalar).__name__} is not numeric")
+        flattened.append(float(scalar))
+
+    collect(value)
+    if not flattened:
+        raise ValueError("joint action is empty")
+    return flattened
+
+
+def _action_summary(env_action: Any, agent_ids: tuple[int, ...]) -> dict[str, Any]:
+    """Summarize per-agent rows or retain an explicit flat joint-action scope."""
+    try:
+        return {str(agent_id): _action_row_summary(env_action[agent_id]) for agent_id in agent_ids}
+    except Exception:  # noqa: BLE001 - deployment action layout may be flat
+        values = _flat_action_values(env_action)
+        shape = getattr(env_action, "shape", None)
+        shape_value = (
+            [int(dimension) for dimension in shape] if shape is not None else [len(values)]
+        )
+        return {
+            "_scope": "joint_flat_action",
+            "shape": shape_value,
+            "argmax": max(range(len(values)), key=values.__getitem__),
+            "nonzero": [index for index, value in enumerate(values) if value != 0.0],
+        }
 
 
 def _predicate_sim_info(sim_info: Any) -> Any:
@@ -256,18 +332,28 @@ class PhysicalDiagnostics:
 
     def _unavailable_document(self, document: dict[str, Any], reason: str) -> dict[str, Any]:
         """Build a bounded record when a requested diagnostic document is unavailable."""
-        return {
+        unavailable = {
             "_status": _UNAVAILABLE,
             "phase": document.get("phase", "per_step"),
             "reason": reason,
             "schema_version": DIAGNOSTICS_SCHEMA,
             "simulator_step": document.get("simulator_step"),
         }
+        for key in ("collection_stats", "dropped_diagnostic_records"):
+            if key in document:
+                unavailable[key] = document[key]
+        return unavailable
 
     def _serialize_document(self, document: dict[str, Any], *, indent: int | None) -> str:
         """Encode one bounded document, degrading serialization failures to unavailable."""
         try:
-            encoded = json.dumps(document, ensure_ascii=False, indent=indent, sort_keys=True)
+            encoded = json.dumps(
+                document,
+                default=_json_scalar,
+                ensure_ascii=False,
+                indent=indent,
+                sort_keys=True,
+            )
         except Exception as error:  # noqa: BLE001 - serialization must not affect execution
             self._dropped_records += 1
             encoded = json.dumps(
@@ -386,10 +472,14 @@ class PhysicalDiagnostics:
         policy = policies[agent_id]
         index = int(policy._cur_skills[0])
         name = policy._idx_to_name[index]
-        skill = policy.defined_skills.get(name)
+        skills = getattr(policy, "_skills", None)
+        skill = skills.get(index) if isinstance(skills, dict) else None
         state: dict[str, Any] = {"skill": name}
         if skill is None:
-            state["_skill_detail"] = {"_status": _UNAVAILABLE, "reason": "skill object unavailable"}
+            state["_skill_detail"] = {
+                "_status": _UNAVAILABLE,
+                "reason": "active skill object unavailable",
+            }
             return state
         current = _read(lambda: float(skill._cur_skill_step[0]))
         maximum = _read(lambda: int(skill._max_skill_steps))
@@ -559,16 +649,7 @@ class PhysicalDiagnostics:
                 return
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim
-            action_summary: dict[str, Any] = {}
-            try:
-                for agent_id in self._agent_ids:
-                    row = env_action[agent_id]
-                    action_summary[str(agent_id)] = {
-                        "argmax": int(row.argmax()),
-                        "nonzero": [int(index) for index in range(len(row)) if row[index] != 0],
-                    }
-            except Exception as error:  # noqa: BLE001 - keep observing through malformed views
-                action_summary = {"_status": _UNAVAILABLE, "reason": str(error)}
+            action_summary = _read(_action_summary, env_action, self._agent_ids)
             document = {
                 "schema_version": DIAGNOSTICS_SCHEMA,
                 "simulator_step": step,

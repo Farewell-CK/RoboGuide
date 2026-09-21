@@ -6,7 +6,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
@@ -41,6 +41,39 @@ class FakeVec:  # minimal numpy-like 1-D view supporting argmax/!=0.
     def __getitem__(self, index: int) -> float:
         """Return one action component."""
         return self._values[index]
+
+
+class FakeArrayScalar:
+    """Emulate one NumPy scalar without requiring NumPy in offline tests."""
+
+    def __init__(self, value: float | bool) -> None:
+        """Store the scalar value returned by ``item``."""
+        self._value = value
+
+    def item(self) -> float | bool:
+        """Return the corresponding built-in JSON scalar."""
+        return self._value
+
+    def __float__(self) -> float:
+        """Match array-library scalar conversion used for pose components."""
+        return float(self._value)
+
+
+class FakeFlatAction:
+    """Emulate the flat joint action layout observed in the real deployment."""
+
+    def __init__(self, values: list[float]) -> None:
+        """Store a fixed flat vector and its array-style shape."""
+        self._values = values
+        self.shape = (len(values),)
+
+    def __getitem__(self, index: int) -> FakeArrayScalar:
+        """Return a scalar so the per-agent row interpretation fails safely."""
+        return FakeArrayScalar(self._values[index])
+
+    def tolist(self) -> list[float]:
+        """Return the flat numeric action values."""
+        return list(self._values)
 
 
 class FakePredicate:
@@ -158,8 +191,8 @@ class FakePolicy:
     def __init__(self, skill: FakeSkill, name: str) -> None:
         """Expose the active skill and its bookkeeping."""
         self._cur_skills = [0]
-        self._idx_to_name = [name]
-        self.defined_skills = {name: skill}
+        self._idx_to_name = {0: name}
+        self._skills = {0: skill}
         self._cur_call_high_level = [False]
 
 
@@ -217,6 +250,31 @@ def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> Non
     assert document["schema_version"] == DIAGNOSTICS_SCHEMA
     assert document["seed"] is None  # config stub carries no seed
     assert document["habitat_seed_config"] == 40
+
+
+def test_array_scalars_remain_available_in_reset_and_terminal_snapshots(
+    tmp_path: Path,
+) -> None:
+    """Vendor scalar types serialize without degrading complete world snapshots."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv(
+        [FakePredicate("any_targets|0", False)],
+        metrics={"pddl_success": False, "path_length": FakeArrayScalar(1.25)},
+    )
+    env.sim._agents[0].base_pos = cast(
+        Any,
+        [FakeArrayScalar(0.5), FakeArrayScalar(1.0), FakeArrayScalar(2.0)],
+    )
+
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 0, "episode_done")
+
+    initial = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert initial["agents"]["0"]["position"] == [0.5, 1.0, 2.0]
+    assert initial.get("_status") is None
+    assert terminal["official_metrics"]["path_length"] == 1.25
+    assert terminal["collection_stats"]["writer"]["records_dropped"] == 0
 
 
 def test_local_completion_and_official_noncompletion_coexist(tmp_path: Path) -> None:
@@ -280,6 +338,50 @@ def test_skill_timeout_and_real_completion_are_distinguishable(tmp_path: Path) -
     assert exit_reason["candidates"] == ["skill_step_budget"]
     assert spot["cur_skill_step"] == 3.0
     assert row["agents"]["1"]["oracle_flags"]["oracle_skill_done"] is False
+
+
+def test_current_hierarchical_policy_skill_map_is_observed(tmp_path: Path) -> None:
+    """Diagnostics read the current policy's index-keyed private skill map."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(7, 1000), FakeSkill(11, 1000)], ["wait", "nav_to_obj"])
+    diagnostics.record_step(
+        11,
+        ["wait", "nav_to_obj"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {},
+        {},
+    )
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    assert row["agents"]["0"]["skill_state"]["cur_skill_step"] == 7.0
+    assert row["agents"]["1"]["skill_state"]["max_skill_steps"] == 1000
+
+
+def test_flat_joint_action_is_recorded_without_claiming_per_agent_rows(tmp_path: Path) -> None:
+    """A production-shaped flat action receives an explicit joint-scope summary."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)])
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["wait", "nav_to_obj"])
+    diagnostics.record_step(
+        1,
+        ["wait", "nav_to_obj"],
+        FakeFlatAction([0.0, 0.25, 0.0, 1.0]),
+        env,
+        actor,
+        False,
+        {},
+        {},
+    )
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    assert row["action_summary"] == {
+        "_scope": "joint_flat_action",
+        "argmax": 3,
+        "nonzero": [1, 3],
+        "shape": [4],
+    }
 
 
 def test_terminal_state_is_independent_of_early_local_completion(tmp_path: Path) -> None:
