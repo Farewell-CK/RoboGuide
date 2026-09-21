@@ -86,12 +86,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """
         gym_env, habitat_env, actor, access = self._require_initialized()
         agent_ids = self._agent_ids
+        loop_owns_terminal_diagnostics = False
+        setup_phase = "gym_reset"
         try:
             habitat_env.episodes = [self._episode]
             observations = gym_env.reset()
             if isinstance(observations, tuple):
                 observations = observations[0]
             self._diagnostics.record_reset(habitat_env, self._config)
+            setup_phase = "task_context"
             episode_started_at = time.time()
             text_context = habitat_env.task.get_task_text_context()
             text_context["episode_id"] = habitat_env.current_episode.episode_id
@@ -122,6 +125,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 "habitat_seed": self._config.seed,
                 "initial_agent_positions": initial_agent_positions(habitat_env, agent_ids),
             }
+            loop_owns_terminal_diagnostics = True
             outcomes, steps, done, info = self._pair_loop(
                 observations,
                 text_context,
@@ -145,6 +149,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             raise
         except Exception as error:
             raise IntegrationError(f"shared EMOS Stage2 execution failed: {error}") from error
+        finally:
+            if not loop_owns_terminal_diagnostics:
+                self._record_terminal_diagnostics(
+                    habitat_env,
+                    0,
+                    f"execution_exception:{setup_phase}",
+                )
 
     def _pair_loop(
         self,
@@ -160,37 +171,47 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], int, bool, dict[str, Any]]:
         """Drive the original joint policy loop with per-agent completion."""
-        torch = self._runtime["torch"]
-        device = self._runtime["device"]
-        batch = self._batch(observations)
-        action_shape, discrete = self._runtime["get_action_space_info"](actor.policy_action_space)
-        hidden = torch.zeros((1, *actor.hidden_state_shape), device=device)
-        previous = torch.zeros(
-            1,
-            *action_shape,
-            device=device,
-            dtype=torch.long if discrete else torch.float,
-        )
-        masks = torch.zeros(1, *access.masks_shape, device=device, dtype=torch.bool)
-        hidden_lengths = actor.hidden_state_shape_lens
-        action_lengths = actor.policy_action_space_shape_lens
-        agent_ids = self._agent_ids
-        initials = {agent_id: self._agent_position_for(agent_id) for agent_id in agent_ids}
-        scene_id = str(habitat_env.current_episode.scene_id)
         steps = 0
+        done = False
+        info: dict[str, Any] = {}
+        termination_reason = "execution_exception:pair_loop_setup"
+        exception_phase = "pair_loop_setup"
+        primary_error: BaseException | None = None
         skill_sequence: list[str] = []
         outcomes: dict[int, LocalExecutionOutcome] = {}
         terminal_bases: dict[int, str] = {}
-        chat_history_root = self._evidence_dir() / "chat-history"
-        (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
-        module, original_group_discussion = self._install_assignment(assignment)
+        module: Any = None
+        original_group_discussion: Any = None
         cancelled = False
         try:
+            torch = self._runtime["torch"]
+            device = self._runtime["device"]
+            batch = self._batch(observations)
+            action_shape, discrete = self._runtime["get_action_space_info"](
+                actor.policy_action_space
+            )
+            hidden = torch.zeros((1, *actor.hidden_state_shape), device=device)
+            previous = torch.zeros(
+                1,
+                *action_shape,
+                device=device,
+                dtype=torch.long if discrete else torch.float,
+            )
+            masks = torch.zeros(1, *access.masks_shape, device=device, dtype=torch.bool)
+            hidden_lengths = actor.hidden_state_shape_lens
+            action_lengths = actor.policy_action_space_shape_lens
+            agent_ids = self._agent_ids
+            initials = {agent_id: self._agent_position_for(agent_id) for agent_id in agent_ids}
+            scene_id = str(habitat_env.current_episode.scene_id)
+            chat_history_root = self._evidence_dir() / "chat-history"
+            (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
+            module, original_group_discussion = self._install_assignment(assignment)
             while steps < self._config.max_steps:
                 if cancellation_requested():
                     cancelled = True
                     break
                 policy_input_observations = observations
+                exception_phase = "actor_act"
                 action_data = actor.act(
                     batch,
                     hidden,
@@ -206,9 +227,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 current_skills = self._current_skills(actor)
                 self._extend_skill_sequence(skill_sequence, current_skills)
                 env_action = action_data.env_actions.detach().cpu()[0].numpy()
+                exception_phase = "gym_env_step"
                 step_result = gym_env.step(env_action)
                 observations, done, info = self._gym_step_result(step_result)
                 steps += 1
+                exception_phase = "post_step_observation"
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
                     previous.copy_(action_data.actions)
@@ -299,9 +322,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     for _ in range(50):
                         if done or habitat_env.episode_over:
                             break
+                        exception_phase = "settle_gym_env_step"
                         step_result = gym_env.step(env_action * 0)
                         observations, done, info = self._gym_step_result(step_result)
                         steps += 1
+                        exception_phase = "settle_post_step_observation"
                         self._diagnostics.record_step(
                             steps,
                             current_skills,
@@ -316,20 +341,32 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     break
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
+            termination_reason = (
+                "cancellation"
+                if cancelled
+                else "episode_done"
+                if done
+                else "step_budget_exhausted"
+                if steps >= self._config.max_steps
+                else "skills_completed_settled"
+            )
+        except BaseException as error:
+            primary_error = error
+            termination_reason = f"execution_exception:{exception_phase}:{type(error).__name__}"
+            raise
         finally:
-            module.group_discussion = original_group_discussion
-            self._flush_action_trace()
-        self._diagnostics.record_terminal(
-            habitat_env,
-            steps,
-            "cancellation"
-            if cancelled
-            else "episode_done"
-            if done
-            else "step_budget_exhausted"
-            if steps >= self._config.max_steps
-            else "skills_completed_settled",
-        )
+            try:
+                if module is not None:
+                    module.group_discussion = original_group_discussion
+            except Exception:
+                if primary_error is None:
+                    raise
+                _LOG.exception(
+                    "failed to restore EMOS group_discussion while preserving the primary error"
+                )
+            finally:
+                self._flush_action_trace()
+                self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
         if cancelled:
             for agent_id in agent_ids:
                 if agent_id not in outcomes:
@@ -362,6 +399,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     terminal_basis="step-budget-exhausted",
                 )
         return outcomes, steps, bool(done or habitat_env.episode_over), info
+
+    def _record_terminal_diagnostics(self, habitat_env: Any, steps: int, reason: str) -> None:
+        """Persist best-effort terminal evidence without changing SUT failure semantics."""
+        try:
+            self._diagnostics.record_terminal(habitat_env, steps, reason)
+        except Exception:  # noqa: BLE001 - optional evidence cannot mask execution
+            _LOG.exception("physical diagnostics failed while recording terminal evidence")
 
     def final_metrics(self) -> dict[str, Any]:
         """Read the shared episode's official terminal metrics once."""
@@ -949,9 +993,12 @@ class SharedWorldCoordinator:
                     waited_from = None
                 continue
             if len(pair) == 2:
-                self._execute_pair(pair)
                 with self._condition:
+                    # The deployment owns exactly one simulator episode. Claim
+                    # it before execution so terminal publication cannot race a
+                    # third accept through an obsolete "not consumed" view.
                     self._episode_consumed = True
+                self._execute_pair(pair)
                 pair = []
                 waited_from = None
 
