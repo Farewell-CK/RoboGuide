@@ -59,7 +59,15 @@ local retry. Other tools, another entity, malformed arguments, actions by an una
 unwritable decision-evidence boundary fail closed as a local contract failure. The guard never
 substitutes an action or edits the benchmark goal. Every decision is appended before execution to
 `stage2-contract-calls.jsonl` using
-`roboguide.local-eaios.stage2-tool-call/v0.1`.
+`roboguide.local-eaios.stage2-tool-call/v0.2`. A model-client failure before a normalized tool is
+returned is recorded as unavailable with only its exception type; the original exception remains
+the execution result and potentially sensitive Provider text is not copied into this evidence.
+
+Optional physical diagnostics use `roboguide.e1.physical-diagnostics/v0.3`. Alongside official
+per-conjunct truth, agent pose, skill state, and termination evidence, v0.3 records live official
+goal-entity positions and a bounded, source-labelled view of the original Oracle navigation target
+cache. This permits comparison of the semantic entity, the local snapped navigation target, and the
+robot base without treating the local cache as benchmark authority.
 
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit

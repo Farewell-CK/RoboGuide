@@ -126,6 +126,12 @@ Mission/Task/Role/Group identity 和已承诺资源。Local EAIOS 可以自主�
 `nav_to_obj(TARGET_any_targets|0)`、`place` 和 `reset_arm`。完整原始调用保存在
 `/data/workspace/code/roboguide-ep51-full-chain-diag-20260921T025132Z/b1-diag-ep51-seed40/evidence/chat-history/51/agent_1_action_history.json`。
 
+这不是任务文本在 MI 到 Stage2 之间被换掉。上述 chat history 的 system prompt、规划输入
+和第一次 observation 都保留了 `TARGET_any_targets|0`。实际差异是原始 EMOS Fetch
+动作面同时暴露了 `nav_to_obj`、`pick`、`place`、`reset_arm` 等工具；模型在收到正确的
+纯导航 subtask 后，仍自主选择了完整搬运序列。因而已证实的部署缺口是 canonical
+operation 没有约束本地模型可执行动作，而不是 MI 下发了错误 destination。
+
 因此该运行最早可确认的偏离不是 PDDL 与两个导航任务不一致，而是 Local EAIOS 执行器
 没有保持第二个 canonical destination，并执行了未由 mobility operation 授权的物体
 操作。这个事实不改变已归档运行的 `pddl_success=false`。
@@ -143,10 +149,43 @@ Mission/Task/Role/Group identity 和已承诺资源。Local EAIOS 可以自主�
 - 不替换工具、不修改参数、不改 PDDL goal；
 - 每次执行性工具选择在返回给 CrabAgent 前 fsync 到
   `evidence/stage2-contract-calls.jsonl`；
+- 原始 EMOS client 若在解析工具参数或返回选择前抛错，写入脱敏的
+  `model_client_error`，同时保留原始异常为执行结果；
 - 证据写入失败也 fail closed，避免在缺少契约证据时继续物理执行。
 
 失败通过现有 Local EAIOS `IntegrationError` 路径成为明确的 `local contract failure`。
 shared-world episode 会停止，两个 Node 保留真实失败，而不会合成 benchmark 成功。
+
+Guard 还在服务器实际部署的 Habitat Conda 环境中，以原始 EMOS `OpenAIModel` 类和冻结
+的离线 completion 对象做了边界验证，全程没有 Provider 调用或 simulator step。验证
+同时覆盖精确 destination 被原样返回，以及原始 client 在 `json.loads()` 处失败时仍保留
+`JSONDecodeError` 并写入脱敏的 `model_client_error`。结果为
+`REAL_EMOS_GUARD_OFFLINE_OK`。执行时 EMOS checkout HEAD 为
+`e9501db45d634b087bf5d1a14228266685e8feeb`；部署文件
+`habitat-mas/habitat_mas/utils/models.py` 的 SHA256 为
+`a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74`。
+该 checkout 存在既有 benchmark instrumentation 改动，因此这里证明的是当前部署边界，
+不是上游 clean commit 的逐字节复现。
+
+## Spot 本地完成与官方谓词的判定差异
+
+部署使用的 `OracleNavDiffBaseAction` 会先通过 `safe_snap_point()` 为语义实体选择可导航
+落点，再以该落点的 XZ 平面距离 `< 0.5 m` 和朝向作为本地 skill 完成条件。官方
+`any_at` 则直接计算机器人 base 到语义实体实时位置的三维欧氏距离，并使用 `<= 2 m`
+阈值。两条判定链不是同一个事实。
+
+历史 step 90 记录了 `oracle_skill_done=true`，但同一步两个官方谓词仍为 false。Spot
+位置是 `(-0.45524, 2.91402, -1.46448)`；此时 Fetch 尚未进入 step 1001 的 pick，
+kinematic 目标物体仍处于 Episode51 冻结变换给出的
+`(-0.31774, 0.30787, -1.91269)`。两者 XZ 距离约 `0.469 m`，小于 Oracle 的
+`0.5 m` 平面阈值；三维距离约 `2.648 m`，大于官方 `2 m` 阈值。因此已确认的直接原因
+是本地完成条件忽略垂直距离，而 Spot 与目标物体仍有约 `2.606 m` 的高度差。
+
+该次 `diagnostics-initial.json` 因旧版 NumPy 序列化失败而整体降级，也未保留 `_targets`
+缓存，所以现有证据不能区分导航落点本身被 snap 到了上层，还是落点位于下层但 Oracle
+仅凭 XZ 接近便提前完成。物理诊断 v0.3 为初始、逐步和终态记录官方 goal entity 实时
+位置，并以明确的 private-source 标签记录有界的 Oracle 导航落点缓存；下一次运行可直接
+比较机器人、导航落点和语义实体三者坐标。
 
 ## 下一次诊断实验
 
