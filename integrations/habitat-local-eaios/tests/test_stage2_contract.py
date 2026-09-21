@@ -38,10 +38,25 @@ class FakeModel:
         return self.results.pop(0)
 
 
+class FailingModel:
+    """Raise before returning a normalized tool, like the original EMOS parser."""
+
+    def __init__(self, error: Exception) -> None:
+        """Retain the exact exception instance used by the boundary test."""
+        self.error = error
+
+    def chat(self, content: str, crab_planning: bool = False) -> Any:
+        """Return planning text but raise the original executable-call error."""
+        del content
+        if crab_planning:
+            return "provider planning text"
+        raise self.error
+
+
 class FakeAgent:
     """Expose the mutable fields used by the original EMOS LLM policy."""
 
-    def __init__(self, model: FakeModel | None, *, initialized: bool) -> None:
+    def __init__(self, model: Any | None, *, initialized: bool) -> None:
         """Configure immediate or deferred model initialization."""
         self.llm_model = model
         self.initialized = initialized
@@ -213,6 +228,43 @@ def test_malformed_model_result_is_rejected_and_attributed(tmp_path: Path, resul
     assert record["task_id"] == "task"
 
 
+def test_model_client_parse_error_is_recorded_without_replacing_original(tmp_path: Path) -> None:
+    """A pre-return parser failure remains primary and has bounded evidence."""
+    original = json.JSONDecodeError("sensitive raw provider output", "{", 1)
+    model = FailingModel(original)
+    guard = Stage2ContractGuard(tmp_path, {0: _invocation()})
+    guard.install(_actor(FakeAgent(model, initialized=True)))
+
+    with pytest.raises(json.JSONDecodeError) as raised:
+        model.chat("execute")
+
+    assert raised.value is original
+    [record] = _records(tmp_path)
+    assert record["schema_version"] == "roboguide.local-eaios.stage2-tool-call/v0.2"
+    assert record["decision"] == "unavailable"
+    assert record["decision_code"] == "model_client_error"
+    assert record["failure_stage"] == "model_client"
+    assert record["model_client_error_type"] == "JSONDecodeError"
+    assert "sensitive raw provider output" not in json.dumps(record)
+    assert record["tool_name"] is None
+    assert record["tool_arguments"] is None
+
+
+def test_error_evidence_failure_does_not_replace_model_client_error(tmp_path: Path) -> None:
+    """An unwritable error record cannot obscure the primary parser failure."""
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("occupied", encoding="utf-8")
+    original = RuntimeError("provider parser failed")
+    model = FailingModel(original)
+    guard = Stage2ContractGuard(blocked, {0: _invocation()})
+    guard.install(_actor(FakeAgent(model, initialized=True)))
+
+    with pytest.raises(RuntimeError) as raised:
+        model.chat("execute")
+
+    assert raised.value is original
+
+
 def test_evidence_failure_blocks_execution_instead_of_bypassing_guard(tmp_path: Path) -> None:
     """An unwritable evidence boundary fails before the accepted call is returned."""
     blocked = tmp_path / "not-a-directory"
@@ -239,3 +291,15 @@ def test_partial_install_failure_restores_prior_agents(tmp_path: Path) -> None:
     assert valid.init_agent == original_init
     assert model.chat("unwrapped") == ("pick", {"target_obj": "any_targets|0"})
     assert not (tmp_path / EVIDENCE_FILENAME).exists()
+
+
+def test_install_rejects_empty_or_unmapped_policy_topology(tmp_path: Path) -> None:
+    """Every committed assignment must map to one installed policy guard."""
+    with pytest.raises(LocalContractViolation, match="no active policies"):
+        Stage2ContractGuard(tmp_path / "empty", {}).install(SimpleNamespace(_active_policies=[]))
+
+    model = FakeModel([("wait", {})])
+    actor = _actor(FakeAgent(model, initialized=True))
+    with pytest.raises(LocalContractViolation, match="no EMOS policy slots"):
+        Stage2ContractGuard(tmp_path / "missing", {1: _invocation()}).install(actor)
+    assert model.chat("unwrapped") == ("wait", {})

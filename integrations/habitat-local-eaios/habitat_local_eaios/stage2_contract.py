@@ -21,7 +21,7 @@ from typing import Any, Optional
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 CONTRACT_SCHEMA = "roboguide.local-eaios.stage2-tool-contract/v0.1"
-EVIDENCE_SCHEMA = "roboguide.local-eaios.stage2-tool-call/v0.1"
+EVIDENCE_SCHEMA = "roboguide.local-eaios.stage2-tool-call/v0.2"
 EVIDENCE_FILENAME = "stage2-contract-calls.jsonl"
 _MAX_ARGUMENT_BYTES = 16 * 1024
 
@@ -81,6 +81,16 @@ class Stage2ContractGuard:
             raise LocalContractViolation(
                 "local contract failure: EMOS active policy topology is unavailable"
             )
+        if not policies:
+            raise LocalContractViolation(
+                "local contract failure: EMOS exposes no active policies to guard"
+            )
+        unguardable_assignments = sorted(set(self._invocations) - set(range(len(policies))))
+        if unguardable_assignments:
+            raise LocalContractViolation(
+                "local contract failure: committed assignments have no EMOS policy slots: "
+                f"{unguardable_assignments}"
+            )
         try:
             for agent_id, policy in enumerate(policies):
                 high_level = getattr(policy, "_high_level_policy", None)
@@ -134,7 +144,12 @@ class Stage2ContractGuard:
 
         def guarded_chat(content: str, crab_planning: bool = False) -> Any:
             """Validate a provider-selected tool before CrabAgent consumes it."""
-            result = original_chat(content, crab_planning=crab_planning)
+            try:
+                result = original_chat(content, crab_planning=crab_planning)
+            except Exception as error:
+                if not crab_planning:
+                    self._record_model_client_error(agent_id, error)
+                raise
             if crab_planning:
                 return result
             self._check_and_record(agent_id, result)
@@ -156,6 +171,33 @@ class Stage2ContractGuard:
             raise LocalContractViolation(
                 f"local contract failure for agent {agent_id}: {decision.code}: {decision.detail}"
             )
+
+    def _record_model_client_error(self, agent_id: int, error: Exception) -> None:
+        """Best-effort archive a pre-return client failure without replacing it.
+
+        The original EMOS client parses raw tool arguments before returning its
+        selected ``(name, arguments)`` pair.  A malformed provider response can
+        therefore fail before the guard can observe a normalized call.  This
+        record makes that boundary explicit while preserving the exact original
+        exception as execution authority.  Error messages are intentionally not
+        retained because provider exceptions may contain sensitive request data.
+        """
+        invocation = self._invocations.get(agent_id)
+        decision = _ToolDecision(
+            False,
+            "model_client_error",
+            f"original EMOS model client raised {type(error).__name__} before returning a tool",
+        )
+        record = self._record(agent_id, invocation, None, None, decision)
+        record["decision"] = "unavailable"
+        record["failure_stage"] = "model_client"
+        record["model_client_error_type"] = type(error).__name__
+        try:
+            self._append_record(record)
+        except LocalContractViolation:
+            # An evidence-path failure must not replace the provider/client
+            # exception that already stopped physical execution.
+            return
 
     def _record(
         self,
