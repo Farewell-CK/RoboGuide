@@ -58,7 +58,17 @@ object NavigationPlanManager {
     fun advanceToNextPhase() {
         val s = state.value as? PlanState.InProgress ?: return
         val next = s.phaseIndex + 1
-        state.value = if (next < s.plan.phases.size) s.copy(phaseIndex = next) else PlanState.Completed
+        val phases = s.plan.phases
+        val reportedPhase = if (next < phases.size) phases[next].phase else phases.last().phase
+        DeviceWatchClient.reportNavigation(
+            instruction = s.plan.rawInstruction,
+            destination = s.plan.destination.orEmpty(),
+            phases = phases.map { NavigationPhaseData(it.phase, it.mode, it.description, it.floor) },
+            currentPhase = reportedPhase,
+            totalPhases = phases.size,
+            confidence = 1f
+        )
+        state.value = if (next < phases.size) s.copy(phaseIndex = next) else PlanState.Completed
     }
 
     fun cancel() {

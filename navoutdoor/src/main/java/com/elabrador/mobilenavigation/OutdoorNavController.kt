@@ -315,11 +315,9 @@ class OutdoorNavController(
             tryAutoAlignedCalibration()
             renderDirectionGuidance()
             val now = SystemClock.elapsedRealtime()
-            val evidence = latestPlanEvidence
-            if (navigationActive && hasValidLocalPlanDisplay && evidence != null && !evidence.fresh(now)) {
-                hasValidLocalPlanDisplay = false
-                listener.onLocalPlan(LocalPlanner.PathResult.waiting("观测已过期，等待新地图").toSnapshot())
-            }
+            // 不再因地图观测过期而清空/替换已显示的局部地图——保留最后一次成功渲染的旧地图，
+            // 不弹出"观测已过期，等待新地图"提示。语音安全停止判定（renderDirectionGuidance
+            // 中的 observationFresh）不受影响，数据过期时仍会正确提示"停止"/"等待"。
             if (now - lastCalibrationPanelMillis >= 1000L) {
                 lastCalibrationPanelMillis = now
                 renderDynamicHeadingCalibration()
