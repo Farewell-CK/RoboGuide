@@ -25,13 +25,14 @@ from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.2"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.3"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
 
 _UNAVAILABLE = "unavailable"
 _READ_ONLY_OFFICIAL_PREDICATES = frozenset({"any_at"})
+_MAX_ORACLE_CACHED_TARGETS = 8
 
 
 class BufferedJsonlWriter:
@@ -158,6 +159,51 @@ def _entity_position(sim_info: Any, problem: Any, name: str) -> Any:
     if entity is None:
         return {"_status": _UNAVAILABLE, "reason": f"entity {name!r} unresolved"}
     return [float(component) for component in sim_info.get_entity_pos(entity)]
+
+
+def _vector3(value: Any) -> list[float]:
+    """Read one vendor vector as an exact three-component JSON value."""
+    components = list(value)
+    if len(components) != 3:
+        raise ValueError(f"expected a 3D vector, received {len(components)} components")
+    return [float(component) for component in components]
+
+
+def _oracle_target_cache(action: Any) -> dict[str, Any]:
+    """Observe bounded local navigation targets without changing Oracle state.
+
+    ``OracleNavDiffBaseAction`` caches a pair containing the snapped navigation
+    target and authoritative semantic entity position.  The cache is private
+    deployment evidence rather than benchmark truth, so the record names its
+    source and never treats the snapped point as goal satisfaction.
+    """
+    targets = getattr(action, "_targets", None)
+    if not isinstance(targets, dict):
+        return {"_status": _UNAVAILABLE, "reason": "oracle target cache unavailable"}
+    if len(targets) > _MAX_ORACLE_CACHED_TARGETS:
+        return {
+            "_status": _UNAVAILABLE,
+            "reason": (f"oracle target cache exceeds {_MAX_ORACLE_CACHED_TARGETS} entry bound"),
+        }
+    cached: dict[str, Any] = {}
+    for raw_index, pair in sorted(targets.items(), key=lambda item: str(item[0])):
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            cached[str(raw_index)] = {
+                "_status": _UNAVAILABLE,
+                "reason": "oracle target cache entry is not a navigation/entity pair",
+            }
+            continue
+        cached[str(raw_index)] = {
+            "navigation_target_position": _read(_vector3, pair[0]),
+            "semantic_entity_position": _read(_vector3, pair[1]),
+        }
+    completed = getattr(action, "prev_match_target_id", None)
+    return {
+        "_status": "observed",
+        "completed_entity_index": int(completed) if isinstance(completed, int) else None,
+        "source": "original EMOS OracleNavDiffBaseAction._targets",
+        "targets": cached,
+    }
 
 
 def _json_scalar(value: Any) -> Any:
@@ -460,6 +506,21 @@ class PhysicalDiagnostics:
             )
         return values
 
+    def _goal_entity_positions(self, problem: Any) -> dict[str, Any]:
+        """Read live world positions for every entity named by a goal conjunct."""
+        if not self._predicates:
+            self._load_predicates(problem)
+        sim_info = getattr(problem, "sim_info", None)
+        if sim_info is None:
+            return {"_status": _UNAVAILABLE, "reason": "sim_info unbound"}
+        entity_positions: dict[str, Any] = {}
+        for _label, predicate in self._predicates:
+            for argument in getattr(predicate, "_arg_values", None) or ():
+                name = getattr(argument, "name", None)
+                if isinstance(name, str):
+                    entity_positions[name] = _read(_entity_position, sim_info, problem, name)
+        return entity_positions
+
     def _metrics(self, habitat_env: Any) -> dict[str, Any]:
         """Read the official measure cache without recomputation side effects."""
         return _read(lambda: dict(habitat_env.get_metrics())) or {}
@@ -538,6 +599,9 @@ class PhysicalDiagnostics:
             "oracle_skill_done": _read(lambda: bool(action.skill_done))
             if action
             else {"_status": _UNAVAILABLE, "reason": "oracle action unavailable"},
+            "oracle_target_cache": _read(_oracle_target_cache, action)
+            if action
+            else {"_status": _UNAVAILABLE, "reason": "oracle action unavailable"},
         }
 
     def _annotate_skill_transition(self, agent_id: int, state: Any) -> Any:
@@ -591,7 +655,7 @@ class PhysicalDiagnostics:
                     _read(lambda p=predicate: repr(p)) for _, predicate in self._predicates
                 ],
                 "goal_conjunct_values": self._official_conjunct_values(problem),
-                "goal_entity_positions": {},
+                "goal_entity_positions": self._goal_entity_positions(problem),
                 "official_pddl_success": self._metrics(habitat_env).get("pddl_success"),
                 "collection_configuration": {
                     "max_step_records": self._max_step_records,
@@ -599,17 +663,6 @@ class PhysicalDiagnostics:
                     "write_batch_records": self._step_writer.stats()["batch_capacity_records"],
                 },
             }
-            sim_info = getattr(problem, "sim_info", None)
-            if sim_info is not None:
-                entity_positions: dict[str, Any] = {}
-                for _label, predicate in self._predicates:
-                    for argument in getattr(predicate, "_arg_values", None) or ():
-                        name = getattr(argument, "name", None)
-                        if isinstance(name, str):
-                            entity_positions[name] = _read(
-                                _entity_position, sim_info, problem, name
-                            )
-                document["goal_entity_positions"] = entity_positions
             self._write_json("diagnostics-initial.json", document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
@@ -657,6 +710,7 @@ class PhysicalDiagnostics:
                 "action_summary": action_summary,
                 "agents": {},
                 "goal_conjunct_values": self._official_conjunct_values(problem),
+                "goal_entity_positions": self._goal_entity_positions(problem),
                 "official_pddl_success_step_info": info.get("pddl_success"),
                 "official_pddl_success_metrics": self._metrics(habitat_env).get("pddl_success"),
                 "done": bool(done),
@@ -717,6 +771,7 @@ class PhysicalDiagnostics:
                     for agent_id in self._agent_ids
                 },
                 "goal_conjunct_values": self._official_conjunct_values(problem),
+                "goal_entity_positions": self._goal_entity_positions(problem),
                 "official_metrics": self._metrics(habitat_env),
                 "dropped_diagnostic_records": self._dropped_records,
                 "collection_stats": self._collection_stats(),

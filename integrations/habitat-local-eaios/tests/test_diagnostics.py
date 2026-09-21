@@ -107,11 +107,31 @@ class FakeProblem:
     def __init__(self, conjuncts: list[FakePredicate]) -> None:
         """Hold the conjuncts and a bound sim_info."""
         self.goal = type("Goal", (), {"sub_exprs": conjuncts})()
-        self.sim_info = type("SimInfo", (), {"bound": True})()
+        self.sim_info = FakeSimInfo()
 
     def get_entity(self, name: str) -> Any:
         """Resolve every requested entity to a stub object."""
         return type("Entity", (), {"name": name})()
+
+
+class FakeSimInfo:
+    """Serve authoritative entity positions through the Habitat-shaped API."""
+
+    def get_entity_pos(self, entity: Any) -> list[float]:
+        """Return distinct stable positions for object and goal entity names."""
+        if str(entity.name).startswith("TARGET_"):
+            return [4.0, 5.0, 6.0]
+        return [1.0, 2.0, 3.0]
+
+
+class FakeOracleAction:
+    """Expose the read-only Oracle fields consumed by physical diagnostics."""
+
+    def __init__(self, done: bool) -> None:
+        """Start with no cached navigation target and one completion flag."""
+        self.skill_done = done
+        self._targets: dict[int, tuple[list[float], list[float]]] = {}
+        self.prev_match_target_id: int | None = None
 
 
 class FakeAgent:
@@ -142,7 +162,7 @@ class FakeTask:
         """Bind the problem and per-agent skill_done flags."""
         self.pddl_problem = problem
         self.actions = {
-            f"agent_{agent_id}_oracle_nav_action": type("Action", (), {"skill_done": done})()
+            f"agent_{agent_id}_oracle_nav_action": FakeOracleAction(done)
             for agent_id, done in skill_done.items()
         }
 
@@ -250,6 +270,67 @@ def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> Non
     assert document["schema_version"] == DIAGNOSTICS_SCHEMA
     assert document["seed"] is None  # config stub carries no seed
     assert document["habitat_seed_config"] == 40
+    assert document["goal_entity_positions"] == {
+        "TARGET_any_targets|0": [4.0, 5.0, 6.0],
+        "any_targets|0": [1.0, 2.0, 3.0],
+    }
+
+
+def test_step_records_official_entity_and_oracle_navigation_targets(tmp_path: Path) -> None:
+    """A local completion can be compared with its snapped and semantic targets."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    oracle = env.task.actions["agent_0_oracle_nav_action"]
+    oracle.skill_done = True
+    oracle.prev_match_target_id = 7
+    oracle._targets[7] = ([9.0, 9.5, 10.0], [1.0, 2.0, 3.0])
+    actor = FakeActor([FakeSkill(90, 1000), FakeSkill(90, 1000)], ["nav_to_obj", "wait"])
+
+    diagnostics.record_step(
+        90,
+        ["nav_to_obj", "wait"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {"pddl_success": False},
+        {},
+    )
+
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    assert row["goal_entity_positions"]["any_targets|0"] == [1.0, 2.0, 3.0]
+    cache = row["agents"]["0"]["oracle_flags"]["oracle_target_cache"]
+    assert cache["_status"] == "observed"
+    assert cache["completed_entity_index"] == 7
+    assert cache["targets"]["7"] == {
+        "navigation_target_position": [9.0, 9.5, 10.0],
+        "semantic_entity_position": [1.0, 2.0, 3.0],
+    }
+
+
+def test_oracle_navigation_target_observation_is_bounded(tmp_path: Path) -> None:
+    """An unexpected target-cache expansion degrades without growing evidence."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    oracle = env.task.actions["agent_0_oracle_nav_action"]
+    oracle._targets = {index: ([float(index), 0.0, 0.0], [0.0, 0.0, 0.0]) for index in range(9)}
+    actor = FakeActor([FakeSkill(1, 10), FakeSkill(1, 10)], ["nav_to_obj", "wait"])
+
+    diagnostics.record_step(
+        1,
+        ["nav_to_obj", "wait"],
+        [FakeVec([1.0]), FakeVec([1.0])],
+        env,
+        actor,
+        False,
+        {},
+        {},
+    )
+
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    cache = row["agents"]["0"]["oracle_flags"]["oracle_target_cache"]
+    assert cache["_status"] == "unavailable"
+    assert "exceeds 8 entry bound" in cache["reason"]
 
 
 def test_array_scalars_remain_available_in_reset_and_terminal_snapshots(
@@ -614,7 +695,7 @@ def test_predicate_reads_do_not_mutate_official_cache(tmp_path: Path) -> None:
     predicate = CachingPredicate("target", True)
     env = FakeEnv([predicate])
     official_cache = {"existing": False}
-    env.task.pddl_problem.sim_info = CachedSimInfo(official_cache)
+    env.task.pddl_problem.sim_info = cast(Any, CachedSimInfo(official_cache))
     make_diagnostics(tmp_path).record_reset(env, None)
     assert official_cache == {"existing": False}
 
