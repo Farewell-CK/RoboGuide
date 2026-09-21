@@ -167,6 +167,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control-owned assignment at the EMOS Stage1-to-Stage2 boundary, then runs the original EMOS
   `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack. Local skill completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
+  Its Stage2 contract guard records each executable model-selected tool before execution and checks
+  it against the exact canonical operation and destination; semantic drift fails as an explicit
+  local contract error and is never repaired by substituting another tool or benchmark goal.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.

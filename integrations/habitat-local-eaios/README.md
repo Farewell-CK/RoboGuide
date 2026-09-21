@@ -5,13 +5,14 @@ This deployment-owned bridge is the C1-S0 reference path from the generic
 RoboGuide Core module and does not add Habitat, EMOS, Gym, Torch, or simulator dependencies to the
 RoboGuide Python environment.
 
-The bridge supports exactly the existing canonical operation `mobility.navigate@v1`. It accepts the
-intact canonical invocation produced by Node Service, retains Mission/Task/Group/Role identity,
-objective, typed scalar parameters, and committed resource IDs, then interprets only the semantic
-`destination` inside Local EAIOS. The current C1-S0 backend maps that destination to the same Habitat
-Oracle navigation action used below the EMOS/CrabAgent high-level policy boundary. PDDL entity
-resolution, agent selection, path planning, action arguments, simulator stepping, and local safety
-remain Local How.
+The bridge supports the existing canonical operations `mobility.navigate@v1` and
+`mobility.move@v1`. It accepts the intact canonical invocation produced by Node Service, retains
+Mission/Task/Group/Role identity, objective, typed scalar parameters, and committed resource IDs,
+then interprets only the semantic `destination` inside Local EAIOS. The current backends map that
+destination to the same Habitat Oracle navigation action used below the EMOS/CrabAgent high-level
+policy boundary. PDDL entity resolution, path planning, local obstacle handling, navigation retries,
+simulator stepping, and local safety remain Local How. Choosing a different semantic destination or
+performing an unrelated manipulation is not Local How for either mobility operation.
 
 ## Local workflow
 
@@ -46,9 +47,19 @@ conda run --no-capture-output -n habitat python -m habitat_local_eaios \
 The `emos-crabagent` backend does not carry a copied RoboGuide decision loop. It injects the
 Control-committed assignment at the output boundary of EMOS Stage1, then calls the original EMOS
 `MultiLLMPolicy`, `LLMHighLevelPolicy`, `CrabAgent`, `HierarchicalPolicy`, and configured skill
-implementations. Consequently invalid output, wait, peer requests, skill entry/termination,
-replanning, and skill step budgets remain the EMOS Stage2 implementation. The direct-Oracle backend
-remains a separate native protocol path.
+implementations. Model choice, skill entry/termination, replanning, and skill step budgets remain the
+EMOS Stage2 implementation; the adapter admits the selected tool only within the committed
+operation. The direct-Oracle backend remains a separate native protocol path.
+
+Before an executable Stage2 model selection reaches CrabAgent or a Habitat skill, the adapter's
+operation guard checks the original tool name and arguments against the committed canonical
+operation. The mobility profile permits `nav_to_obj` only for the exact committed `destination`,
+plus argument-free `wait` for quiescence. Repeated navigation to that same destination remains a
+local retry. Other tools, another entity, malformed arguments, actions by an unassigned agent, or an
+unwritable decision-evidence boundary fail closed as a local contract failure. The guard never
+substitutes an action or edits the benchmark goal. Every decision is appended before execution to
+`stage2-contract-calls.jsonl` using
+`roboguide.local-eaios.stage2-tool-call/v0.1`.
 
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit

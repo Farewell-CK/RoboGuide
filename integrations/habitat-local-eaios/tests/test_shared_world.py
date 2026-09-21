@@ -17,12 +17,19 @@ if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
-from habitat_local_eaios.model import IntegrationError  # noqa: E402
+from habitat_local_eaios.model import (  # noqa: E402
+    CanonicalMobilityInvocation,
+    IntegrationError,
+)
 from habitat_local_eaios.shared_world import (  # noqa: E402
     InProcessWorldService,
     NodeEndpoint,
     SharedEmosStage2Runtime,
     SharedWorldCoordinator,
+)
+from habitat_local_eaios.stage2_contract import (  # noqa: E402
+    EVIDENCE_FILENAME,
+    LocalContractViolation,
 )
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 
@@ -138,6 +145,57 @@ class PolicyActor:
         )
 
 
+class ContractModel:
+    """Return one fixed Stage2 tool call for contract-loop integration tests."""
+
+    def __init__(self, target: str) -> None:
+        """Retain the provider-selected navigation target."""
+        self.target = target
+
+    def chat(self, content: str, crab_planning: bool = False) -> object:
+        """Return planning text or one navigation tool call."""
+        del content
+        if crab_planning:
+            return "plan"
+        return ("nav_to_obj", {"target_obj": self.target})
+
+
+class ContractAgent:
+    """Expose an already initialized model through the original EMOS shape."""
+
+    def __init__(self, target: str) -> None:
+        """Build one initialized fake agent."""
+        self.initialized = True
+        self.llm_model = ContractModel(target)
+
+    def init_agent(self, *args: object, **kwargs: object) -> None:
+        """Accept the policy initialization signature without replacing the model."""
+        del args, kwargs
+
+
+class ContractPolicyActor(PolicyActor):
+    """Select two provider tools inside the production pair-loop actor phase."""
+
+    def __init__(self) -> None:
+        """Assign one exact and one drifted navigation target."""
+        super().__init__()
+        self._active_policies = [
+            SimpleNamespace(
+                _high_level_policy=SimpleNamespace(llm_agent=ContractAgent("any_targets|0"))
+            ),
+            SimpleNamespace(
+                _high_level_policy=SimpleNamespace(llm_agent=ContractAgent("any_targets|0"))
+            ),
+        ]
+
+    def act(self, *args: object, **kwargs: object) -> object:
+        """Ask both guarded models for their next tool before any Gym step."""
+        del args, kwargs
+        for policy in self._active_policies:
+            policy._high_level_policy.llm_agent.llm_model.chat("execute")
+        return super().act()
+
+
 class StepEnvironment:
     """Return nonterminal observations until the configured step raises."""
 
@@ -238,6 +296,20 @@ def _run_failing_loop(runtime: LoopHarness, actor: PolicyActor, gym_env: StepEnv
     )
 
 
+def _guard_invocation(task: str, destination: str) -> CanonicalMobilityInvocation:
+    """Build one committed assignment for pair-loop contract enforcement."""
+    return CanonicalMobilityInvocation(
+        mission_id="mission",
+        task_id=task,
+        group_id="group",
+        role_id=f"role-{task}",
+        operation="mobility.move@v1",
+        objective=f"move to {destination}",
+        parameters={"destination": destination},
+        resource_ids=(f"space-{task}",),
+    )
+
+
 def test_actor_exception_flushes_terminal_diagnostics_without_masking_error(
     tmp_path: Path,
 ) -> None:
@@ -259,6 +331,51 @@ def test_gym_exception_flushes_prior_steps_and_reads_terminal_state(tmp_path: Pa
     assert diagnostics.persisted_steps == [1]
     assert diagnostics.terminals == [(1, "execution_exception:gym_env_step:RuntimeError")]
     assert runtime.action_trace_flushes == 1
+
+
+def test_destination_drift_is_archived_and_rejected_before_gym_step(tmp_path: Path) -> None:
+    """The shared loop exposes a local contract failure without executing the tool."""
+    diagnostics = RecordingDiagnostics()
+    runtime = LoopHarness(tmp_path, diagnostics)
+    actor = ContractPolicyActor()
+    gym_env = StepEnvironment(fail_at=9)
+    habitat_env = SimpleNamespace(
+        current_episode=SimpleNamespace(scene_id="scene"),
+        episode_over=False,
+    )
+    invocations = {
+        0: _guard_invocation("object", "any_targets|0"),
+        1: _guard_invocation("goal", "TARGET_any_targets|0"),
+    }
+
+    with pytest.raises(LocalContractViolation, match="destination_mismatch"):
+        runtime._pair_loop(
+            {
+                "agent_0_has_finished_oracle_nav": [0],
+                "agent_1_has_finished_oracle_nav": [0],
+            },
+            {"episode_id": "51"},
+            {},
+            invocations,
+            actor,
+            SimpleNamespace(masks_shape=(1,)),
+            gym_env,
+            habitat_env,
+            lambda: False,
+            lambda agent_id, detail: None,
+        )
+
+    assert gym_env.calls == 0
+    records = [
+        json.loads(line)
+        for line in (runtime._evidence_dir() / EVIDENCE_FILENAME)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [record["decision"] for record in records] == ["accepted", "rejected"]
+    assert records[1]["task_id"] == "goal"
+    assert records[1]["tool_arguments"] == {"target_obj": "any_targets|0"}
+    assert diagnostics.terminals == [(0, "execution_exception:actor_act:LocalContractViolation")]
 
 
 def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) -> None:
@@ -343,6 +460,41 @@ class StubRuntime:
         )
 
 
+class FailingWorld:
+    """Expose one already-ready shared world that fails during pair execution."""
+
+    def __init__(self, detail: str) -> None:
+        """Retain the exact local failure surfaced by the child runtime."""
+        self.detail = detail
+
+    def start(self) -> str:
+        """Report immediate readiness without creating simulator state."""
+        return "failing world ready"
+
+    def is_ready(self) -> bool:
+        """Keep the coordinator readiness check true before dispatch."""
+        return True
+
+    def readiness_detail(self) -> str:
+        """Describe the deterministic failing world."""
+        return "failing world"
+
+    def run_pair(
+        self,
+        invocations: dict[int, Any],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, object]]:
+        """Publish RUNNING, then raise the configured local contract failure."""
+        del cancellation_requested
+        for agent_id in invocations:
+            running(agent_id, "stub running")
+        raise LocalContractViolation(self.detail)
+
+    def shutdown(self) -> None:
+        """Accept coordinator cleanup without external resources."""
+
+
 def _execution(store: ExecutionStore, execution_id: str) -> dict[str, object]:
     """Narrow one store read to a present execution for assertions."""
     execution = store.get(execution_id)
@@ -424,6 +576,33 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
     assert summary["identity"]["episode_reset_count"] == 1
     assert summary["identity"]["simulator_worlds"] == 1
     assert summary["official_pddl_success"] is True
+
+
+def test_local_contract_failure_marks_both_attempts_failed_without_summary(
+    tmp_path: Path,
+) -> None:
+    """A guarded Stage2 rejection remains a real local failure for both Nodes."""
+    evidence = tmp_path / "evidence"
+    world = FailingWorld("local contract failure: destination_mismatch")
+    coordinator = SharedWorldCoordinator(world, 5.0, evidence)
+    endpoint_a = NodeEndpoint("node-a", 0, ExecutionStore(tmp_path / "a.sqlite3"), coordinator)
+    endpoint_b = NodeEndpoint("node-b", 1, ExecutionStore(tmp_path / "b.sqlite3"), coordinator)
+    handle_a = endpoint_a.submit(_request("m", "any_targets|0", "ta"))
+    handle_b = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
+
+    for _ in range(80):
+        state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
+        state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
+        if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
+            break
+        time.sleep(0.1)
+
+    assert state_a["state"] == "FAILED"
+    assert state_b["state"] == "FAILED"
+    assert "local contract failure: destination_mismatch" in str(state_a["detail"])
+    assert "local contract failure: destination_mismatch" in str(state_b["detail"])
+    assert not (evidence / "shared-world-summary.json").exists()
+    coordinator.shutdown()
 
 
 def test_duplicate_assignment_is_idempotent(tmp_path: Path) -> None:

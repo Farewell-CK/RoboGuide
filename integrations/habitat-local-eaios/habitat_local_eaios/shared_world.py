@@ -32,6 +32,7 @@ from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .semantic_evidence import build_authoritative_semantic_evidence
+from .stage2_contract import Stage2ContractGuard
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
@@ -182,6 +183,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         terminal_bases: dict[int, str] = {}
         module: Any = None
         original_group_discussion: Any = None
+        guard = Stage2ContractGuard(self._evidence_dir(), dict(invocations))
         cancelled = False
         try:
             torch = self._runtime["torch"]
@@ -206,6 +208,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             chat_history_root = self._evidence_dir() / "chat-history"
             (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
             module, original_group_discussion = self._install_assignment(assignment)
+            exception_phase = "contract_guard_install"
+            if invocations:
+                guard.install(actor)
             while steps < self._config.max_steps:
                 if cancellation_requested():
                     cancelled = True
@@ -356,17 +361,26 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             raise
         finally:
             try:
-                if module is not None:
-                    module.group_discussion = original_group_discussion
+                guard.restore()
             except Exception:
                 if primary_error is None:
                     raise
                 _LOG.exception(
-                    "failed to restore EMOS group_discussion while preserving the primary error"
+                    "failed to restore Stage2 contract guard while preserving the primary error"
                 )
             finally:
-                self._flush_action_trace()
-                self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
+                try:
+                    if module is not None:
+                        module.group_discussion = original_group_discussion
+                except Exception:
+                    if primary_error is None:
+                        raise
+                    _LOG.exception(
+                        "failed to restore EMOS group_discussion while preserving the primary error"
+                    )
+                finally:
+                    self._flush_action_trace()
+                    self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
         if cancelled:
             for agent_id in agent_ids:
                 if agent_id not in outcomes:

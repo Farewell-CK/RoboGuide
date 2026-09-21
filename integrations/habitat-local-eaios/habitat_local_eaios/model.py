@@ -57,7 +57,7 @@ class CanonicalMobilityInvocation:
             raise IntegrationError(f"unsupported canonical operation {operation!r}")
         parameters = _parameters(invocation["parameters"])
         if set(parameters) != {"destination"}:
-            raise IntegrationError("mobility.navigate@v1 requires exactly destination")
+            raise IntegrationError(f"{operation} requires exactly destination")
         _non_empty_string(parameters["destination"], "parameters.destination")
         resources = _string_list(invocation["resource_ids"], "resource_ids")
         if len(set(resources)) != len(resources):

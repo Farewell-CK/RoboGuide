@@ -11,6 +11,7 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .stage2_contract import Stage2ContractGuard
 
 
 class EmosStage2Runtime:
@@ -208,7 +209,12 @@ class EmosStage2Runtime:
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
         module, original_group_discussion = self._install_assignment(assignment)
+        guard = Stage2ContractGuard(
+            self._evidence_dir(),
+            {self._config.agent_id: invocation},
+        )
         try:
+            guard.install(actor)
             while steps < self._config.max_steps:
                 if cancellation_requested():
                     return self._outcome(
@@ -300,8 +306,11 @@ class EmosStage2Runtime:
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
         finally:
-            module.group_discussion = original_group_discussion
-            self._flush_action_trace()
+            try:
+                guard.restore()
+            finally:
+                module.group_discussion = original_group_discussion
+                self._flush_action_trace()
         return self._outcome(
             "FAILED",
             f"EMOS Stage2 exceeded {self._config.max_steps} simulator steps",
