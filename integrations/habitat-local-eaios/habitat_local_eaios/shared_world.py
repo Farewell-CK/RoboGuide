@@ -32,6 +32,7 @@ from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .semantic_evidence import build_authoritative_semantic_evidence
+from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
@@ -182,6 +183,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         terminal_bases: dict[int, str] = {}
         module: Any = None
         original_group_discussion: Any = None
+        contract_restore: Callable[[], None] | None = None
+        contract_failure: Stage2ContractViolation | None = None
         cancelled = False
         try:
             torch = self._runtime["torch"]
@@ -206,6 +209,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             chat_history_root = self._evidence_dir() / "chat-history"
             (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
             module, original_group_discussion = self._install_assignment(assignment)
+            contract_restore = self._install_execution_contract(
+                {
+                    f"agent_{agent_id}": Stage2ExecutionContract.for_invocation(
+                        invocations[agent_id]
+                    )
+                    for agent_id in invocations
+                },
+                lambda: steps,
+            )
             while steps < self._config.max_steps:
                 if cancellation_requested():
                     cancelled = True
@@ -350,12 +362,17 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 if steps >= self._config.max_steps
                 else "skills_completed_settled"
             )
+        except Stage2ContractViolation as error:
+            contract_failure = error
+            termination_reason = "local_contract_failure"
         except BaseException as error:
             primary_error = error
             termination_reason = f"execution_exception:{exception_phase}:{type(error).__name__}"
             raise
         finally:
             try:
+                if contract_restore is not None:
+                    contract_restore()
                 if module is not None:
                     module.group_discussion = original_group_discussion
             except Exception:
@@ -367,6 +384,33 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             finally:
                 self._flush_action_trace()
                 self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
+        if contract_failure is not None:
+            for agent_id in agent_ids:
+                # A later joint-policy stop cannot erase an already observed
+                # local completion, even when that agent proposed the violation.
+                if agent_id in outcomes:
+                    continue
+                is_offending_agent = f"agent_{agent_id}" == contract_failure.agent_name
+                outcomes[agent_id] = self._pair_outcome(
+                    "FAILED",
+                    str(contract_failure)
+                    if is_offending_agent
+                    else "shared episode stopped after a sibling local contract failure",
+                    invocations[agent_id],
+                    scene_id,
+                    steps,
+                    initials[agent_id],
+                    agent_id,
+                    skill_sequence,
+                    local_skill_completed=False,
+                    episode_terminated=bool(done or habitat_env.episode_over),
+                    terminal_basis=(
+                        "local-contract-failure"
+                        if is_offending_agent
+                        else "sibling-local-contract-failure"
+                    ),
+                )
+            return outcomes, steps, bool(done or habitat_env.episode_over), info
         if cancelled:
             for agent_id in agent_ids:
                 if agent_id not in outcomes:

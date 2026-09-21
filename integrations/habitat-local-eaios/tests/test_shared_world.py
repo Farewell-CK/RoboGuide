@@ -17,13 +17,16 @@ if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
-from habitat_local_eaios.model import IntegrationError  # noqa: E402
+from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
+from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
 from habitat_local_eaios.shared_world import (  # noqa: E402
     InProcessWorldService,
     NodeEndpoint,
     SharedEmosStage2Runtime,
     SharedWorldCoordinator,
 )
+from habitat_local_eaios.stage2_contract import Stage2ExecutionContract  # noqa: E402
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
@@ -177,6 +180,9 @@ class LoopHarness(SharedEmosStage2Runtime):
         }
         self._diagnostics = cast(Any, diagnostics)
         self._test_evidence_dir = tmp_path / "evidence"
+        self._action_trace_writer = BufferedJsonlWriter(
+            self._test_evidence_dir / "action_trace.jsonl"
+        )
         self.action_trace_flushes = 0
 
     def _batch(self, observations: Any) -> Any:
@@ -195,6 +201,13 @@ class LoopHarness(SharedEmosStage2Runtime):
         """Install a mutable module facade for restoration checks."""
         del assignment
         return SimpleNamespace(group_discussion="installed"), "original"
+
+    def _install_execution_contract(
+        self, contracts: dict[str, Any], completed_steps: Callable[[], int]
+    ) -> Callable[[], None]:
+        """Skip the vendor import while exercising the loop with fake actors."""
+        del contracts, completed_steps
+        return lambda: None
 
     def _current_skills(self, actor: Any) -> list[str]:
         """Expose two active navigation skills without reading actor internals."""
@@ -286,6 +299,174 @@ def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) ->
         runtime.execute_pair({}, lambda: False, lambda agent_id, detail: None)
     assert diagnostics.reset_calls == 1
     assert diagnostics.terminals == [(0, "execution_exception:task_context")]
+
+
+class ContractModel:
+    """Return a correct navigation followed by a configurable target violation."""
+
+    def __init__(self, target: str, violate_at: int | None) -> None:
+        """Retain the raw model action schedule used by the joint-loop test."""
+        self.target = target
+        self.violate_at = violate_at
+        self.calls = 0
+        self.model = "offline-model"
+
+    def chat(self, observation: str, crab_planning: bool = False) -> Any:
+        """Return one selected tool without changing the fake simulator."""
+        del observation, crab_planning
+        self.calls += 1
+        target = "wrong-target" if self.calls == self.violate_at else self.target
+        return "nav_to_obj", {"target_obj": target}
+
+
+class ContractAgent:
+    """Expose the instance hook and track dispatches after raw model selection."""
+
+    def __init__(self, name: str, model: ContractModel) -> None:
+        """Install the scripted model behind a vendor-shaped agent."""
+        self.name = name
+        self.llm_model = model
+        self.dispatches = 0
+
+    def chat(self, observation: str) -> Any:
+        """Dispatch only after the raw model call has returned through the guard."""
+        result = self.llm_model.chat(observation)
+        self.dispatches += 1
+        return result
+
+
+class ContractActor(PolicyActor):
+    """Run guarded agent selection from the real pair loop's actor boundary."""
+
+    def __init__(self, agents: list[ContractAgent]) -> None:
+        """Expose the same active-policy agent lookup as the EMOS actor."""
+        super().__init__()
+        self._active_policies = [
+            SimpleNamespace(_high_level_policy=SimpleNamespace(llm_agent=agent)) for agent in agents
+        ]
+
+    def act(self, *args: object, **kwargs: object) -> object:
+        """Select actions before permitting the policy loop to step Gym."""
+        for policy in self._active_policies:
+            policy._high_level_policy.llm_agent.chat("observation")
+        return super().act(*args, **kwargs)
+
+
+class ContractLoopHarness(LoopHarness):
+    """Use production contract installation and outcome reduction with fake physics."""
+
+    def _install_execution_contract(
+        self, contracts: dict[str, Stage2ExecutionContract], completed_steps: Callable[[], int]
+    ) -> Callable[[], None]:
+        """Exercise real instance hooks, audit output, and restoration."""
+        return EmosStage2Runtime._install_execution_contract(self, contracts, completed_steps)
+
+
+@pytest.mark.parametrize("completed_first", [False, True])
+def test_contract_violation_stops_before_gym_and_preserves_prior_completion(
+    tmp_path: Path, completed_first: bool
+) -> None:
+    """The real pair loop reports a local violation without erasing completed work."""
+    diagnostics = RecordingDiagnostics()
+    runtime = ContractLoopHarness(tmp_path, diagnostics)
+    runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="generic")
+    agents = [
+        ContractAgent("agent_0", ContractModel("north", None)),
+        ContractAgent("agent_1", ContractModel("south", 2 if completed_first else 1)),
+    ]
+    actor = ContractActor(agents)
+    runtime._actor = actor
+    habitat_env = SimpleNamespace(
+        current_episode=SimpleNamespace(scene_id="scene"),
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    runtime._habitat_env = habitat_env
+    gym_calls: list[object] = []
+
+    def gym_step(action: object) -> Any:
+        """Observe one legitimate step and optionally complete the first agent."""
+        gym_calls.append(action)
+        return (
+            {
+                "agent_0_has_finished_oracle_nav": [int(completed_first)],
+                "agent_1_has_finished_oracle_nav": [0],
+            },
+            0.0,
+            False,
+            {},
+        )
+
+    invocations = {
+        index: CanonicalMobilityInvocation.from_request(_request("m", target, f"t{index}"))
+        for index, target in enumerate(["north", "south"])
+    }
+    outcomes, steps, done, _ = runtime._pair_loop(
+        {},
+        {"episode_id": "generic"},
+        {},
+        invocations,
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        SimpleNamespace(step=gym_step),
+        habitat_env,
+        lambda: False,
+        lambda agent_id, detail: None,
+    )
+    assert steps == len(gym_calls) == int(completed_first)
+    assert done is False
+    assert outcomes[1].state == "FAILED"
+    assert outcomes[1].terminal_basis == "local-contract-failure"
+    assert outcomes[0].state == ("COMPLETED" if completed_first else "FAILED")
+    assert outcomes[0].terminal_basis == (
+        "oracle-nav-skill" if completed_first else "sibling-local-contract-failure"
+    )
+    assert not outcomes[1].benchmark_task_achieved
+    assert agents[1].dispatches == int(completed_first)
+    assert all("chat" not in vars(agent) for agent in agents)
+    assert diagnostics.terminals == [(steps, "local_contract_failure")]
+    evidence = tmp_path / "evidence"
+    rows = [
+        json.loads(line) for line in (evidence / "stage2-actions.jsonl").read_text().splitlines()
+    ]
+    assert rows[-1]["decision"] == "rejected"
+    assert rows[-1]["agent_name"] == "agent_1"
+    assert rows[-1]["completed_simulator_steps"] == steps
+    assert json.loads((evidence / "stage2-action-audit.json").read_text())["complete"]
+
+
+def test_single_loop_contract_violation_is_local_failure_before_step(tmp_path: Path) -> None:
+    """The non-shared production loop uses the same guard and terminal classification."""
+    runtime = ContractLoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config = SimpleNamespace(
+        max_steps=3, step_period_ms=0, episode_id="generic", agent_id=0
+    )
+    agent = ContractAgent("agent_0", ContractModel("north", 1))
+    actor = ContractActor([agent])
+    runtime._actor = actor
+    runtime._agent_position = lambda: (0.0, 0.0, 0.0)  # type: ignore[method-assign]
+    habitat_env = SimpleNamespace(episode_over=False, get_metrics=lambda: {"pddl_success": False})
+    runtime._habitat_env = habitat_env
+    gym_env = StepEnvironment(1)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "north", "t"))
+    outcome = runtime._policy_loop(
+        {},
+        {"episode_id": "generic"},
+        {"agent_0": object()},
+        invocation,
+        (0.0, 0.0, 0.0),
+        "scene",
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        gym_env,
+        habitat_env,
+        lambda: False,
+    )
+    assert outcome.state == "FAILED"
+    assert outcome.terminal_basis == "local-contract-failure"
+    assert gym_env.calls == 0
+    assert agent.dispatches == 0
+    assert "chat" not in vars(agent)
 
 
 class StubRuntime:
