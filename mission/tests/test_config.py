@@ -113,6 +113,8 @@ def test_prompts_separate_availability_from_required_participation() -> None:
     assert "Do not omit required\n  participation" in prompts["planner"]
     assert "do not require one logical Actor for every available participant" in prompts["reviewer"]
     assert "preserves every confirmed identity" in prompts["reviewer"]
+    assert "Pairwise distinct eventual bindings do not name or select" in prompts["reviewer"]
     assert "do not add placeholder Actors" in prompts["repairer"]
     assert "allocation discretion cannot waive them" in prompts["repairer"]
+    assert "do not require setting Actor `physical_entity`" in prompts["repairer"]
     assert all("Episode51" not in prompt for prompt in prompts.values())
