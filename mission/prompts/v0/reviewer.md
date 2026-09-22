@@ -113,6 +113,9 @@ Approve it only when all of the following hold:
   procedure, and its satisfaction basis does not claim stronger evidence than it actually requires;
 - Mission Actors, ContextRoles, and TaskRoles form one consistent reference chain without duplicated
   Actor identity;
+- do not require one logical Actor for every available participant or embodiment. Actor cardinality
+  follows confirmed required participation and execution continuity; availability alone remains a
+  Control candidate-set fact, and a user-delegated work division remains a planning choice;
 - Actor names do not prove physical identity or placement. A grounded `physical_entity` must be
   an exact fresh admitted reference in this Grounding Context, never an invented Node or Host.
   Context `executor_constraints` express required physical distinctness, not a global policy
