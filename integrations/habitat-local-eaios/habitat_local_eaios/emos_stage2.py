@@ -11,6 +11,7 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .source_provenance import build_runtime_source_manifest
 from .stage2_contract import (
     Stage2ActionAudit,
     Stage2ContractViolation,
@@ -148,6 +149,18 @@ class EmosStage2Runtime:
                 "torch": torch,
                 "transforms": transforms,
             }
+            self._write_json(
+                "runtime-source-manifest.json",
+                build_runtime_source_manifest(
+                    (
+                        "habitat.tasks.rearrange.actions.habitat_mas_actions",
+                        "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
+                        "habitat_mas.utils.models",
+                        "habitat_local_eaios.shared_world",
+                        "habitat_local_eaios.stage2_contract",
+                    )
+                ),
+            )
         except IntegrationError:
             raise
         except Exception as error:
