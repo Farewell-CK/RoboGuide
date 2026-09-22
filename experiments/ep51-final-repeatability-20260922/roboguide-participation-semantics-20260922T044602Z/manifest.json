@@ -1,0 +1,36 @@
+{
+  "calls_registered": 9,
+  "case_inputs": {
+    "available": "Three suitable mobile robots are available for this mission. Inspect storage zone alpha and storage zone beta. Decide how to divide the work.",
+    "minimum": "At least two mobile robots must participate in this mission. Inspect storage zone alpha and storage zone beta. Decide how to divide the work while preserving that participation requirement.",
+    "universal": "All three available mobile robots must participate in this mission. Inspect storage zone alpha and storage zone beta. Decide how to divide the work while preserving that participation requirement."
+  },
+  "code_head": "219ba23ca454d11bcb718a9bbf09e72a86cab61c",
+  "component": "ResponsesMissionInterpreter only",
+  "control_node_habitat_started": false,
+  "credential_archived": false,
+  "endpoint": "http://101.43.45.215:8080/responses",
+  "interpretation_note": "This bounded study checks the production Interpreter on three generic participation semantics. It does not prove Planner, Reviewer, Control, or physical execution behavior.",
+  "max_output_tokens": 4096,
+  "mission_requests_created": 0,
+  "model": "gpt-5.6-luna",
+  "order": [
+    "available",
+    "minimum",
+    "universal",
+    "available",
+    "minimum",
+    "universal",
+    "available",
+    "minimum",
+    "universal"
+  ],
+  "prompt_path": "/tmp/roboguide-stage2-execution-contract/mission/prompts/v0/interpreter.md",
+  "prompt_sha256": "sha256:c42d9ce6577ab78012dcba1437d5cfd55f66cc5421d32b72102b1823f1ec9dde",
+  "provider_name": "OpenAI",
+  "reasoning_effort": "xhigh",
+  "retries": 0,
+  "schema": "roboguide.participation-semantics-study/v0.1",
+  "services_started": [],
+  "timeout_seconds": 600.0
+}

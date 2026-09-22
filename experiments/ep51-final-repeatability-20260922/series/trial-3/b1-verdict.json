@@ -1,0 +1,102 @@
+{
+  "schema": "roboguide.e1-b1-verdict/v0.2",
+  "run_id": "trial-3",
+  "evidence_digest": "f8c9cd7a05804d34825c6f4531e2c0989b038fd59db7050b76ea1bbdd6879a13",
+  "provenance_schema": "roboguide.e1.b1-provenance/v0.3",
+  "protocol_provenance": "VALID",
+  "system_outcome": "COMPLETED",
+  "admission": {
+    "provenance_valid": true,
+    "valid_for_formal_population": true,
+    "benchmark_authority_available": true,
+    "valid_for_benchmark_population": true,
+    "benchmark_outcome": "BENCHMARK_TRUE",
+    "run_validity": "VALID_RUN",
+    "failure_owner": "NONE",
+    "system_failure": false,
+    "model_failure": false,
+    "reasons": [],
+    "schema_version": "roboguide.e1.b1-admission/v0.1"
+  },
+  "checks": {
+    "provenance_chain_passed": true,
+    "valid_for_formal_population": true,
+    "valid_for_benchmark_population": true
+  },
+  "context": {
+    "event_archive": {
+      "schema_version": "roboguide.e1.controller-event-archive/v0.1",
+      "run_id": "trial-3",
+      "state": "complete",
+      "failure_owner": null,
+      "attempt_directory": "controller-event-pages/attempt-1k53qd0c",
+      "limits": {
+        "page_size": 100,
+        "max_pages": 256,
+        "max_page_bytes": 8388608,
+        "max_total_bytes": 67108864,
+        "timeout_seconds": 2.0,
+        "budget_seconds": 30.0,
+        "tail_confirmation_seconds": 0.1
+      },
+      "reason": "terminal_tail_confirmed",
+      "scope": "terminal_durable_prefix",
+      "terminal_mission": {
+        "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+        "group_id": "group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+        "status": "Completed"
+      },
+      "events_digest": "sha256:8fbd445e0ae3b605e40a5b35b18496eefeab0ed44095c20ff49b3794b9068051",
+      "tail_confirmations": 2,
+      "event_count": 66,
+      "last_sequence": 66,
+      "pages": 3
+    },
+    "event_archive_error": null,
+    "provenance_failures": [],
+    "semantic_goal_diagnostic": [
+      {
+        "diagnostic_only": true,
+        "status": "complete",
+        "coverage_basis": "predicate argument text in final MissionPlan semantic outcomes",
+        "objective_scope": "joint_terminal_state",
+        "authoritative_operator": "and",
+        "authoritative_predicate_count": 2,
+        "exactly_covered_predicates": [],
+        "argument_mentioned_predicates": [
+          {
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "missing_predicates": [],
+        "joint_goal_shape_preserved_in_mi_input": true
+      }
+    ],
+    "controller_receipt": {
+      "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+      "group_id": "group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+      "registered_task_ids": [
+        "reach-goal",
+        "reach-object"
+      ],
+      "execution_ids": [
+        "attempt-46:group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0-10:reach-goal-9:move-goal-1",
+        "attempt-46:group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0-12:reach-object-11:move-object-1"
+      ],
+      "mission_status": "Completed"
+    },
+    "benchmark_tri_state": "BENCHMARK_TRUE",
+    "benchmark_outcome_reason": "official_pddl_success_authoritative"
+  },
+  "verdict": "PASS",
+  "verdict_basis": "formal_protocol_admission"
+}

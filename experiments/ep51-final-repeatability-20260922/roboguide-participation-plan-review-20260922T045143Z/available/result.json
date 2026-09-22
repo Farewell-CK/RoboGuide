@@ -1,0 +1,16 @@
+{
+  "active_actor_count": 1,
+  "active_actor_ids": [
+    "inspection-actor"
+  ],
+  "case": "available",
+  "elapsed_seconds": 5.008973825722933,
+  "mission_actor_count": 1,
+  "review": {
+    "approved": true,
+    "issues": []
+  },
+  "stage": "reviewer",
+  "status": "completed",
+  "task_count": 2
+}

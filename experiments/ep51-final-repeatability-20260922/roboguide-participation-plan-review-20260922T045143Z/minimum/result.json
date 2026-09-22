@@ -1,0 +1,24 @@
+{
+  "active_actor_count": 2,
+  "active_actor_ids": [
+    "actor_alpha",
+    "actor_beta"
+  ],
+  "case": "minimum",
+  "elapsed_seconds": 35.35926277656108,
+  "mission_actor_count": 2,
+  "review": {
+    "approved": false,
+    "issues": [
+      {
+        "code": "underspecified_inspection_outcome",
+        "message": "The grounded objective asks to inspect storage zones alpha and beta but does not specify what the inspection should determine. Both Tasks narrow this to observing “safety-relevant conditions,” which is not established by the supplied intent or evidence. Clarify the intended inspection outcome before choosing these Task effects.",
+        "path": "/tasks/0/description",
+        "required_action": "RequestClarification"
+      }
+    ]
+  },
+  "stage": "reviewer",
+  "status": "completed",
+  "task_count": 2
+}

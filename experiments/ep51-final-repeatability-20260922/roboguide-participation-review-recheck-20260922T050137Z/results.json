@@ -1,0 +1,29 @@
+[
+  {
+    "case": "minimum",
+    "review": {
+      "approved": true,
+      "issues": []
+    }
+  },
+  {
+    "case": "universal",
+    "review": {
+      "approved": false,
+      "issues": [
+        {
+          "code": "inspection_outcome_undefined",
+          "message": "The alpha task asks `observation.verify` to observe whether “storage zone alpha has been inspected.” That checks whether the requested outcome already holds; it does not perform an inspection or establish that the zone has been inspected. Its `execution-report` satisfaction basis therefore cannot support the stated expected effect. Clarify what should be inspected and what result constitutes completion.",
+          "path": "/tasks/0/roles/0/execution_intent/parameters/expected",
+          "required_action": "RequestClarification"
+        },
+        {
+          "code": "inspection_outcome_undefined",
+          "message": "The beta task asks `observation.verify` to observe whether “storage zone beta has been inspected.” That checks whether the requested outcome already holds; it does not perform an inspection or establish that the zone has been inspected. Its `execution-report` satisfaction basis therefore cannot support the stated expected effect. Clarify what should be inspected and what result constitutes completion.",
+          "path": "/tasks/1/roles/0/execution_intent/parameters/expected",
+          "required_action": "RequestClarification"
+        }
+      ]
+    }
+  }
+]

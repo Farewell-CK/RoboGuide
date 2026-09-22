@@ -1,0 +1,37 @@
+{
+  "assessment": {
+    "assumptions": [
+      "No specific inspection criteria were given, so interpret “inspect” as a general inspection of each named zone."
+    ],
+    "constraints": [
+      "The user delegated how to divide the inspection work."
+    ],
+    "objective": "Inspect storage zone alpha and storage zone beta.",
+    "open_questions": []
+  },
+  "attempt": 1,
+  "case": "available",
+  "dialogue": [
+    {
+      "content": "Three suitable mobile robots are available for this mission. Inspect storage zone alpha and storage zone beta. Decide how to divide the work.",
+      "created_at_ms": 1,
+      "in_reply_to": null,
+      "kind": "Instruction",
+      "speaker": "User",
+      "turn_id": "turn-available"
+    }
+  ],
+  "elapsed_seconds": 6.615183993242681,
+  "grounding_context": {
+    "captured_at_ms": 10,
+    "context_digest": "sha256:3ac565b26b47d43073780666cda98254e87a5fee329ce45af05f4ff551a0b894",
+    "dialogue_digest": "sha256:721b2447b118751f0cecc8b78741aae8877739befdf857d5839d110344af3c34",
+    "gaps": [],
+    "memory_evidence": [],
+    "request_id": "request-available",
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "semantic_evidence": null,
+    "state_evidence": []
+  }
+}

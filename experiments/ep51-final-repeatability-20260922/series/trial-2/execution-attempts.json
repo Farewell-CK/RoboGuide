@@ -1,0 +1,23 @@
+{
+  "attempts": [
+    {
+      "execution_id": "attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-10:reach-goal-15:reach-goal-role-1",
+      "group_id": "group-mission-eba9f8333e024110b4c2042956ad9ba4",
+      "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+      "node_id": "e1-shared-node-b",
+      "role_id": "reach-goal-role",
+      "status": "Completed",
+      "task_id": "reach-goal"
+    },
+    {
+      "execution_id": "attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-12:reach-object-17:reach-object-role-1",
+      "group_id": "group-mission-eba9f8333e024110b4c2042956ad9ba4",
+      "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+      "node_id": "e1-shared-node-a",
+      "role_id": "reach-object-role",
+      "status": "Completed",
+      "task_id": "reach-object"
+    }
+  ],
+  "schema": "roboguide.execution-attempt-history/v0.1"
+}

@@ -1,0 +1,70 @@
+{
+  "agents": {
+    "0": {
+      "position": [
+        -1.334444284439087,
+        -1.775452971458435,
+        -2.5258309841156006
+      ],
+      "rotation": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 1.5983401536941528
+      }
+    },
+    "1": {
+      "position": [
+        -0.1461477279663086,
+        2.2338037490844727,
+        2.590353012084961
+      ],
+      "rotation": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 1.53212571144104
+      }
+    }
+  },
+  "collection_stats": {
+    "capture_max_seconds": 0.002952837385237217,
+    "capture_seconds": 0.0958841647952795,
+    "dropped_step_records": 0,
+    "max_record_bytes": 65536,
+    "sampling_period_simulator_steps": 1,
+    "step_observations": 108,
+    "step_records_accepted": 108,
+    "writer": {
+      "batch_capacity_records": 32,
+      "flushes": 4,
+      "pending_records": 0,
+      "records_dropped": 0,
+      "records_written": 108,
+      "write_failures": 0,
+      "write_seconds": 0.006495548412203789
+    }
+  },
+  "dropped_diagnostic_records": 0,
+  "goal_conjunct_values": {
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": true,
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": true
+  },
+  "official_metrics": {
+    "did_collide": false,
+    "num_agents_collide": 0,
+    "num_steps": 108,
+    "object_to_goal_distance": {
+      "0": 1.6753647327423096
+    },
+    "pddl_stage_goals": {
+      "robot_at_object_0_success": 1.0,
+      "robot_at_receptacle_0_success": 1.0
+    },
+    "pddl_subgoal_reward": 1.0,
+    "pddl_success": true,
+    "rearrange_cooperate_reward": 5.0
+  },
+  "phase": "terminal_world_state",
+  "schema_version": "roboguide.e1.physical-diagnostics/v0.2",
+  "simulator_steps": 108,
+  "termination_reason": "episode_done"
+}

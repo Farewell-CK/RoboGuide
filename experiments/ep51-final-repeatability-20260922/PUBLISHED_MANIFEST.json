@@ -1,0 +1,22 @@
+{
+  "schema": "roboguide.ep51-final-repeatability-publication/v0.1",
+  "code_head": "7dfdf3891487af51cd59f97cabc1796800d073d8",
+  "emos_head": "8d082d3a41af8219ca43719d24c553e9d61771fb",
+  "report_branch": "codex/ep51-final-repeatability-report",
+  "episode_id": "51",
+  "seed": 40,
+  "included": [
+    "final report and machine-readable summary",
+    "frozen run-series registration",
+    "key evidence digests",
+    "three trials' request, plan, assignment, action, diagnostics, provenance, and verdict evidence",
+    "generic participation Interpreter, Planner, and Reviewer study evidence"
+  ],
+  "excluded": [
+    "credentials and authorization headers",
+    "environment files",
+    "SQLite databases and WAL files",
+    "service and runner logs",
+    "build outputs and unrelated user files"
+  ]
+}

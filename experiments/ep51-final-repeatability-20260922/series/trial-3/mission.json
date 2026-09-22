@@ -1,0 +1,19 @@
+{
+  "group_id": "group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+  "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+  "peer_channels": [],
+  "relations": [],
+  "status": "Completed",
+  "tasks": [
+    {
+      "context_id": "reach-context",
+      "status": "Completed",
+      "task_id": "reach-goal"
+    },
+    {
+      "context_id": "reach-context",
+      "status": "Completed",
+      "task_id": "reach-object"
+    }
+  ]
+}

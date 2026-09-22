@@ -1,0 +1,63 @@
+{
+  "agents": {
+    "0": {
+      "position": [
+        1.5805046558380127,
+        -2.566195011138916,
+        -4.83552360534668
+      ],
+      "rotation": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 0.6015070676803589
+      }
+    },
+    "1": {
+      "position": [
+        -0.08676141500473022,
+        2.309159994125366,
+        3.6870832443237305
+      ],
+      "rotation": {
+        "representation": "yaw",
+        "unit": "radians",
+        "value": 3.4487898349761963
+      }
+    }
+  },
+  "collection_configuration": {
+    "max_step_records": 3050,
+    "sampling_period_simulator_steps": 1,
+    "write_batch_records": 32
+  },
+  "episode_id": "51",
+  "goal_conjunct_values": {
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": false,
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": false
+  },
+  "goal_conjuncts": [
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>",
+    "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>"
+  ],
+  "goal_entity_positions": {
+    "TARGET_any_targets|0": [
+      0.05107999965548515,
+      -0.7983099818229675,
+      -3.115679979324341
+    ],
+    "any_targets|0": [
+      -0.31773999333381653,
+      0.3078700006008148,
+      -1.9126900434494019
+    ]
+  },
+  "habitat_seed_config": {
+    "_status": "unavailable",
+    "reason": "ConfigAttributeError: Key 'habitat' not in 'HabitatConfig'\n    full_key: habitat.habitat\n    object_type=HabitatConfig"
+  },
+  "official_pddl_success": false,
+  "phase": "initial_world_state",
+  "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb",
+  "schema_version": "roboguide.e1.physical-diagnostics/v0.2",
+  "seed": 40
+}

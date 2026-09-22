@@ -1,0 +1,122 @@
+{
+  "contexts": [
+    {
+      "coupling_mode": "independent",
+      "executor_constraints": [],
+      "id": "inspection-context",
+      "relations": [],
+      "roles": [
+        {
+          "actor": "inspection-actor",
+          "id": "inspector"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "actors": [
+      {
+        "id": "inspection-actor"
+      }
+    ],
+    "id": "mission-participation-available",
+    "objective": "Inspect storage zone alpha and storage zone beta."
+  },
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "tasks": [
+    {
+      "context_id": "inspection-context",
+      "depends_on": [],
+      "description": "Safety-relevant conditions in storage zone alpha are observed as a general inspection.",
+      "id": "inspect-alpha",
+      "roles": [
+        {
+          "context_role": "inspector",
+          "execution_intent": {
+            "objective": "Observe safety-relevant conditions in storage zone alpha as a general inspection.",
+            "operation": {
+              "name": "observe",
+              "namespace": "safety",
+              "version": "v1"
+            },
+            "parameters": {
+              "mode": "general inspection of storage zone alpha"
+            }
+          },
+          "id": "alpha-observer",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "observe",
+                  "namespace": "safety",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Safety-relevant conditions in storage zone alpha have been observed as a general inspection.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    },
+    {
+      "context_id": "inspection-context",
+      "depends_on": [],
+      "description": "Safety-relevant conditions in storage zone beta are observed as a general inspection.",
+      "id": "inspect-beta",
+      "roles": [
+        {
+          "context_role": "inspector",
+          "execution_intent": {
+            "objective": "Observe safety-relevant conditions in storage zone beta as a general inspection.",
+            "operation": {
+              "name": "observe",
+              "namespace": "safety",
+              "version": "v1"
+            },
+            "parameters": {
+              "mode": "general inspection of storage zone beta"
+            }
+          },
+          "id": "beta-observer",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "observe",
+                  "namespace": "safety",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Safety-relevant conditions in storage zone beta have been observed as a general inspection.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    }
+  ]
+}

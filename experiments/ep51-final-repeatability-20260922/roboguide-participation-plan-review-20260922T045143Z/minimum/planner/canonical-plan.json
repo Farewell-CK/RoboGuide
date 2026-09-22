@@ -1,0 +1,153 @@
+{
+  "contexts": [
+    {
+      "coupling_mode": "independent",
+      "executor_constraints": [
+        {
+          "context_roles": [
+            "alpha_inspector",
+            "beta_inspector"
+          ],
+          "kind": "distinct-physical-entities"
+        }
+      ],
+      "id": "inspection_context",
+      "relations": [],
+      "roles": [
+        {
+          "actor": "actor_alpha",
+          "id": "alpha_inspector"
+        },
+        {
+          "actor": "actor_beta",
+          "id": "beta_inspector"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "actors": [
+      {
+        "id": "actor_alpha"
+      },
+      {
+        "id": "actor_beta"
+      }
+    ],
+    "id": "mission-participation-minimum",
+    "objective": "Inspect storage zone alpha and storage zone beta. Determine how to divide the inspection work while ensuring at least two mobile robots participate."
+  },
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "tasks": [
+    {
+      "context_id": "inspection_context",
+      "depends_on": [],
+      "description": "Safety-relevant conditions in storage zone alpha have been observed.",
+      "id": "inspect_alpha",
+      "roles": [
+        {
+          "context_role": "alpha_inspector",
+          "execution_intent": {
+            "objective": "Observe safety-relevant conditions in storage zone alpha.",
+            "operation": {
+              "name": "observe",
+              "namespace": "safety",
+              "version": "v1"
+            },
+            "parameters": {
+              "mode": "inspect storage zone alpha"
+            }
+          },
+          "id": "alpha_role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "observe",
+                  "namespace": "safety",
+                  "version": "v1"
+                }
+              },
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Safety-relevant conditions in storage zone alpha have been observed.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    },
+    {
+      "context_id": "inspection_context",
+      "depends_on": [],
+      "description": "Safety-relevant conditions in storage zone beta have been observed.",
+      "id": "inspect_beta",
+      "roles": [
+        {
+          "context_role": "beta_inspector",
+          "execution_intent": {
+            "objective": "Observe safety-relevant conditions in storage zone beta.",
+            "operation": {
+              "name": "observe",
+              "namespace": "safety",
+              "version": "v1"
+            },
+            "parameters": {
+              "mode": "inspect storage zone beta"
+            }
+          },
+          "id": "beta_role",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "observe",
+                  "namespace": "safety",
+                  "version": "v1"
+                }
+              },
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "move",
+                  "namespace": "mobility",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Safety-relevant conditions in storage zone beta have been observed.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    }
+  ]
+}

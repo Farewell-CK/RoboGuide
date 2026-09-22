@@ -1,0 +1,246 @@
+{
+  "schema_version": "roboguide.mission-request/v0.4",
+  "request_id": "request-26a1fae856a24d818ef7028a3a9c798f",
+  "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+  "dialogue": [
+    {
+      "turn_id": "turn-0001",
+      "speaker": "User",
+      "kind": "Instruction",
+      "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+      "created_at_ms": 1790053499710,
+      "in_reply_to": null
+    }
+  ],
+  "lifecycle": "Accepted",
+  "assessment": {
+    "objective": "Ensure that a robot reaches any_targets|0 and that a robot reaches TARGET_any_targets|0.",
+    "constraints": [
+      "Choose how to allocate the work among the available robots."
+    ],
+    "assumptions": [
+      "The robot reaching the object and the robot reaching the goal receptacle position may be the same robot; no distinct-robot requirement is stated."
+    ],
+    "open_questions": []
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+      "objective": "Ensure that a robot reaches any_targets|0 and that a robot reaches TARGET_any_targets|0.",
+      "actors": [
+        {
+          "id": "robot-object"
+        },
+        {
+          "id": "robot-goal"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "joint-arrival",
+        "roles": [
+          {
+            "id": "object-arrival",
+            "actor": "robot-object"
+          },
+          {
+            "id": "goal-arrival",
+            "actor": "robot-goal"
+          }
+        ],
+        "relations": [],
+        "coupling_mode": "independent",
+        "executor_constraints": []
+      }
+    ],
+    "tasks": [
+      {
+        "id": "reach-object",
+        "description": "The assigned robot is at any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "move-to-object",
+            "context_role": "object-arrival",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Reach any_targets|0.",
+              "parameters": {
+                "destination": "any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "joint-arrival",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The assigned robot is at any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "reach-goal",
+        "description": "The assigned robot is at TARGET_any_targets|0.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "move-to-goal",
+            "context_role": "goal-arrival",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Reach TARGET_any_targets|0.",
+              "parameters": {
+                "destination": "TARGET_any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "joint-arrival",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "The assigned robot is at TARGET_any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "grounding_context": {
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "context_digest": "sha256:cc9f9f0e55e8b53dbf6713df4d88a4feaac8a4408abcc83501ca736c97cab703",
+    "request_id": "request-26a1fae856a24d818ef7028a3a9c798f",
+    "dialogue_digest": "sha256:9cec51b8ecb4d2aedf6e768718bc33618f3e9100a211fc46c08b40ffe42c7d86",
+    "captured_at_ms": 1790053499833,
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "state_evidence": [],
+    "memory_evidence": [],
+    "gaps": [],
+    "semantic_evidence": {
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "authority": "environment-authoritative",
+      "identity": {
+        "run_id": "trial-1",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+      },
+      "objective_scope": "joint_terminal_state",
+      "goal": {
+        "kind": "logical",
+        "operator": "and",
+        "operands": [
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "quantifier": null,
+        "variables": []
+      },
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      },
+      "digest": "sha256:3b064053ae53ad0ebc76e9de7f0b7a42b0d1e7f8048f4b7621dd0c839e4ec9cd"
+    }
+  },
+  "draft_revision": 1,
+  "draft_digest": "sha256:c6dca1e86dc32e5a7e2ed6ad671cf3bd191e8e3612fa3a5549a38e5ef2d42306",
+  "approval_required": false,
+  "approval_reasons": [],
+  "issues": [],
+  "repair_attempts": 0,
+  "review_history": [
+    {
+      "draft_revision": 1,
+      "draft_digest": "sha256:c6dca1e86dc32e5a7e2ed6ad671cf3bd191e8e3612fa3a5549a38e5ef2d42306",
+      "grounding_context_digest": "sha256:cc9f9f0e55e8b53dbf6713df4d88a4feaac8a4408abcc83501ca736c97cab703",
+      "review": {
+        "approved": true,
+        "issues": []
+      },
+      "reviewed_at_ms": 1790053537883
+    }
+  ],
+  "created_at_ms": 1790053499710,
+  "updated_at_ms": 1790053538245
+}

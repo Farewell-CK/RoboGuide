@@ -1,0 +1,11 @@
+{
+  "manifest.json": "sha256:ef3e674e368aa611a4bd8ac3db3eea014f7ea35ebcdd28e2515756fd8190f2a1",
+  "minimum/provider-request.json": "sha256:f54bcbd26c29a0957a6042f36eb63998f56d7752b699c7be2b2608ad50f8c8ca",
+  "minimum/provider-response.json": "sha256:d6d6343ce0900a37c1e9c9707d3f1f34a2fab99dbd5fb387f3093e7c68327dc7",
+  "minimum/result.json": "sha256:89cdd92a96145242711e84dad0148eab37208ea7c3cd9b0e7de937c33e507c32",
+  "results.json": "sha256:c0bb8fcc9249b68f8188fcbd79c9a7171f842ec857dd226a3ea0e73314354820",
+  "run.py": "sha256:49e23af641750ad89b3112db231d0350c3d55ad034adaae2dba5d098d7487da2",
+  "universal/provider-request.json": "sha256:e3c1fb8873a3c6a7d08f3c87b66f8daa13954186f01ea7e118602661e0f341d8",
+  "universal/provider-response.json": "sha256:41b60a9b0b5d1b0cebde930db6c825d507975d9972fa46c31740cb14b018653f",
+  "universal/result.json": "sha256:14cbff8cb94aa552e81b443c3077acae15156cec4dcc7d76e103ebbb5987baca"
+}

@@ -1,0 +1,36 @@
+{
+  "assessment": {
+    "assumptions": [],
+    "constraints": [
+      "All three available mobile robots must participate.",
+      "Work may be divided among the robots as needed, while preserving the participation requirement."
+    ],
+    "objective": "Inspect storage zone alpha and storage zone beta.",
+    "open_questions": []
+  },
+  "attempt": 9,
+  "case": "universal",
+  "dialogue": [
+    {
+      "content": "All three available mobile robots must participate in this mission. Inspect storage zone alpha and storage zone beta. Decide how to divide the work while preserving that participation requirement.",
+      "created_at_ms": 1,
+      "in_reply_to": null,
+      "kind": "Instruction",
+      "speaker": "User",
+      "turn_id": "turn-universal"
+    }
+  ],
+  "elapsed_seconds": 2.9077300149947405,
+  "grounding_context": {
+    "captured_at_ms": 10,
+    "context_digest": "sha256:22cc80fe7dccf901ca6da5fb0c90797e2a8e6f4685e1d0e2e16d39421386a3d7",
+    "dialogue_digest": "sha256:ad0724eb2e3fa3eb02f25f0ca259c91237b5be182b00e679e4346de192f3b43f",
+    "gaps": [],
+    "memory_evidence": [],
+    "request_id": "request-universal",
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "semantic_evidence": null,
+    "state_evidence": []
+  }
+}

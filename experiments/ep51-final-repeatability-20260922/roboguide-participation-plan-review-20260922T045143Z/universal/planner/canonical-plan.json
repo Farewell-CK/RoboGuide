@@ -1,0 +1,174 @@
+{
+  "contexts": [
+    {
+      "coupling_mode": "independent",
+      "executor_constraints": [
+        {
+          "context_roles": [
+            "participant-1",
+            "participant-2",
+            "participant-3"
+          ],
+          "kind": "distinct-physical-entities"
+        }
+      ],
+      "id": "inspection-context",
+      "relations": [],
+      "roles": [
+        {
+          "actor": "participant-1",
+          "id": "participant-1"
+        },
+        {
+          "actor": "participant-2",
+          "id": "participant-2"
+        },
+        {
+          "actor": "participant-3",
+          "id": "participant-3"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "actors": [
+      {
+        "id": "participant-1"
+      },
+      {
+        "id": "participant-2"
+      },
+      {
+        "id": "participant-3"
+      }
+    ],
+    "id": "mission-participation-universal",
+    "objective": "Inspect storage zones alpha and beta, deciding how to divide the work while ensuring all three available mobile robots participate."
+  },
+  "schema_version": "roboguide.mission-plan/v0.8",
+  "tasks": [
+    {
+      "context_id": "inspection-context",
+      "depends_on": [],
+      "description": "Storage zone alpha has been inspected.",
+      "id": "inspect-alpha",
+      "roles": [
+        {
+          "context_role": "participant-1",
+          "execution_intent": {
+            "objective": "Inspect storage zone alpha.",
+            "operation": {
+              "name": "verify",
+              "namespace": "observation",
+              "version": "v1"
+            },
+            "parameters": {
+              "expected": "storage zone alpha has been inspected"
+            }
+          },
+          "id": "inspect-alpha-1",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "verify",
+                  "namespace": "observation",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        },
+        {
+          "context_role": "participant-2",
+          "execution_intent": {
+            "objective": "Inspect storage zone alpha.",
+            "operation": {
+              "name": "verify",
+              "namespace": "observation",
+              "version": "v1"
+            },
+            "parameters": {
+              "expected": "storage zone alpha has been inspected"
+            }
+          },
+          "id": "inspect-alpha-2",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "verify",
+                  "namespace": "observation",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Storage zone alpha has been inspected.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    },
+    {
+      "context_id": "inspection-context",
+      "depends_on": [],
+      "description": "Storage zone beta has been inspected.",
+      "id": "inspect-beta",
+      "roles": [
+        {
+          "context_role": "participant-3",
+          "execution_intent": {
+            "objective": "Inspect storage zone beta.",
+            "operation": {
+              "name": "verify",
+              "namespace": "observation",
+              "version": "v1"
+            },
+            "parameters": {
+              "expected": "storage zone beta has been inspected"
+            }
+          },
+          "id": "inspect-beta-1",
+          "requirements": {
+            "capabilities": [
+              {
+                "constraints": [],
+                "contract": {
+                  "name": "verify",
+                  "namespace": "observation",
+                  "version": "v1"
+                }
+              }
+            ],
+            "resources": []
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "satisfaction": {
+        "basis": "execution-report",
+        "expected_effect": "Storage zone beta has been inspected.",
+        "verifier": null
+      },
+      "timing": {
+        "completion_deadline_offset_ms": null,
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null
+      }
+    }
+  ]
+}

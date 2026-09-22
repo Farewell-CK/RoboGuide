@@ -1,0 +1,14 @@
+{
+  "batch_capacity_records": 1,
+  "complete": true,
+  "flushes": 2,
+  "max_record_bytes": 65536,
+  "pending_records": 0,
+  "records_dropped": 0,
+  "records_seen": 2,
+  "records_unavailable": 0,
+  "records_written": 2,
+  "schema_version": "roboguide.stage2-action-audit/v0.1",
+  "write_failures": 0,
+  "write_seconds": 0.0005261478945612907
+}

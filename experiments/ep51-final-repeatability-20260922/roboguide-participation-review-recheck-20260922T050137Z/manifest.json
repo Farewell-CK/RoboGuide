@@ -1,0 +1,23 @@
+{
+  "cases": [
+    "minimum",
+    "universal"
+  ],
+  "code_head": "7dfdf3891487af51cd59f97cabc1796800d073d8",
+  "configured_model": "gpt-5.6-luna",
+  "known_current_response_identity": "gpt-6-luna",
+  "provider_calls": 2,
+  "purpose": "Verify that unbound pairwise distinctness is not confused with invented concrete physical identity.",
+  "repairer_calls": 0,
+  "retries": 0,
+  "reviewer_prompt_sha256": "sha256:de4e14e9104afc68e7b0e94ec406c2554028e29f50f231c59c95fc854d37293f",
+  "schema": "roboguide.participation-review-recheck/v0.1",
+  "source_plan_sha256": {
+    "minimum": "sha256:347f3b3721f875af3ceceff78234c2155b3a605e1d5bd6ce6b2f29487a148163",
+    "universal": "sha256:4f929a0d17c4c3bde9b42bb004654e95f910408d12c318b9b8b4535b2becbf19"
+  },
+  "source_plans": {
+    "minimum": "/data/workspace/code/roboguide-participation-plan-review-20260922T045143Z/minimum/planner/canonical-plan.json",
+    "universal": "/data/workspace/code/roboguide-participation-plan-review-20260922T045143Z/universal/planner/canonical-plan.json"
+  }
+}

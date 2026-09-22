@@ -1,0 +1,14 @@
+acceptance=three_consecutive_official_pddl_success_true
+roboguide_head=7dfdf3891487af51cd59f97cabc1796800d073d8
+emos_head=8d082d3a41af8219ca43719d24c553e9d61771fb
+episode_id=51
+seed=40
+dataset_sha256=5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca
+input_file_sha256=1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6
+order=trial-1,trial-2,trial-3
+one_mission_request_per_trial=true
+stop_on_first_failure=true
+provider_request_alias=gpt-5.6-luna
+provider_recent_observed_response_identity=gpt-6-luna
+prior_final_series=/data/workspace/code/roboguide-ep51-nav3d-repeat-v2-20260922T121100Z
+prior_final_series_result=3_of_3_official_success_at_roboguide_head_2eccc8c

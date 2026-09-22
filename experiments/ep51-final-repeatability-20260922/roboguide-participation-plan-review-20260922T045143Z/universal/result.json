@@ -1,0 +1,31 @@
+{
+  "active_actor_count": 3,
+  "active_actor_ids": [
+    "participant-1",
+    "participant-2",
+    "participant-3"
+  ],
+  "case": "universal",
+  "elapsed_seconds": 60.19524975307286,
+  "mission_actor_count": 3,
+  "review": {
+    "approved": false,
+    "issues": [
+      {
+        "code": "inspection_outcome_not_supported",
+        "message": "Both inspection Tasks use observation.verify with the condition that the zone has already been inspected. The Catalog operation observes whether a condition holds; it does not establish that an inspection was performed or that this affirmative outcome is true. The request does not specify what each zone must be inspected for, so the plan cannot express the requested outcome faithfully. Clarify the intended inspection result before planning these Tasks.",
+        "path": "/tasks",
+        "required_action": "RequestClarification"
+      },
+      {
+        "code": "ungrounded_physical_distinctness",
+        "message": "This constraint requires the three ContextRoles to map to distinct physical entities, but the Grounding Context contains no admitted physical-entity evidence grounding those Actor identities. The requirement that all three available robots participate does not supply exact entity references. Do not retain unsupported physical-entity constraints or invent provider identities.",
+        "path": "/contexts/0/executor_constraints/0",
+        "required_action": "RejectDraft"
+      }
+    ]
+  },
+  "stage": "reviewer",
+  "status": "completed",
+  "task_count": 2
+}

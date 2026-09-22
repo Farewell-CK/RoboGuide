@@ -1,0 +1,39 @@
+{
+  "acceptance": {
+    "all": "Reviewer reports no unsupported weakening or added participation requirement.",
+    "available": "No all-candidates obligation; any nonempty active subset is semantically permitted.",
+    "minimum": "At least two active logical participants remain represented.",
+    "universal": "All three required active logical participants remain represented."
+  },
+  "case_order": [
+    "available",
+    "minimum",
+    "universal"
+  ],
+  "code_head": "219ba23ca454d11bcb718a9bbf09e72a86cab61c",
+  "components": [
+    "ResponsesMissionPlanner",
+    "ResponsesMissionReviewer"
+  ],
+  "configured_model": "gpt-5.6-luna",
+  "configured_review_model": "gpt-5.6-luna",
+  "control_node_habitat_started": false,
+  "input_source": "/data/workspace/code/roboguide-participation-plan-review-20260922T045143Z/interpreter-results-source.json",
+  "known_provider_response_identity": "gpt-6-luna in immediately preceding Interpreter study; retained as observed drift, not assumed equivalence",
+  "mission_requests_created": 0,
+  "planner_calls_maximum": 3,
+  "prompt_sha256": {
+    "planner": "sha256:804def79fb5d26a1ab3e891888b3cc37a2261e9b6d76441b9de2aec37adb1127",
+    "reviewer": "sha256:1e85b771063af1661bd46d9727d46f55f183b9acb955b64148d950cd58b5b29a"
+  },
+  "provider_retries": 0,
+  "repairer_calls": 0,
+  "reviewer_calls_maximum": 3,
+  "schema": "roboguide.participation-plan-review-study/v0.1",
+  "selected_interpreter_attempts": {
+    "available": 1,
+    "minimum": 2,
+    "universal": 3
+  },
+  "services_started": []
+}

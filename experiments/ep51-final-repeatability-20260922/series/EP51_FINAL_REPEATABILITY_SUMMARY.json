@@ -1,0 +1,945 @@
+{
+  "acceptance": "three consecutive official pddl_success=true runs on exact final code",
+  "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca",
+  "emos_head": "8d082d3a41af8219ca43719d24c553e9d61771fb",
+  "episode_id": "51",
+  "provider_identity_observation": {
+    "component_validation_response_model": "gpt-6-luna",
+    "configured_request_alias": "gpt-5.6-luna",
+    "scope": "Observed in the adjacent current-provider Interpreter/Planner/Reviewer studies; Mission Service does not archive raw provider envelopes in these three B1 runs."
+  },
+  "roboguide_head": "7dfdf3891487af51cd59f97cabc1796800d073d8",
+  "schema": "roboguide.ep51-final-repeatability-summary/v0.1",
+  "seed": 40,
+  "series_checks": {
+    "all_benchmark_population_valid": true,
+    "all_diagnostics_lossless": true,
+    "all_formal_population_valid": true,
+    "all_mission_completed": true,
+    "all_official_success": true,
+    "all_provenance_valid": true,
+    "all_stage2_actions_allowed": true,
+    "same_final_positions": true,
+    "same_initial_positions": true,
+    "same_step_count": true,
+    "trial_count": 3
+  },
+  "series_root": "/data/workspace/code/roboguide-ep51-final-repeat-20260922T050410Z",
+  "trials": [
+    {
+      "control": {
+        "assignment_arrivals": [
+          {
+            "destination": "TARGET_any_targets|0",
+            "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "node": "node-b",
+            "task_id": "reach-goal",
+            "unix": 1790053538.4714706
+          },
+          {
+            "destination": "any_targets|0",
+            "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "node": "node-a",
+            "task_id": "reach-object",
+            "unix": 1790053538.513803
+          }
+        ],
+        "attempts": [
+          {
+            "execution_id": "attempt-46:group-mission-0585118bfc8f4ba5994f55a7ba7ed0ca-10:reach-goal-12:move-to-goal-1",
+            "group_id": "group-mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "node_id": "e1-shared-node-b",
+            "role_id": "move-to-goal",
+            "status": "Completed",
+            "task_id": "reach-goal"
+          },
+          {
+            "execution_id": "attempt-46:group-mission-0585118bfc8f4ba5994f55a7ba7ed0ca-12:reach-object-14:move-to-object-1",
+            "group_id": "group-mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+            "node_id": "e1-shared-node-a",
+            "role_id": "move-to-object",
+            "status": "Completed",
+            "task_id": "reach-object"
+          }
+        ]
+      },
+      "habitat": {
+        "action_trace_collection": {
+          "batch_capacity_records": 32,
+          "flushes": 4,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_written": 108,
+          "sampling_period_simulator_steps": 1,
+          "write_failures": 0,
+          "write_seconds": 0.0016899462789297104
+        },
+        "diagnostic_collection": {
+          "capture_max_seconds": 0.0028062853962183,
+          "capture_seconds": 0.08966395724564791,
+          "dropped_step_records": 0,
+          "max_record_bytes": 65536,
+          "sampling_period_simulator_steps": 1,
+          "step_observations": 108,
+          "step_records_accepted": 108,
+          "writer": {
+            "batch_capacity_records": 32,
+            "flushes": 4,
+            "pending_records": 0,
+            "records_dropped": 0,
+            "records_written": 108,
+            "write_failures": 0,
+            "write_seconds": 0.0063735367730259895
+          }
+        },
+        "final_positions": {
+          "0": [
+            -1.334444284439087,
+            -1.775452971458435,
+            -2.5258309841156006
+          ],
+          "1": [
+            -0.1461477279663086,
+            2.2338037490844727,
+            2.590353012084961
+          ]
+        },
+        "initial_positions": {
+          "0": [
+            1.5805046558380127,
+            -2.566195011138916,
+            -4.83552360534668
+          ],
+          "1": [
+            -0.08676141500473022,
+            2.309159994125366,
+            3.6870832443237305
+          ]
+        },
+        "official_metrics": {
+          "did_collide": false,
+          "num_agents_collide": 0,
+          "num_steps": 108,
+          "object_to_goal_distance": {
+            "0": 1.6753647327423096
+          },
+          "pddl_stage_goals": {
+            "robot_at_object_0_success": 1.0,
+            "robot_at_receptacle_0_success": 1.0
+          },
+          "pddl_subgoal_reward": 1.0,
+          "pddl_success": true,
+          "rearrange_cooperate_reward": 5.0
+        },
+        "official_pddl_success": true,
+        "predicate_timeline": {
+          "object": {
+            "first_true_step": 108,
+            "remained_true_after_first": true
+          },
+          "target": {
+            "first_true_step": 26,
+            "remained_true_after_first": true
+          }
+        },
+        "simulator_steps": 108,
+        "terminal_goal_values": {
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": true,
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": true
+        }
+      },
+      "key_evidence_sha256": {
+        "b1-input-used.json": "sha256:1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+        "b1-provenance.json": "sha256:763bcbf9e50cdbff17a29f2a37864b7e3d6fb833eb8c4cbc3e730b364b3cf4b0",
+        "b1-request-record.json": "sha256:302da215c7350d4f63ec5e3d9b29aa5b36e60d8ccdae212165b5fd59e7a855be",
+        "b1-verdict.json": "sha256:526be878096de4ac69c73358f869a94d26d9f14160c3ba577789cc72cd728396",
+        "evidence/assignment-arrival.jsonl": "sha256:fe8d79c7ccbcb99c5cf8712c5a8d2313737459f64643255927b74cb889c2d61c",
+        "evidence/diagnostics-initial.json": "sha256:1cf174aa961ef66853652ea5ea77959e95d62ef587549ad1862ea8efc53c0535",
+        "evidence/diagnostics-steps.jsonl": "sha256:5045709812f620d5eb0c94e987b9d72a85657c3edef61950a6083f1385c2644e",
+        "evidence/diagnostics-terminal.json": "sha256:1a2b6b293fc7be45c8dc8986373ef8ea79774bd239f1b6d18f0bbe9ac0001fc1",
+        "evidence/runtime-source-manifest.json": "sha256:cafb2457f5593432063f3308607849b88ce9a5939ede7bb5745e62be02808240",
+        "evidence/shared-world-summary.json": "sha256:38c954ea98a86ef49fee51f19e8e1a9911296407de61615ca1d985a7f49e9b05",
+        "evidence/stage2-action-audit.json": "sha256:38cb303fced66123b726f935d42c1ed033053ffb4ec73bd9549359421ba7f1de",
+        "evidence/stage2-actions.jsonl": "sha256:554ad0a8b55fe48d48a7d143f4af2ac4d79157ce06e699abc062626a4c7ac017",
+        "execution-attempts.json": "sha256:3e9400d7232f29eec92dce8f830a08f5edb8a13bdb271e890a3067890d7eafc4",
+        "mission.json": "sha256:d8a7296bee09dd15b75c10309318518de2c972857ef77f3a63fc9c0bfed9bad2"
+      },
+      "mi": {
+        "actor_count": 2,
+        "all_role_operations": [
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          },
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          }
+        ],
+        "coupling_modes": [
+          "independent"
+        ],
+        "draft_revision": 1,
+        "lifecycle": "Accepted",
+        "relations": [],
+        "repair_attempts": 0,
+        "review_approved": true,
+        "review_attempts": 1,
+        "tasks": [
+          {
+            "depends_on": [],
+            "destinations": [
+              "any_targets|0"
+            ],
+            "id": "reach-object",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          },
+          {
+            "depends_on": [],
+            "destinations": [
+              "TARGET_any_targets|0"
+            ],
+            "id": "reach-goal",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          }
+        ]
+      },
+      "mission_id": "mission-0585118bfc8f4ba5994f55a7ba7ed0ca",
+      "request_id": "request-26a1fae856a24d818ef7028a3a9c798f",
+      "run": "trial-1",
+      "runtime_source_manifest": {
+        "modules": {
+          "habitat.tasks.rearrange.actions.habitat_mas_actions": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-lab/habitat/tasks/rearrange/actions/habitat_mas_actions.py",
+            "sha256": "0398c435a8a7bea2c0b236ec2844090d53b8d9c470e61057f299c3efd1b3f4de"
+          },
+          "habitat_baselines.rl.multi_agent.multi_agent_access_mgr": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-baselines/habitat_baselines/rl/multi_agent/multi_agent_access_mgr.py",
+            "sha256": "02037194d6283ef997e3ea07cb5b8e7df003d7b354f589d60d3201606b22a9c4"
+          },
+          "habitat_local_eaios.shared_world": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py",
+            "sha256": "b891c6936185045829b3060f0bd4b4c8f7d83584879a6af9fc1fb2e8a7fbb937"
+          },
+          "habitat_local_eaios.stage2_contract": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/stage2_contract.py",
+            "sha256": "08b95f7a5ffe64a0a547df02f88d3c719e777d99159ba3ac6b800caea8617b15"
+          },
+          "habitat_mas.utils.models": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-mas/habitat_mas/utils/models.py",
+            "sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+          }
+        },
+        "python_executable": "/home/duchaoke/miniconda3/envs/habitat/bin/python3.9",
+        "schema_version": "roboguide.local-eaios-source-provenance/v0.1"
+      },
+      "stage2": {
+        "actions": [
+          {
+            "agent_name": "agent_0",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "any_targets|0",
+              "invocation_digest": "5ec24443f3720c7a2366c09fc6c93cbd868488ef0400a6e9b5240c045118c16b",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053552.0034547,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 1
+          },
+          {
+            "agent_name": "agent_1",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "TARGET_any_targets|0",
+              "invocation_digest": "429d3cba3ea457c093948c92ebc4113d57bf48545300ce3b18e9de73df5baac6",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053555.6132472,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "TARGET_any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 2
+          }
+        ],
+        "audit": {
+          "batch_capacity_records": 1,
+          "complete": true,
+          "flushes": 2,
+          "max_record_bytes": 65536,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_seen": 2,
+          "records_unavailable": 0,
+          "records_written": 2,
+          "schema_version": "roboguide.stage2-action-audit/v0.1",
+          "write_failures": 0,
+          "write_seconds": 0.0004757298156619072
+        }
+      },
+      "verdict": {
+        "admission": {
+          "benchmark_authority_available": true,
+          "benchmark_outcome": "BENCHMARK_TRUE",
+          "failure_owner": "NONE",
+          "model_failure": false,
+          "provenance_valid": true,
+          "reasons": [],
+          "run_validity": "VALID_RUN",
+          "schema_version": "roboguide.e1.b1-admission/v0.1",
+          "system_failure": false,
+          "valid_for_benchmark_population": true,
+          "valid_for_formal_population": true
+        },
+        "system_outcome": "COMPLETED",
+        "verdict": "PASS"
+      }
+    },
+    {
+      "control": {
+        "assignment_arrivals": [
+          {
+            "destination": "TARGET_any_targets|0",
+            "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+            "node": "node-b",
+            "task_id": "reach-goal",
+            "unix": 1790053686.370583
+          },
+          {
+            "destination": "any_targets|0",
+            "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+            "node": "node-a",
+            "task_id": "reach-object",
+            "unix": 1790053686.395768
+          }
+        ],
+        "attempts": [
+          {
+            "execution_id": "attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-10:reach-goal-15:reach-goal-role-1",
+            "group_id": "group-mission-eba9f8333e024110b4c2042956ad9ba4",
+            "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+            "node_id": "e1-shared-node-b",
+            "role_id": "reach-goal-role",
+            "status": "Completed",
+            "task_id": "reach-goal"
+          },
+          {
+            "execution_id": "attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-12:reach-object-17:reach-object-role-1",
+            "group_id": "group-mission-eba9f8333e024110b4c2042956ad9ba4",
+            "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+            "node_id": "e1-shared-node-a",
+            "role_id": "reach-object-role",
+            "status": "Completed",
+            "task_id": "reach-object"
+          }
+        ]
+      },
+      "habitat": {
+        "action_trace_collection": {
+          "batch_capacity_records": 32,
+          "flushes": 4,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_written": 108,
+          "sampling_period_simulator_steps": 1,
+          "write_failures": 0,
+          "write_seconds": 0.001672571524977684
+        },
+        "diagnostic_collection": {
+          "capture_max_seconds": 0.002952837385237217,
+          "capture_seconds": 0.0958841647952795,
+          "dropped_step_records": 0,
+          "max_record_bytes": 65536,
+          "sampling_period_simulator_steps": 1,
+          "step_observations": 108,
+          "step_records_accepted": 108,
+          "writer": {
+            "batch_capacity_records": 32,
+            "flushes": 4,
+            "pending_records": 0,
+            "records_dropped": 0,
+            "records_written": 108,
+            "write_failures": 0,
+            "write_seconds": 0.006495548412203789
+          }
+        },
+        "final_positions": {
+          "0": [
+            -1.334444284439087,
+            -1.775452971458435,
+            -2.5258309841156006
+          ],
+          "1": [
+            -0.1461477279663086,
+            2.2338037490844727,
+            2.590353012084961
+          ]
+        },
+        "initial_positions": {
+          "0": [
+            1.5805046558380127,
+            -2.566195011138916,
+            -4.83552360534668
+          ],
+          "1": [
+            -0.08676141500473022,
+            2.309159994125366,
+            3.6870832443237305
+          ]
+        },
+        "official_metrics": {
+          "did_collide": false,
+          "num_agents_collide": 0,
+          "num_steps": 108,
+          "object_to_goal_distance": {
+            "0": 1.6753647327423096
+          },
+          "pddl_stage_goals": {
+            "robot_at_object_0_success": 1.0,
+            "robot_at_receptacle_0_success": 1.0
+          },
+          "pddl_subgoal_reward": 1.0,
+          "pddl_success": true,
+          "rearrange_cooperate_reward": 5.0
+        },
+        "official_pddl_success": true,
+        "predicate_timeline": {
+          "object": {
+            "first_true_step": 108,
+            "remained_true_after_first": true
+          },
+          "target": {
+            "first_true_step": 26,
+            "remained_true_after_first": true
+          }
+        },
+        "simulator_steps": 108,
+        "terminal_goal_values": {
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": true,
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": true
+        }
+      },
+      "key_evidence_sha256": {
+        "b1-input-used.json": "sha256:1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+        "b1-provenance.json": "sha256:a82804dca27ff3018f4044541365907d8be8cb65f4bcc791f363c0e3d87519ca",
+        "b1-request-record.json": "sha256:48e0f73c23081f9f92a07811864372b73ed217f207a9d1a79e8b96dbe5df6b15",
+        "b1-verdict.json": "sha256:46d928664f7559fb393976a7bde65e6c08c3ec63abccba199e0c7642d8c04746",
+        "evidence/assignment-arrival.jsonl": "sha256:690e22fbaf4c52ed0067bac53bb43d38c7ad68a73edfdd77f1724263da8e389f",
+        "evidence/diagnostics-initial.json": "sha256:1cf174aa961ef66853652ea5ea77959e95d62ef587549ad1862ea8efc53c0535",
+        "evidence/diagnostics-steps.jsonl": "sha256:5045709812f620d5eb0c94e987b9d72a85657c3edef61950a6083f1385c2644e",
+        "evidence/diagnostics-terminal.json": "sha256:bda16072464ac1a9ea2e7a84fe85a5f774600d86c55db9524ca0bed0cd5e2651",
+        "evidence/runtime-source-manifest.json": "sha256:cafb2457f5593432063f3308607849b88ce9a5939ede7bb5745e62be02808240",
+        "evidence/shared-world-summary.json": "sha256:f606839fe06c181bb963ad862650ee3a091343518ed29b76dd2808c1d92fd076",
+        "evidence/stage2-action-audit.json": "sha256:c08c8657b79943fe8eaa8b55ce6d5e2bd7dafff0d09a9b71bf7a53c03a361026",
+        "evidence/stage2-actions.jsonl": "sha256:ecd0bbbe39081949f26ab6ac7cb892401ca55376178cbf727aa876dcea15e700",
+        "execution-attempts.json": "sha256:039c7cb0409759ecb25f9badfddec1ad153ec1619d88bb813692ede9bfadb1ab",
+        "mission.json": "sha256:7eb367edefafcd313fba65bff16c70e20c3ce7bfe48fea2611a18fc62541e65b"
+      },
+      "mi": {
+        "actor_count": 2,
+        "all_role_operations": [
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          },
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          }
+        ],
+        "coupling_modes": [
+          "independent"
+        ],
+        "draft_revision": 1,
+        "lifecycle": "Accepted",
+        "relations": [],
+        "repair_attempts": 0,
+        "review_approved": true,
+        "review_attempts": 1,
+        "tasks": [
+          {
+            "depends_on": [],
+            "destinations": [
+              "any_targets|0"
+            ],
+            "id": "reach-object",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          },
+          {
+            "depends_on": [],
+            "destinations": [
+              "TARGET_any_targets|0"
+            ],
+            "id": "reach-goal",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          }
+        ]
+      },
+      "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+      "request_id": "request-dedf5d42e3ba44bfb83c61ed2ff2de76",
+      "run": "trial-2",
+      "runtime_source_manifest": {
+        "modules": {
+          "habitat.tasks.rearrange.actions.habitat_mas_actions": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-lab/habitat/tasks/rearrange/actions/habitat_mas_actions.py",
+            "sha256": "0398c435a8a7bea2c0b236ec2844090d53b8d9c470e61057f299c3efd1b3f4de"
+          },
+          "habitat_baselines.rl.multi_agent.multi_agent_access_mgr": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-baselines/habitat_baselines/rl/multi_agent/multi_agent_access_mgr.py",
+            "sha256": "02037194d6283ef997e3ea07cb5b8e7df003d7b354f589d60d3201606b22a9c4"
+          },
+          "habitat_local_eaios.shared_world": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py",
+            "sha256": "b891c6936185045829b3060f0bd4b4c8f7d83584879a6af9fc1fb2e8a7fbb937"
+          },
+          "habitat_local_eaios.stage2_contract": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/stage2_contract.py",
+            "sha256": "08b95f7a5ffe64a0a547df02f88d3c719e777d99159ba3ac6b800caea8617b15"
+          },
+          "habitat_mas.utils.models": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-mas/habitat_mas/utils/models.py",
+            "sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+          }
+        },
+        "python_executable": "/home/duchaoke/miniconda3/envs/habitat/bin/python3.9",
+        "schema_version": "roboguide.local-eaios-source-provenance/v0.1"
+      },
+      "stage2": {
+        "actions": [
+          {
+            "agent_name": "agent_0",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "any_targets|0",
+              "invocation_digest": "aab7f583be2bea375e3275e9aec162704b24dbd0a1e60d16536575e3422a4aea",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053695.6680868,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 1
+          },
+          {
+            "agent_name": "agent_1",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "TARGET_any_targets|0",
+              "invocation_digest": "3ac4e90c0e85f7c8908dccbec9057060a2a1b5eff56dd586ce378062164c5faf",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053699.7183955,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "TARGET_any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 2
+          }
+        ],
+        "audit": {
+          "batch_capacity_records": 1,
+          "complete": true,
+          "flushes": 2,
+          "max_record_bytes": 65536,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_seen": 2,
+          "records_unavailable": 0,
+          "records_written": 2,
+          "schema_version": "roboguide.stage2-action-audit/v0.1",
+          "write_failures": 0,
+          "write_seconds": 0.0005261478945612907
+        }
+      },
+      "verdict": {
+        "admission": {
+          "benchmark_authority_available": true,
+          "benchmark_outcome": "BENCHMARK_TRUE",
+          "failure_owner": "NONE",
+          "model_failure": false,
+          "provenance_valid": true,
+          "reasons": [],
+          "run_validity": "VALID_RUN",
+          "schema_version": "roboguide.e1.b1-admission/v0.1",
+          "system_failure": false,
+          "valid_for_benchmark_population": true,
+          "valid_for_formal_population": true
+        },
+        "system_outcome": "COMPLETED",
+        "verdict": "PASS"
+      }
+    },
+    {
+      "control": {
+        "assignment_arrivals": [
+          {
+            "destination": "TARGET_any_targets|0",
+            "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "node": "node-b",
+            "task_id": "reach-goal",
+            "unix": 1790053848.0064456
+          },
+          {
+            "destination": "any_targets|0",
+            "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "node": "node-a",
+            "task_id": "reach-object",
+            "unix": 1790053848.0484183
+          }
+        ],
+        "attempts": [
+          {
+            "execution_id": "attempt-46:group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0-10:reach-goal-9:move-goal-1",
+            "group_id": "group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "node_id": "e1-shared-node-b",
+            "role_id": "move-goal",
+            "status": "Completed",
+            "task_id": "reach-goal"
+          },
+          {
+            "execution_id": "attempt-46:group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0-12:reach-object-11:move-object-1",
+            "group_id": "group-mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+            "node_id": "e1-shared-node-a",
+            "role_id": "move-object",
+            "status": "Completed",
+            "task_id": "reach-object"
+          }
+        ]
+      },
+      "habitat": {
+        "action_trace_collection": {
+          "batch_capacity_records": 32,
+          "flushes": 4,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_written": 108,
+          "sampling_period_simulator_steps": 1,
+          "write_failures": 0,
+          "write_seconds": 0.001956379972398281
+        },
+        "diagnostic_collection": {
+          "capture_max_seconds": 0.00345523189753294,
+          "capture_seconds": 0.09701238665729761,
+          "dropped_step_records": 0,
+          "max_record_bytes": 65536,
+          "sampling_period_simulator_steps": 1,
+          "step_observations": 108,
+          "step_records_accepted": 108,
+          "writer": {
+            "batch_capacity_records": 32,
+            "flushes": 4,
+            "pending_records": 0,
+            "records_dropped": 0,
+            "records_written": 108,
+            "write_failures": 0,
+            "write_seconds": 0.006490688771009445
+          }
+        },
+        "final_positions": {
+          "0": [
+            -1.334444284439087,
+            -1.775452971458435,
+            -2.5258309841156006
+          ],
+          "1": [
+            -0.1461477279663086,
+            2.2338037490844727,
+            2.590353012084961
+          ]
+        },
+        "initial_positions": {
+          "0": [
+            1.5805046558380127,
+            -2.566195011138916,
+            -4.83552360534668
+          ],
+          "1": [
+            -0.08676141500473022,
+            2.309159994125366,
+            3.6870832443237305
+          ]
+        },
+        "official_metrics": {
+          "did_collide": false,
+          "num_agents_collide": 0,
+          "num_steps": 108,
+          "object_to_goal_distance": {
+            "0": 1.6753647327423096
+          },
+          "pddl_stage_goals": {
+            "robot_at_object_0_success": 1.0,
+            "robot_at_receptacle_0_success": 1.0
+          },
+          "pddl_subgoal_reward": 1.0,
+          "pddl_success": true,
+          "rearrange_cooperate_reward": 5.0
+        },
+        "official_pddl_success": true,
+        "predicate_timeline": {
+          "object": {
+            "first_true_step": 108,
+            "remained_true_after_first": true
+          },
+          "target": {
+            "first_true_step": 26,
+            "remained_true_after_first": true
+          }
+        },
+        "simulator_steps": 108,
+        "terminal_goal_values": {
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[TARGET_any_targets|0-T:goal_entity_type]]>": true,
+          "<Predicate: any_at [[obj-T:static_obj_type]] [[any_targets|0-T:movable_entity_type]]>": true
+        }
+      },
+      "key_evidence_sha256": {
+        "b1-input-used.json": "sha256:1026761241f906ca2a35ab567082ab3d281d76524d5c8ab38a2c8522bbaf87c6",
+        "b1-provenance.json": "sha256:e7d68c2f0f618727d5845617ddf899a8650ef8d9e19dd4b2f80527f247294369",
+        "b1-request-record.json": "sha256:6b6609cd841f92790587a2e7ff1b1bf09d94f95b090e909d61bff222ebdffdc8",
+        "b1-verdict.json": "sha256:32eb89eb130d2bf077676b36446d47d00dd77591239bfe95184b257302fbe94a",
+        "evidence/assignment-arrival.jsonl": "sha256:4fc8d2616325a2d59704c981f8bac5ac4539e2e7864c164de8fe77bd6b78d14d",
+        "evidence/diagnostics-initial.json": "sha256:1cf174aa961ef66853652ea5ea77959e95d62ef587549ad1862ea8efc53c0535",
+        "evidence/diagnostics-steps.jsonl": "sha256:5045709812f620d5eb0c94e987b9d72a85657c3edef61950a6083f1385c2644e",
+        "evidence/diagnostics-terminal.json": "sha256:b561e21b5ca70f20a4c2a1bee438dd05d95d96aa3a2c4c403f0cb553a2c63beb",
+        "evidence/runtime-source-manifest.json": "sha256:cafb2457f5593432063f3308607849b88ce9a5939ede7bb5745e62be02808240",
+        "evidence/shared-world-summary.json": "sha256:94275870e003f9299c886b843b7c22dd4c2c048a6e4d8e747d644da4dafb5ce1",
+        "evidence/stage2-action-audit.json": "sha256:3877f7cf104e8dfe1ccf1ebca1219caf6752172472846d002e8c49ea4001a8bc",
+        "evidence/stage2-actions.jsonl": "sha256:10a4e5ead0997654857a2ea4025d3735da1cb330321498852e33b8a254681a47",
+        "execution-attempts.json": "sha256:759499076b3ef192ee3ff4cf5214267889bed211cb322be477aab32a77657c76",
+        "mission.json": "sha256:f9077b9489985be16fc986318c51ff661cbf607def768990bfe25a91d3724b35"
+      },
+      "mi": {
+        "actor_count": 2,
+        "all_role_operations": [
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          },
+          {
+            "name": "move",
+            "namespace": "mobility",
+            "version": "v1"
+          }
+        ],
+        "coupling_modes": [
+          "independent"
+        ],
+        "draft_revision": 1,
+        "lifecycle": "Accepted",
+        "relations": [],
+        "repair_attempts": 0,
+        "review_approved": true,
+        "review_attempts": 1,
+        "tasks": [
+          {
+            "depends_on": [],
+            "destinations": [
+              "any_targets|0"
+            ],
+            "id": "reach-object",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          },
+          {
+            "depends_on": [],
+            "destinations": [
+              "TARGET_any_targets|0"
+            ],
+            "id": "reach-goal",
+            "resources": [
+              [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            ]
+          }
+        ]
+      },
+      "mission_id": "mission-f5be7dc286cc4b5fbbef364cdfd26cf0",
+      "request_id": "request-e8be73a49e314f0a8eb4a4e4e32eff64",
+      "run": "trial-3",
+      "runtime_source_manifest": {
+        "modules": {
+          "habitat.tasks.rearrange.actions.habitat_mas_actions": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-lab/habitat/tasks/rearrange/actions/habitat_mas_actions.py",
+            "sha256": "0398c435a8a7bea2c0b236ec2844090d53b8d9c470e61057f299c3efd1b3f4de"
+          },
+          "habitat_baselines.rl.multi_agent.multi_agent_access_mgr": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-baselines/habitat_baselines/rl/multi_agent/multi_agent_access_mgr.py",
+            "sha256": "02037194d6283ef997e3ea07cb5b8e7df003d7b354f589d60d3201606b22a9c4"
+          },
+          "habitat_local_eaios.shared_world": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py",
+            "sha256": "b891c6936185045829b3060f0bd4b4c8f7d83584879a6af9fc1fb2e8a7fbb937"
+          },
+          "habitat_local_eaios.stage2_contract": {
+            "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/stage2_contract.py",
+            "sha256": "08b95f7a5ffe64a0a547df02f88d3c719e777d99159ba3ac6b800caea8617b15"
+          },
+          "habitat_mas.utils.models": {
+            "path": "/tmp/emos-oracle-nav-3d/habitat-mas/habitat_mas/utils/models.py",
+            "sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+          }
+        },
+        "python_executable": "/home/duchaoke/miniconda3/envs/habitat/bin/python3.9",
+        "schema_version": "roboguide.local-eaios-source-provenance/v0.1"
+      },
+      "stage2": {
+        "actions": [
+          {
+            "agent_name": "agent_0",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "any_targets|0",
+              "invocation_digest": "5832fd6a8bdb411f9c02f7e3335d016a014ed44660acebf21681c02de69089a4",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053857.20534,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 1
+          },
+          {
+            "agent_name": "agent_1",
+            "boundary": "before-crab-agent-dispatch",
+            "completed_simulator_steps": 0,
+            "contract": {
+              "expected_destination": "TARGET_any_targets|0",
+              "invocation_digest": "7443e296c21f6e0a34b7ac3d16ab3cbf75c79e7e7815acf7317d79a30bf8c9ac",
+              "operation": "mobility.move@v1",
+              "profile": "emos-navigation/v0.1"
+            },
+            "decision": "allowed",
+            "observed_unix": 1790053860.4457116,
+            "reason": null,
+            "schema_version": "roboguide.stage2-action/v0.1",
+            "selected_action": {
+              "arguments": {
+                "target_obj": "TARGET_any_targets|0"
+              },
+              "name": "nav_to_obj"
+            },
+            "sequence": 2
+          }
+        ],
+        "audit": {
+          "batch_capacity_records": 1,
+          "complete": true,
+          "flushes": 2,
+          "max_record_bytes": 65536,
+          "pending_records": 0,
+          "records_dropped": 0,
+          "records_seen": 2,
+          "records_unavailable": 0,
+          "records_written": 2,
+          "schema_version": "roboguide.stage2-action-audit/v0.1",
+          "write_failures": 0,
+          "write_seconds": 0.0004585385322570801
+        }
+      },
+      "verdict": {
+        "admission": {
+          "benchmark_authority_available": true,
+          "benchmark_outcome": "BENCHMARK_TRUE",
+          "failure_owner": "NONE",
+          "model_failure": false,
+          "provenance_valid": true,
+          "reasons": [],
+          "run_validity": "VALID_RUN",
+          "schema_version": "roboguide.e1.b1-admission/v0.1",
+          "system_failure": false,
+          "valid_for_benchmark_population": true,
+          "valid_for_formal_population": true
+        },
+        "system_outcome": "COMPLETED",
+        "verdict": "PASS"
+      }
+    }
+  ]
+}

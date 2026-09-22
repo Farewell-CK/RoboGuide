@@ -1,0 +1,26 @@
+{
+  "modules": {
+    "habitat.tasks.rearrange.actions.habitat_mas_actions": {
+      "path": "/tmp/emos-oracle-nav-3d/habitat-lab/habitat/tasks/rearrange/actions/habitat_mas_actions.py",
+      "sha256": "0398c435a8a7bea2c0b236ec2844090d53b8d9c470e61057f299c3efd1b3f4de"
+    },
+    "habitat_baselines.rl.multi_agent.multi_agent_access_mgr": {
+      "path": "/tmp/emos-oracle-nav-3d/habitat-baselines/habitat_baselines/rl/multi_agent/multi_agent_access_mgr.py",
+      "sha256": "02037194d6283ef997e3ea07cb5b8e7df003d7b354f589d60d3201606b22a9c4"
+    },
+    "habitat_local_eaios.shared_world": {
+      "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py",
+      "sha256": "b891c6936185045829b3060f0bd4b4c8f7d83584879a6af9fc1fb2e8a7fbb937"
+    },
+    "habitat_local_eaios.stage2_contract": {
+      "path": "/tmp/roboguide-stage2-execution-contract/integrations/habitat-local-eaios/habitat_local_eaios/stage2_contract.py",
+      "sha256": "08b95f7a5ffe64a0a547df02f88d3c719e777d99159ba3ac6b800caea8617b15"
+    },
+    "habitat_mas.utils.models": {
+      "path": "/tmp/emos-oracle-nav-3d/habitat-mas/habitat_mas/utils/models.py",
+      "sha256": "a63f6af9e98731d80ae578be59d98dc317b7614de36fc8f8de5ab538e1d22b74"
+    }
+  },
+  "python_executable": "/home/duchaoke/miniconda3/envs/habitat/bin/python3.9",
+  "schema_version": "roboguide.local-eaios-source-provenance/v0.1"
+}

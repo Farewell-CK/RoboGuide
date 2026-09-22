@@ -1,0 +1,16 @@
+{
+  "run_id": "trial-2",
+  "input_digest": "82e97b42bdf6741997da1e2250e26fab82ce62069edb195c93c7baad80d1189b",
+  "mi_run_identity": "request-dedf5d42e3ba44bfb83c61ed2ff2de76",
+  "accepted_plan_digest": "1a563ff8de3065a3e463d44c4fd1af3d4e916048abbdd6ad7e83d4b929d117bf",
+  "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+  "controller_submission_identity": "group-mission-eba9f8333e024110b4c2042956ad9ba4",
+  "execution_identity": "attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-10:reach-goal-15:reach-goal-role-1,attempt-46:group-mission-eba9f8333e024110b4c2042956ad9ba4-12:reach-object-17:reach-object-role-1",
+  "request_record_digest": "4782ca69e858db423f7407bd85c4a00d06848098fd2b24371203e88485397c88",
+  "observations_digest": "23416ce89b904529b1d8ed52020fd42604d266216271510a1743e6f188855873",
+  "submission_evidence_digest": "6dce19e4dc58afbf73bbcf99d8765b256d0c53d834c9498d0abcb56d94ef2fe1",
+  "failure_evidence_digest": "",
+  "semantic_evidence_digest": "sha256:a9c2dbcd615931e51580c6a693d8f72b49d603dbe50395bfb08815ecf11e3256",
+  "benchmark_evidence_digest": "3fb598eea9bbf14731074c8912e57774379a6b1a5cd44ab8b0c64d440bd6268c",
+  "schema_version": "roboguide.e1.b1-provenance/v0.3"
+}

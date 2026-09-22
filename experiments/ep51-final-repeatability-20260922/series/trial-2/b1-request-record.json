@@ -1,0 +1,242 @@
+{
+  "schema_version": "roboguide.mission-request/v0.4",
+  "request_id": "request-dedf5d42e3ba44bfb83c61ed2ff2de76",
+  "mission_id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+  "dialogue": [
+    {
+      "turn_id": "turn-0001",
+      "speaker": "User",
+      "kind": "Instruction",
+      "content": "Two heterogeneous robots (a legged Spot and a wheeled Fetch) operate in one shared multi-floor scene. Complete the benchmark objective: ensure that a robot reaches the object any_targets|0, and ensure that a robot reaches the goal receptacle position TARGET_any_targets|0. Decide yourselves how to divide the work between the available robots and carry it out.",
+      "created_at_ms": 1790053650378,
+      "in_reply_to": null
+    }
+  ],
+  "lifecycle": "Accepted",
+  "assessment": {
+    "objective": "At the joint terminal state, ensure that at least one robot is at the object any_targets|0 and at least one robot is at the goal receptacle position TARGET_any_targets|0. Decide how to allocate the work between the available robots.",
+    "constraints": [],
+    "assumptions": [
+      "No distinct-robot requirement is specified: either or both robots may be assigned work, and the same robot may satisfy both reach conditions if the joint terminal state permits it."
+    ],
+    "open_questions": []
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-eba9f8333e024110b4c2042956ad9ba4",
+      "objective": "At the joint terminal state, ensure that at least one robot is at the object any_targets|0 and at least one robot is at the goal receptacle position TARGET_any_targets|0. Decide how to allocate the work between the available robots.",
+      "actors": [
+        {
+          "id": "object-reacher"
+        },
+        {
+          "id": "goal-reacher"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "reach-context",
+        "roles": [
+          {
+            "id": "object-reacher-role",
+            "actor": "object-reacher"
+          },
+          {
+            "id": "goal-reacher-role",
+            "actor": "goal-reacher"
+          }
+        ],
+        "relations": [],
+        "coupling_mode": "independent",
+        "executor_constraints": []
+      }
+    ],
+    "tasks": [
+      {
+        "id": "reach-object",
+        "description": "A robot is at the object location any_targets|0 at the joint terminal state.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "reach-object-role",
+            "context_role": "object-reacher-role",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Be at the object location any_targets|0.",
+              "parameters": {
+                "destination": "any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "reach-context",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "A robot is at the object location any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "reach-goal",
+        "description": "A robot is at the goal receptacle position TARGET_any_targets|0 at the joint terminal state.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "reach-goal-role",
+            "context_role": "goal-reacher-role",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "move",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "move",
+                "version": "v1"
+              },
+              "objective": "Be at the goal receptacle position TARGET_any_targets|0.",
+              "parameters": {
+                "destination": "TARGET_any_targets|0"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "reach-context",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "A robot is at the goal receptacle position TARGET_any_targets|0.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "grounding_context": {
+    "schema_version": "roboguide.grounding-context/v0.2",
+    "context_digest": "sha256:04f19b2036f48cbe3db805a08748dda2ca4768d003c4e6a20e31c1fc1ce3e1e3",
+    "request_id": "request-dedf5d42e3ba44bfb83c61ed2ff2de76",
+    "dialogue_digest": "sha256:5913b90606a8edeb03dbc5108fa9eb503cc55379155e45fc255af05e70ff6dc8",
+    "captured_at_ms": 1790053650490,
+    "selection_policy_ref": "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2#world-payload-schemas=sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "state_evidence": [],
+    "memory_evidence": [],
+    "gaps": [],
+    "semantic_evidence": {
+      "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+      "authority": "environment-authoritative",
+      "identity": {
+        "run_id": "trial-2",
+        "episode_id": "51",
+        "revision": "goal-8a94fa217ab56c749a22ac2f1141bb6cb16c7b855c61a08831383c8d8b3f6968",
+        "dataset_revision": "mobility_episodes_1",
+        "dataset_sha256": "5d2c6aa6608d5611c73d8f6c688e17613a9898afa5f0f668e66db068598191ca"
+      },
+      "objective_scope": "joint_terminal_state",
+      "goal": {
+        "kind": "logical",
+        "operator": "and",
+        "operands": [
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "any_targets|0"
+            ]
+          },
+          {
+            "kind": "predicate",
+            "name": "any_at",
+            "arguments": [
+              "TARGET_any_targets|0"
+            ]
+          }
+        ],
+        "quantifier": null,
+        "variables": []
+      },
+      "world_context": {
+        "agent_ids": [
+          0,
+          1
+        ],
+        "entity_catalog": [
+          "TARGET_any_targets|0",
+          "agent_0",
+          "agent_1",
+          "any_targets|0"
+        ],
+        "scene_id": "data/scene_datasets/mp3d/pRbA3pwrgk9/pRbA3pwrgk9.glb"
+      },
+      "digest": "sha256:a9c2dbcd615931e51580c6a693d8f72b49d603dbe50395bfb08815ecf11e3256"
+    }
+  },
+  "draft_revision": 1,
+  "draft_digest": "sha256:1a563ff8de3065a3e463d44c4fd1af3d4e916048abbdd6ad7e83d4b929d117bf",
+  "approval_required": false,
+  "approval_reasons": [],
+  "issues": [],
+  "repair_attempts": 0,
+  "review_history": [
+    {
+      "draft_revision": 1,
+      "draft_digest": "sha256:1a563ff8de3065a3e463d44c4fd1af3d4e916048abbdd6ad7e83d4b929d117bf",
+      "grounding_context_digest": "sha256:04f19b2036f48cbe3db805a08748dda2ca4768d003c4e6a20e31c1fc1ce3e1e3",
+      "review": {
+        "approved": true,
+        "issues": []
+      },
+      "reviewed_at_ms": 1790053685806
+    }
+  ],
+  "created_at_ms": 1790053650378,
+  "updated_at_ms": 1790053686161
+}
