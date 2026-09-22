@@ -29,6 +29,12 @@ Use these evidence rules:
   gives Planning discretion only within those requirements; it neither creates an all-participants
   obligation nor waives one. Do not invent physical identity or placement when the Grounding
   Context supplies no admitted reference.
+- For a joint terminal state, preserve the requirement that every conjunct hold at the same final
+  state. Do not assume that one participant can establish several effects sequentially when a later
+  operation may invalidate an earlier effect. Such reuse is a valid interpretation only when the
+  dialogue or admitted evidence establishes effect persistence, mutual compatibility, or an explicit
+  restoration mechanism. When that evidence is absent, keep allocation open without claiming
+  same-participant feasibility or inventing distinct physical identities.
 
 - Treat State entries as attributed evidence, not global truth. Preserve material conflicts and
   distinguish `Fresh` from `Stale`; source-local timestamps are not comparable across producers.

@@ -68,6 +68,23 @@ and robot. That is an intentional C1 scope bound, not a canonical operation cons
 performs bounded status reacquisition for transient observation failures without redispatching the
 physical attempt.
 
+## Shared-world deployment topology
+
+The `shared-emos-stage2` profile has a stricter episode-start contract than the single-agent
+backend. One process owns one official Habitat episode and exactly two configured agent endpoints.
+It starts the single reset only after two Control-committed assignments arrive through distinct
+endpoints. It does not support running one endpoint and later reusing that endpoint for a second
+assignment inside the same official episode. This is a deployment topology limit, not a statement
+that every two-goal Mission semantically requires distinct Physical Entities.
+
+The bounded `--pair-wait-s` barrier prevents a half-populated joint episode from running. Expiry
+fails the arrived local execution and writes `evidence/shared-world-start-admission.json` with the
+fixed topology, arrived assignment, and rejection reason. A successful pair writes the same artifact
+with `state: ADMITTED` before reset. Evidence write failures are logged and never change the local
+execution result. Generic Control remains free to run a true one-Actor DAG sequentially on one
+resource after satisfaction releases it; such a plan must use a deployment that implements
+sequential endpoint reuse.
+
 ## Stage2 execution contract guard
 
 For the `emos-crabagent` deployment profile, the bridge derives a temporary

@@ -548,12 +548,22 @@ def _request(mission: str, destination: str, task: str) -> dict[str, object]:
 
 
 def _world(
-    tmp_path: Path, pair_wait: float = 5.0
+    tmp_path: Path,
+    pair_wait: float = 5.0,
+    *,
+    monotonic: Callable[[], float] = time.monotonic,
+    wait_poll: float = 0.2,
 ) -> tuple[Any, Any, NodeEndpoint, NodeEndpoint, Path]:
     """Create one coordinator with two endpoints over stub runtime."""
     runtime = StubRuntime()
     evidence = tmp_path / "evidence"
-    coordinator = SharedWorldCoordinator(InProcessWorldService(runtime), pair_wait, evidence)
+    coordinator = SharedWorldCoordinator(
+        InProcessWorldService(runtime),
+        pair_wait,
+        evidence,
+        monotonic=monotonic,
+        wait_poll_s=wait_poll,
+    )
     endpoint_a = NodeEndpoint("node-a", 0, ExecutionStore(tmp_path / "a.sqlite3"), coordinator)
     endpoint_b = NodeEndpoint("node-b", 1, ExecutionStore(tmp_path / "b.sqlite3"), coordinator)
     return runtime, coordinator, endpoint_a, endpoint_b, evidence
@@ -561,15 +571,42 @@ def _world(
 
 def test_lone_assignment_waits_then_fails_closed(tmp_path: Path) -> None:
     """A sibling-less assignment must fail closed without a shared episode."""
-    runtime, _, endpoint_a, _, evidence = _world(tmp_path, pair_wait=1.0)
+    clock_values = iter((0.0, 2.0))
+    runtime, coordinator, endpoint_a, _, evidence = _world(
+        tmp_path,
+        pair_wait=1.0,
+        monotonic=lambda: next(clock_values, 2.0),
+        wait_poll=0.001,
+    )
     response = endpoint_a.submit(_request("m", "any_targets|0", "t"))
-    time.sleep(2.0)
-    execution = _execution(endpoint_a.store(), str(response["execution_id"]))
-    assert execution is not None
+    for _ in range(1000):
+        execution = _execution(endpoint_a.store(), str(response["execution_id"]))
+        if execution["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
     assert str(execution["state"]) == "FAILED"
     assert "pair never assembled" in str(execution["detail"])
     assert runtime.calls == 0
     assert not (evidence / "shared-world-summary.json").exists()
+    admission = json.loads(
+        (evidence / "shared-world-start-admission.json").read_text(encoding="utf-8")
+    )
+    assert admission["state"] == "REJECTED"
+    assert admission["required_distinct_endpoint_assignments"] == 2
+    assert admission["sequential_endpoint_reuse_supported"] is False
+    assert admission["arrived_assignments"] == [
+        {
+            "agent_id": 0,
+            "endpoint": "node-a",
+            "execution_id": response["execution_id"],
+            "group_id": "group",
+            "mission_id": "m",
+            "resource_ids": ["slot"],
+            "role_id": "role",
+            "task_id": "t",
+        }
+    ]
+    assert coordinator.deployment_contract()["episode_scope"] == "one-official-shared-episode"
 
 
 def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
@@ -605,6 +642,40 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
     assert summary["identity"]["episode_reset_count"] == 1
     assert summary["identity"]["simulator_worlds"] == 1
     assert summary["official_pddl_success"] is True
+    admission = json.loads(
+        (evidence / "shared-world-start-admission.json").read_text(encoding="utf-8")
+    )
+    assert admission["state"] == "ADMITTED"
+    assert {entry["endpoint"] for entry in admission["arrived_assignments"]} == {
+        "node-a",
+        "node-b",
+    }
+
+
+def test_start_admission_evidence_failure_does_not_change_pair_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Optional topology evidence I/O cannot block an otherwise admitted pair."""
+    runtime, coordinator, endpoint_a, endpoint_b, _ = _world(tmp_path)
+    write_json = coordinator._write_json
+
+    def fail_write(name: str, value: object) -> None:
+        """Raise only for the new admission document in this failure injection."""
+        if name == "shared-world-start-admission.json":
+            raise OSError("read-only evidence directory")
+        write_json(name, value)
+
+    monkeypatch.setattr(coordinator, "_write_json", fail_write)
+    handle_a = endpoint_a.submit(_request("m", "any_targets|0", "ta"))
+    handle_b = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
+    for _ in range(1000):
+        state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
+        state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
+        if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert state_a["state"] == state_b["state"] == "COMPLETED"
+    assert runtime.calls == 1
 
 
 def test_duplicate_assignment_is_idempotent(tmp_path: Path) -> None:

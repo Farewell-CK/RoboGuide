@@ -37,6 +37,7 @@ from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 from .video_capture import HabitatVideoCapture
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
+_START_ADMISSION_SCHEMA = "roboguide.e1.shared-world-start-admission/v0.1"
 
 
 class SharedEmosStage2Runtime(EmosStage2Runtime):
@@ -976,19 +977,33 @@ class ProcessWorldService:
 
 
 class SharedWorldCoordinator:
-    """Serialize one shared episode across two independent Node endpoints."""
+    """Serialize one shared episode across exactly two independent Node endpoints.
+
+    This deployment profile does not support running a single endpoint first and
+    reusing it later in the same official episode.  Both committed assignments
+    must arrive on distinct configured endpoints before the one Habitat reset.
+    The restriction belongs to this adapter topology, not Mission semantics or
+    the generic Control resource model.
+    """
 
     def __init__(
         self,
         world: Any,
         pair_wait_s: float,
         evidence_dir: Path,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        wait_poll_s: float = 0.2,
     ) -> None:
         """Own the single-episode state machine and evidence log."""
         if pair_wait_s <= 0:
             raise IntegrationError("pair_wait_s must be positive")
+        if wait_poll_s <= 0:
+            raise IntegrationError("wait_poll_s must be positive")
         self._world = world
         self._pair_wait_s = pair_wait_s
+        self._monotonic = monotonic
+        self._wait_poll_s = wait_poll_s
         self._evidence_dir = evidence_dir
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
@@ -1037,6 +1052,20 @@ class SharedWorldCoordinator:
         """Report whether the shared world initialized on its owning thread."""
         return self._initialization_error is None and self._world.is_ready()
 
+    def deployment_contract(self) -> dict[str, object]:
+        """Describe the fixed episode-start topology without claiming Mission semantics."""
+        return {
+            "schema_version": _START_ADMISSION_SCHEMA,
+            "episode_scope": "one-official-shared-episode",
+            "required_distinct_endpoint_assignments": 2,
+            "sequential_endpoint_reuse_supported": False,
+            "pair_wait_seconds": self._pair_wait_s,
+            "start_condition": (
+                "two Control-committed assignments dispatched through distinct configured "
+                "Node endpoints before the single Habitat reset"
+            ),
+        }
+
     def episode_consumed(self) -> bool:
         """Report whether the single shared episode has already been used."""
         with self._condition:
@@ -1058,7 +1087,7 @@ class SharedWorldCoordinator:
         while True:
             with self._condition:
                 if not self._queue:
-                    self._condition.wait(timeout=0.2)
+                    self._condition.wait(timeout=self._wait_poll_s)
                 entries = list(self._queue)
             for entry in entries:
                 if len(pair) < 2 and all(node is not entry[0] for node, _ in pair):
@@ -1068,8 +1097,8 @@ class SharedWorldCoordinator:
                     self._fail_extra(entry)
             if len(pair) == 1:
                 if waited_from is None:
-                    waited_from = time.monotonic()
-                elif time.monotonic() - waited_from >= self._pair_wait_s:
+                    waited_from = self._monotonic()
+                elif self._monotonic() - waited_from >= self._pair_wait_s:
                     self._fail_unpaired(pair[0])
                     pair = []
                     waited_from = None
@@ -1103,10 +1132,19 @@ class SharedWorldCoordinator:
             )
 
     def _fail_unpaired(self, entry: tuple[NodeEndpoint, str]) -> None:
-        """Fail closed a lone assignment whose sibling never arrived (S1)."""
+        """Fail closed and archive a lone assignment whose sibling never arrived."""
         endpoint, execution_id = entry
         store = endpoint.store()
         current = store.get(execution_id)
+        # Publish the deployment decision before the local terminal fact so an
+        # observer that sees FAILED can also inspect the reason immediately.
+        # The evidence helper suppresses its own I/O failures.
+        self._write_start_admission(
+            "REJECTED",
+            [(endpoint, execution_id)],
+            "required second distinct endpoint assignment did not arrive within the bounded "
+            "episode-start window",
+        )
         if current is not None and current["state"] not in TERMINAL_STATES:
             store.mark_failed(
                 execution_id,
@@ -1115,6 +1153,11 @@ class SharedWorldCoordinator:
 
     def _execute_pair(self, pair: list[tuple[NodeEndpoint, str]]) -> None:
         """Run the single shared episode and project per-agent terminal facts."""
+        self._write_start_admission(
+            "ADMITTED",
+            pair,
+            "both required distinct endpoint assignments arrived before reset",
+        )
         endpoints = {endpoint.agent_id: endpoint for endpoint, _ in pair}
         handles: dict[int, str] = {}
         invocations: dict[int, CanonicalMobilityInvocation] = {}
@@ -1185,6 +1228,53 @@ class SharedWorldCoordinator:
         self._evidence_dir.mkdir(parents=True, exist_ok=True)
         path = self._evidence_dir / name
         path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _write_start_admission(
+        self,
+        state: str,
+        entries: list[tuple[NodeEndpoint, str]],
+        reason: str,
+    ) -> None:
+        """Best-effort archive the deployment start decision without changing execution."""
+        document = self.deployment_contract()
+        document.update(
+            {
+                "state": state,
+                "reason": reason,
+                "arrived_assignments": [
+                    self._start_assignment_identity(endpoint, execution_id)
+                    for endpoint, execution_id in entries
+                ],
+            }
+        )
+        try:
+            self._write_json("shared-world-start-admission.json", document)
+        except Exception as error:  # noqa: BLE001 - evidence cannot become execution authority
+            _LOG.warning("shared-world start-admission evidence unavailable: %s", error)
+
+    @staticmethod
+    def _start_assignment_identity(endpoint: NodeEndpoint, execution_id: str) -> dict[str, object]:
+        """Project one arrived assignment identity without modifying its durable state."""
+        document: dict[str, object] = {
+            "agent_id": endpoint.agent_id,
+            "endpoint": endpoint.name,
+            "execution_id": execution_id,
+        }
+        execution = endpoint.store().get(execution_id)
+        if execution is None:
+            document["identity_unavailable_reason"] = "execution disappeared before admission"
+            return document
+        invocation = execution["invocation"]
+        document.update(
+            {
+                "group_id": invocation.group_id,
+                "mission_id": invocation.mission_id,
+                "resource_ids": list(invocation.resource_ids),
+                "role_id": invocation.role_id,
+                "task_id": invocation.task_id,
+            }
+        )
+        return document
 
 
 def _receive_message(connection: Any) -> tuple[str, Any]:
