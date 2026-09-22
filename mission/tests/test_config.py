@@ -89,3 +89,24 @@ def test_prompts_share_mission_semantic_consistency_rules() -> None:
     assert "selected-by-later-planning" in planner_prompt
     assert "selected-by-later-planning" in reviewer_prompt
     assert "selected-by-later-planning" in repairer_prompt
+
+
+def test_prompts_separate_available_participants_from_mandatory_execution() -> None:
+    """Participant availability cannot silently become an all-executors requirement."""
+    settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
+    prompts = {
+        name: path.read_text(encoding="utf-8")
+        for name, path in {
+            "interpreter": settings.prompts.interpreter_path,
+            "planner": settings.prompts.planner_path,
+            "reviewer": settings.prompts.reviewer_path,
+            "repairer": settings.prompts.repairer_path,
+        }.items()
+    }
+
+    assert "availability does not require every participant" in prompts["interpreter"]
+    assert "delegates division of work" in prompts["interpreter"]
+    assert "not from the number of available embodiments" in prompts["planner"]
+    assert "do not require one logical Actor for every available participant" in prompts["reviewer"]
+    assert "do not add placeholder Actors" in prompts["repairer"]
+    assert all("Episode51" not in prompt for prompt in prompts.values())
