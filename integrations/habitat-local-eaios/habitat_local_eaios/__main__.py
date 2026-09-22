@@ -57,6 +57,18 @@ def _arguments() -> argparse.Namespace:
         default=30,
         help="RGB evidence playback rate; does not change simulator stepping",
     )
+    parser.add_argument(
+        "--live-preview-path",
+        type=Path,
+        default=None,
+        help="optional atomically replaced operator-view JPEG; disabled by default",
+    )
+    parser.add_argument(
+        "--live-preview-period-steps",
+        type=int,
+        default=5,
+        help="bounded preview sampling period in simulator steps",
+    )
     parser.add_argument("--initialization-timeout-s", type=float, default=120.0)
     parser.add_argument(
         "--subtask-mode",
@@ -121,6 +133,8 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         seed=arguments.seed,
         video_path=arguments.video_path,
         video_fps=arguments.video_fps,
+        live_preview_path=arguments.live_preview_path,
+        live_preview_period_steps=arguments.live_preview_period_steps,
         subtask_mode=arguments.subtask_mode,
         evidence_dir=arguments.evidence_dir,
         run_id=arguments.run_id,
@@ -166,6 +180,8 @@ def main() -> None:
         "seed": arguments.seed,
         "video_path": arguments.video_path,
         "video_fps": arguments.video_fps,
+        "live_preview_path": arguments.live_preview_path,
+        "live_preview_period_steps": arguments.live_preview_period_steps,
     }
     if arguments.backend == "emos-crabagent":
         config: HabitatBackendConfig = CrabAgentBackendConfig(
