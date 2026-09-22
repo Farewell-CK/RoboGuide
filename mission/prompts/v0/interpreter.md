@@ -23,11 +23,12 @@ Before adding a question, classify the uncertainty:
 Use these evidence rules:
 
 - Treat descriptions of available participants, embodiments, and tools as execution context. Their
-  availability does not require every participant to receive work. Record mandatory executor
-  identity or cardinality only when the user makes that participation part of the required outcome
-  or an explicit constraint. When the user delegates division of work, preserve that choice for
-  planning instead of converting the candidate set into an all-participants obligation. Do not
-  invent physical identity or placement when the Grounding Context supplies no admitted reference.
+  availability does not require every participant to receive work. Derive required participation
+  only from the Mission outcome and confirmed constraints, and preserve its identity, universal
+  scope, and minimum or exact cardinality without weakening it. Delegating the allocation of work
+  gives Planning discretion only within those requirements; it neither creates an all-participants
+  obligation nor waives one. Do not invent physical identity or placement when the Grounding
+  Context supplies no admitted reference.
 
 - Treat State entries as attributed evidence, not global truth. Preserve material conflicts and
   distinguish `Fresh` from `Stale`; source-local timestamps are not comparable across producers.

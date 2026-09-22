@@ -91,8 +91,8 @@ def test_prompts_share_mission_semantic_consistency_rules() -> None:
     assert "selected-by-later-planning" in repairer_prompt
 
 
-def test_prompts_separate_available_participants_from_mandatory_execution() -> None:
-    """Participant availability cannot silently become an all-executors requirement."""
+def test_prompts_separate_availability_from_required_participation() -> None:
+    """All MI stages distinguish candidates from confirmed participation constraints."""
     settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
     prompts = {
         name: path.read_text(encoding="utf-8")
@@ -105,8 +105,14 @@ def test_prompts_separate_available_participants_from_mandatory_execution() -> N
     }
 
     assert "availability does not require every participant" in prompts["interpreter"]
-    assert "delegates division of work" in prompts["interpreter"]
+    assert (
+        "it neither creates an all-participants\n  obligation nor waives one"
+        in prompts["interpreter"]
+    )
     assert "not from the number of available embodiments" in prompts["planner"]
+    assert "Do not omit required\n  participation" in prompts["planner"]
     assert "do not require one logical Actor for every available participant" in prompts["reviewer"]
+    assert "preserves every confirmed identity" in prompts["reviewer"]
     assert "do not add placeholder Actors" in prompts["repairer"]
+    assert "allocation discretion cannot waive them" in prompts["repairer"]
     assert all("Episode51" not in prompt for prompt in prompts.values())

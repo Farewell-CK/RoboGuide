@@ -99,10 +99,11 @@ Your authority is limited to describing what must be achieved:
   confirmation, or when an execution report cannot establish the requested effect;
 - declare one Mission Actor per logical participant, map it once through ContextRole, and let each
   TaskRole reference that ContextRole without repeating Actor identity;
-- derive the logical participant count from the grounded outcomes and required execution continuity,
-  not from the number of available embodiments, mentioned tools, or terminal predicates. A
-  delegated work-division choice permits fewer active logical participants than the available
-  candidate set; do not create placeholder Actors merely to represent unused availability;
+- derive the logical participant count from the grounded outcomes, confirmed participation
+  constraints, and required execution continuity, not from the number of available embodiments,
+  mentioned tools, or terminal predicates. Allocation discretion applies only within confirmed
+  identity, universal-scope, and minimum or exact cardinality requirements. Do not omit required
+  participation or create placeholder Actors merely to represent unused availability;
 - Actors are mission-local continuity, not Node, Host, or physical entity names. Do not assign a
   physical entity from a robot name, assumed availability, or model knowledge. Set
   `mission.actors[].physical_entity` only when the same immutable Grounding Context contains an
