@@ -20,6 +20,7 @@ INPUT_JSON="${2:-${ROBOGUIDE_B1_INPUT:-$SCENARIO/b1-input.json}}"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 PIDS=()
+VIDEO_ARGS=()
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -136,6 +137,12 @@ fi
 cp "$INPUT_JSON" "$RUN/b1-input-used.json"
 INPUT_JSON="$RUN/b1-input-used.json"
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
+if [[ "${ROBOGUIDE_HABITAT_CAPTURE_VIDEO:-0}" == 1 ]]; then
+    VIDEO_ARGS=(
+        --video-path "$RUN/evidence/episode-video.mp4"
+        --video-fps "${ROBOGUIDE_HABITAT_VIDEO_FPS:-30}"
+    )
+fi
 trap finish_run EXIT
 # The workload (episode, seed, dataset identity) comes from the frozen B1
 # input itself — never from a scenario-embedded episode. The extractor
@@ -189,7 +196,8 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --episode-id "$EPISODE_ID" \
         --seed "$SEED" \
         --max-steps 3000 \
-        --step-period-ms 20
+        --step-period-ms 20 \
+        "${VIDEO_ARGS[@]}"
 ) >"$RUN/shared-bridge.log" 2>&1 &
 PIDS+=($!)
 COMPONENTS+=(local_eaios)
