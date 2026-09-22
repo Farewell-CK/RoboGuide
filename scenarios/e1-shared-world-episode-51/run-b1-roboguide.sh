@@ -17,6 +17,7 @@ EMOS_ROOT="${ROBOGUIDE_EMOS_ROOT:-$DEFAULT_EMOS_ROOT}"
 HABITAT_ENV="${ROBOGUIDE_HABITAT_CONDA_ENV:-habitat}"
 RUN="${1:?usage: run-b1-roboguide.sh <run-dir> [input-json]}"
 INPUT_JSON="${2:-${ROBOGUIDE_B1_INPUT:-$SCENARIO/b1-input.json}}"
+MISSION_CONFIG="${ROBOGUIDE_MISSION_CONFIG:-$REPO/config/mission.toml}"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 PIDS=()
@@ -151,7 +152,7 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
-if [[ ! -x "$SERVER" || ! -x "$NODE" ]]; then
+if [[ ! -x "$SERVER" || ! -x "$NODE" || ! -f "$MISSION_CONFIG" ]]; then
     FAILURE_REASON=required_sut_binary_missing
     exit 1
 fi
@@ -233,7 +234,7 @@ cd "$REPO"
 # The frozen relay endpoint is plain HTTP on a remote host; the MI provider
 # config requires this explicit opt-out (same relay the EMOS arm uses).
 ROBOGUIDE_ALLOW_INSECURE_LLM_HTTP=1 uv run python "$REPO/apps/mission-service/main.py" \
-    --mission-config config/mission.toml \
+    --mission-config "$MISSION_CONFIG" \
     --service-config "$RUN/mission-service-b1.toml" \
     --repository-root "$REPO" >"$RUN/mission-service.log" 2>&1 &
 PIDS+=($!)
@@ -255,7 +256,7 @@ echo "submission_start_utc=$SUBMITTED_AT" > "$RUN/b1-timing.txt"
 # it for reasoning, never used as the wait). Frozen before submission.
 MI_OBSERVATION_BUDGET_SECONDS="${ROBOGUIDE_B1_MI_OBSERVATION_BUDGET_SECONDS:-1800}"
 MI_WAIT_BUDGET_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
-    --budget-only --mission-config "$REPO/config/mission.toml" \
+    --budget-only --mission-config "$MISSION_CONFIG" \
     --service-config "$RUN/mission-service-b1.toml")" \
     || { FAILURE_REASON=mi_wait_budget_derivation_failed; exit 1; }
 MI_WAIT_BUDGET_SECONDS=$(printf '%s\n' "$MI_WAIT_BUDGET_JSON" \
