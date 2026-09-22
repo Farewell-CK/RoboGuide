@@ -45,6 +45,18 @@ def _arguments() -> argparse.Namespace:
     )
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--step-period-ms", type=int, default=20)
+    parser.add_argument(
+        "--video-path",
+        type=Path,
+        default=None,
+        help="optional RGB evidence MP4; disabled unless explicitly supplied",
+    )
+    parser.add_argument(
+        "--video-fps",
+        type=int,
+        default=30,
+        help="RGB evidence playback rate; does not change simulator stepping",
+    )
     parser.add_argument("--initialization-timeout-s", type=float, default=120.0)
     parser.add_argument(
         "--subtask-mode",
@@ -107,6 +119,8 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         max_steps=arguments.max_steps,
         step_period_ms=arguments.step_period_ms,
         seed=arguments.seed,
+        video_path=arguments.video_path,
+        video_fps=arguments.video_fps,
         subtask_mode=arguments.subtask_mode,
         evidence_dir=arguments.evidence_dir,
         run_id=arguments.run_id,
@@ -150,6 +164,8 @@ def main() -> None:
         "max_steps": arguments.max_steps,
         "step_period_ms": arguments.step_period_ms,
         "seed": arguments.seed,
+        "video_path": arguments.video_path,
+        "video_fps": arguments.video_fps,
     }
     if arguments.backend == "emos-crabagent":
         config: HabitatBackendConfig = CrabAgentBackendConfig(

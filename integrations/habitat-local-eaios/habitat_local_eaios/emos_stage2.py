@@ -148,6 +148,7 @@ class EmosStage2Runtime:
                 "get_action_space_info": get_action_space_info,
                 "torch": torch,
                 "transforms": transforms,
+                "habitat_config": config,
             }
             self._write_json(
                 "runtime-source-manifest.json",

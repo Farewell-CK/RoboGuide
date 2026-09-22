@@ -22,6 +22,8 @@ class HabitatBackendConfig:
     max_steps: int
     step_period_ms: int
     seed: int | None = None
+    video_path: Path | None = None
+    video_fps: int = 30
 
 
 def habitat_config_overrides(seed: int | None) -> list[str]:

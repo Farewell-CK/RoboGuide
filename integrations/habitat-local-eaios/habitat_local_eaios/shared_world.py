@@ -34,6 +34,7 @@ from .model import CanonicalMobilityInvocation, IntegrationError
 from .semantic_evidence import build_authoritative_semantic_evidence
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
+from .video_capture import HabitatVideoCapture
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
 
@@ -53,6 +54,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             # both local skills finish, so this is the complete stream bound.
             config.max_steps + 50,
         )
+        self._video = HabitatVideoCapture(config.video_path, config.video_fps)
 
     def initialize(self) -> None:
         """Initialize the environment and publish authoritative semantics before readiness."""
@@ -95,6 +97,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             if isinstance(observations, tuple):
                 observations = observations[0]
             self._diagnostics.record_reset(habitat_env, self._config)
+            self._record_video(0, observations, {})
             setup_phase = "task_context"
             episode_started_at = time.time()
             text_context = habitat_env.task.get_task_text_context()
@@ -265,6 +268,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     observations,
                     policy_input_observations,
                 )
+                self._record_video(steps, observations, info)
                 for agent_id in agent_ids:
                     if agent_id in outcomes:
                         continue
@@ -350,6 +354,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                             observations,
                             None,
                         )
+                        self._record_video(steps, observations, info)
                     break
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
@@ -450,6 +455,34 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             self._diagnostics.record_terminal(habitat_env, steps, reason)
         except Exception:  # noqa: BLE001 - optional evidence cannot mask execution
             _LOG.exception("physical diagnostics failed while recording terminal evidence")
+        video = getattr(self, "_video", None)
+        if video is not None:
+            video.close(reason)
+
+    def _record_video(
+        self,
+        step: int,
+        observations: Any,
+        info: dict[str, Any],
+    ) -> None:
+        """Forward existing observations only when RGB evidence is explicitly enabled."""
+        video = getattr(self, "_video", None)
+        if video is None or not video.enabled:
+            return
+        video.record(
+            step,
+            observations,
+            info,
+            self._runtime.get("habitat_config"),
+            str(self._config.episode_id),
+        )
+
+    def close(self) -> None:
+        """Finalize optional video evidence before releasing the shared simulator."""
+        video = getattr(self, "_video", None)
+        if video is not None:
+            video.close("runtime_close")
+        super().close()
 
     def final_metrics(self) -> dict[str, Any]:
         """Read the shared episode's official terminal metrics once."""
