@@ -252,6 +252,18 @@ def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> Non
     assert document["habitat_seed_config"] == 40
 
 
+def test_structured_habitat_seed_shape_is_read_without_nested_habitat_key(
+    tmp_path: Path,
+) -> None:
+    """The current HabitatConfig shape records its direct resolved seed."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", False)])
+    env._config = type("HabitatConfig", (), {"seed": 73})()
+    diagnostics.record_reset(env, type("BackendConfig", (), {"seed": 40})())
+    document = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    assert document["habitat_seed_config"] == 73
+
+
 def test_array_scalars_remain_available_in_reset_and_terminal_snapshots(
     tmp_path: Path,
 ) -> None:

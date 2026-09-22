@@ -143,6 +143,28 @@ def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
         }
 
 
+def _habitat_seed(habitat_env: Any, backend_config: Any) -> Any:
+    """Read the resolved Habitat seed, with a deployment-config fallback.
+
+    Habitat's runtime config shape differs between the structured Habitat
+    versions used by the EMOS checkout.  The bridge backend configuration is
+    the exact override passed to Habitat when the runtime config does not expose
+    a readable seed field.  No value is inferred from the episode id.
+    """
+    accessors: tuple[Callable[[], Any], ...] = (
+        lambda: habitat_env._config.seed,
+        lambda: habitat_env._config.habitat.seed,
+        lambda: backend_config.seed,
+    )
+    failures: list[str] = []
+    for accessor in accessors:
+        value = _read(accessor)
+        if not isinstance(value, dict):
+            return value
+        failures.append(str(value.get("reason", "seed accessor unavailable")))
+    return {"_status": _UNAVAILABLE, "reason": "; ".join(failures)}
+
+
 def _goal_conjuncts(problem: Any) -> list[tuple[str, Any]]:
     """Return the goal's top-level conjuncts as (label, predicate) pairs."""
     goal = getattr(problem, "goal", None)
@@ -579,7 +601,7 @@ class PhysicalDiagnostics:
                 "episode_id": _read(lambda: str(episode.episode_id)) if episode else _UNAVAILABLE,
                 "scene_id": _read(lambda: str(episode.scene_id)) if episode else _UNAVAILABLE,
                 "seed": getattr(config, "seed", None),
-                "habitat_seed_config": _read(lambda: habitat_env._config.habitat.seed),
+                "habitat_seed_config": _read(_habitat_seed, habitat_env, config),
                 "agents": {
                     str(agent_id): {
                         "position": _read(_position, sim, agent_id),
