@@ -262,6 +262,12 @@ def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None
         "would violate that requirement",
         "not continued physical occupancy or persistence of a completed Task's effect",
         "if the supplied operation contracts support that requirement",
+        "all of its effects to coexist at the terminal state",
+        "perform an effect-interference check",
+        "later operation can invalidate an earlier required effect",
+        "grounded requirement or admitted evidence establishes persistence",
+        "preserve enough logical participation capacity",
+        "does not by itself prove that eventual PhysicalEntity bindings must be distinct",
     ):
         assert requirement in rules
     for instructions_for_role in instructions:

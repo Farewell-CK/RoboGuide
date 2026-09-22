@@ -118,3 +118,36 @@ def test_prompts_separate_availability_from_required_participation() -> None:
     assert "allocation discretion cannot waive them" in prompts["repairer"]
     assert "do not require setting Actor `physical_entity`" in prompts["repairer"]
     assert all("Episode51" not in prompt for prompt in prompts.values())
+
+
+def test_prompts_preserve_joint_effects_without_inventing_physical_identity() -> None:
+    """All MI stages fence destructive Actor reuse separately from hard distinctness."""
+    settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
+    prompts = {
+        name: path.read_text(encoding="utf-8")
+        for name, path in {
+            "interpreter": settings.prompts.interpreter_path,
+            "planner": settings.prompts.planner_path,
+            "reviewer": settings.prompts.reviewer_path,
+            "repairer": settings.prompts.repairer_path,
+        }.items()
+    }
+    normalized = {name: " ".join(prompt.split()) for name, prompt in prompts.items()}
+
+    assert "every conjunct hold at the same final state" in normalized["interpreter"]
+    assert "later operation may invalidate an earlier effect" in normalized["interpreter"]
+    assert "without claiming same-participant feasibility" in normalized["interpreter"]
+    for role in ("planner", "reviewer", "repairer"):
+        prompt = normalized[role]
+        assert "all of its effects to coexist at the terminal state" in prompt
+        assert "perform an effect-interference check" in prompt
+        assert "later operation can invalidate an earlier required effect" in prompt
+        assert "preserve enough logical participation capacity" in prompt
+        assert "does not by itself prove" in prompt
+        assert "`distinct-physical-entities` constraint" in prompt
+    assert "point to the Actor/ContextRole/Task references" in normalized["reviewer"]
+    assert "Do not misreport this as a need for `requires-active`" in normalized["reviewer"]
+    assert "identifies effect-interfering reuse of one Actor" in normalized["repairer"]
+    assert "introduce only the logical participation capacity" in normalized["repairer"]
+    benchmark_terms = ("Episode3", "Episode51", "any_targets", "Spot", "Fetch")
+    assert all(term not in prompt for prompt in prompts.values() for term in benchmark_terms)

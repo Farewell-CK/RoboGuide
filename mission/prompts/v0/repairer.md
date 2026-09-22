@@ -45,6 +45,15 @@ explicitly requires a safety observer to remain active has a real observer-to-in
 `requires-active` dependency, if the supplied operation contracts support that requirement.
 These are semantic distinctions, not templates to copy regardless of the input.
 
+A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
+state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
+later operation can invalidate an earlier required effect. Sequential reuse is supported only when
+the grounded requirement or admitted evidence establishes persistence, mutual compatibility, or an
+explicit restoration mechanism. Otherwise preserve enough logical participation capacity for the
+plan to represent a feasible joint state. This effect-preservation check does not by itself prove
+that eventual PhysicalEntity bindings must be distinct, authorize a hard
+`distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
+
 A Group shared view declares exactly what the cooperation consumes:
 
 - `execution` bindings expose Runtime logical execution state. They do not select a State export:
@@ -111,6 +120,10 @@ Your authority is intentionally narrow:
 - do not add placeholder Actors merely to mirror every available participant. Preserve every
   confirmed identity, universal-scope, and minimum or exact cardinality requirement, together with
   the logical continuity required by the repaired Tasks; allocation discretion cannot waive them;
+- when Review identifies effect-interfering reuse of one Actor across terminal effects, preserve all Tasks
+  and introduce only the logical participation capacity needed to represent their coexistence. Do
+  not add `requires-active`, shared-view machinery, concrete executors, or a hard
+  `distinct-physical-entities` constraint unless the frozen requirement independently grounds it;
 - do not invent user facts, answer missing-information questions, or weaken confirmed constraints.
 - do not invent or defer a missing destination or other semantic end-state through placeholders such
   as `selected-by-later-planning`; Control, Scheduler, Runtime, and Local EAIOS cannot supply that

@@ -42,6 +42,15 @@ explicitly requires a safety observer to remain active has a real observer-to-in
 `requires-active` dependency, if the supplied operation contracts support that requirement.
 These are semantic distinctions, not templates to copy regardless of the input.
 
+A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
+state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
+later operation can invalidate an earlier required effect. Sequential reuse is supported only when
+the grounded requirement or admitted evidence establishes persistence, mutual compatibility, or an
+explicit restoration mechanism. Otherwise preserve enough logical participation capacity for the
+plan to represent a feasible joint state. This effect-preservation check does not by itself prove
+that eventual PhysicalEntity bindings must be distinct, authorize a hard
+`distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
+
 A Group shared view declares exactly what the cooperation consumes:
 
 - `execution` bindings expose Runtime logical execution state. They do not select a State export:
@@ -79,6 +88,11 @@ When reporting a coordination defect, use the existing issue fields: point to th
 relation, or binding; explain the relevant input requirement and the added restriction or omitted
 condition. Report all observed blockers together, rather than prescribing a field to satisfy only
 the first validation error. Do not invent extra review fields or require rationale inside MissionPlan.
+When one Actor is reused for Tasks whose required terminal effects may interfere, point to the
+Actor/ContextRole/Task references that create that continuity. If the frozen input is sufficient to
+preserve the Tasks with additional logical participation capacity, require that repair without a hard
+physical-distinctness constraint. Do not misreport this as a need for `requires-active` or a Group
+shared view.
 
 Use `RepairPlan` for an unsupported cooperation mechanism when the supplied facts suffice to choose
 and express the correct mode, and for incomplete genuine cooperation whose contracts are supplied.
