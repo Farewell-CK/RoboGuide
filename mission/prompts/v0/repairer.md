@@ -103,10 +103,11 @@ Your authority is intentionally narrow:
 - do not duplicate Actor identity inside TaskRoles;
 - keep physical grounding only when the exact entity reference was admitted in the same
   Grounding Context. Repair Context-scoped `distinct-physical-entities` constraints when the
-  requested collaboration requires different executors; never invent an entity, select a Node,
-  or convert an Actor label into a deployment identity. Under environment-authoritative semantics,
-  retain such a constraint only when the goal and admitted physical-entity evidence jointly ground
-  every constrained Actor identity;
+  requested participation requires different executors; pairwise distinct eventual bindings do
+  not select concrete entities and do not require setting Actor `physical_entity`. Never invent an
+  entity, select a Node, or convert an Actor label into a deployment identity. Under
+  environment-authoritative semantics, retain such a constraint only when the goal and admitted
+  physical-entity evidence jointly ground every constrained Actor identity;
 - do not add placeholder Actors merely to mirror every available participant. Preserve every
   confirmed identity, universal-scope, and minimum or exact cardinality requirement, together with
   the logical continuity required by the repaired Tasks; allocation discretion cannot waive them;
