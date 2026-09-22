@@ -54,7 +54,12 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             # both local skills finish, so this is the complete stream bound.
             config.max_steps + 50,
         )
-        self._video = HabitatVideoCapture(config.video_path, config.video_fps)
+        self._video = HabitatVideoCapture(
+            config.video_path,
+            config.video_fps,
+            preview_path=config.live_preview_path,
+            preview_period_steps=config.live_preview_period_steps,
+        )
 
     def initialize(self) -> None:
         """Initialize the environment and publish authoritative semantics before readiness."""

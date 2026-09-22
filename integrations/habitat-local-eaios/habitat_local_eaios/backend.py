@@ -24,6 +24,8 @@ class HabitatBackendConfig:
     seed: int | None = None
     video_path: Path | None = None
     video_fps: int = 30
+    live_preview_path: Path | None = None
+    live_preview_period_steps: int = 5
 
 
 def habitat_config_overrides(seed: int | None) -> list[str]:

@@ -62,6 +62,35 @@ def _make_episode_gym_environment(
     return gym_env, habitat_env, loaded[0]
 
 
+def _add_operator_view_sensors(
+    config: Any,
+    get_agent_config: Callable[[Any, int], Any],
+    read_write: Callable[[Any], Any],
+) -> None:
+    """Enable EMOS' declared third-person sensors for explicit operator capture.
+
+    This mirrors the original Habitat Baselines evaluator's video setup: the
+    deployment config already owns ``extra_sim_sensors``; capture only attaches
+    those sensors to each configured agent before simulator construction.  It
+    never changes task sensors, policy inputs, actions, goals, or success rules.
+    """
+    extra_sensors = config.habitat_baselines.eval.extra_sim_sensors
+    agent_count = len(config.habitat.simulator.agents_order)
+    for agent_id in range(agent_count):
+        agent_config = get_agent_config(config.habitat.simulator, agent_id)
+        with read_write(agent_config.sim_sensors):
+            agent_config.sim_sensors.update(extra_sensors)
+    if config.habitat.gym.obs_keys is None:
+        return
+    with read_write(config):
+        for agent_id in range(agent_count):
+            agent_name = config.habitat.simulator.agents_order[agent_id]
+            for sensor in extra_sensors.values():
+                key = f"{agent_name}_{sensor.uuid}" if agent_count > 1 else sensor.uuid
+                if key not in config.habitat.gym.obs_keys:
+                    config.habitat.gym.obs_keys.append(key)
+
+
 class EmosStage2Runtime:
     """Own one official EMOS policy, skill stack, and Habitat environment."""
 
@@ -83,6 +112,10 @@ class EmosStage2Runtime:
         try:
             import torch  # type: ignore[import-not-found]
             from habitat import make_dataset  # type: ignore[import-not-found]
+            from habitat.config import read_write  # type: ignore[import-not-found]
+            from habitat.config.default import (  # type: ignore[import-not-found]
+                get_agent_config,
+            )
             from habitat.gym import make_gym_from_config  # type: ignore[import-not-found]
             from habitat_baselines.common.env_spec import (  # type: ignore[import-not-found]
                 EnvironmentSpec,
@@ -107,6 +140,8 @@ class EmosStage2Runtime:
                 str(self._config.config_path),
                 overrides=habitat_config_overrides(self._config.seed),
             )
+            if self._config.video_path is not None or self._config.live_preview_path is not None:
+                _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
                 config,
                 self._config.episode_id,

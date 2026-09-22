@@ -21,7 +21,9 @@ MISSION_CONFIG="${ROBOGUIDE_MISSION_CONFIG:-$REPO/config/mission.toml}"
 SERVER="$REPO/target/debug/integration-server"
 NODE="$REPO/target/debug/roboguide-node"
 PIDS=()
+AUX_PIDS=()
 VIDEO_ARGS=()
+LIVE_VIEW_ARGS=()
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -61,6 +63,7 @@ finish_run() {
         --component "$component" --reason "$reason"
     local archive_code=$?
     for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+    for pid in "${AUX_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
     if [[ "$archive_code" != 0 ]]; then
         echo "B1 evidence collection failed; no admission can be claimed" >&2
         exit "$archive_code"
@@ -138,10 +141,19 @@ fi
 cp "$INPUT_JSON" "$RUN/b1-input-used.json"
 INPUT_JSON="$RUN/b1-input-used.json"
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
-if [[ "${ROBOGUIDE_HABITAT_CAPTURE_VIDEO:-0}" == 1 ]]; then
+# E1 keeps human-reviewable visual evidence for every run by default.  The
+# generic Habitat adapter remains opt-in, and deployments may set this to 0
+# only when a pre-registered paired protocol disables capture for both arms.
+if [[ "${ROBOGUIDE_HABITAT_CAPTURE_VIDEO:-1}" == 1 ]]; then
     VIDEO_ARGS=(
         --video-path "$RUN/evidence/episode-video.mp4"
         --video-fps "${ROBOGUIDE_HABITAT_VIDEO_FPS:-30}"
+    )
+fi
+if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
+    LIVE_VIEW_ARGS=(
+        --live-preview-path "$RUN/live/latest-frame.jpg"
+        --live-preview-period-steps "${ROBOGUIDE_HABITAT_LIVE_PREVIEW_PERIOD_STEPS:-5}"
     )
 fi
 trap finish_run EXIT
@@ -173,6 +185,15 @@ clean_port 28090
 clean_port 28100
 clean_port 28102
 clean_port 8070
+if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
+    LIVE_VIEW_PORT="${ROBOGUIDE_B1_LIVE_VIEW_PORT:-28110}"
+    clean_port "$LIVE_VIEW_PORT"
+    uv run --project "$REPO" python -m roboguide_eval.b1_live_view \
+        --run-dir "$RUN" --port "$LIVE_VIEW_PORT" >"$RUN/live-view.log" 2>&1 &
+    AUX_PIDS+=($!)
+    wait_http "http://127.0.0.1:$LIVE_VIEW_PORT/healthz" 30
+    echo "B1 live operator view: http://127.0.0.1:$LIVE_VIEW_PORT/" >&2
+fi
 HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
 (
     cd "$EMOS_ROOT"
@@ -198,7 +219,8 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --seed "$SEED" \
         --max-steps 3000 \
         --step-period-ms 20 \
-        "${VIDEO_ARGS[@]}"
+        "${VIDEO_ARGS[@]}" \
+        "${LIVE_VIEW_ARGS[@]}"
 ) >"$RUN/shared-bridge.log" 2>&1 &
 PIDS+=($!)
 COMPONENTS+=(local_eaios)
