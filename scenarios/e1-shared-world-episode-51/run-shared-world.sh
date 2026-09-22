@@ -138,7 +138,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
     exec env \
         CUDA_VISIBLE_DEVICES="${ROBOGUIDE_HABITAT_CUDA_DEVICE:-1}" \
         HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet MPLCONFIGDIR="$RUN/mpl" \
-        PYTHONPATH="$REPO/integrations/habitat-local-eaios:$EMOS_ROOT/habitat-mas" \
+        PYTHONPATH="$REPO/integrations/habitat-local-eaios:$EMOS_ROOT/habitat-lab:$EMOS_ROOT/habitat-baselines:$EMOS_ROOT/habitat-mas" \
         "$HABITAT_PYTHON" -u -m habitat_local_eaios \
         --port 28100 \
         --backend shared-emos-stage2 \
