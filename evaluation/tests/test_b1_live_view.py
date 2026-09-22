@@ -29,10 +29,16 @@ def test_snapshot_tracks_generic_episode_and_provider_visible_stage2(tmp_path: P
             "plan": {"tasks": [{"id": "task-1"}]},
         },
     )
-    _write_json(
-        tmp_path / "evidence/chat-history/73/agent_0_action_history.json",
-        [{"role": "assistant", "tool_calls": [{"name": "nav_to_obj"}]}],
-    )
+    for agent_index in range(4):
+        _write_json(
+            tmp_path / f"evidence/chat-history/73/agent_{agent_index}_action_history.json",
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [{"name": "nav_to_obj", "agent": agent_index}],
+                }
+            ],
+        )
     evidence = tmp_path / "evidence"
     evidence.mkdir(exist_ok=True)
     (evidence / "stage2-actions.jsonl").write_text(
@@ -43,6 +49,13 @@ def test_snapshot_tracks_generic_episode_and_provider_visible_stage2(tmp_path: P
     assert snapshot["phase"] == "mission intelligence: Accepted"
     assert snapshot["plan"] == {"tasks": [{"id": "task-1"}]}
     assert snapshot["chat_history"]["agent_0"][0]["role"] == "assistant"
+    assert list(snapshot["chat_history"]) == [
+        "agent_0",
+        "agent_1",
+        "agent_2",
+        "agent_3",
+    ]
+    assert snapshot["chat_history"]["agent_3"][0]["tool_calls"][0]["agent"] == 3
     assert snapshot["stage2_actions"][0]["sequence"] == 1
 
 

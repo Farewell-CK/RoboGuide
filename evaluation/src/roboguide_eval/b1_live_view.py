@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_JSONL_RECORDS = 20
+MAX_AGENT_HISTORIES = 32
 
 _PAGE = """<!doctype html>
 <html lang="en">
@@ -77,7 +78,11 @@ async function refresh(){
     if(value.frame.available){
       document.getElementById('frame').src='/api/frame?t='+Date.now();
     }
-  }catch(error){document.getElementById('phase').textContent='viewer error: '+error;}
+  }catch(error){
+    document.getElementById('phase').textContent=
+      'viewer backend unavailable; showing the last received archive state';
+    document.getElementById('phase').className='pending';
+  }
 }
 refresh();setInterval(refresh,500);
 </script>
@@ -124,6 +129,29 @@ def _request_summary(record: Any) -> dict[str, Any] | None:
     }
 
 
+def _read_chat_histories(chat_root: Path) -> dict[str, Any]:
+    """Discover bounded per-agent Stage2 histories without assuming agent cardinality."""
+    try:
+        candidates = sorted(
+            path
+            for path in chat_root.iterdir()
+            if path.is_file() and path.name.endswith("_action_history.json")
+        )
+    except OSError:
+        return {}
+    histories = {
+        path.name.removesuffix("_action_history.json"): _read_json(path)
+        for path in candidates[:MAX_AGENT_HISTORIES]
+    }
+    if len(candidates) > MAX_AGENT_HISTORIES:
+        histories["_collection"] = {
+            "unavailable": "agent history count exceeds live-view bound",
+            "discovered": len(candidates),
+            "included": MAX_AGENT_HISTORIES,
+        }
+    return histories
+
+
 def build_snapshot(run_dir: Path) -> dict[str, Any]:
     """Build one read-only snapshot from files already emitted by the run."""
     frozen_input = _read_json(run_dir / "b1-input-used.json")
@@ -138,10 +166,7 @@ def build_snapshot(run_dir: Path) -> dict[str, Any]:
         else "unavailable"
     )
     chat_root = run_dir / "evidence" / "chat-history" / episode_id
-    chat_history = {
-        "agent_0": _read_json(chat_root / "agent_0_action_history.json"),
-        "agent_1": _read_json(chat_root / "agent_1_action_history.json"),
-    }
+    chat_history = _read_chat_histories(chat_root)
     if isinstance(verdict, dict):
         phase = "completed"
     elif isinstance(mission, dict):
