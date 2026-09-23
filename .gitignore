@@ -1,0 +1,8 @@
+# Project Files
+.idea/
+.vscode/
+.claude/
+
+# Markdown
+*.md
+![Rr][Ee][Aa][Dd][Mm][Ee]*

@@ -1,0 +1,11 @@
+.devcontainer/
+.vscode/
+.idea/
+.git/
+.gitlab/
+.github/
+
+generated_*
+generated-*
+pb_gen/
+build/
