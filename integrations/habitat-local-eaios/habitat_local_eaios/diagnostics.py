@@ -722,7 +722,10 @@ class PhysicalDiagnostics:
         """Record the true final world state at episode termination."""
         if not self._enabled:
             return
-        self._step_writer.flush()
+        try:
+            self._step_writer.flush()
+        except Exception:  # noqa: BLE001 - unexpected flush failure cannot erase terminal evidence
+            self._record_failure()
         try:
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim

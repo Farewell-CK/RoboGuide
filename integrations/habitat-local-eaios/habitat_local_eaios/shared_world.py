@@ -407,8 +407,12 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     "failed to restore EMOS group_discussion while preserving the primary error"
                 )
             finally:
-                self._flush_action_trace()
-                self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
+                try:
+                    self._flush_action_trace()
+                except Exception:  # noqa: BLE001 - evidence cannot mask execution
+                    _LOG.exception("action trace flush failed at shared-world termination")
+                finally:
+                    self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
         if contract_failure is not None:
             for agent_id in agent_ids:
                 # A later joint-policy stop cannot erase an already observed
@@ -477,7 +481,10 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             _LOG.exception("physical diagnostics failed while recording terminal evidence")
         video = getattr(self, "_video", None)
         if video is not None:
-            video.close(reason)
+            try:
+                video.close(reason)
+            except Exception:  # noqa: BLE001 - optional video cannot mask execution
+                _LOG.exception("video close failed at shared-world termination")
 
     def _record_video(
         self,

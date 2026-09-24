@@ -274,6 +274,45 @@ def test_gym_exception_flushes_prior_steps_and_reads_terminal_state(tmp_path: Pa
     assert runtime.action_trace_flushes == 1
 
 
+def test_action_trace_flush_failure_preserves_actor_error_and_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unexpected trace flush failure cannot replace the physical failure."""
+    diagnostics = RecordingDiagnostics()
+    runtime = LoopHarness(tmp_path, diagnostics)
+
+    def fail_flush() -> None:
+        """Emulate a writer regression outside its ordinary fail-soft path."""
+        raise OSError("action trace flush failure sentinel")
+
+    monkeypatch.setattr(runtime, "_flush_action_trace", fail_flush)
+    with pytest.raises(RuntimeError, match="actor failure sentinel"):
+        _run_failing_loop(runtime, PolicyActor(fail_at=2), StepEnvironment(fail_at=3))
+    assert diagnostics.persisted_steps == [1]
+    assert diagnostics.terminals == [(1, "execution_exception:actor_act:RuntimeError")]
+
+
+def test_video_close_failure_does_not_mask_gym_failure(tmp_path: Path) -> None:
+    """Optional video finalization cannot change the original Gym failure."""
+    diagnostics = RecordingDiagnostics()
+    runtime = LoopHarness(tmp_path, diagnostics)
+
+    class BrokenVideo:
+        """Emulate a recorder that fails while closing after a Gym exception."""
+
+        enabled = False
+
+        def close(self, reason: str) -> None:
+            """Raise after retaining the termination reason as an input."""
+            assert reason == "execution_exception:gym_env_step:RuntimeError"
+            raise OSError("video close failure sentinel")
+
+    runtime._video = cast(Any, BrokenVideo())
+    with pytest.raises(RuntimeError, match="gym step failure sentinel"):
+        _run_failing_loop(runtime, PolicyActor(), StepEnvironment(fail_at=2))
+    assert diagnostics.terminals == [(1, "execution_exception:gym_env_step:RuntimeError")]
+
+
 def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) -> None:
     """A failure after reset but before the policy loop still closes diagnostics."""
     diagnostics = RecordingDiagnostics()

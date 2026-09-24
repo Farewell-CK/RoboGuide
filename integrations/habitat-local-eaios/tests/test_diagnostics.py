@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
@@ -572,6 +574,27 @@ def test_reset_and_terminal_top_level_failures_do_not_escape(tmp_path: Path) -> 
     terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
     assert initial["_status"] == "unavailable"
     assert terminal["_status"] == "unavailable"
+
+
+def test_unexpected_step_flush_failure_still_records_terminal_world(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An observer writer regression must not prevent a readable terminal snapshot."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("target", True)], metrics={"pddl_success": True})
+    diagnostics.record_reset(env, None)
+
+    def fail_flush() -> None:
+        """Raise beyond the buffered writer's ordinary internal I/O isolation."""
+        raise OSError("flush failure sentinel")
+
+    monkeypatch.setattr(diagnostics._step_writer, "flush", fail_flush)
+    diagnostics.record_terminal(env, 7, "execution_exception:actor_act:RuntimeError")
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert terminal["simulator_steps"] == 7
+    assert terminal["termination_reason"] == "execution_exception:actor_act:RuntimeError"
+    assert terminal["official_metrics"]["pddl_success"] is True
+    assert terminal["dropped_diagnostic_records"] >= 1
 
 
 def test_predicate_failure_is_explicitly_unavailable(tmp_path: Path) -> None:
