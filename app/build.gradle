@@ -5,6 +5,12 @@ plugins {
     id "kotlin-parcelize"
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
 static def releaseTime() {
     return new Date().format("yyyyMMddHHmmss")
 }
@@ -31,6 +37,11 @@ android {
         // :navoutdoor 带有 semanticModel flavor 维度（完整搬运自 mobile-navigation），
         // :app 本身不需要按该维度出多个包，缺省固定选用本机唯一有真实模型资产的 npu flavor。
         missingDimensionStrategy 'semanticModel', 'npu'
+
+        buildConfigField "String", "ASR_AUTH_TOKEN", "\"${System.getenv("ASR_AUTH_TOKEN") ?: localProperties.getProperty("ASR_AUTH_TOKEN", "906991e73318694909fd99dc512e75ef75b7dd0a2dbe81872ced3274410ef8e1")}\""
+        buildConfigField "String", "DMWS_TOKEN", "\"${System.getenv("DMWS_TOKEN") ?: localProperties.getProperty("DMWS_TOKEN", "f4h8j2q7b5n9c1v3")}\""
+        buildConfigField "String", "LLM_API_KEY", "\"${System.getenv("LLM_API_KEY") ?: localProperties.getProperty("LLM_API_KEY", "sk-ws-H.PDIEILX.7j27.MEQCIGvUmUXDT6jdt74-PIW34bgWJOd4xQO8grbER0ySzgxhAiBqp1TXT4PLNLyg4DjRjnupmQtg4ai3Gt2inDSRFWtA7A")}\""
+        buildConfigField "String", "AMAP_KEY", "\"${System.getenv("AMAP_KEY") ?: localProperties.getProperty("AMAP_KEY", "1d9ca20ae160111eaff0426505e81997")}\""
     }
     buildFeatures {
         buildConfig = true
