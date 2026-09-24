@@ -1,10 +1,42 @@
-# .gitlab-ci.yml - 仅用于满足合入检查的空流水线
+# include:
+#   - project: "infra/gitlab-cicd"
+#     file: "/templates/global.yml"
+
+# 流水线整体准入门：
+#   - 目标分支是受保护或默认分支的 MR
+#   - 形如 v?\d+(\.\d+){0,2}([-_]\w+)? 的 tag（与 cleanup 用的版本号正则一致）
+#   - trigger / parent_pipeline / pipeline 这几种被动触发
+#   - web（手动）/ schedule（定时）
+# 普通 push 流水线不开（除非命中上面其中之一）
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_IID && ($CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED == "true" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH)
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+(\.\d+){0,2}([-_]\w+)?$/'
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
 stages:
   - build
 
-empty-android-check:
+# 真实构建验证：干净克隆下执行 assembleDebug
+# 此 job 的通过/失败直接反映工程能否构建，而非“空操作通过”
+build-debug:
   stage: build
-  image: fabernovel/android:api-33-v1.7.0
+  image: fabernovel/android:api-35-v1.7.0
+  before_script:
+    - export GRADLE_USER_HOME=$(pwd)/.gradle
+    - chmod +x ./gradlew
+  cache:
+    key: ${CI_PROJECT_ID}
+    paths:
+      - .gradle/
   script:
-    - echo "Pipeline check passed. Skipping actual build to allow merge."
-    - gradle --version  # 仅验证 Gradle 可用，不做实际构建
+    - ./gradlew assembleDebug
+  artifacts:
+    name: "debug-apk-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - app/build/outputs/apk/debug/*.apk
+    expire_in: 1 week
