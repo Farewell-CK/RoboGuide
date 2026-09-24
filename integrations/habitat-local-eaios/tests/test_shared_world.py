@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import time
@@ -17,6 +18,7 @@ if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
+from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
 from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
 from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
@@ -113,6 +115,11 @@ class RecordingDiagnostics:
         if self.fail_terminal:
             raise OSError("diagnostic storage unavailable")
 
+    def flush_boundary(self) -> None:
+        """Persist pending segment records before the next Task starts."""
+        self.persisted_steps.extend(self.pending_steps)
+        self.pending_steps.clear()
+
 
 class PolicyActor:
     """Return a stable action or raise at the requested call."""
@@ -184,6 +191,7 @@ class LoopHarness(SharedEmosStage2Runtime):
             self._test_evidence_dir / "action_trace.jsonl"
         )
         self.action_trace_flushes = 0
+        self.trace_steps: list[int] = []
 
     def _batch(self, observations: Any) -> Any:
         """Keep observations unchanged in the failure harness."""
@@ -220,12 +228,117 @@ class LoopHarness(SharedEmosStage2Runtime):
         return False
 
     def _append_action_trace(self, steps: int, skills: list[str], info: dict[str, Any]) -> None:
-        """Accept one action trace row without file I/O."""
-        del steps, skills, info
+        """Retain the simulator step identity without file I/O."""
+        del skills, info
+        self.trace_steps.append(steps)
 
     def _flush_action_trace(self) -> None:
         """Count the action-trace flush performed at every exit."""
         self.action_trace_flushes += 1
+
+
+class SerialGym:
+    """Count actual reset and step calls across two local Task segments."""
+
+    def __init__(self) -> None:
+        """Start an unreset deterministic world."""
+        self.resets = 0
+        self.steps = 0
+
+    def reset(self) -> dict[str, int]:
+        """Return the first observation from the only episode reset."""
+        self.resets += 1
+        return {"step": 0}
+
+    def step(self, action: object) -> tuple[dict[str, int], float, bool, dict[str, bool]]:
+        """Advance exactly one shared-world step for either segment."""
+        del action
+        self.steps += 1
+        return {"step": self.steps}, 0.0, False, {"pddl_success": self.steps == 2}
+
+
+class SerialRuntimeHarness(SharedEmosStage2Runtime):
+    """Drive production serial session setup with a deterministic policy boundary."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        """Install a fake world and retain real serial session lifecycle methods."""
+        super().__init__(
+            CrabAgentBackendConfig(
+                config_path=tmp_path / "unused.yaml",
+                episode_id="3",
+                agent_id=0,
+                max_steps=10,
+                step_period_ms=0,
+                evidence_dir=tmp_path,
+            ),
+            (0, 1),
+        )
+        self._gym_env = SerialGym()
+        agent_data = lambda unused: SimpleNamespace(  # noqa: E731 - compact fake simulator accessor
+            articulated_agent=SimpleNamespace(base_pos=(0.0, 0.0, 0.0))
+        )
+        self._habitat_env = SimpleNamespace(
+            episodes=[],
+            current_episode=SimpleNamespace(episode_id="3", scene_id="scene"),
+            episode_over=False,
+            task=SimpleNamespace(get_task_text_context=lambda: {"scene_description": "scene"}),
+            sim=SimpleNamespace(get_agent_data=agent_data),
+            get_metrics=lambda: {"pddl_success": self._gym_env.steps == 2},
+        )
+        self._episode = object()
+        self._actor = object()
+        self._agent_access = object()
+        self._diagnostics = cast(Any, RecordingDiagnostics())
+        self.observation_inputs: list[int] = []
+
+    def _assigned_arguments(
+        self, text_context: dict[str, Any], invocation: CanonicalMobilityInvocation
+    ) -> dict[str, Any]:
+        """Avoid importing the vendor AgentArguments class in this offline test."""
+        del text_context, invocation
+        return {"agent_0": object(), "agent_1": object()}
+
+    def _policy_loop(
+        self,
+        observations: Any,
+        text_context: dict[str, Any],
+        assignment: dict[str, Any],
+        invocation: CanonicalMobilityInvocation,
+        initial: tuple[float, float, float],
+        scene_id: str,
+        actor: Any,
+        access: Any,
+        gym_env: Any,
+        habitat_env: Any,
+        cancellation_requested: Callable[[], bool],
+    ) -> LocalExecutionOutcome:
+        """Observe the retained input, step once, and emit a local Task result."""
+        del text_context, assignment, actor, access, habitat_env, cancellation_requested
+        self.observation_inputs.append(int(observations["step"]))
+        next_observations, done, info = self._gym_step_result(gym_env.step(None))
+        self._last_policy_observations = next_observations
+        self._observe_policy_step(
+            1,
+            ["nav_to_obj", "wait"],
+            None,
+            self._habitat_env,
+            None,
+            done,
+            info,
+            next_observations,
+            observations,
+        )
+        return LocalExecutionOutcome(
+            state="COMPLETED",
+            detail="fake local navigation completed",
+            episode_id="3",
+            scene_id=scene_id,
+            destination=invocation.destination,
+            simulator_steps=1,
+            initial_position=initial,
+            final_position=initial,
+            local_skill_completed=True,
+        )
 
 
 def _run_failing_loop(runtime: LoopHarness, actor: PolicyActor, gym_env: StepEnvironment) -> None:
@@ -272,6 +385,66 @@ def test_gym_exception_flushes_prior_steps_and_reads_terminal_state(tmp_path: Pa
     assert diagnostics.persisted_steps == [1]
     assert diagnostics.terminals == [(1, "execution_exception:gym_env_step:RuntimeError")]
     assert runtime.action_trace_flushes == 1
+
+
+def test_serial_policy_trace_continues_global_step_numbers(tmp_path: Path) -> None:
+    """A later local Task cannot make step one appear to be a second reset."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._serial_steps = 5
+    runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="3", agent_id=0)
+    habitat_env = SimpleNamespace(episode_over=False)
+    runtime._habitat_env = habitat_env
+    invocation = CanonicalMobilityInvocation.from_request(_request("mission", "target", "task"))
+    with pytest.raises(RuntimeError, match="actor failure sentinel"):
+        runtime._policy_loop(
+            {"agent_0_has_finished_oracle_nav": [0]},
+            {"episode_id": "3"},
+            {"agent_0": object(), "agent_1": object()},
+            invocation,
+            (0.0, 0.0, 0.0),
+            "scene",
+            PolicyActor(fail_at=2),
+            SimpleNamespace(masks_shape=(1,)),
+            StepEnvironment(fail_at=3),
+            habitat_env,
+            lambda: False,
+        )
+    assert runtime.trace_steps == [6]
+    assert runtime._serial_steps == 6
+
+
+def test_serial_policy_flush_failure_preserves_original_actor_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed trace flush cannot replace the original serial Stage2 failure."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._serial_steps = 2
+    runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="3", agent_id=0)
+    habitat_env = SimpleNamespace(episode_over=False)
+    runtime._habitat_env = habitat_env
+
+    def fail_flush() -> None:
+        """Simulate a writer regression after the physical policy has failed."""
+        raise OSError("trace flush failure sentinel")
+
+    monkeypatch.setattr(runtime, "_flush_action_trace", fail_flush)
+    invocation = CanonicalMobilityInvocation.from_request(_request("mission", "target", "task"))
+    with pytest.raises(RuntimeError, match="actor failure sentinel"):
+        runtime._policy_loop(
+            {"agent_0_has_finished_oracle_nav": [0]},
+            {"episode_id": "3"},
+            {"agent_0": object(), "agent_1": object()},
+            invocation,
+            (0.0, 0.0, 0.0),
+            "scene",
+            PolicyActor(fail_at=2),
+            SimpleNamespace(masks_shape=(1,)),
+            StepEnvironment(fail_at=3),
+            habitat_env,
+            lambda: False,
+        )
+    assert runtime._serial_steps == 3
+    assert runtime.trace_steps == [3]
 
 
 def test_action_trace_flush_failure_preserves_actor_error_and_terminal(
@@ -537,6 +710,7 @@ class StubRuntime:
     def __init__(self, pair_wait_outcome: str = "COMPLETED") -> None:
         """Record calls and preset the terminal outcome."""
         self.calls = 0
+        self.serial_calls: list[tuple[int, str]] = []
         self.pair_wait_outcome = pair_wait_outcome
 
     def initialize(self) -> None:
@@ -585,6 +759,42 @@ class StubRuntime:
             {"identity": {"simulator_worlds": 1, "episode_reset_count": 1}},
         )
 
+    def execute_serial(
+        self,
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, object]]:
+        """Observe successive calls without claiming a second simulator reset."""
+        del cancellation_requested
+        self.serial_calls.append((agent_id, invocation.task_id))
+        running(agent_id, "stub serial running")
+        return (
+            LocalExecutionOutcome(
+                state="COMPLETED",
+                detail="stub serial completion",
+                episode_id="51",
+                scene_id="scene",
+                destination=invocation.destination,
+                simulator_steps=10 * len(self.serial_calls),
+                initial_position=(0.0, 0.0, 0.0),
+                final_position=(1.0, 0.0, 0.0),
+                local_skill_completed=True,
+                benchmark_task_achieved=final_slot,
+                terminal_basis="stub",
+            ),
+            {
+                "identity": {
+                    "simulator_worlds": 1,
+                    "episode_reset_count": 1,
+                    "simulator_steps": 10 * len(self.serial_calls),
+                    "episode_terminated": final_slot,
+                }
+            },
+        )
+
 
 def _execution(store: ExecutionStore, execution_id: str) -> dict[str, object]:
     """Narrow one store read to a present execution for assertions."""
@@ -607,6 +817,50 @@ def _request(mission: str, destination: str, task: str) -> dict[str, object]:
             "resource_ids": ["slot"],
         }
     }
+
+
+def _session_request(
+    mission: str, destination: str, task: str, slots: list[dict[str, object]]
+) -> dict[str, object]:
+    """Bind one canonical request to a complete digest-bound topology."""
+    request = _request(mission, destination, task)
+    session: dict[str, object] = {
+        "schema_version": "roboguide.execution-session/v0.1",
+        "mission_id": mission,
+        "group_id": "group",
+        "slots": slots,
+    }
+    encoded = json.dumps(session, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    session["digest"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    cast(dict[str, object], request["invocation"])["execution_session"] = session
+    return request
+
+
+def _slot(task: str, actor: str, dependencies: list[str] | None = None) -> dict[str, object]:
+    """Create one independent accepted-plan slot for coordinator tests."""
+    return {
+        "task_id": task,
+        "role_id": "role",
+        "actor_id": actor,
+        "dependencies": dependencies or [],
+        "independent": True,
+    }
+
+
+def test_execution_session_digest_agrees_with_core_canonical_json() -> None:
+    """Node-admitted topology uses the same canonical digest in Rust and Python."""
+    slots = [
+        _slot("first", "participant"),
+        _slot("second", "participant", ["first"]),
+    ]
+    request = _session_request("mission", "target", "second", slots)
+    invocation = CanonicalMobilityInvocation.from_request(request)
+    assert invocation.execution_session is not None
+    assert invocation.execution_session.digest == (
+        "sha256:7569dee8adc832c5811a78d034ada84e166014586cca5c8689317900a04e7099"
+    )
 
 
 def _world(
@@ -655,7 +909,7 @@ def test_lone_assignment_waits_then_fails_closed(tmp_path: Path) -> None:
     )
     assert admission["state"] == "REJECTED"
     assert admission["required_distinct_endpoint_assignments"] == 2
-    assert admission["sequential_endpoint_reuse_supported"] is False
+    assert admission["sequential_endpoint_reuse_supported"] is True
     assert admission["arrived_assignments"] == [
         {
             "agent_id": 0,
@@ -669,6 +923,135 @@ def test_lone_assignment_waits_then_fails_closed(tmp_path: Path) -> None:
         }
     ]
     assert coordinator.deployment_contract()["episode_scope"] == "one-official-shared-episode"
+
+
+def test_one_actor_reuses_one_endpoint_without_another_reset(tmp_path: Path) -> None:
+    """Control can release the first Task and dispatch the second into one world."""
+    runtime, _, endpoint_a, endpoint_b, evidence = _world(tmp_path)
+    slots = [_slot("ta", "participant"), _slot("tb", "participant")]
+    first = endpoint_a.submit(_session_request("m", "any_targets|0", "ta", slots))
+    for _ in range(1000):
+        first_state = _execution(endpoint_a.store(), str(first["execution_id"]))
+        if first_state["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert first_state["state"] == "COMPLETED"
+    assert runtime.serial_calls == [(0, "ta")]
+    assert runtime.calls == 0
+    assert not (evidence / "shared-world-summary.json").exists()
+    with pytest.raises(IntegrationError, match="consumed"):
+        endpoint_b.submit(_session_request("m", "TARGET_any_targets|0", "tb", slots))
+    second = endpoint_a.submit(_session_request("m", "TARGET_any_targets|0", "tb", slots))
+    for _ in range(1000):
+        second_state = _execution(endpoint_a.store(), str(second["execution_id"]))
+        if second_state["state"] in TERMINAL and (evidence / "shared-world-summary.json").exists():
+            break
+        time.sleep(0.001)
+    assert second_state["state"] == "COMPLETED"
+    assert runtime.serial_calls == [(0, "ta"), (0, "tb")]
+    summary = json.loads((evidence / "shared-world-summary.json").read_text())
+    assert summary["identity"]["episode_reset_count"] == 1
+    assert {(item["task_id"], item["role_id"]) for item in summary["serial_task_outcomes"]} == {
+        ("ta", "role"),
+        ("tb", "role"),
+    }
+    assert summary["official_pddl_success"] is True
+
+
+def test_serial_runtime_retains_reset_observations_and_global_step_count(tmp_path: Path) -> None:
+    """Original shared runtime continues one world across Task boundaries."""
+    runtime = SerialRuntimeHarness(tmp_path)
+    slots = [_slot("ta", "participant"), _slot("tb", "participant")]
+    first = CanonicalMobilityInvocation.from_request(
+        _session_request("m", "any_targets|0", "ta", slots)
+    )
+    second = CanonicalMobilityInvocation.from_request(
+        _session_request("m", "TARGET_any_targets|0", "tb", slots)
+    )
+    original_config = runtime._config
+    first_outcome, first_summary = runtime.execute_serial(
+        first, 0, lambda: False, lambda agent_id, detail: None, False
+    )
+    second_outcome, final_summary = runtime.execute_serial(
+        second, 0, lambda: False, lambda agent_id, detail: None, True
+    )
+    assert first_outcome.state == second_outcome.state == "COMPLETED"
+    assert first_summary["identity"]["simulator_steps"] == 1
+    assert final_summary["identity"]["simulator_steps"] == 2
+    gym = cast(SerialGym, runtime._gym_env)
+    assert gym.resets == 1
+    assert gym.steps == 2
+    assert runtime.observation_inputs == [0, 1]
+    assert cast(RecordingDiagnostics, runtime._diagnostics).persisted_steps == [1, 2]
+    assert cast(RecordingDiagnostics, runtime._diagnostics).terminals == [
+        (2, "serial_session_completed")
+    ]
+    assert runtime._config == original_config
+
+
+def test_serial_session_timeout_keeps_unfinished_topology_explicit(tmp_path: Path) -> None:
+    """A missing follow-on Task never becomes a fabricated shared-world success."""
+    now = [0.0]
+    runtime, coordinator, endpoint_a, _, evidence = _world(
+        tmp_path, pair_wait=1.0, monotonic=lambda: now[0], wait_poll=0.001
+    )
+    slots = [_slot("ta", "participant"), _slot("tb", "participant")]
+    first = endpoint_a.submit(_session_request("m", "any_targets|0", "ta", slots))
+    for _ in range(1000):
+        state = _execution(endpoint_a.store(), str(first["execution_id"]))
+        if state["state"] == "COMPLETED":
+            break
+        time.sleep(0.001)
+    assert state["state"] == "COMPLETED"
+    now[0] = 2.0
+    for _ in range(1000):
+        if coordinator._serial_finished:
+            break
+        time.sleep(0.001)
+    assert coordinator._serial_finished
+    assert runtime.serial_calls == [(0, "ta")]
+    assert not (evidence / "shared-world-summary.json").exists()
+    admission = json.loads((evidence / "shared-world-start-admission.json").read_text())
+    for _ in range(1000):
+        if admission["state"] == "INCOMPLETE":
+            break
+        time.sleep(0.001)
+        admission = json.loads((evidence / "shared-world-start-admission.json").read_text())
+    assert admission["state"] == "INCOMPLETE"
+    with pytest.raises(IntegrationError, match="consumed"):
+        endpoint_a.submit(_session_request("m", "TARGET_any_targets|0", "tb", slots))
+
+
+def test_serial_session_rejects_tampered_or_foreign_slot(tmp_path: Path) -> None:
+    """Digest and exact Task/Role identity fence a session before local admission."""
+    _, _, endpoint_a, _, _ = _world(tmp_path)
+    slots = [_slot("ta", "participant"), _slot("tb", "participant")]
+    request = _session_request("m", "any_targets|0", "ta", slots)
+    invocation = cast(dict[str, object], request["invocation"])
+    session = cast(dict[str, object], invocation["execution_session"])
+    session["slots"] = [_slot("ta", "someone-else"), _slot("tb", "participant")]
+    with pytest.raises(IntegrationError, match="digest"):
+        endpoint_a.accept(request)
+    foreign = _session_request("m", "any_targets|0", "not-in-plan", slots)
+    with pytest.raises(IntegrationError, match="Task/Role"):
+        endpoint_a.accept(foreign)
+
+
+def test_unsupported_topology_fails_before_world_reset(tmp_path: Path) -> None:
+    """A non-independent topology cannot silently enter pair or serial execution."""
+    runtime, _, endpoint_a, _, evidence = _world(tmp_path)
+    slots = [_slot("ta", "participant"), _slot("tb", "participant")]
+    slots[0]["independent"] = False
+    handle = endpoint_a.submit(_session_request("m", "any_targets|0", "ta", slots))
+    for _ in range(1000):
+        state = _execution(endpoint_a.store(), str(handle["execution_id"]))
+        if state["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert state["state"] == "FAILED"
+    assert runtime.calls == 0 and runtime.serial_calls == []
+    admission = json.loads((evidence / "shared-world-start-admission.json").read_text())
+    assert admission["state"] == "REJECTED"
 
 
 def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
@@ -712,6 +1095,28 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
         "node-a",
         "node-b",
     }
+
+
+def test_two_actor_metadata_keeps_distinct_endpoint_start_barrier(tmp_path: Path) -> None:
+    """Plan-derived two-Actor topology retains the original concurrent path."""
+    runtime, _, endpoint_a, endpoint_b, evidence = _world(tmp_path)
+    slots = [_slot("ta", "actor-a"), _slot("tb", "actor-b")]
+    left = endpoint_a.submit(_session_request("m", "any_targets|0", "ta", slots))
+    assert _execution(endpoint_a.store(), str(left["execution_id"]))["state"] == "ACCEPTED"
+    right = endpoint_b.submit(_session_request("m", "TARGET_any_targets|0", "tb", slots))
+    for _ in range(1000):
+        states = [
+            _execution(endpoint.store(), str(handle["execution_id"]))["state"]
+            for endpoint, handle in ((endpoint_a, left), (endpoint_b, right))
+        ]
+        if all(state in TERMINAL for state in states):
+            break
+        time.sleep(0.001)
+    assert states == ["COMPLETED", "COMPLETED"]
+    assert runtime.calls == 1 and not runtime.serial_calls
+    admission = json.loads((evidence / "shared-world-start-admission.json").read_text())
+    assert admission["state"] == "ADMITTED"
+    assert {item["endpoint"] for item in admission["arrived_assignments"]} == {"node-a", "node-b"}
 
 
 def test_start_admission_evidence_failure_does_not_change_pair_result(

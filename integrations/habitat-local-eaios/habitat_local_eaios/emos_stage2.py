@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,8 @@ from .stage2_contract import (
     Stage2ExecutionContract,
     install_stage2_contract_guard,
 )
+
+_LOG = logging.getLogger(__name__)
 
 
 def _make_episode_gym_environment(
@@ -280,6 +283,7 @@ class EmosStage2Runtime:
         cancellation_requested: Callable[[], bool],
     ) -> LocalExecutionOutcome:
         """Mirror the EMOS evaluator loop while preserving RoboGuide cancellation."""
+        self._last_policy_observations = observations
         torch = self._runtime["torch"]
         device = self._runtime["device"]
         batch = self._batch(observations)
@@ -295,6 +299,7 @@ class EmosStage2Runtime:
         hidden_lengths = actor.hidden_state_shape_lens
         action_lengths = actor.policy_action_space_shape_lens
         steps = 0
+        step_offset = self._policy_step_offset()
         skill_sequence: list[str] = []
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
@@ -303,7 +308,8 @@ class EmosStage2Runtime:
         contract_failure: Stage2ContractViolation | None = None
         try:
             contract_restore = self._install_execution_contract(
-                self._single_execution_contracts(assignment, invocation), lambda: steps
+                self._single_execution_contracts(assignment, invocation),
+                lambda: step_offset + steps,
             )
             while steps < self._config.max_steps:
                 if cancellation_requested():
@@ -318,6 +324,7 @@ class EmosStage2Runtime:
                         local_skill_completed=False,
                         terminal_basis="cancellation",
                     )
+                policy_input_observations = observations
                 action_data = actor.act(
                     batch,
                     hidden,
@@ -335,6 +342,7 @@ class EmosStage2Runtime:
                 env_action = action_data.env_actions.detach().cpu()[0].numpy()
                 step_result = gym_env.step(env_action)
                 observations, done, info = self._gym_step_result(step_result)
+                self._last_policy_observations = observations
                 steps += 1
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
@@ -345,7 +353,18 @@ class EmosStage2Runtime:
                 masks = torch.tensor([[not done]], dtype=torch.bool, device=device).repeat(
                     1, *access.masks_shape
                 )
-                self._append_action_trace(steps, current_skills, info)
+                self._append_action_trace(step_offset + steps, current_skills, info)
+                self._observe_policy_step(
+                    steps,
+                    current_skills,
+                    env_action,
+                    habitat_env,
+                    actor,
+                    done,
+                    info,
+                    observations,
+                    policy_input_observations,
+                )
                 target_skill = current_skills[self._config.agent_id]
                 finished_key = f"agent_{self._config.agent_id}_has_finished_oracle_nav"
                 if target_skill in {
@@ -403,7 +422,10 @@ class EmosStage2Runtime:
                     contract_restore()
             finally:
                 module.group_discussion = original_group_discussion
-                self._flush_action_trace()
+                try:
+                    self._flush_action_trace()
+                except Exception:  # noqa: BLE001 - evidence cannot replace physical outcome
+                    _LOG.exception("action trace flush failed at Stage2 termination")
         if contract_failure is not None:
             return self._outcome(
                 "FAILED",
@@ -427,6 +449,26 @@ class EmosStage2Runtime:
             local_skill_completed=False,
             terminal_basis="step-budget-exhausted",
         )
+
+    def _observe_policy_step(
+        self,
+        step: int,
+        skills: list[str],
+        env_action: Any,
+        habitat_env: Any,
+        actor: Any,
+        done: bool,
+        info: dict[str, Any],
+        observations: Any,
+        policy_input_observations: Any,
+    ) -> None:
+        """Permit a shared-world observer to capture existing post-step state only."""
+        del step, skills, env_action, habitat_env, actor, done, info, observations
+        del policy_input_observations
+
+    def _policy_step_offset(self) -> int:
+        """Return the number of steps already consumed by the same simulator world."""
+        return 0
 
     def _assigned_arguments(
         self,
@@ -506,7 +548,7 @@ class EmosStage2Runtime:
         """Install one scoped guard around the original EMOS action boundary."""
         if self._actor is None:
             raise IntegrationError("Stage2 contract requires an initialized actor")
-        audit = Stage2ActionAudit(self._evidence_dir())
+        audit = Stage2ActionAudit(self._evidence_dir(), self._previous_action_audit())
         agents = [policy._high_level_policy.llm_agent for policy in self._actor._active_policies]
 
         def record(document: dict[str, Any]) -> None:
@@ -525,8 +567,17 @@ class EmosStage2Runtime:
                 restore_guard()
             finally:
                 audit.close()
+                self._retain_action_audit(audit.summary)
 
         return restore
+
+    def _previous_action_audit(self) -> dict[str, Any] | None:
+        """Return prior segment accounting when the local world is intentionally retained."""
+        return None
+
+    def _retain_action_audit(self, summary: dict[str, Any] | None) -> None:
+        """Leave independent executions without cross-episode audit state."""
+        del summary
 
     def _batch(self, observations: Any) -> Any:
         """Apply the same batching and transforms as the EMOS evaluator."""

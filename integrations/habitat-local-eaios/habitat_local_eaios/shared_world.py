@@ -18,6 +18,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 from .video_capture import HabitatVideoCapture
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
-_START_ADMISSION_SCHEMA = "roboguide.e1.shared-world-start-admission/v0.1"
+_START_ADMISSION_SCHEMA = "roboguide.e1.shared-world-start-admission/v0.2"
 
 
 class SharedEmosStage2Runtime(EmosStage2Runtime):
@@ -94,6 +95,153 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             raise IntegrationError(
                 f"authoritative planning world evidence initialization failed: {error}"
             ) from error
+
+    def execute_serial(
+        self,
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, Any]]:
+        """Continue one Actor's tasks in the same reset world with fresh Stage2 subtasks."""
+        gym_env, habitat_env, actor, access = self._require_initialized()
+        if agent_id not in self._agent_ids:
+            raise IntegrationError("serial assignment uses an unconfigured endpoint")
+        original_config = self._config
+        self._config = replace(original_config, agent_id=agent_id)
+        phase = "serial_reset"
+        terminal_recorded = False
+        try:
+            if not hasattr(self, "_serial_observations"):
+                habitat_env.episodes = [self._episode]
+                observations = gym_env.reset()
+                if isinstance(observations, tuple):
+                    observations = observations[0]
+                self._serial_observations = observations
+                self._serial_agent_id = agent_id
+                self._serial_steps = 0
+                self._serial_initial_positions = initial_agent_positions(
+                    habitat_env, self._agent_ids
+                )
+                self._diagnostics.record_reset(habitat_env, original_config)
+                self._record_video(0, observations, {})
+                self._serial_text_context = habitat_env.task.get_task_text_context()
+                self._serial_text_context["episode_id"] = habitat_env.current_episode.episode_id
+                self._serial_started_at = time.time()
+                self._write_text(
+                    "scene_description.txt", str(self._serial_text_context["scene_description"])
+                )
+            elif self._serial_agent_id != agent_id or habitat_env.episode_over:
+                raise IntegrationError(
+                    "serial session cannot switch physical agent or resume an ended episode"
+                )
+            phase = "serial_policy_loop"
+            self._config = replace(
+                original_config,
+                agent_id=agent_id,
+                max_steps=max(0, original_config.max_steps - self._serial_steps),
+            )
+            task_suffix = invocation.request_key()[:16]
+            self._write_text(
+                f"subtask-agent-{agent_id}-{task_suffix}.txt", self._subtask(invocation)
+            )
+            self._write_text(f"subtask-agent-{agent_id}.txt", self._subtask(invocation))
+            assignment = self._assigned_arguments(self._serial_text_context, invocation)
+            running(agent_id, f"shared EMOS Stage2 serial task {invocation.task_id} started")
+            initial_values = self._serial_initial_positions[str(agent_id)]
+            outcome = self._policy_loop(
+                self._serial_observations,
+                self._serial_text_context,
+                assignment,
+                invocation,
+                (initial_values[0], initial_values[1], initial_values[2]),
+                str(habitat_env.current_episode.scene_id),
+                actor,
+                access,
+                gym_env,
+                habitat_env,
+                cancellation_requested,
+            )
+            self._serial_observations = self._last_policy_observations
+            self._write_json(f"controlled-outcome-{task_suffix}.json", outcome.as_dict())
+            self._diagnostics.flush_boundary()
+            complete = final_slot or outcome.state != "COMPLETED" or habitat_env.episode_over
+            if complete:
+                self._record_terminal_diagnostics(
+                    habitat_env,
+                    self._serial_steps,
+                    "serial_session_completed"
+                    if outcome.state == "COMPLETED"
+                    else "serial_session_failed",
+                )
+                terminal_recorded = True
+            return outcome, {
+                "action_trace_collection": self._action_trace_stats(),
+                "identity": {
+                    "episode_id": original_config.episode_id,
+                    "episode_reset_count": 1,
+                    "episode_started_unix": self._serial_started_at,
+                    "pid": os.getpid(),
+                    "scene_id": str(habitat_env.current_episode.scene_id),
+                    "simulator_worlds": 1,
+                    "habitat_seed": original_config.seed,
+                    "initial_agent_positions": self._serial_initial_positions,
+                    "simulator_steps": self._serial_steps,
+                    "episode_terminated": bool(habitat_env.episode_over),
+                },
+            }
+        except BaseException:
+            if not terminal_recorded:
+                self._record_terminal_diagnostics(
+                    habitat_env,
+                    getattr(self, "_serial_steps", 0),
+                    f"execution_exception:{phase}",
+                )
+            raise
+        finally:
+            self._config = original_config
+
+    def _observe_policy_step(
+        self,
+        step: int,
+        skills: list[str],
+        env_action: Any,
+        habitat_env: Any,
+        actor: Any,
+        done: bool,
+        info: dict[str, Any],
+        observations: Any,
+        policy_input_observations: Any,
+    ) -> None:
+        """Observe serial segments with one continuous simulator step sequence."""
+        del step
+        self._serial_steps += 1
+        self._diagnostics.record_step(
+            self._serial_steps,
+            skills,
+            env_action,
+            habitat_env,
+            actor,
+            done,
+            info,
+            observations,
+            policy_input_observations,
+        )
+        self._record_video(self._serial_steps, observations, info)
+
+    def _policy_step_offset(self) -> int:
+        """Keep action and decision evidence numbered across serial Task segments."""
+        return getattr(self, "_serial_steps", 0)
+
+    def _previous_action_audit(self) -> dict[str, Any] | None:
+        """Retain the prior serial segment's selected-tool evidence accounting."""
+        return getattr(self, "_serial_action_audit", None)
+
+    def _retain_action_audit(self, summary: dict[str, Any] | None) -> None:
+        """Carry exact audit counts to the next segment of this one episode."""
+        if hasattr(self, "_serial_steps"):
+            self._serial_action_audit = summary
 
     def execute_pair(
         self,
@@ -733,9 +881,9 @@ class NodeEndpoint:
                 raise IntegrationError(
                     "this shared-world endpoint already owns another active execution"
                 )
-            if self._coordinator.episode_consumed():
+            if not self._coordinator.can_accept(self, invocation):
                 raise IntegrationError(
-                    "the shared-world episode has already been consumed by a prior pair"
+                    "the shared-world episode was consumed by an incompatible session or slot"
                 )
             execution, created = self._store.create_or_get(invocation)
             if created:
@@ -841,6 +989,21 @@ class InProcessWorldService:
         summary["official_metrics"] = self._runtime.final_metrics()
         return outcomes, summary
 
+    def run_serial(
+        self,
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, Any]]:
+        """Run one Task segment while retaining the same in-process Habitat world."""
+        outcome, summary = self._runtime.execute_serial(
+            invocation, agent_id, cancellation_requested, running, final_slot
+        )
+        summary["official_metrics"] = self._runtime.final_metrics()
+        return outcome, summary
+
     def shutdown(self) -> None:
         """Release the in-process world."""
         closer = getattr(self._runtime, "close", None)
@@ -873,7 +1036,7 @@ def _child_world_process(
                 return
             if kind == "CLOSE":
                 return
-            if kind != "EXECUTE_PAIR" or not isinstance(payload, dict):
+            if kind not in {"EXECUTE_PAIR", "EXECUTE_SERIAL"}:
                 connection.send(("WORLD_ERROR", "invalid world process command"))
                 continue
 
@@ -890,7 +1053,26 @@ def _child_world_process(
                 connection.send(("RUNNING", (agent_id, detail)))
 
             try:
-                outcomes, summary = runtime.execute_pair(payload, cancellation_requested, running)
+                if kind == "EXECUTE_PAIR":
+                    if not isinstance(payload, dict):
+                        raise IntegrationError("pair command requires invocation mapping")
+                    outcomes, summary = runtime.execute_pair(
+                        payload, cancellation_requested, running
+                    )
+                else:
+                    if not isinstance(payload, tuple) or len(payload) != 3:
+                        raise IntegrationError("serial command requires one invocation and slot")
+                    invocation, agent_id, final_slot = payload
+                    if not isinstance(invocation, CanonicalMobilityInvocation):
+                        raise IntegrationError("serial command invocation is invalid")
+                    outcome, summary = runtime.execute_serial(
+                        invocation,
+                        agent_id,
+                        cancellation_requested,
+                        running,
+                        final_slot,
+                    )
+                    outcomes = {agent_id: outcome}
                 summary["official_metrics"] = runtime.final_metrics()
                 connection.send(("TERMINAL", (outcomes, summary)))
             except Exception as error:  # noqa: BLE001 - terminal failure for both nodes
@@ -982,6 +1164,40 @@ class ProcessWorldService:
             if not process.is_alive():
                 raise IntegrationError("shared world process exited during the episode")
 
+    def run_serial(
+        self,
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, Any]]:
+        """Execute one segment in the retained child world without another reset."""
+        connection, process = self._require_live()
+        connection.send(("EXECUTE_SERIAL", (invocation, agent_id, final_slot)))
+        cancel_sent = False
+        while True:
+            if cancellation_requested() and not cancel_sent:
+                try:
+                    connection.send(("CANCEL", None))
+                except (BrokenPipeError, OSError):
+                    pass
+                cancel_sent = True
+            if connection.poll(0.05):
+                kind, payload = _receive_message(connection)
+                if kind == "RUNNING":
+                    current_agent_id, detail = payload
+                    running(current_agent_id, detail)
+                    continue
+                if kind == "TERMINAL":
+                    outcomes, summary = payload
+                    return outcomes[agent_id], summary
+                if kind == "WORLD_ERROR":
+                    raise IntegrationError(f"shared world execution failed: {payload}")
+                raise IntegrationError(f"unexpected world message {kind!r}")
+            if not process.is_alive():
+                raise IntegrationError("shared world process exited during the serial segment")
+
     def shutdown(self) -> None:
         """Request clean world shutdown with bounded termination fallback."""
         connection, process = self._connection, self._process
@@ -1008,13 +1224,11 @@ class ProcessWorldService:
 
 
 class SharedWorldCoordinator:
-    """Serialize one shared episode across exactly two independent Node endpoints.
+    """Serialize one official episode across an admitted deployment topology.
 
-    This deployment profile does not support running a single endpoint first and
-    reusing it later in the same official episode.  Both committed assignments
-    must arrive on distinct configured endpoints before the one Habitat reset.
-    The restriction belongs to this adapter topology, not Mission semantics or
-    the generic Control resource model.
+    Two-Actor concurrency retains the two-endpoint start barrier. One Actor may
+    instead finish successive Tasks on its assigned endpoint without another
+    Habitat reset. Neither topology is inferred from goal-predicate cardinality.
     """
 
     def __init__(
@@ -1040,6 +1254,14 @@ class SharedWorldCoordinator:
         self._condition = threading.Condition(self._lock)
         self._queue: list[tuple[NodeEndpoint, str]] = []
         self._episode_consumed = False
+        self._serial_endpoint: NodeEndpoint | None = None
+        self._serial_digest: str | None = None
+        self._serial_slots: tuple[tuple[str, str], ...] = ()
+        self._serial_completed: set[tuple[str, str]] = set()
+        self._serial_outcomes: list[dict[str, object]] = []
+        self._serial_arrivals: list[tuple[NodeEndpoint, str]] = []
+        self._serial_waited_from: float | None = None
+        self._serial_finished = False
         self._initialization_error: str | None = None
         self._worker = threading.Thread(
             target=self._run, name="shared-world-coordinator", daemon=True
@@ -1054,6 +1276,11 @@ class SharedWorldCoordinator:
             "mission_id": invocation.mission_id,
             "task_id": invocation.task_id,
             "destination": invocation.destination,
+            "execution_session_digest": (
+                invocation.execution_session.digest
+                if invocation.execution_session is not None
+                else None
+            ),
             "unix": time.time(),
         }
         self._evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -1089,16 +1316,34 @@ class SharedWorldCoordinator:
             "schema_version": _START_ADMISSION_SCHEMA,
             "episode_scope": "one-official-shared-episode",
             "required_distinct_endpoint_assignments": 2,
-            "sequential_endpoint_reuse_supported": False,
+            "required_distinct_endpoint_assignments_applies_to": "two_actor_concurrent",
+            "sequential_endpoint_reuse_supported": True,
             "pair_wait_seconds": self._pair_wait_s,
             "start_condition": (
-                "two Control-committed assignments dispatched through distinct configured "
-                "Node endpoints before the single Habitat reset"
+                "one accepted-plan Actor may run successive Tasks on one retained endpoint; "
+                "two accepted-plan Actors require distinct configured Node endpoints "
+                "before the single Habitat reset"
             ),
         }
 
+    def can_accept(self, endpoint: NodeEndpoint, invocation: CanonicalMobilityInvocation) -> bool:
+        """Admit only an unused episode or the next slot of its exact serial session."""
+        with self._condition:
+            if not self._episode_consumed:
+                return True
+            session = invocation.execution_session
+            slot = (invocation.task_id, invocation.role_id)
+            return bool(
+                self._serial_endpoint is endpoint
+                and not self._serial_finished
+                and session is not None
+                and session.digest == self._serial_digest
+                and slot in self._serial_slots
+                and slot not in self._serial_completed
+            )
+
     def episode_consumed(self) -> bool:
-        """Report whether the single shared episode has already been used."""
+        """Report whether the single shared episode was claimed for any topology."""
         with self._condition:
             return self._episode_consumed
 
@@ -1120,6 +1365,65 @@ class SharedWorldCoordinator:
                 if not self._queue:
                     self._condition.wait(timeout=self._wait_poll_s)
                 entries = list(self._queue)
+            if self._serial_endpoint is not None:
+                for entry in entries:
+                    self._dequeue(entry)
+                    self._execute_serial(entry)
+                if (
+                    not self._serial_finished
+                    and self._serial_waited_from is not None
+                    and self._monotonic() - self._serial_waited_from >= self._pair_wait_s
+                ):
+                    self._write_start_admission(
+                        "INCOMPLETE",
+                        self._serial_arrivals,
+                        "next serial Task assignment did not arrive within the bounded "
+                        "session window",
+                    )
+                    with self._condition:
+                        self._serial_finished = True
+                continue
+            if self._episode_consumed:
+                for entry in entries:
+                    self._fail_extra(entry)
+                continue
+            if not pair and entries:
+                first_endpoint, first_execution_id = entries[0]
+                first_record = first_endpoint.store().get(first_execution_id)
+                first_invocation = first_record["invocation"] if first_record is not None else None
+                first_session = (
+                    first_invocation.execution_session if first_invocation is not None else None
+                )
+                if (
+                    first_session is not None
+                    and first_session.topology() == "single_actor_sequential"
+                ):
+                    self._dequeue(entries[0])
+                    with self._condition:
+                        self._episode_consumed = True
+                        self._serial_endpoint = first_endpoint
+                        self._serial_digest = first_session.digest
+                        self._serial_slots = tuple(
+                            (str(slot["task_id"]), str(slot["role_id"]))
+                            for slot in first_session.slots
+                        )
+                    self._execute_serial(entries[0])
+                    continue
+                if first_session is not None and first_session.topology() == "unsupported":
+                    self._dequeue(entries[0])
+                    with self._condition:
+                        self._episode_consumed = True
+                    self._write_start_admission(
+                        "REJECTED",
+                        [entries[0]],
+                        "accepted-plan topology is unsupported by this shared-world deployment",
+                    )
+                    if first_record is not None and first_record["state"] == "ACCEPTED":
+                        first_endpoint.store().mark_failed(
+                            first_execution_id,
+                            "shared-world deployment does not support the accepted-plan topology",
+                        )
+                    continue
             for entry in entries:
                 if len(pair) < 2 and all(node is not entry[0] for node, _ in pair):
                     pair.append(entry)
@@ -1201,11 +1505,102 @@ class SharedWorldCoordinator:
         first, second = records
         assert first is not None and second is not None
         left, right = first["invocation"], second["invocation"]
+        left_session, right_session = left.execution_session, right.execution_session
+        if (left_session is None) != (right_session is None):
+            return "paired assignments disagree on execution session presence"
+        if left_session is not None and right_session is not None:
+            if (
+                left_session.digest != right_session.digest
+                or left_session.topology() != "two_actor_concurrent"
+            ):
+                return "paired assignments have incompatible accepted-plan topology"
         if left.mission_id != right.mission_id or left.group_id != right.group_id:
             return "assignments belong to different Mission or execution Group identities"
         if (left.task_id, left.role_id) == (right.task_id, right.role_id):
             return "assignments duplicate one logical Task/Role slot"
         return None
+
+    def _execute_serial(self, entry: tuple[NodeEndpoint, str]) -> None:
+        """Run one committed Task on a retained world, then await its next Task."""
+        endpoint, execution_id = entry
+        store = endpoint.store()
+        record = store.get(execution_id)
+        if record is None or record["state"] != "ACCEPTED":
+            return
+        invocation = record["invocation"]
+        session = invocation.execution_session
+        slot = (invocation.task_id, invocation.role_id)
+        if (
+            endpoint is not self._serial_endpoint
+            or session is None
+            or session.digest != self._serial_digest
+            or slot not in self._serial_slots
+            or slot in self._serial_completed
+            or self._serial_finished
+        ):
+            store.mark_failed(
+                execution_id, "serial session rejected an incompatible Task assignment"
+            )
+            return
+        current_slot = next(
+            item
+            for item in session.slots
+            if item["task_id"] == invocation.task_id and item["role_id"] == invocation.role_id
+        )
+        completed_tasks = {task_id for task_id, _ in self._serial_completed}
+        dependencies = current_slot["dependencies"]
+        if not isinstance(dependencies, list) or not set(dependencies).issubset(completed_tasks):
+            store.mark_failed(execution_id, "serial Task arrived before its DAG prerequisites")
+            return
+        self._write_start_admission(
+            "ADMITTED",
+            [*self._serial_arrivals, entry],
+            "accepted-plan single-Actor Task segment admitted on its retained endpoint",
+        )
+        self._serial_arrivals.append(entry)
+
+        def cancellation_requested() -> bool:
+            """Observe the current Task's durable cancellation request."""
+            return store.cancellation_requested(execution_id)
+
+        def running(agent_id: int, detail: str) -> None:
+            """Publish the real post-reset RUNNING state for this endpoint."""
+            if agent_id == endpoint.agent_id:
+                current = store.get(execution_id)
+                if current is not None and current["state"] == "ACCEPTED":
+                    store.mark_running(execution_id, detail)
+
+        try:
+            final_slot = len(self._serial_completed) + 1 == len(self._serial_slots)
+            outcome, summary = self._world.run_serial(
+                invocation, endpoint.agent_id, cancellation_requested, running, final_slot
+            )
+            store.mark_terminal(execution_id, outcome)
+            self._serial_completed.add(slot)
+            self._serial_outcomes.append(
+                {
+                    "task_id": invocation.task_id,
+                    "role_id": invocation.role_id,
+                    "outcome": outcome.as_dict(),
+                }
+            )
+            self._serial_waited_from = self._monotonic()
+            if (
+                final_slot
+                or outcome.state != "COMPLETED"
+                or summary["identity"].get("episode_terminated")
+            ):
+                self._serial_finished = True
+                self._publish_summary(
+                    {endpoint.agent_id: outcome},
+                    summary,
+                    serial_task_outcomes=self._serial_outcomes,
+                )
+        except Exception as error:  # noqa: BLE001 - local failure cannot become success
+            current = store.get(execution_id)
+            if current is not None and current["state"] not in TERMINAL_STATES:
+                store.mark_failed(execution_id, f"shared serial episode failed: {error}")
+            self._serial_finished = True
 
     def _fail_incompatible(self, pair: list[tuple[NodeEndpoint, str]], reason: str) -> None:
         """Archive and fail both incompatible assignments before any Habitat reset."""
@@ -1250,43 +1645,51 @@ class SharedWorldCoordinator:
             outcomes, summary = self._world.run_pair(invocations, cancellation_requested, running)
             for agent_id, outcome in outcomes.items():
                 endpoints[agent_id].store().mark_terminal(handles[agent_id], outcome)
-            metrics = summary.get("official_metrics", {})
-            # Strict authority semantics: write official_pddl_success only when
-            # the episode actually produced a strict-bool Habitat pddl_success.
-            # Missing or malformed metrics stay unavailable (key omitted) so
-            # downstream consumers never read a synthetic false.
-            raw_pddl = metrics.get("pddl_success")
-            summary_document: dict[str, object] = {
-                "action_trace_collection": summary.get("action_trace_collection", {}),
-                "identity": summary["identity"],
-                "outcomes": {
-                    str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()
-                },
-                "stage1_assignment": "RoboGuide committed assignments "
-                "(original EMOS group_discussion replaced per execution)",
-            }
-            semantic_evidence = self._evidence_dir / "authoritative-semantic-evidence.json"
-            if semantic_evidence.is_file():
-                semantic_document = json.loads(semantic_evidence.read_text(encoding="utf-8"))
-                if isinstance(semantic_document, dict) and isinstance(
-                    semantic_document.get("digest"), str
-                ):
-                    summary_document["authoritative_semantic_evidence_digest"] = semantic_document[
-                        "digest"
-                    ]
-            if isinstance(raw_pddl, bool):
-                summary_document["official_pddl_success"] = raw_pddl
-            else:
-                summary_document["official_pddl_success_unavailable_reason"] = (
-                    "habitat metrics did not report a strict-bool pddl_success"
-                )
-            self._write_json("shared-world-summary.json", summary_document)
+            self._publish_summary(outcomes, summary)
         except Exception as error:  # noqa: BLE001 - terminal failure must reach both nodes
             for endpoint, execution_id in pair:
                 store = endpoint.store()
                 current = store.get(execution_id)
                 if current is not None and current["state"] not in TERMINAL_STATES:
                     store.mark_failed(execution_id, f"shared episode failed: {error}")
+
+    def _publish_summary(
+        self,
+        outcomes: dict[int, LocalExecutionOutcome],
+        summary: dict[str, Any],
+        *,
+        serial_task_outcomes: list[dict[str, object]] | None = None,
+    ) -> None:
+        """Archive actual terminal evidence without synthesizing Habitat PDDL truth."""
+        metrics = summary.get("official_metrics", {})
+        raw_pddl = metrics.get("pddl_success") if isinstance(metrics, dict) else None
+        summary_document: dict[str, object] = {
+            "action_trace_collection": summary.get("action_trace_collection", {}),
+            "identity": summary["identity"],
+            "outcomes": {
+                str(agent_id): outcome.as_dict() for agent_id, outcome in outcomes.items()
+            },
+            "stage1_assignment": "RoboGuide committed assignments "
+            "(original EMOS group_discussion replaced per execution)",
+        }
+        if serial_task_outcomes is not None:
+            summary_document["serial_task_outcomes"] = serial_task_outcomes
+        semantic_evidence = self._evidence_dir / "authoritative-semantic-evidence.json"
+        if semantic_evidence.is_file():
+            semantic_document = json.loads(semantic_evidence.read_text(encoding="utf-8"))
+            if isinstance(semantic_document, dict) and isinstance(
+                semantic_document.get("digest"), str
+            ):
+                summary_document["authoritative_semantic_evidence_digest"] = semantic_document[
+                    "digest"
+                ]
+        if isinstance(raw_pddl, bool):
+            summary_document["official_pddl_success"] = raw_pddl
+        else:
+            summary_document["official_pddl_success_unavailable_reason"] = (
+                "habitat metrics did not report a strict-bool pddl_success"
+            )
+        self._write_json("shared-world-summary.json", summary_document)
 
     def _write_json(self, name: str, value: object) -> None:
         """Persist one deterministic JSON evidence file."""

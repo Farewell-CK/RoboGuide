@@ -722,10 +722,7 @@ class PhysicalDiagnostics:
         """Record the true final world state at episode termination."""
         if not self._enabled:
             return
-        try:
-            self._step_writer.flush()
-        except Exception:  # noqa: BLE001 - unexpected flush failure cannot erase terminal evidence
-            self._record_failure()
+        self.flush_boundary()
         try:
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim
@@ -752,6 +749,15 @@ class PhysicalDiagnostics:
             self._write_unavailable_snapshot(
                 "diagnostics-terminal.json", "terminal_world_state", error, steps
             )
+
+    def flush_boundary(self) -> None:
+        """Persist a segment's buffered steps without declaring official episode termination."""
+        if not self._enabled:
+            return
+        try:
+            self._step_writer.flush()
+        except Exception:  # noqa: BLE001 - unexpected writer failure remains diagnostic only
+            self._record_failure()
 
 
 class UnavailablePhysicalDiagnostics:
@@ -807,6 +813,9 @@ class UnavailablePhysicalDiagnostics:
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record that terminal diagnostics are unavailable, when storage permits."""
         self._write("diagnostics-terminal.json", "terminal_world_state", steps)
+
+    def flush_boundary(self) -> None:
+        """Keep unavailable diagnostics side-effect-free at a local Task boundary."""
 
 
 def create_physical_diagnostics(

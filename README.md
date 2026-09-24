@@ -517,6 +517,11 @@ Controlled deployment 只在 EMOS Stage1→Stage2 边界注入 Control 已 Commi
 它不再维护 RoboGuide-specific 的 prompt、invalid-output retry 或 skill dispatcher 副本。
 Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
 作为四类独立证据记录，彼此不得推导。
+当前 shared-world deployment 根据 Controller 已接受计划的版本化 Execution Session 选择
+双 Actor 双 endpoint 并发执行，或单 Actor 在同一 endpoint 上逐 Task 复用一次 Habitat reset。
+Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适配器不按官方目标数量
+虚构 Actor、assignment 或 benchmark success。边界见
+[`ADR-0045`](docs/decisions/0045-shared-world-execution-session.md)。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。

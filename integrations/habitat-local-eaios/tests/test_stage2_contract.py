@@ -424,3 +424,22 @@ def test_record_callback_failure_does_not_mask_violation() -> None:
         assert agent.dispatched == []
     finally:
         restore()
+
+
+def test_serial_segments_preserve_global_action_audit_sequence(tmp_path: Path) -> None:
+    """The second Task cannot overwrite or silently omit the first Task's tool audit."""
+    first = Stage2ActionAudit(tmp_path)
+    first.record({"decision": "allowed", "task_id": "first"})
+    first.close()
+    assert first.summary is not None and first.summary["complete"] is True
+    second = Stage2ActionAudit(tmp_path, first.summary)
+    second.record({"decision": "allowed", "task_id": "second"})
+    second.close()
+    rows = [
+        json.loads(line) for line in (tmp_path / "stage2-actions.jsonl").read_text().splitlines()
+    ]
+    summary = json.loads((tmp_path / "stage2-action-audit.json").read_text())
+    assert [row["sequence"] for row in rows] == [1, 2]
+    assert [row["task_id"] for row in rows] == ["first", "second"]
+    assert summary["records_seen"] == summary["records_written"] == 2
+    assert summary["complete"] is True

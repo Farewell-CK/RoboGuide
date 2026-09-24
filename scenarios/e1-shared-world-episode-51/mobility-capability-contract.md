@@ -75,16 +75,19 @@ under its existing local run directories and is not part of this change.
 The current deployment already publishes a start-admission document from
 `SharedWorldCoordinator.deployment_contract()` in
 `integrations/habitat-local-eaios/habitat_local_eaios/shared_world.py`. Its
-`required_distinct_endpoint_assignments=2` and
-`sequential_endpoint_reuse_supported=false` describe an **adapter start
-condition**, not a requirement that a benchmark's two predicates need
-distinct physical executors. One Actor with two sequential Tasks remains a
-semantically valid MissionPlan, but this fixed two-endpoint deployment cannot
-start it: the first assignment waits for a distinct second endpoint until the
-bounded pair-wait expires. `shared-world-start-admission.json` records admitted
-or rejected assignments; the tests in `test_shared_world.py` cover both cases.
-This limitation cannot be remedied by adding an unjustified distinct-entity
-constraint to MI or by interpreting a ready Node as proof of an episode start.
+`required_distinct_endpoint_assignments=2` applies to the **two-Actor concurrent**
+adapter start condition. A v0.8 plan with one independent Actor can instead
+dispatch successive Tasks through the same endpoint while retaining one reset
+Habitat world. The versioned, digest-bound execution session comes from the
+Controller's accepted plan and is carried by each Node Execute; the adapter
+does not infer Actor count from PDDL predicates. Control still decides when the
+second Task is ready, releases `space:1`, and dispatches it. The adapter never
+pre-commits or invents that assignment. `shared-world-start-admission.json`
+records ADMITTED, REJECTED, or INCOMPLETE with actual arrivals. The Controller
+requires the Node registration metadata for this session schema before sending
+the additive Execute field; a route without that declaration is rejected before
+dispatch. See
+[ADR-0045](../../docs/decisions/0045-shared-world-execution-session.md).
 
 The simulator supplies actual initial agent positions, rotations, scene, and
 per-conjunct goal observations only after the shared-world barrier and
@@ -96,8 +99,7 @@ resource declaration handles endpoint concurrency, but it does not claim an
 agent can reach a specific destination from an unknown initial floor.
 
 Before lifting this registration draft into production, separately review the
-Node-to-agent mapping and the versioned source of floor-transition claims,
-and decide whether the deployment admits a single-Actor sequential topology.
+Node-to-agent mapping and the versioned source of floor-transition claims.
 Any automatic cross-floor Role requirement additionally needs grounded
 start/goal-floor facts available **before** matching, with freshness and
 provenance; the current implementation does not fabricate them.

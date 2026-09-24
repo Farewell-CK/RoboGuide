@@ -143,3 +143,18 @@ the local failure cause. The schema marks unavailable raw evidence instead of
 claiming a truncated action is complete. This profile is an admission boundary,
 not a model correctness or navigation-convergence guarantee. It adds no global
 RoboGuide authority, MissionPlan fields or new Habitat success rules.
+
+The shared-world deployment also accepts `roboguide.execution-session/v0.1`
+metadata derived from an accepted MissionPlan. Two independent Actors retain
+the distinct-endpoint start barrier. One independent Actor can run successive
+Control-dispatched Tasks on the same endpoint without resetting Habitat between
+them. The adapter verifies Group, Task/Role slot, session digest, prerequisites,
+and retained endpoint; it does not release resources or decide Task readiness.
+Action traces and selected-tool audit counts retain continuous episode step
+and sequence identities across those Task segments. The final official
+`pddl_success` remains separate from each local Task outcome. Unsupported
+topologies and a missing follow-on assignment produce explicit failure or
+INCOMPLETE admission evidence. A Node route must advertise this session schema
+in registration metadata; the Controller rejects a non-advertising route before
+dispatch rather than silently losing the topology. Deploy Controller and Node
+updates together.

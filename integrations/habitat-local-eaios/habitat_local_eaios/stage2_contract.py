@@ -102,12 +102,14 @@ class Stage2ExecutionContract:
 class Stage2ActionAudit:
     """Stream bounded selected-tool evidence; I/O failure never permits a rejected action."""
 
-    def __init__(self, directory: Path) -> None:
-        """Initialize per-execution audit accounting without touching disk."""
+    def __init__(self, directory: Path, previous_summary: dict[str, Any] | None = None) -> None:
+        """Initialize append-only accounting for a new segment of one episode."""
         self._directory = directory
-        self._sequence = 0
+        self._previous_summary = previous_summary or {}
+        self._sequence = int(self._previous_summary.get("records_seen", 0))
         self._unavailable = 0
         self._closed = False
+        self.summary: dict[str, Any] | None = None
         self._writer = BufferedJsonlWriter(directory / "stage2-actions.jsonl", batch_records=1)
 
     def record(self, document: dict[str, Any]) -> None:
@@ -155,18 +157,28 @@ class Stage2ActionAudit:
             }
             flush_failed = True
             _LOG.exception("Stage2 action audit stats unavailable")
+        previous = self._previous_summary
+        records_unavailable = int(previous.get("records_unavailable", 0)) + self._unavailable
+        records_written = int(previous.get("records_written", 0)) + stats["records_written"]
+        records_dropped = int(previous.get("records_dropped", 0)) + stats["records_dropped"]
+        write_failures = int(previous.get("write_failures", 0)) + stats["write_failures"]
         summary = {
             "schema_version": "roboguide.stage2-action-audit/v0.1",
             "records_seen": self._sequence,
-            "records_unavailable": self._unavailable,
+            "records_unavailable": records_unavailable,
             "max_record_bytes": _MAX_RECORD_BYTES,
             "complete": (
                 not flush_failed
-                and self._unavailable == 0
-                and stats["records_written"] == self._sequence
+                and records_unavailable == 0
+                and write_failures == 0
+                and records_written == self._sequence
             ),
             **stats,
+            "records_written": records_written,
+            "records_dropped": records_dropped,
+            "write_failures": write_failures,
         }
+        self.summary = summary
         try:
             self._directory.mkdir(parents=True, exist_ok=True)
             (self._directory / "stage2-action-audit.json").write_text(
