@@ -53,8 +53,8 @@ pub use duration_estimate::TaskDurationEstimate;
 pub use error::DomainError;
 pub use event::{EventPayload, EventRecord};
 pub use execution::{
-    CapabilityContractRef, ExecutionCommand, ExecutionIntent, ExecutionValue, NodeEvent,
-    OperationRef,
+    CapabilityContractRef, ExecutionCommand, ExecutionIntent, ExecutionSessionDescriptor,
+    ExecutionSessionSlot, ExecutionValue, NodeEvent, OperationRef,
 };
 pub use execution_relation::{
     CoordinationMechanism, ExecutionCouplingMode, ExecutionRelationKind, ExecutionRelationSpec,

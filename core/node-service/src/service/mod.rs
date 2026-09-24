@@ -467,10 +467,11 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status = match self.engine.execute(
+                let receipt_status = match self.engine.execute_with_session(
                     execution_id.clone(),
                     invocation,
                     execute.resource_ids,
+                    &execute.execution_session_json,
                 ) {
                     Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
                         integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted

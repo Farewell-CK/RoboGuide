@@ -52,7 +52,7 @@ This separates task semantics, static environment knowledge, abstract deployment
 and live placement authority. It does not prove a robot can reach a particular target. The
 current Habitat episode records a target transform but does not expose an exact pre-reset
 object-instance transform under the same handle; start poses are sampled at reset. Such facts
-remain explicit gaps. A later design may need an admitted pre-assignment start-state or
-topology contract before automatically requiring cross-floor mobility. The current shared-world
-adapter still requires two distinct endpoint assignments to begin one joint episode; this is a
-deployment start condition, not a benchmark requirement for distinct physical executors.
+remain explicit gaps. A later design may need an admitted pre-assignment start-state before
+automatically requiring cross-floor mobility. Shared-world episode-start topology is an
+independent deployment contract described in [ADR-0045](0045-shared-world-execution-session.md),
+not a benchmark requirement for distinct physical executors.

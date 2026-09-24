@@ -70,6 +70,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   semantically satisfied. Control records `AwaitingSatisfaction` and retains bindings;
   Orchestration applies the Mission-declared basis, emits `TaskSatisfied`, then releases Task-scoped
   ownership, advances the DAG, and evaluates Mission completion.
+- Accepted-plan Execution Session v0.1 is immutable Group topology evidence carried with
+  Runtime Execute through Node Protocol; it is not Mission semantics, a Node selector, or
+  resource authority. The Habitat shared-world deployment admits either two independent
+  Actors on two endpoints or one independent Actor whose Tasks reuse one endpoint and one
+  reset world after each Control-owned Task release. Other topologies fail closed; benchmark
+  success still comes only from Habitat's official metric. See ADR-0045.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.

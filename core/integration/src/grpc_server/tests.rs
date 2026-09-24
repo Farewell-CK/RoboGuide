@@ -349,6 +349,7 @@ fn peer_readiness_requires_current_session_identity_and_bounds() {
             management_sequence: 1,
             state_export_ids: BTreeSet::new(),
             active: true,
+            supports_execution_session: false,
         },
     );
     let readiness = |session_id: &str, sequence: u64, valid_for_ms: u64| NodeMessage {
@@ -500,6 +501,7 @@ fn pending_registration_cannot_route_commands() {
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: false,
+            supports_execution_session: false,
         },
     );
     let error = router
@@ -523,6 +525,55 @@ fn pending_registration_cannot_route_commands() {
     assert!(error.message().contains("pending"));
 }
 
+/// A non-advertising Node cannot silently discard accepted-plan topology evidence.
+#[test]
+fn execution_session_requires_registration_metadata() {
+    let router = GrpcNodeRouter::default();
+    let (sender, _receiver) = mpsc::unbounded_channel();
+    router.sessions.lock().expect("registry lock").insert(
+        "dog-a".to_string(),
+        RoutedSession {
+            session_id: "session-current".to_string(),
+            sender,
+            lease_id: "lease-current".to_string(),
+            last_heartbeat: std::time::Instant::now(),
+            lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: NODE_CONTRACT_VERSION.to_string(),
+            management_sequence: 0,
+            state_export_ids: BTreeSet::new(),
+            active: true,
+            supports_execution_session: false,
+        },
+    );
+    let error = router
+        .execute_with_session(
+            "dog-a",
+            "command-1".to_string(),
+            "execution-1".to_string(),
+            crate::grpc::v0_4::CanonicalInvocation {
+                mission_id: "m".to_string(),
+                task_id: "t".to_string(),
+                group_id: "g".to_string(),
+                role_id: "r".to_string(),
+                intent: Some(crate::grpc::v0_4::ExecutionIntent {
+                    operation: Some(crate::grpc::v0_4::OperationRef {
+                        namespace: "mobility".to_string(),
+                        name: "navigate".to_string(),
+                        version: "v1".to_string(),
+                    }),
+                    objective: "reach target".to_string(),
+                    parameters: Default::default(),
+                }),
+                ..Default::default()
+            },
+            Vec::new(),
+            "{}".to_string(),
+        )
+        .expect_err("topology must not be sent to a route without the feature declaration");
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    assert!(error.message().contains("execution-session/v0.1"));
+}
+
 /// Expired leases cannot route Execute or Cancel.
 #[test]
 fn expired_lease_rejects_new_commands() {
@@ -540,6 +591,7 @@ fn expired_lease_rejects_new_commands() {
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: true,
+            supports_execution_session: false,
         },
     );
     assert_eq!(
@@ -582,6 +634,7 @@ fn current_session_check_rejects_pending_wrong_and_expired_routes() {
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: false,
+            supports_execution_session: false,
         },
     );
     assert!(
@@ -639,6 +692,7 @@ fn newer_session_fences_late_old_heartbeat() {
             management_sequence: 0,
             state_export_ids: BTreeSet::new(),
             active: true,
+            supports_execution_session: false,
         },
     );
     let message = NodeMessage {

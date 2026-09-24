@@ -128,6 +128,84 @@ fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistr
     )
 }
 
+/// Only the local owner of a selected operation may opt its Node into session transport.
+#[test]
+fn execution_session_transport_is_local_owner_opt_in() {
+    use std::collections::BTreeMap;
+
+    let node_id = domain::NodeId::new("session-node").expect("node valid");
+    let owner = domain::LocalSystemId::new("motion").expect("system valid");
+    let other = domain::LocalSystemId::new("other").expect("system valid");
+    let operation = domain::OperationRef::new("mobility", "move", "v1").expect("operation valid");
+    let intent =
+        domain::ExecutionIntent::new_semantic(operation.clone(), "reach target", BTreeMap::new())
+            .expect("intent valid");
+    for (owner_advertises, other_advertises, expected) in [
+        (false, false, false),
+        (false, true, false),
+        (true, false, true),
+    ] {
+        let metadata = |advertises| {
+            if advertises {
+                BTreeMap::from([(
+                    integration::EXECUTION_SESSION_METADATA_KEY.to_string(),
+                    integration::EXECUTION_SESSION_METADATA_VALUE.to_string(),
+                )])
+            } else {
+                BTreeMap::new()
+            }
+        };
+        let registration = domain::NodeRegistration::new_with_local_systems(
+            node_id.clone(),
+            vec![
+                domain::LocalSystemDescriptor::new(
+                    owner.clone(),
+                    domain::LocalRuntime::new("motion", "1").expect("runtime valid"),
+                    metadata(owner_advertises),
+                ),
+                domain::LocalSystemDescriptor::new(
+                    other.clone(),
+                    domain::LocalRuntime::new("other", "1").expect("runtime valid"),
+                    metadata(other_advertises),
+                ),
+            ],
+            domain::NodeContractVersion::v0_6(),
+            vec![domain::Capability::new(
+                domain::CapabilityKind::Mobility,
+                true,
+            )],
+            BTreeMap::from([(operation.as_legacy_contract().clone(), owner.clone())]),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+        )
+        .expect("registration valid")
+        .with_operation_support(vec![domain::OperationSupport::new(
+            operation.clone(),
+            owner.clone(),
+        )])
+        .expect("operation support valid");
+        let mut state = state::InMemorySharedNodeState::new();
+        ports::SharedNodeStateWriter::record_node(
+            &mut state,
+            domain::NodeStateSnapshot::new(
+                registration,
+                domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(1)),
+                domain::TimestampMs::new(1),
+                domain::NodeLivenessObservation::new(
+                    domain::NodeLiveness::Reachable,
+                    domain::TimestampMs::new(1),
+                ),
+            ),
+        )
+        .expect("state accepts node");
+        assert_eq!(
+            node_accepts_execution_session(&state, &node_id, &intent),
+            expected
+        );
+    }
+}
+
 /// State query filters are exact and can exclude only records explicitly marked stale.
 #[test]
 fn state_query_filters_semantics_sources_and_staleness() {

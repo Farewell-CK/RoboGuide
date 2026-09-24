@@ -17,6 +17,10 @@ use tonic::{Request, Response, Status};
 
 /// Current Integration Server implementation version.
 const SERVER_VERSION: &str = "roboguide.server/v0.4";
+/// Registration metadata that explicitly opts a Node into accepted-plan Session transport.
+pub const EXECUTION_SESSION_METADATA_KEY: &str = "roboguide.execution-session";
+/// The only Session schema currently understood by the Controller/Node pair.
+pub const EXECUTION_SESSION_METADATA_VALUE: &str = "roboguide.execution-session/v0.1";
 /// Maximum time transport waits for Controller composition to durably accept one fact.
 const APPLICATION_ACCEPTANCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -162,6 +166,8 @@ struct RoutedSession {
     state_export_ids: BTreeSet<String>,
     /// Whether Controller composition accepted registration and `Registered` was emitted.
     active: bool,
+    /// Whether this Node explicitly advertises the additive execution-session field.
+    supports_execution_session: bool,
 }
 
 impl GrpcNodeRouter {
@@ -207,6 +213,26 @@ impl GrpcNodeRouter {
         invocation: crate::grpc::v0_4::CanonicalInvocation,
         resource_ids: Vec<String>,
     ) -> Result<(), Status> {
+        self.execute_with_session(
+            node_id,
+            command_id,
+            execution_id,
+            invocation,
+            resource_ids,
+            String::new(),
+        )
+    }
+
+    /// Sends an Execute with immutable accepted-plan topology outside semantic intent.
+    pub fn execute_with_session(
+        &self,
+        node_id: &str,
+        command_id: String,
+        execution_id: String,
+        invocation: crate::grpc::v0_4::CanonicalInvocation,
+        resource_ids: Vec<String>,
+        execution_session_json: String,
+    ) -> Result<(), Status> {
         if command_id.trim().is_empty()
             || execution_id.trim().is_empty()
             || invocation.mission_id.trim().is_empty()
@@ -238,6 +264,11 @@ impl GrpcNodeRouter {
         if !route.active {
             return Err(Status::unavailable("node registration is pending"));
         }
+        if !execution_session_json.is_empty() && !route.supports_execution_session {
+            return Err(Status::failed_precondition(
+                "Node registration does not advertise roboguide.execution-session/v0.1",
+            ));
+        }
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
@@ -251,6 +282,7 @@ impl GrpcNodeRouter {
                     invocation: Some(invocation),
                     resource_ids,
                     command_id,
+                    execution_session_json,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -477,6 +509,13 @@ async fn run_grpc_session(
                     .map(|export| export.export_id.clone())
                     .collect(),
                 active: false,
+                supports_execution_session: registration.local_systems.iter().any(|system| {
+                    system
+                        .metadata
+                        .get(EXECUTION_SESSION_METADATA_KEY)
+                        .map(String::as_str)
+                        == Some(EXECUTION_SESSION_METADATA_VALUE)
+                }),
             },
         );
     if let Some(previous) = previous {

@@ -13,7 +13,7 @@ pub(crate) use actor_placement::{
     validate_restored_actor_placement_coverage,
 };
 #[cfg(test)]
-pub(crate) use dispatch::deferred_dispatch;
+pub(crate) use dispatch::{deferred_dispatch, node_accepts_execution_session};
 pub(crate) use dispatch::{drive_ready_tasks, drive_rebound_attempts};
 pub(crate) use outcomes::{
     apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,

@@ -470,6 +470,22 @@ route loss 后非终态 attempt 进入 `Unknown` 与既有 Control recovery pipe
 直到各 attempt 有 terminal evidence 才释放。完整边界见
 [`ADR-0028`](../../decisions/0028-durable-command-recovery-and-attempts.md)。
 
+Controller 可从已接受的 v0.8 MissionPlan 导出版本化、digest 绑定的 Execution Session
+descriptor；只有选中 Operation 的注册 Local System 显式声明支持时，才随 durable Execute
+command 传至 Node workflow。其他部署沿用原命令；该 descriptor 只描述同一 Group 内的
+Task/Role、Actor 与 DAG 先决关系，不是 Mission 语义、新的 placement authority 或
+`ExecutionIntent` 参数。Node 在调用 Local EAIOS 前校验精确 slot 和 descriptor。当前
+Habitat shared-world deployment 据此选择双 Actor、双 endpoint 并发 barrier，或单 Actor
+在同一 endpoint 上逐 Task 复用一次 reset 的 simulator world。后一拓扑的 Task readiness、
+资源释放与下一次 dispatch 始终由 Orchestration/Control 决定；Local EAIOS 仅保持已有
+物理世界并发布各 Task 的真实 local outcome。缺少/不支持的拓扑不会凭目标谓词数量补造
+第二 assignment。Node Protocol v0.4 的 `Execute.execution_session_json` 是 additive wire
+字段，旧命令可为空；需要 session 的 Node 必须在注册 metadata 中显式声明该 schema，
+Controller 对路由能力与非空 session 不一致的情况在发送前 fail closed。该部署须成套升级
+Controller 与 Node，避免拓扑证据被
+静默丢弃。详见
+[`ADR-0045`](../../decisions/0045-shared-world-execution-session.md)。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。

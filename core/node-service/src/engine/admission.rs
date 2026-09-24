@@ -8,14 +8,53 @@ impl LocalIntegrationEngine {
         &self,
         execution_id: String,
         invocation: CanonicalInvocation,
+        resource_ids: Vec<String>,
+    ) -> Result<ExecuteDisposition, EngineError> {
+        self.execute_with_session(execution_id, invocation, resource_ids, "")
+    }
+
+    /// Admits one exact Execute with immutable accepted-plan topology evidence.
+    pub fn execute_with_session(
+        &self,
+        execution_id: String,
+        invocation: CanonicalInvocation,
         mut resource_ids: Vec<String>,
+        execution_session_json: &str,
     ) -> Result<ExecuteDisposition, EngineError> {
         validate_invocation_identity(&execution_id, &invocation)?;
+        let session = if execution_session_json.is_empty() {
+            None
+        } else {
+            let session: domain::ExecutionSessionDescriptor =
+                serde_json::from_str(execution_session_json).map_err(EngineError::Json)?;
+            session
+                .validate_slot(
+                    &MissionId::new(invocation.mission_id.clone())
+                        .map_err(|error| EngineError::Protocol(error.to_string()))?,
+                    &domain::ExecutionGroupId::new(invocation.group_id.clone())
+                        .map_err(|error| EngineError::Protocol(error.to_string()))?,
+                    &TaskId::new(invocation.task_id.clone())
+                        .map_err(|error| EngineError::Protocol(error.to_string()))?,
+                    &domain::RoleId::new(invocation.role_id.clone())
+                        .map_err(|error| EngineError::Protocol(error.to_string()))?,
+                )
+                .map_err(EngineError::Protocol)?;
+            Some(session)
+        };
         let operation = invocation_operation(&invocation)?;
         let capability = self.operation(&operation)?.clone();
         validate_resources(&self.inner.catalog, &capability, &resource_ids)?;
         resource_ids.sort();
-        let invocation_json = canonical_invocation_json(&invocation, &resource_ids)?;
+        let mut invocation_json = canonical_invocation_json(&invocation, &resource_ids)?;
+        if let Some(session) = session {
+            invocation_json
+                .as_object_mut()
+                .expect("canonical invocation is an object")
+                .insert(
+                    "execution_session".to_string(),
+                    serde_json::to_value(session).map_err(EngineError::Json)?,
+                );
+        }
         let workflow_digest = workflow_digest(&self.inner.catalog, &capability, &invocation_json)?;
         let spec = ExecutionSpec::new(
             serde_json::to_vec(&invocation_json).map_err(EngineError::Json)?,

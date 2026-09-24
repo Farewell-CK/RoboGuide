@@ -233,6 +233,9 @@ message Execute {
   repeated string resource_ids = 4;
   // Immutable Controller command identity. Replays must retain this value.
   string command_id = 5;
+  // Controller-derived, digest-bound accepted-plan topology. Empty only on
+  // explicit legacy commands; this is not an ExecutionIntent parameter.
+  string execution_session_json = 6;
 }
 
 message Cancel {

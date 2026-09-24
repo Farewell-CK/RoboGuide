@@ -41,6 +41,25 @@ fn shared_world_endpoint_resources_flow_through_control_ownership() {
         let first = tasks[0].requirement().task_ref().clone();
         let second = tasks[1].requirement().task_ref().clone();
         let group_id = ExecutionGroupId::new("shared-world").unwrap();
+        let session = domain::ExecutionSessionDescriptor::from_plan(&plan, group_id.clone())
+            .expect("accepted v0.8 plan has executable session topology")
+            .expect("v0.8 plans carry an execution session");
+        assert_eq!(session.slots.len(), 2);
+        assert!(session.slots.iter().all(|slot| slot.independent));
+        assert_eq!(
+            session.slots[0].actor_id == session.slots[1].actor_id,
+            sequential
+        );
+        assert!(
+            session
+                .validate_slot(
+                    &mission_id,
+                    &group_id,
+                    &session.slots[1].task_id,
+                    &session.slots[1].role_id
+                )
+                .is_ok()
+        );
         let correlation = CorrelationId::new("shared-world").unwrap();
         let mut control = ControlPlane::new();
         let mut state = InMemorySharedNodeState::new();

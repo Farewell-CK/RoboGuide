@@ -773,7 +773,10 @@ fn gated_catalog_for_contract(
                 id: "motion".to_string(),
                 runtime_name: "configured-runtime".to_string(),
                 runtime_version: "1".to_string(),
-                metadata: BTreeMap::new(),
+                metadata: BTreeMap::from([(
+                    "roboguide.execution-session".to_string(),
+                    "roboguide.execution-session/v0.1".to_string(),
+                )]),
                 health: HealthCheckConfig {
                     step: step("health", "/health", RequestMappingConfig::default()),
                     state_pointer: "/state".to_string(),

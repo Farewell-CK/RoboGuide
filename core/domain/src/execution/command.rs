@@ -3,6 +3,7 @@
 use crate::{CorrelationId, ExecutionGroupId, MissionId, NodeId, RoleId, TaskId, TaskRef};
 
 use super::ExecutionIntent;
+use super::ExecutionSessionDescriptor;
 
 /// A command sent through the runtime to a local node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17,6 +18,9 @@ pub struct ExecutionCommand {
     node_id: NodeId,
     /// Canonical operation and parameters requested from the local EAIOS.
     intent: ExecutionIntent,
+    /// Immutable accepted-plan topology evidence; absent on legacy commands.
+    #[serde(default)]
+    session: Option<ExecutionSessionDescriptor>,
     /// Correlation identity for the command and its observations.
     correlation_id: CorrelationId,
 }
@@ -38,6 +42,7 @@ impl ExecutionCommand {
             role_id,
             node_id,
             intent,
+            session: None,
             correlation_id,
         }
     }
@@ -75,6 +80,17 @@ impl ExecutionCommand {
     /// Returns the canonical capability contract request for the local EAIOS adapter.
     pub const fn intent(&self) -> &ExecutionIntent {
         &self.intent
+    }
+
+    /// Attaches accepted-plan topology without changing the semantic execution intent.
+    pub fn with_session(mut self, session: ExecutionSessionDescriptor) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    /// Returns immutable topology evidence retained across durable Runtime replay.
+    pub const fn session(&self) -> Option<&ExecutionSessionDescriptor> {
+        self.session.as_ref()
     }
 
     /// Returns the operation correlation identity.

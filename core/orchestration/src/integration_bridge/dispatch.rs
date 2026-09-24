@@ -37,7 +37,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     ) -> Result<(), IntegrationRuntimeError> {
         resource_ids.sort();
         resource_ids.dedup();
-        let route_result = self.router.execute(
+        let session_json = command
+            .session()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+            .unwrap_or_default();
+        let route_result = self.router.execute_with_session(
             command.node_id().as_str(),
             format!("dispatch-{execution_id}"),
             execution_id.to_string(),
@@ -46,6 +52,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 .iter()
                 .map(|resource_id| resource_id.as_str().to_string())
                 .collect(),
+            session_json,
         );
         self.runtime.record_dispatch_attempt(execution_id);
         if let Err(error) = route_result {
@@ -186,6 +193,31 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         now: TimestampMs,
         correlation_id: CorrelationId,
     ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        self.prepare_task_bound_with_session(
+            execution_id,
+            group_id,
+            task_ref,
+            role_id,
+            intent,
+            None,
+            now,
+            correlation_id,
+        )
+    }
+
+    /// Persists one Task-bound command with accepted-plan session topology.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_task_bound_with_session(
+        &mut self,
+        execution_id: String,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+        intent: domain::ExecutionIntent,
+        session: Option<domain::ExecutionSessionDescriptor>,
+        now: TimestampMs,
+        correlation_id: CorrelationId,
+    ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
         self.runtime.refresh_peer_channel_deadlines(now);
         let group = self.control.group(group_id).ok_or_else(|| {
             IntegrationRuntimeError::Protocol("execution group is unknown".to_string())
@@ -261,7 +293,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 assignment.resource_ids().to_vec(),
             )
         };
-        let command = ExecutionCommand::new(
+        if let Some(ref session) = session {
+            session
+                .validate_slot(task_ref.mission_id(), group_id, task_ref.task_id(), role_id)
+                .map_err(IntegrationRuntimeError::Protocol)?;
+        }
+        let mut command = ExecutionCommand::new(
             task_ref.mission_id().clone(),
             task_ref.task_id().clone(),
             group_id.clone(),
@@ -270,6 +307,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             intent,
             correlation_id,
         );
+        if let Some(session) = session {
+            command = command.with_session(session);
+        }
         self.runtime
             .prepare_dispatch(execution_id, command.clone(), resource_ids)
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;

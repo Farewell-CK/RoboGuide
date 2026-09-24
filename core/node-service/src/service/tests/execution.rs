@@ -8,10 +8,11 @@ async fn control_bound_command_round_trips_through_generic_engine() {
     use control::{BoundedJointScheduler, ControlPlane};
     use domain::{
         ActorId, Capability, CapabilityContractRef, CapabilityKind, CorrelationId,
-        ExecutionGroupId, ExecutionIntent, ExecutionValue, LocalRuntime, MissionId,
-        NodeContractVersion, NodeHealth, NodeId, NodeRegistration as DomainRegistration,
-        NodeStatus as DomainStatus, OperationRef, Resource as DomainResource, ResourceId,
-        ResourceKind, RoleId, RoleRequirement, TaskId, TaskRequirement, TimestampMs,
+        ExecutionGroupId, ExecutionIntent, ExecutionSessionDescriptor, ExecutionSessionSlot,
+        ExecutionValue, LocalRuntime, MissionId, NodeContractVersion, NodeHealth, NodeId,
+        NodeRegistration as DomainRegistration, NodeStatus as DomainStatus, OperationRef,
+        Resource as DomainResource, ResourceId, ResourceKind, RoleId, RoleRequirement, TaskId,
+        TaskRequirement, TimestampMs,
     };
     use integration::GrpcIntegrationService;
     use integration::grpc::v0_4::CanonicalInvocation;
@@ -182,13 +183,28 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         .consume(heartbeat, TimestampMs::new(2), &correlation)
         .expect("heartbeat consumed after route activation");
     heartbeat_completion.accept();
+    let mut session = ExecutionSessionDescriptor {
+        schema_version: "roboguide.execution-session/v0.1".to_string(),
+        mission_id: requirement.mission_id().clone(),
+        group_id: group_id.clone(),
+        slots: vec![ExecutionSessionSlot {
+            task_id: requirement.task_id().clone(),
+            role_id: role_id.clone(),
+            actor_id: ActorId::new("carrier").expect("actor valid"),
+            dependencies: vec![],
+            independent: true,
+        }],
+        digest: String::new(),
+    };
+    session.digest = session.canonical_digest().expect("session digest");
     let command = bridge
-        .execute_task_bound(
+        .prepare_task_bound_with_session(
             "execution-e2e".to_string(),
             &group_id,
             requirement.task_ref(),
             &role_id,
             intent,
+            Some(session.clone()),
             TimestampMs::new(3),
             correlation.clone(),
         )
@@ -197,6 +213,7 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         .flush_command_outboxes()
         .expect("persisted command routes");
     assert_eq!(command.node_id().as_str(), "dog-a");
+    assert_eq!(command.session(), Some(&session));
     while bridge.execution_status("execution-e2e") != Some(RemoteExecutionStatus::Running) {
         let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_receiver.recv())
             .await
@@ -224,6 +241,12 @@ async fn control_bound_command_round_trips_through_generic_engine() {
                 .and_then(serde_json::Value::as_str),
             Some("Reach the library region while preserving local navigation and safety authority")
         );
+        assert_eq!(
+            requests[0]
+                .pointer("/invocation/execution_session/digest")
+                .and_then(serde_json::Value::as_str),
+            Some(session.digest.as_str())
+        );
     }
     assert_ne!(
         bridge.execution_status("execution-e2e"),
@@ -238,6 +261,15 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         parameters: Default::default(),
         intent: None,
     };
+    assert!(matches!(
+        engine.execute_with_session(
+            "execution-competing".to_string(),
+            competing.clone(),
+            vec!["base".to_string()],
+            &serde_json::to_string(&session).expect("session serializes"),
+        ),
+        Err(crate::EngineError::Protocol(_))
+    ));
     assert!(matches!(
         engine.execute(
             "execution-competing".to_string(),

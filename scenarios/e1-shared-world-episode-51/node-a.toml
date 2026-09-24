@@ -8,6 +8,7 @@ reconnect_delay_ms = 500
 id = "habitat-local-eaios"
 runtime_name = "emos-habitat-local-eaios"
 runtime_version = "c1-s0"
+metadata = { "roboguide.execution-session" = "roboguide.execution-session/v0.1" }
 
 [local_systems.health]
 state_pointer = "/state"

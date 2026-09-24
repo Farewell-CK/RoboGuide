@@ -13,6 +13,7 @@ pub mod grpc;
 mod grpc_server;
 
 pub use grpc_server::{
-    GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion,
-    GrpcNodeEventDelivery, GrpcNodeRouter,
+    EXECUTION_SESSION_METADATA_KEY, EXECUTION_SESSION_METADATA_VALUE, GrpcIntegrationService,
+    GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
+    GrpcNodeRouter,
 };

@@ -267,6 +267,7 @@ mod tests {
             invocation: None,
             resource_ids: vec!["motor".to_string()],
             command_id: "dispatch-attempt-1".to_string(),
+            execution_session_json: String::new(),
         };
         let decoded = super::v0_4::Execute::decode(execute.encode_to_vec().as_slice())
             .expect("v0.4 Execute decodes");

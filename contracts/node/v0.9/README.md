@@ -13,7 +13,13 @@ Node Contract v0.6 closes the feasibility boundary introduced by v0.5:
   `objective`, and typed scalar parameters.
 
 The checked-in [`../v0.8/roboguide-node.proto`](../v0.8/roboguide-node.proto) remains immutable.
-The additive field in this release is admitted only after explicit Node Contract v0.6 negotiation.
+The additive execution-session field in this release is admitted only when the Node registration
+advertises `roboguide.execution-session=roboguide.execution-session/v0.1` in Local System metadata.
+The Controller attaches this optional field only for the registered Local System that owns the
+selected operation and advertises the schema. It rejects a stale route that does not advertise
+support before sending a non-empty field; generic Nodes keep their existing command shape.
+Semantic invocation negotiation
+remains explicit Node Contract v0.6 negotiation.
 A v0.4 registration uses `capabilities`; a v0.5 registration uses `capability_profiles` without
 operation support; a v0.6 registration uses both `capability_profiles` and `operation_support`.
 A v0.4 invocation uses the legacy `capability_contract` and `parameters` fields; v0.5 and v0.6 use

@@ -53,6 +53,8 @@ pub(crate) fn drive_ready_tasks(
                 .execution(&mission_id)
                 .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?;
             let group_id = execution.group_id().clone();
+            let session =
+                domain::ExecutionSessionDescriptor::from_plan(execution.plan(), group_id.clone())?;
             let planned = execution
                 .plan()
                 .task_graph()
@@ -89,12 +91,16 @@ pub(crate) fn drive_ready_tasks(
                 let execution_id = controller
                     .bridge
                     .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
-                let dispatched = controller.bridge.prepare_task_bound(
+                let node_session = session.as_ref().filter(|_| {
+                    node_accepts_execution_session(controller.bridge.state(), &node_id, &intent)
+                });
+                let dispatched = controller.bridge.prepare_task_bound_with_session(
                     execution_id,
                     &group_id,
                     &task_ref,
                     &role_id,
                     intent,
+                    node_session.cloned(),
                     timestamp,
                     correlation_id.clone(),
                 );
@@ -162,20 +168,29 @@ pub(crate) fn drive_rebound_attempts(
                     task_execution.task_ref().clone(),
                     assignment.role_id().clone(),
                     intent,
+                    assignment.node_id().clone(),
+                    domain::ExecutionSessionDescriptor::from_plan(
+                        execution.plan(),
+                        group.group_id().clone(),
+                    )?,
                 ));
             }
         }
     }
-    for (group_id, task_ref, role_id, intent) in pending {
+    for (group_id, task_ref, role_id, intent, node_id, session) in pending {
         let execution_id = controller
             .bridge
             .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
-        match controller.bridge.prepare_task_bound(
+        let node_session = session.as_ref().filter(|_| {
+            node_accepts_execution_session(controller.bridge.state(), &node_id, &intent)
+        });
+        match controller.bridge.prepare_task_bound_with_session(
             execution_id,
             &group_id,
             &task_ref,
             &role_id,
             intent,
+            node_session.cloned(),
             timestamp,
             correlation_id.clone(),
         ) {
@@ -185,6 +200,30 @@ pub(crate) fn drive_rebound_attempts(
         }
     }
     Ok(())
+}
+
+/// Opt into the additive session field only for the registered owner of this operation.
+pub(crate) fn node_accepts_execution_session(
+    state: &state::InMemorySharedNodeState,
+    node_id: &domain::NodeId,
+    intent: &domain::ExecutionIntent,
+) -> bool {
+    let Some(registration) = state
+        .node(node_id)
+        .map(domain::NodeStateSnapshot::registration)
+    else {
+        return false;
+    };
+    let Some(owner) = registration.operation_owner(intent.operation()) else {
+        return false;
+    };
+    registration.local_systems().iter().any(|system| {
+        system.id() == owner
+            && system
+                .metadata()
+                .get(integration::EXECUTION_SESSION_METADATA_KEY)
+                .is_some_and(|value| value == integration::EXECUTION_SESSION_METADATA_VALUE)
+    })
 }
 
 /// Identifies a bound Task waiting for declared Runtime coordination evidence.
