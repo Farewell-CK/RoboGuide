@@ -76,7 +76,7 @@ class ExecutionSessionMetadata:
                 raise IntegrationError("execution_session slot is inconsistent")
             identities.add((current_task, current_role))
             prerequisites.update(dependencies)
-            dependencies_by_task[current_task] = set(dependencies)
+            dependencies_by_task.setdefault(current_task, set()).update(dependencies)
             slots.append(slot)
         if (task_id, role_id) not in identities:
             raise IntegrationError("execution_session does not contain the invoked Task/Role")

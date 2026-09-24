@@ -931,11 +931,17 @@ def _session_request(
     return request
 
 
-def _slot(task: str, actor: str, dependencies: list[str] | None = None) -> dict[str, object]:
+def _slot(
+    task: str,
+    actor: str,
+    dependencies: list[str] | None = None,
+    *,
+    role: str = "role",
+) -> dict[str, object]:
     """Create one independent accepted-plan slot for coordinator tests."""
     return {
         "task_id": task,
-        "role_id": "role",
+        "role_id": role,
         "actor_id": actor,
         "dependencies": dependencies or [],
         "independent": True,
@@ -1135,6 +1141,18 @@ def test_serial_session_rejects_dependency_cycle(tmp_path: Path) -> None:
     _, _, endpoint_a, _, _ = _world(tmp_path)
     slots = [
         _slot("first", "participant", ["second"]),
+        _slot("second", "participant", ["first"]),
+    ]
+    with pytest.raises(IntegrationError, match="dependency graph contains a cycle"):
+        endpoint_a.accept(_session_request("m", "any_targets|0", "first", slots))
+
+
+def test_serial_session_merges_dependencies_across_roles(tmp_path: Path) -> None:
+    """Cycle validation covers every role slot belonging to one logical task."""
+    _, _, endpoint_a, _, _ = _world(tmp_path)
+    slots = [
+        _slot("first", "participant"),
+        _slot("first", "participant", ["second"], role="role-b"),
         _slot("second", "participant", ["first"]),
     ]
     with pytest.raises(IntegrationError, match="dependency graph contains a cycle"):
