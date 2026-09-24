@@ -27,7 +27,7 @@
 
 11. 配置了Parcelable:Parcelable插件，序列化只需要一个注释@Parcelize
 
-    
+
 
 # 三方库
 
@@ -121,7 +121,7 @@ kotlin相关的扩展库
 
 23. `AppBarUtils`：根据AppBarLayout滚动来逐渐改变控件颜色
 
-    
+
 
 # 基类
 
@@ -142,7 +142,7 @@ kotlin相关的扩展库
   class MainActivity : BaseBindActivity<ActivityMainBinding>() {
       override fun onCreate(savedInstanceState: Bundle?) {
           super.onCreate(savedInstanceState)
-          bind.textView.text = "Hello World!"  
+          bind.textView.text = "Hello World!"
       }
   }
   ```
@@ -161,7 +161,7 @@ dataProvider//数据提供者
     .query()//此栏目查询方法
     .bindLife(provider)//绑定生命周期
     .sub({bind.item = it.result})//只关心请求成功结果
-    
+
 ```
 
 去掉注释,正规写法,3行一个请求
@@ -216,7 +216,7 @@ BottomNavUtils.tabBindViewPager(this,bind.tabLayout,bind.viewPager)
   <layout xmlns:android="http://schemas.android.com/apk/res/android"
       xmlns:app="http://schemas.android.com/apk/res-auto"
       xmlns:tools="http://schemas.android.com/tools">
-      <data> 
+      <data>
           <variable
               name="user"
               type="com.seaway.guideassistant.bean.UserBean" />
@@ -241,9 +241,9 @@ BottomNavUtils.tabBindViewPager(this,bind.tabLayout,bind.viewPager)
   bind.user = UserBean("Smallcake",8)
   ```
 
-  
 
-​	
+
+​
 
 ##### 5 如何添加公共头部
 

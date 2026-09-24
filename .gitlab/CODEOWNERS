@@ -1,0 +1,8 @@
+^[default] @group
+*
+
+[CODEOWNERS][1] @org/codeowner-dev
+CODEOWNERS
+
+[LICENSE][1] @org/legal-dev
+LICENSE
