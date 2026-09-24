@@ -25,7 +25,7 @@ stages:
 # 此 job 的通过/失败直接反映工程能否构建，而非“空操作通过”
 build-debug:
   stage: build
-  image: fabernovel/android:api-35-v1.7.0
+  image: fabernovel/android:api-35-v1.11.0
   before_script:
     - export GRADLE_USER_HOME=$(pwd)/.gradle
     - chmod +x ./gradlew
