@@ -13,6 +13,7 @@ from mission.planning_world_evidence import (
 
 from roboguide_eval.b1_provenance import (
     PLANNING_SOURCE_ARTIFACT,
+    PLANNING_SOURCE_REQUIREMENT_ARTIFACT,
     load_document,
     required_planning_source,
 )
@@ -21,6 +22,14 @@ from roboguide_eval.b1_workload import extract_b1_workload
 
 def freeze_source(run: Path) -> None:
     """Persist the requirement before any SUT component can accept a request."""
+    marker = {
+        "schema_version": "roboguide.e1.planning-world-source-requirement/v0.1",
+        "required": True,
+        "artifact": "planning-world-source.json",
+    }
+    (run / PLANNING_SOURCE_REQUIREMENT_ARTIFACT).write_text(
+        json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     frozen = load_document(run / "b1-input-used.json")
     source = required_planning_source(run.name, frozen)
     (run / "planning-world-source.json").write_text(

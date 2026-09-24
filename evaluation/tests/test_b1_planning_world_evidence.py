@@ -144,6 +144,7 @@ def test_required_source_rejects_accepted_v02_and_missing_declaration(tmp_path: 
     """A configured B1 run cannot hide missing world evidence behind legacy grounding."""
     run = make_run(tmp_path)
     _upgrade_required_source(run)
+    assert (run / "planning-world-source-required.json").exists()
     verdict = assess_b1_directory(run)
     assert "required_planning_world_evidence_missing" in verdict["context"]["provenance_failures"]
     assert verdict["admission"]["valid_for_formal_population"] is False

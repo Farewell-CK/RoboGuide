@@ -13,6 +13,7 @@ from typing import Any
 from roboguide_eval.b1_admission import FailureOwner
 from roboguide_eval.b1_event_archive import collect_controller_events
 from roboguide_eval.b1_provenance import (
+    PLANNING_SOURCE_REQUIREMENT_ARTIFACT,
     RUN_FAILURE_SCHEMA,
     build_b1_provenance_record,
     load_document,
@@ -97,12 +98,13 @@ def collect_b1_artifacts(
             },
         )
     planning_source_path = run / "planning-world-source.json"
-    # Legacy offline/early-failure runs did not declare a required planning
-    # source.  Do not manufacture a v0.4 provenance record merely because the
-    # collector knows the conventional filename; a source is versioned only
-    # when its run-local declaration actually exists.  A v0.3 grounding
-    # request still fails closed later if it lacks the corresponding planning
-    # world artifact.
+    planning_source_required = (
+        run / PLANNING_SOURCE_REQUIREMENT_ARTIFACT
+    ).is_file() or planning_source_path.is_file()
+    # Legacy offline fixtures have no requirement marker and retain v0.3
+    # compatibility. Current B1 runs write the marker before attempting the
+    # source declaration, so a missing declaration is represented as v0.4 and
+    # fails closed rather than silently downgrading provenance.
     record = build_b1_provenance_record(
         run_id=run.name,
         frozen_input_path=run / "b1-input-used.json",
@@ -113,7 +115,7 @@ def collect_b1_artifacts(
         execution_attempts_path=run / "execution-attempts.json",
         shared_world_summary_path=run / "evidence/shared-world-summary.json",
         semantic_evidence_path=run / "evidence/authoritative-semantic-evidence.json",
-        planning_source_path=planning_source_path if planning_source_path.is_file() else None,
+        planning_source_path=planning_source_path if planning_source_required else None,
         failure_evidence_path=run / "run-failure.json",
     )
     write_b1_provenance(record, run / "b1-provenance.json")

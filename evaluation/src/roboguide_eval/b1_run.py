@@ -35,6 +35,7 @@ B1_FILES = (
     "evidence/authoritative-semantic-evidence.json",
     "evidence/shared-world-summary.json",
     "planning-world-source.json",
+    "planning-world-source-required.json",
 )
 
 
