@@ -25,6 +25,8 @@ from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from .evidence_io import write_text_atomic
+
 DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.2"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
@@ -399,10 +401,7 @@ class PhysicalDiagnostics:
 
     def _write_json(self, name: str, document: dict[str, Any]) -> None:
         """Write one bounded diagnostics snapshot document."""
-        self._dir.mkdir(parents=True, exist_ok=True)
-        (self._dir / name).write_text(
-            self._serialize_document(document, indent=2), encoding="utf-8"
-        )
+        write_text_atomic(self._dir / name, self._serialize_document(document, indent=2))
 
     def _append_step(self, document: dict[str, Any]) -> None:
         """Queue one bounded step record for batched persistence."""

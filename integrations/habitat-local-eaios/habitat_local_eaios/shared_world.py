@@ -31,6 +31,7 @@ from .backend import (
 from .crabagent_backend import CrabAgentBackendConfig
 from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
+from .evidence_io import write_text_atomic
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .semantic_evidence import build_authoritative_semantic_evidence
@@ -164,7 +165,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 cancellation_requested,
             )
             self._serial_observations = self._last_policy_observations
-            self._write_json(f"controlled-outcome-{task_suffix}.json", outcome.as_dict())
+            self._best_effort_write_json(
+                f"controlled-outcome-{task_suffix}.json",
+                outcome.as_dict(),
+                "serial local outcome",
+            )
             self._diagnostics.flush_boundary()
             complete = final_slot or outcome.state != "COMPLETED" or habitat_env.episode_over
             if complete:
@@ -1575,7 +1580,6 @@ class SharedWorldCoordinator:
             outcome, summary = self._world.run_serial(
                 invocation, endpoint.agent_id, cancellation_requested, running, final_slot
             )
-            store.mark_terminal(execution_id, outcome)
             self._serial_completed.add(slot)
             self._serial_outcomes.append(
                 {
@@ -1584,18 +1588,20 @@ class SharedWorldCoordinator:
                     "outcome": outcome.as_dict(),
                 }
             )
-            self._serial_waited_from = self._monotonic()
-            if (
+            terminal = (
                 final_slot
                 or outcome.state != "COMPLETED"
                 or summary["identity"].get("episode_terminated")
-            ):
+            )
+            if terminal:
                 self._serial_finished = True
-                self._publish_summary(
+                self._publish_summary_best_effort(
                     {endpoint.agent_id: outcome},
                     summary,
                     serial_task_outcomes=self._serial_outcomes,
                 )
+            store.mark_terminal(execution_id, outcome)
+            self._serial_waited_from = self._monotonic()
         except Exception as error:  # noqa: BLE001 - local failure cannot become success
             current = store.get(execution_id)
             if current is not None and current["state"] not in TERMINAL_STATES:
@@ -1643,9 +1649,9 @@ class SharedWorldCoordinator:
 
         try:
             outcomes, summary = self._world.run_pair(invocations, cancellation_requested, running)
+            self._publish_summary_best_effort(outcomes, summary)
             for agent_id, outcome in outcomes.items():
                 endpoints[agent_id].store().mark_terminal(handles[agent_id], outcome)
-            self._publish_summary(outcomes, summary)
         except Exception as error:  # noqa: BLE001 - terminal failure must reach both nodes
             for endpoint, execution_id in pair:
                 store = endpoint.store()
@@ -1691,11 +1697,27 @@ class SharedWorldCoordinator:
             )
         self._write_json("shared-world-summary.json", summary_document)
 
+    def _publish_summary_best_effort(
+        self,
+        outcomes: dict[int, LocalExecutionOutcome],
+        summary: dict[str, Any],
+        *,
+        serial_task_outcomes: list[dict[str, object]] | None = None,
+    ) -> None:
+        """Publish terminal evidence before lifecycle exposure without changing outcomes."""
+        try:
+            self._publish_summary(
+                outcomes,
+                summary,
+                serial_task_outcomes=serial_task_outcomes,
+            )
+        except Exception:  # noqa: BLE001 - evidence cannot become execution authority
+            _LOG.exception("shared-world terminal summary unavailable")
+
     def _write_json(self, name: str, value: object) -> None:
         """Persist one deterministic JSON evidence file."""
-        self._evidence_dir.mkdir(parents=True, exist_ok=True)
         path = self._evidence_dir / name
-        path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_text_atomic(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
     def _write_start_admission(
         self,

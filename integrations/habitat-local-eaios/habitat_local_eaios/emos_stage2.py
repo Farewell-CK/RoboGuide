@@ -11,6 +11,7 @@ from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
+from .evidence_io import write_text_atomic
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .source_provenance import build_runtime_source_manifest
 from .stage2_contract import (
@@ -422,10 +423,7 @@ class EmosStage2Runtime:
                     contract_restore()
             finally:
                 module.group_discussion = original_group_discussion
-                try:
-                    self._flush_action_trace()
-                except Exception:  # noqa: BLE001 - evidence cannot replace physical outcome
-                    _LOG.exception("action trace flush failed at Stage2 termination")
+                self._best_effort_flush_action_trace("Stage2 termination")
         if contract_failure is not None:
             return self._outcome(
                 "FAILED",
@@ -630,7 +628,7 @@ class EmosStage2Runtime:
         terminal_basis: str,
     ) -> LocalExecutionOutcome:
         """Capture distinct local-skill, benchmark, episode, and model evidence."""
-        self._flush_action_trace()
+        self._best_effort_flush_action_trace("local outcome")
         habitat_env = self._habitat_env
         metrics = habitat_env.get_metrics() if habitat_env is not None else {}
         benchmark_achieved = bool(metrics.get("pddl_success", False))
@@ -638,7 +636,7 @@ class EmosStage2Runtime:
             bool(habitat_env.episode_over) if habitat_env is not None else False
         )
         policy_evidence = self._policy_evidence()
-        self._write_json(
+        self._best_effort_write_json(
             "controlled-outcome.json",
             {
                 "benchmark_task_achieved": benchmark_achieved,
@@ -650,6 +648,7 @@ class EmosStage2Runtime:
                 "simulator_steps": steps,
                 "skill_sequence": skill_sequence,
             },
+            "local outcome",
         )
         return LocalExecutionOutcome(
             state=state,
@@ -780,6 +779,20 @@ class EmosStage2Runtime:
         """Best-effort flush action evidence without affecting physical execution."""
         self._action_trace_writer.flush()
 
+    def _best_effort_flush_action_trace(self, phase: str) -> None:
+        """Flush action evidence without allowing storage failure to alter outcome."""
+        try:
+            self._flush_action_trace()
+        except Exception:  # noqa: BLE001 - evidence cannot become execution authority
+            _LOG.exception("action trace flush failed at %s", phase)
+
+    def _best_effort_write_json(self, name: str, value: object, phase: str) -> None:
+        """Write one optional JSON artifact without changing the local outcome."""
+        try:
+            self._write_json(name, value)
+        except Exception:  # noqa: BLE001 - evidence cannot become execution authority
+            _LOG.exception("JSON evidence %s unavailable at %s", name, phase)
+
     def _action_trace_stats(self) -> dict[str, Any]:
         """Expose action-trace buffering and loss accounting as evidence."""
         return {
@@ -820,8 +833,7 @@ class EmosStage2Runtime:
     def _write_text(self, name: str, value: str) -> None:
         """Persist UTF-8 evidence beside adapter-local artifacts."""
         path = self._evidence_dir() / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value, encoding="utf-8")
+        write_text_atomic(path, value)
 
     def _write_json(self, name: str, value: object) -> None:
         """Persist deterministic JSON evidence without creating authority."""
