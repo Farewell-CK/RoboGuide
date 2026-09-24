@@ -50,6 +50,7 @@ class ExecutionSessionMetadata:
         slots: list[dict[str, object]] = []
         identities: set[tuple[str, str]] = set()
         prerequisites: set[str] = set()
+        dependencies_by_task: dict[str, set[str]] = {}
         for raw_slot in raw_slots:
             slot = _string_object(raw_slot, "execution_session slot")
             if set(slot) != {
@@ -75,6 +76,7 @@ class ExecutionSessionMetadata:
                 raise IntegrationError("execution_session slot is inconsistent")
             identities.add((current_task, current_role))
             prerequisites.update(dependencies)
+            dependencies_by_task[current_task] = set(dependencies)
             slots.append(slot)
         if (task_id, role_id) not in identities:
             raise IntegrationError("execution_session does not contain the invoked Task/Role")
@@ -82,6 +84,21 @@ class ExecutionSessionMetadata:
             raise IntegrationError("execution_session slots are not canonical")
         if not prerequisites.issubset({str(slot["task_id"]) for slot in slots}):
             raise IntegrationError("execution_session has an unknown prerequisite")
+        remaining: dict[str, set[str]] = {
+            task_id: set(dependencies) for task_id, dependencies in dependencies_by_task.items()
+        }
+        while remaining:
+            ready = {
+                task_id
+                for task_id, pending_dependencies in remaining.items()
+                if not pending_dependencies
+            }
+            if not ready:
+                raise IntegrationError("execution_session dependency graph contains a cycle")
+            for task_id in ready:
+                del remaining[task_id]
+            for pending_dependencies in remaining.values():
+                pending_dependencies.difference_update(ready)
         claimed = body["digest"]
         if not isinstance(claimed, str):
             raise IntegrationError("execution_session digest is missing")

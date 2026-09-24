@@ -4,13 +4,14 @@ use crate::{
     ActorId, ExecutionCouplingMode, ExecutionGroupId, MissionId, MissionPlan, RoleId, TaskId,
 };
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact schema of deployment session metadata, separate from MissionPlan semantics.
 pub const EXECUTION_SESSION_SCHEMA: &str = "roboguide.execution-session/v0.1";
 
 /// One accepted logical execution slot and its declared task prerequisites.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionSessionSlot {
     /// Mission Task identity.
     pub task_id: TaskId,
@@ -26,6 +27,7 @@ pub struct ExecutionSessionSlot {
 
 /// Digest-bound whole-Group topology evidence transported to Local EAIOS sessions.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionSessionDescriptor {
     /// Explicit schema marker for downstream strict parsing.
     pub schema_version: String,
@@ -159,6 +161,27 @@ impl ExecutionSessionDescriptor {
         {
             return Err("execution session identity, slot, or digest is invalid".into());
         }
+        let mut remaining = BTreeMap::<TaskId, BTreeSet<TaskId>>::new();
+        for slot in &self.slots {
+            remaining
+                .entry(slot.task_id.clone())
+                .or_default()
+                .extend(slot.dependencies.iter().cloned());
+        }
+        while !remaining.is_empty() {
+            let ready = remaining
+                .iter()
+                .filter(|(_, dependencies)| dependencies.is_empty())
+                .map(|(task_id, _)| task_id.clone())
+                .collect::<BTreeSet<_>>();
+            if ready.is_empty() {
+                return Err("execution session dependency graph contains a cycle".into());
+            }
+            remaining.retain(|task_id, _| !ready.contains(task_id));
+            for dependencies in remaining.values_mut() {
+                dependencies.retain(|dependency| !ready.contains(dependency));
+            }
+        }
         Ok(())
     }
 }
@@ -239,5 +262,24 @@ mod tests {
                 .validate_slot(&mission, &group, &task, &role)
                 .is_err()
         );
+
+        let mut cycle = session.clone();
+        cycle.slots[0].dependencies = vec![TaskId::new("second").unwrap()];
+        cycle.slots[1].dependencies = vec![TaskId::new("first").unwrap()];
+        cycle.digest = cycle.canonical_digest().unwrap();
+        assert_eq!(
+            cycle
+                .validate_slot(&mission, &group, &task, &role)
+                .unwrap_err(),
+            "execution session dependency graph contains a cycle"
+        );
+
+        let mut descriptor_json = serde_json::to_value(&session).unwrap();
+        descriptor_json["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<ExecutionSessionDescriptor>(descriptor_json).is_err());
+
+        let mut slot_json = serde_json::to_value(&session.slots[0]).unwrap();
+        slot_json["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<ExecutionSessionSlot>(slot_json).is_err());
     }
 }

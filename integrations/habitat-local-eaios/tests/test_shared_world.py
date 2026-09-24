@@ -465,6 +465,99 @@ def test_action_trace_flush_failure_preserves_actor_error_and_terminal(
     assert diagnostics.terminals == [(1, "execution_exception:actor_act:RuntimeError")]
 
 
+def test_successful_outcome_survives_action_trace_flush_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal trace writer failure cannot turn local completion into failure."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config = SimpleNamespace(episode_id="3", agent_id=0)
+    runtime._actor = None
+    runtime._habitat_env = SimpleNamespace(
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    runtime._agent_position = lambda: (1.0, 0.0, 2.0)  # type: ignore[method-assign]
+
+    def fail_flush() -> None:
+        """Inject the evidence-only failure after the local skill completed."""
+        raise OSError("successful trace flush failure sentinel")
+
+    monkeypatch.setattr(runtime, "_flush_action_trace", fail_flush)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "target", "task"))
+    outcome = runtime._outcome(
+        "COMPLETED",
+        "local completion",
+        invocation,
+        "scene",
+        3,
+        (0.0, 0.0, 0.0),
+        [],
+        local_skill_completed=True,
+        terminal_basis="oracle-nav-skill",
+    )
+    assert outcome.state == "COMPLETED"
+    assert outcome.terminal_basis == "oracle-nav-skill"
+
+
+def test_successful_outcome_survives_controlled_artifact_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A controlled-outcome snapshot failure cannot rewrite the physical result."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config = SimpleNamespace(episode_id="3", agent_id=0)
+    runtime._actor = None
+    runtime._habitat_env = SimpleNamespace(
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    runtime._agent_position = lambda: (1.0, 0.0, 2.0)  # type: ignore[method-assign]
+
+    def fail_write(name: str, value: object) -> None:
+        """Inject a failure only for the optional terminal sidecar."""
+        del value
+        if name == "controlled-outcome.json":
+            raise OSError("controlled outcome write failure sentinel")
+
+    monkeypatch.setattr(runtime, "_write_json", fail_write)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "target", "task"))
+    outcome = runtime._outcome(
+        "COMPLETED",
+        "local completion",
+        invocation,
+        "scene",
+        3,
+        (0.0, 0.0, 0.0),
+        [],
+        local_skill_completed=True,
+        terminal_basis="oracle-nav-skill",
+    )
+    assert outcome.state == "COMPLETED"
+
+
+def test_serial_controlled_outcome_write_failure_does_not_change_terminal_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A serial controlled-outcome write failure remains observational."""
+    runtime = SerialRuntimeHarness(tmp_path)
+
+    def fail_write(name: str, value: object) -> None:
+        """Inject one terminal artifact storage failure."""
+        del value
+        if name.startswith("controlled-outcome-"):
+            raise OSError("controlled outcome write failure sentinel")
+
+    monkeypatch.setattr(runtime, "_write_json", fail_write)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "target", "task"))
+    outcome, _ = runtime.execute_serial(
+        invocation,
+        0,
+        lambda: False,
+        lambda agent_id, detail: None,
+        True,
+    )
+    assert outcome.state == "COMPLETED"
+
+
 def test_video_close_failure_does_not_mask_gym_failure(tmp_path: Path) -> None:
     """Optional video finalization cannot change the original Gym failure."""
     diagnostics = RecordingDiagnostics()
@@ -1037,6 +1130,17 @@ def test_serial_session_rejects_tampered_or_foreign_slot(tmp_path: Path) -> None
         endpoint_a.accept(foreign)
 
 
+def test_serial_session_rejects_dependency_cycle(tmp_path: Path) -> None:
+    """A self-consistent cyclic session cannot strand the serial coordinator."""
+    _, _, endpoint_a, _, _ = _world(tmp_path)
+    slots = [
+        _slot("first", "participant", ["second"]),
+        _slot("second", "participant", ["first"]),
+    ]
+    with pytest.raises(IntegrationError, match="dependency graph contains a cycle"):
+        endpoint_a.accept(_session_request("m", "any_targets|0", "first", slots))
+
+
 def test_unsupported_topology_fails_before_world_reset(tmp_path: Path) -> None:
     """A non-independent topology cannot silently enter pair or serial execution."""
     runtime, _, endpoint_a, _, evidence = _world(tmp_path)
@@ -1143,6 +1247,66 @@ def test_start_admission_evidence_failure_does_not_change_pair_result(
         time.sleep(0.001)
     assert state_a["state"] == state_b["state"] == "COMPLETED"
     assert runtime.calls == 1
+
+
+def test_summary_evidence_failure_does_not_change_pair_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal summary storage failure cannot change completed executions."""
+    runtime, coordinator, endpoint_a, endpoint_b, _ = _world(tmp_path)
+    write_json = coordinator._write_json
+
+    def fail_summary(name: str, value: object) -> None:
+        """Raise only while publishing the terminal shared-world snapshot."""
+        if name == "shared-world-summary.json":
+            raise OSError("summary storage failure sentinel")
+        write_json(name, value)
+
+    monkeypatch.setattr(coordinator, "_write_json", fail_summary)
+    handle_a = endpoint_a.submit(_request("m", "any_targets|0", "ta"))
+    handle_b = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
+    for _ in range(1000):
+        state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
+        state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
+        if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert state_a["state"] == state_b["state"] == "COMPLETED"
+    assert runtime.calls == 1
+
+
+def test_summary_is_complete_before_pair_terminal_visibility(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A visible terminal Node fact always follows the complete summary snapshot."""
+    _, coordinator, endpoint_a, endpoint_b, evidence = _world(tmp_path)
+    original_write = coordinator._write_json
+    observed: list[tuple[str, bool, bool]] = []
+
+    def delayed_write(name: str, value: object) -> None:
+        """Expose the publication order while the summary write is paused."""
+        if name == "shared-world-summary.json":
+            observed.append(
+                (
+                    "before-summary",
+                    endpoint_a.store().active_execution() is not None,
+                    endpoint_b.store().active_execution() is not None,
+                )
+            )
+        original_write(name, value)
+
+    monkeypatch.setattr(coordinator, "_write_json", delayed_write)
+    left = endpoint_a.submit(_request("m", "any_targets|0", "ta"))
+    right = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
+    for _ in range(1000):
+        left_state = _execution(endpoint_a.store(), str(left["execution_id"]))
+        right_state = _execution(endpoint_b.store(), str(right["execution_id"]))
+        if left_state["state"] in TERMINAL and right_state["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert observed == [("before-summary", True, True)]
+    assert json.loads((evidence / "shared-world-summary.json").read_text())["official_pddl_success"]
+    assert left_state["state"] == right_state["state"] == "COMPLETED"
 
 
 def test_duplicate_assignment_is_idempotent(tmp_path: Path) -> None:
