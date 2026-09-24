@@ -15,6 +15,12 @@ from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import HttpMissionController
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.models import MissionPlan
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningSpatialFact,
+    PlanningWorldGap,
+    PlanningWorldRelation,
+)
 from mission.request_engine import MissionRequestEngine
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.request_store import MissionRequestStore
@@ -35,9 +41,14 @@ def write_json(path: Path, document: Any) -> None:
 class StaticSemanticGroundingReader:
     """Supply one immutable adapter snapshot to every MI phase in an offline run."""
 
-    def __init__(self, evidence: AuthoritativeSemanticEvidence) -> None:
+    def __init__(
+        self,
+        evidence: AuthoritativeSemanticEvidence,
+        planning_world_evidence: AuthoritativePlanningWorldEvidence | None = None,
+    ) -> None:
         """Retain the exact semantic evidence object shared by the lifecycle."""
         self._evidence = evidence
+        self._planning_world_evidence = planning_world_evidence
 
     def capture(
         self,
@@ -51,6 +62,7 @@ class StaticSemanticGroundingReader:
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
             captured_at_ms=captured_at_ms,
             semantic_evidence=self._evidence,
+            planning_world_evidence=self._planning_world_evidence,
         )
 
 
@@ -96,7 +108,12 @@ def controller_server(status: int = 202) -> Iterator[tuple[str, list[bytes]]]:
 
 
 def make_run(
-    root: Path, *, case: str = "A", repaired: bool = False, omit_second_goal: bool = False
+    root: Path,
+    *,
+    case: str = "A",
+    repaired: bool = False,
+    omit_second_goal: bool = False,
+    planning_world: bool = False,
 ) -> Path:
     """Build evidence through actual MI orchestration and HTTP boundary, stopping on failure."""
     run = root / f"run-{case}"
@@ -129,6 +146,31 @@ def make_run(
         world_context={"scene_id": "scene-51", "agent_ids": [0, 1], "entity_catalog": []},
     )
     write_json(run / "evidence/authoritative-semantic-evidence.json", semantic.to_json())
+    planning_evidence = (
+        AuthoritativePlanningWorldEvidence.create(
+            run_id=run.name,
+            episode_id="51",
+            scene_id="scene-51",
+            dataset_revision="dataset-1",
+            dataset_sha256="a" * 64,
+            source_revision="static-scene-source-1",
+            facts=(
+                PlanningSpatialFact("any_targets|0", "room-1", "floor-1"),
+                PlanningSpatialFact("TARGET_any_targets|0", "room-2", "floor-2"),
+            ),
+            relations=(
+                PlanningWorldRelation("any_targets|0", "different_floor", "TARGET_any_targets|0"),
+            ),
+            gaps=(PlanningWorldGap("agent_start_state_pending_reset", "reset has not run"),),
+        )
+        if planning_world
+        else None
+    )
+    if planning_evidence is not None:
+        write_json(
+            run / "evidence/authoritative-planning-world-evidence.json",
+            planning_evidence.to_json(),
+        )
     raw = json.loads((ROOT / "scenarios/e1-shared-world-episode-51/mission-plan.json").read_text())
     raw["mission"]["objective"] = INSTRUCTION
     raw["tasks"][0]["description"] = "offline MI-generated task"
@@ -181,7 +223,7 @@ def make_run(
             reviewer=reviewer if repaired else None,
             repairer=repairer if repaired else None,
             max_repair_attempts=1 if repaired else 0,
-            grounding_reader=StaticSemanticGroundingReader(semantic),
+            grounding_reader=StaticSemanticGroundingReader(semantic, planning_evidence),
         )
         record = engine.create(INSTRUCTION)
         write_json(run / "b1-request-record.json", record.to_json())

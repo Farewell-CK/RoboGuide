@@ -153,3 +153,64 @@ def test_catalog_rejects_invalid_intent_parameters(mutation: str, message: str) 
 
     with pytest.raises(CapabilityCatalogError, match=message):
         CanonicalCapabilityCatalog.load(CATALOG).validate_plan(plan)
+
+
+def test_mobility_catalog_declares_deployment_feasibility_attributes() -> None:
+    """Mobility requirements may name typed deployment facts without naming a concrete Node."""
+    catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+    expected = {"supports-floor-transition": "boolean"}
+    for definition in catalog.capabilities:
+        if definition.contract.name not in {"move", "navigate"}:
+            continue
+        assert {
+            attribute.name: attribute.value_type.value for attribute in definition.attributes
+        } == expected
+
+
+def test_mobility_constraint_requires_grounded_boolean_and_survives_execution_profile() -> None:
+    """A documented mobility attribute may constrain matching without changing semantic targets."""
+    from mission.execution_profile import DeploymentExecutionProfile
+
+    raw = cast(
+        JSONObject,
+        json.loads(
+            Path("scenarios/e1-shared-world-episode-51/mission-plan.json").read_text(
+                encoding="utf-8"
+            )
+        ),
+    )
+    tasks = cast(list[JSONObject], raw["tasks"])
+    first_role = cast(list[JSONObject], tasks[0]["roles"])[0]
+    requirements = cast(JSONObject, first_role["requirements"])
+    capability = cast(list[JSONObject], requirements["capabilities"])[0]
+    capability["constraints"] = [
+        {
+            "attribute": "supports-floor-transition",
+            "operator": "equals",
+            "value": True,
+        }
+    ]
+    catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+    plan = MissionPlan.from_json(raw)
+    catalog.validate_plan(plan)
+    profile = DeploymentExecutionProfile.load(
+        Path("scenarios/e1-shared-world-episode-51/execution-profile.json")
+    )
+    bound = profile.apply(plan)
+    assert bound.tasks[0].roles[0].capabilities[0].constraints[0].value is True
+    assert bound.tasks[1].roles[0].capabilities[0].constraints == ()
+    assert dict(bound.tasks[0].roles[0].execution.parameters) == {"destination": "any_targets|0"}
+    assert dict(bound.tasks[1].roles[0].execution.parameters) == {
+        "destination": "TARGET_any_targets|0"
+    }
+    assert all(role.resources for task in bound.tasks for role in task.roles)
+
+    invalid = deepcopy(raw)
+    invalid_tasks = cast(list[JSONObject], invalid["tasks"])
+    invalid_role = cast(list[JSONObject], invalid_tasks[0]["roles"])[0]
+    invalid_requirements = cast(JSONObject, invalid_role["requirements"])
+    invalid_capability = cast(list[JSONObject], invalid_requirements["capabilities"])[0]
+    invalid_constraint = cast(list[JSONObject], invalid_capability["constraints"])[0]
+    invalid_constraint["value"] = "true"
+    with pytest.raises(CapabilityCatalogError, match="must be boolean"):
+        catalog.validate_plan(MissionPlan.from_json(invalid))

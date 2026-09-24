@@ -177,6 +177,7 @@ for n in a b; do
 done
 sed -e "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
     -e "s|SEMANTIC_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-semantic-evidence.json|" \
+    -e "s|PLANNING_WORLD_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-planning-world-evidence.json|" \
     "$SCENARIO/mission-service-b1.toml" > "$RUN/mission-service-b1.toml"
 
 clean_port 25060

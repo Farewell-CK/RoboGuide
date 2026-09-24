@@ -304,18 +304,33 @@ def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) ->
 class ContractModel:
     """Return a correct navigation followed by a configurable target violation."""
 
-    def __init__(self, target: str, violate_at: int | None) -> None:
-        """Retain the raw model action schedule used by the joint-loop test."""
+    def __init__(
+        self, target: str, violate_at: int | None, extra_tools_at: int | None = None
+    ) -> None:
+        """Retain selected-action and raw-response faults for the joint-loop test."""
         self.target = target
         self.violate_at = violate_at
+        self.extra_tools_at = extra_tools_at
         self.calls = 0
         self.model = "offline-model"
+        self.chat_history: list[list[dict[str, Any]]] = []
 
     def chat(self, observation: str, crab_planning: bool = False) -> Any:
-        """Return one selected tool without changing the fake simulator."""
+        """Return one raw selected tool without changing the fake simulator."""
         del observation, crab_planning
         self.calls += 1
         target = "wrong-target" if self.calls == self.violate_at else self.target
+        self.chat_history.append(
+            [
+                {"role": "user", "content": "observation"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [{"name": "nav_to_obj"}]
+                    * (2 if self.calls == self.extra_tools_at else 1),
+                },
+                {"role": "tool", "content": "first action only"},
+            ]
+        )
         return "nav_to_obj", {"target_obj": target}
 
 
@@ -363,8 +378,9 @@ class ContractLoopHarness(LoopHarness):
 
 
 @pytest.mark.parametrize("completed_first", [False, True])
+@pytest.mark.parametrize("violation", ["wrong-target", "multiple-tools"])
 def test_contract_violation_stops_before_gym_and_preserves_prior_completion(
-    tmp_path: Path, completed_first: bool
+    tmp_path: Path, completed_first: bool, violation: str
 ) -> None:
     """The real pair loop reports a local violation without erasing completed work."""
     diagnostics = RecordingDiagnostics()
@@ -372,7 +388,14 @@ def test_contract_violation_stops_before_gym_and_preserves_prior_completion(
     runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="generic")
     agents = [
         ContractAgent("agent_0", ContractModel("north", None)),
-        ContractAgent("agent_1", ContractModel("south", 2 if completed_first else 1)),
+        ContractAgent(
+            "agent_1",
+            ContractModel(
+                "south",
+                (2 if completed_first else 1) if violation == "wrong-target" else None,
+                (2 if completed_first else 1) if violation == "multiple-tools" else None,
+            ),
+        ),
     ]
     actor = ContractActor(agents)
     runtime._actor = actor
@@ -686,7 +709,7 @@ def test_duplicate_assignment_is_idempotent(tmp_path: Path) -> None:
     endpoint_a.dispatch(str(handle["execution_id"]))
     duplicate = endpoint_a.accept(request)
     assert duplicate["execution_id"] == handle["execution_id"]
-    endpoint_b.submit(_request("m2", "TARGET_any_targets|0", "tb"))
+    endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
     for _ in range(80):
         execution = _execution(endpoint_a.store(), str(handle["execution_id"]))
         if str(execution["state"]) in TERMINAL:
@@ -700,11 +723,64 @@ def test_duplicate_assignment_is_idempotent(tmp_path: Path) -> None:
     assert runtime.calls == 1
 
 
+@pytest.mark.parametrize("mismatch", ["different-group", "same-slot"])
+def test_pair_requires_one_group_with_distinct_logical_slots(tmp_path: Path, mismatch: str) -> None:
+    """A valid Node/agent pair alone cannot authorize inconsistent Group work."""
+    runtime, _, endpoint_a, endpoint_b, evidence = _world(tmp_path)
+    left = _request("mission-a", "any_targets|0", "ta")
+    right = _request("mission-a", "TARGET_any_targets|0", "tb")
+    right_invocation = cast(dict[str, object], right["invocation"])
+    if mismatch == "different-group":
+        right_invocation["group_id"] = "other-group"
+    else:
+        right_invocation["task_id"] = "ta"
+    handle_a = endpoint_a.submit(left)
+    handle_b = endpoint_b.submit(right)
+    for _ in range(1000):
+        state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
+        state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
+        if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert state_a["state"] == state_b["state"] == "FAILED"
+    assert runtime.calls == 0
+    admission = json.loads(
+        (evidence / "shared-world-start-admission.json").read_text(encoding="utf-8")
+    )
+    assert admission["state"] == "REJECTED"
+    if mismatch == "different-group":
+        assert "different Mission" in admission["reason"]
+    else:
+        assert "duplicate one logical" in admission["reason"]
+
+
+def test_cross_mission_pair_is_rejected_before_habitat_reset(tmp_path: Path) -> None:
+    """The coordinator never combines unrelated Missions into one shared episode."""
+    runtime, _, endpoint_a, endpoint_b, evidence = _world(tmp_path)
+    handle_a = endpoint_a.submit(_request("mission-a", "any_targets|0", "ta"))
+    handle_b = endpoint_b.submit(_request("mission-b", "TARGET_any_targets|0", "tb"))
+    for _ in range(1000):
+        state_a = _execution(endpoint_a.store(), str(handle_a["execution_id"]))
+        state_b = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
+        if state_a["state"] in TERMINAL and state_b["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert state_a["state"] == state_b["state"] == "FAILED"
+    assert runtime.calls == 0
+    admission = json.loads(
+        (evidence / "shared-world-start-admission.json").read_text(encoding="utf-8")
+    )
+    assert admission["state"] == "REJECTED"
+    assert "different Mission" in admission["reason"]
+    journal = (evidence / "shared-world-start-admission.jsonl").read_text(encoding="utf-8")
+    assert '"state": "REJECTED"' in journal
+
+
 def test_new_invocation_after_consumed_episode_rejected(tmp_path: Path) -> None:
     """A fresh third assignment cannot fabricate a second shared episode."""
     runtime, _, endpoint_a, endpoint_b, _ = _world(tmp_path)
     endpoint_a.submit(_request("m", "any_targets|0", "ta"))
-    handle_b = endpoint_b.submit(_request("m2", "TARGET_any_targets|0", "tb"))
+    handle_b = endpoint_b.submit(_request("m", "TARGET_any_targets|0", "tb"))
     for _ in range(80):
         execution = _execution(endpoint_b.store(), str(handle_b["execution_id"]))
         if str(execution["state"]) in TERMINAL:

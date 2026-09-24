@@ -17,6 +17,8 @@ from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.planning_profile import DeploymentPlanningProfile
+from mission.planning_world_evidence import planning_world_review_payload
 from mission.provider_mission_plan import (
     ProviderMissionPlanError,
     build_mission_plan_provider_schema,
@@ -143,6 +145,16 @@ def _with_semantic_goal(
     return {**payload, "authoritative_semantic_goal": goal}
 
 
+def _with_planning_world_evidence(
+    payload: JSONObject, grounding_context: GroundingContextSnapshot
+) -> JSONObject:
+    """Expose fixed world facts while making unknowns and deployment boundaries explicit."""
+    evidence = planning_world_review_payload(grounding_context.planning_world_evidence)
+    if evidence is None:
+        return payload
+    return {**payload, "authoritative_planning_world_evidence": evidence}
+
+
 class _ResponsesClient:
     """Own shared provider transport and strict structured-output mechanics only."""
 
@@ -260,11 +272,13 @@ class ResponsesMissionPlanner:
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
+        planning_profile: DeploymentPlanningProfile | None = None,
     ) -> None:
         """Create a Planner over transport mechanics that carry no Mission authority."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
+        self._planning_profile = planning_profile
 
     def plan(
         self,
@@ -340,6 +354,11 @@ class ResponsesMissionPlanner:
                 if self._execution_profile is not None
                 else {}
             ),
+            **(
+                {"deployment_planning_profile": self._planning_profile.to_json()}
+                if self._planning_profile is not None
+                else {}
+            ),
         }
         if feedback is not None:
             payload["prevalidation_recovery_feedback"] = feedback
@@ -347,7 +366,9 @@ class ResponsesMissionPlanner:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
             input_text=json.dumps(
-                _with_semantic_goal(payload, grounding_context),
+                _with_planning_world_evidence(
+                    _with_semantic_goal(payload, grounding_context), grounding_context
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
@@ -399,11 +420,13 @@ class ResponsesMissionReviewer:
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
+        planning_profile: DeploymentPlanningProfile | None = None,
     ) -> None:
         """Create a Reviewer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
+        self._planning_profile = planning_profile
 
     def review(
         self,
@@ -418,19 +441,27 @@ class ResponsesMissionReviewer:
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
             input_text=json.dumps(
-                _with_semantic_goal(
-                    {
-                        "grounded_intent": grounded_intent.to_json(),
-                        "mission_plan": plan.to_json(),
-                        "satisfaction_policy": self._client._satisfaction_policy_input(),
-                        "capability_catalog": capability_catalog.to_json(),
-                        "grounding_context": grounding_context.to_json(),
-                        **(
-                            {"deployment_execution_profile": self._execution_profile.to_json()}
-                            if self._execution_profile is not None
-                            else {}
-                        ),
-                    },
+                _with_planning_world_evidence(
+                    _with_semantic_goal(
+                        {
+                            "grounded_intent": grounded_intent.to_json(),
+                            "mission_plan": plan.to_json(),
+                            "satisfaction_policy": self._client._satisfaction_policy_input(),
+                            "capability_catalog": capability_catalog.to_json(),
+                            "grounding_context": grounding_context.to_json(),
+                            **(
+                                {"deployment_execution_profile": self._execution_profile.to_json()}
+                                if self._execution_profile is not None
+                                else {}
+                            ),
+                            **(
+                                {"deployment_planning_profile": self._planning_profile.to_json()}
+                                if self._planning_profile is not None
+                                else {}
+                            ),
+                        },
+                        grounding_context,
+                    ),
                     grounding_context,
                 ),
                 ensure_ascii=False,
@@ -451,11 +482,13 @@ class ResponsesMissionRepairer:
         environment: Mapping[str, str],
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
+        planning_profile: DeploymentPlanningProfile | None = None,
     ) -> None:
         """Create a Repairer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
+        self._planning_profile = planning_profile
 
     def repair(
         self,
@@ -472,21 +505,29 @@ class ResponsesMissionRepairer:
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
             input_text=json.dumps(
-                _with_semantic_goal(
-                    {
-                        "mission_id": mission_id,
-                        "grounded_intent": grounded_intent.to_json(),
-                        "rejected_plan": rejected_plan.to_json(),
-                        "satisfaction_policy": self._client._satisfaction_policy_input(),
-                        "review": review.to_json(),
-                        "capability_catalog": capability_catalog.to_json(),
-                        "grounding_context": grounding_context.to_json(),
-                        **(
-                            {"deployment_execution_profile": self._execution_profile.to_json()}
-                            if self._execution_profile is not None
-                            else {}
-                        ),
-                    },
+                _with_planning_world_evidence(
+                    _with_semantic_goal(
+                        {
+                            "mission_id": mission_id,
+                            "grounded_intent": grounded_intent.to_json(),
+                            "rejected_plan": rejected_plan.to_json(),
+                            "satisfaction_policy": self._client._satisfaction_policy_input(),
+                            "review": review.to_json(),
+                            "capability_catalog": capability_catalog.to_json(),
+                            "grounding_context": grounding_context.to_json(),
+                            **(
+                                {"deployment_execution_profile": self._execution_profile.to_json()}
+                                if self._execution_profile is not None
+                                else {}
+                            ),
+                            **(
+                                {"deployment_planning_profile": self._planning_profile.to_json()}
+                                if self._planning_profile is not None
+                                else {}
+                            ),
+                        },
+                        grounding_context,
+                    ),
                     grounding_context,
                 ),
                 ensure_ascii=False,

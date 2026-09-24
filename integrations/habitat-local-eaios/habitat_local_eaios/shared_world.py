@@ -31,6 +31,7 @@ from .crabagent_backend import CrabAgentBackendConfig
 from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .semantic_evidence import build_authoritative_semantic_evidence
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
@@ -79,6 +80,19 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             self.close()
             raise IntegrationError(
                 f"authoritative semantic evidence initialization failed: {error}"
+            ) from error
+        try:
+            planning_document = build_authoritative_planning_world_evidence(
+                habitat_env,
+                run_id=getattr(self._config, "run_id", ""),
+                episode_id=self._config.episode_id,
+                episode=self._episode,
+            )
+            self._write_json("authoritative-planning-world-evidence.json", planning_document)
+        except Exception as error:
+            self.close()
+            raise IntegrationError(
+                f"authoritative planning world evidence initialization failed: {error}"
             ) from error
 
     def execute_pair(
@@ -527,13 +541,23 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         if not isinstance(resumes, dict):
             raise IntegrationError("EMOS robot_resume does not contain an object")
         assigned: dict[str, Any] = {}
+        expected_names = {f"agent_{agent_id}" for agent_id in self._agent_ids}
         for agent_name, resume in resumes.items():
             if not isinstance(agent_name, str) or not isinstance(resume, dict):
                 raise IntegrationError("EMOS robot_resume has invalid structure")
+            if agent_name not in expected_names:
+                raise IntegrationError(
+                    f"shared world has no configured agent slot for {agent_name!r}"
+                )
             robot_type = resume.get("robot_type")
             if not isinstance(robot_type, str) or not robot_type:
                 raise IntegrationError("EMOS robot_resume lacks robot_type")
-            agent_index = int(agent_name.rsplit("_", 1)[-1])
+            try:
+                agent_index = int(agent_name.rsplit("_", 1)[-1])
+            except ValueError as error:
+                raise IntegrationError(
+                    f"shared world has invalid configured agent slot {agent_name!r}"
+                ) from error
             invocation = invocations.get(agent_index)
             if invocation is None:
                 raise IntegrationError(
@@ -546,9 +570,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 subtask_description=self._subtask(invocation),
                 chat_history=[],
             )
-        for agent_id in self._agent_ids:
-            if f"agent_{agent_id}" not in assigned:
-                raise IntegrationError(f"assigned EMOS agent agent_{agent_id!r} is unavailable")
+        if set(assigned) != expected_names:
+            missing = sorted(expected_names - set(assigned))
+            raise IntegrationError(f"assigned EMOS agent slots are unavailable: {missing}")
         return assigned
 
     def _pair_outcome(
@@ -1104,6 +1128,12 @@ class SharedWorldCoordinator:
                     waited_from = None
                 continue
             if len(pair) == 2:
+                incompatibility = self._pair_incompatibility(pair)
+                if incompatibility is not None:
+                    self._fail_incompatible(pair, incompatibility)
+                    pair = []
+                    waited_from = None
+                    continue
                 with self._condition:
                     # The deployment owns exactly one simulator episode. Claim
                     # it before execution so terminal publication cannot race a
@@ -1150,6 +1180,34 @@ class SharedWorldCoordinator:
                 execution_id,
                 "shared-world pair never assembled; refusing to fake a paired episode",
             )
+
+    @staticmethod
+    def _pair_incompatibility(pair: list[tuple[NodeEndpoint, str]]) -> str | None:
+        """Admit only distinct logical slots in one mission/group and physical episode."""
+        if pair[0][0].agent_id == pair[1][0].agent_id:
+            return "two endpoints map to the same physical agent"
+        if pair[0][0].name == pair[1][0].name:
+            return "two endpoints share one configured Node identity"
+        records = [endpoint.store().get(execution_id) for endpoint, execution_id in pair]
+        if any(record is None or record["state"] != "ACCEPTED" for record in records):
+            return "paired execution is missing or no longer awaiting episode start"
+        first, second = records
+        assert first is not None and second is not None
+        left, right = first["invocation"], second["invocation"]
+        if left.mission_id != right.mission_id or left.group_id != right.group_id:
+            return "assignments belong to different Mission or execution Group identities"
+        if (left.task_id, left.role_id) == (right.task_id, right.role_id):
+            return "assignments duplicate one logical Task/Role slot"
+        return None
+
+    def _fail_incompatible(self, pair: list[tuple[NodeEndpoint, str]], reason: str) -> None:
+        """Archive and fail both incompatible assignments before any Habitat reset."""
+        self._write_start_admission("REJECTED", pair, reason)
+        for endpoint, execution_id in pair:
+            store = endpoint.store()
+            current = store.get(execution_id)
+            if current is not None and current["state"] not in TERMINAL_STATES:
+                store.mark_failed(execution_id, f"shared-world episode start rejected: {reason}")
 
     def _execute_pair(self, pair: list[tuple[NodeEndpoint, str]]) -> None:
         """Run the single shared episode and project per-agent terminal facts."""
@@ -1247,6 +1305,14 @@ class SharedWorldCoordinator:
                 ],
             }
         )
+        try:
+            self._evidence_dir.mkdir(parents=True, exist_ok=True)
+            with (self._evidence_dir / "shared-world-start-admission.jsonl").open(
+                "a", encoding="utf-8"
+            ) as journal:
+                journal.write(json.dumps(document, sort_keys=True) + "\n")
+        except Exception as error:  # noqa: BLE001 - evidence cannot become execution authority
+            _LOG.warning("shared-world start-admission history unavailable: %s", error)
         try:
             self._write_json("shared-world-start-admission.json", document)
         except Exception as error:  # noqa: BLE001 - evidence cannot become execution authority

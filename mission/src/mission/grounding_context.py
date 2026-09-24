@@ -11,9 +11,14 @@ from enum import StrEnum
 from typing import cast
 
 from mission.models import JSONObject, JSONValue
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningWorldEvidenceError,
+)
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
 GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.2"
+GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA = "roboguide.grounding-context/v0.3"
 LEGACY_GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.1"
 GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2"
 PHYSICAL_ENTITY_REFERENCE_SCHEMA = "roboguide.world.physical-entity-reference/v0.1"
@@ -361,6 +366,7 @@ class GroundingContextSnapshot:
     memory_evidence: tuple[MemoryGroundingEvidence, ...]
     gaps: tuple[GroundingGap, ...]
     semantic_evidence: AuthoritativeSemanticEvidence | None = None
+    planning_world_evidence: AuthoritativePlanningWorldEvidence | None = None
     schema_version: str = GROUNDING_CONTEXT_SCHEMA
 
     @classmethod
@@ -374,11 +380,17 @@ class GroundingContextSnapshot:
         gaps: tuple[GroundingGap, ...] = (),
         selection_policy_ref: str = EMPTY_GROUNDING_SELECTION_POLICY_REF,
         semantic_evidence: AuthoritativeSemanticEvidence | None = None,
+        planning_world_evidence: AuthoritativePlanningWorldEvidence | None = None,
     ) -> GroundingContextSnapshot:
         """Create a deterministic snapshot and bind its digest to all included evidence."""
         state_evidence = tuple(sorted(state_evidence, key=lambda item: item.evidence_id))
         memory_evidence = tuple(sorted(memory_evidence, key=lambda item: item.evidence_id))
         gaps = tuple(sorted(gaps, key=lambda item: (item.source, item.code, item.detail)))
+        schema_version = (
+            GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+            if planning_world_evidence is not None
+            else GROUNDING_CONTEXT_SCHEMA
+        )
         payload = _snapshot_payload(
             request_id,
             dialogue_digest,
@@ -388,7 +400,8 @@ class GroundingContextSnapshot:
             memory_evidence,
             gaps,
             semantic_evidence,
-            GROUNDING_CONTEXT_SCHEMA,
+            planning_world_evidence,
+            schema_version,
         )
         return cls(
             context_digest=_digest(payload),
@@ -400,6 +413,8 @@ class GroundingContextSnapshot:
             memory_evidence=memory_evidence,
             gaps=gaps,
             semantic_evidence=semantic_evidence,
+            planning_world_evidence=planning_world_evidence,
+            schema_version=schema_version,
         )
 
     def __post_init__(self) -> None:
@@ -433,13 +448,31 @@ class GroundingContextSnapshot:
             sorted(self.gaps, key=lambda item: (item.source, item.code, item.detail))
         ):
             raise GroundingContextError("grounding gaps must use canonical order")
-        if self.schema_version not in {LEGACY_GROUNDING_CONTEXT_SCHEMA, GROUNDING_CONTEXT_SCHEMA}:
+        if self.schema_version not in {
+            LEGACY_GROUNDING_CONTEXT_SCHEMA,
+            GROUNDING_CONTEXT_SCHEMA,
+            GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA,
+        }:
             raise GroundingContextError("unsupported grounding context schema")
-        if (
-            self.schema_version == LEGACY_GROUNDING_CONTEXT_SCHEMA
-            and self.semantic_evidence is not None
+        if self.schema_version == LEGACY_GROUNDING_CONTEXT_SCHEMA and (
+            self.semantic_evidence is not None or self.planning_world_evidence is not None
         ):
             raise GroundingContextError("legacy grounding context cannot carry semantic evidence")
+        if (
+            self.schema_version != GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+            and self.planning_world_evidence is not None
+        ):
+            raise GroundingContextError("planning world evidence requires grounding context v0.3")
+        if (
+            self.schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+            and self.planning_world_evidence is None
+        ):
+            raise GroundingContextError("grounding context v0.3 requires planning world evidence")
+        if self.semantic_evidence is not None and self.planning_world_evidence is not None:
+            _require_matching_world_identity(
+                self.semantic_evidence,
+                self.planning_world_evidence,
+            )
         expected = _digest(
             _snapshot_payload(
                 self.request_id,
@@ -450,6 +483,7 @@ class GroundingContextSnapshot:
                 self.memory_evidence,
                 self.gaps,
                 self.semantic_evidence,
+                self.planning_world_evidence,
                 self.schema_version,
             )
         )
@@ -472,6 +506,7 @@ class GroundingContextSnapshot:
                 self.memory_evidence,
                 self.gaps,
                 self.semantic_evidence,
+                self.planning_world_evidence,
                 self.schema_version,
             ),
         }
@@ -506,6 +541,20 @@ class GroundingContextSnapshot:
                 "gaps",
                 "semantic_evidence",
             }
+        elif schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA:
+            expected = {
+                "schema_version",
+                "context_digest",
+                "request_id",
+                "dialogue_digest",
+                "captured_at_ms",
+                "selection_policy_ref",
+                "state_evidence",
+                "memory_evidence",
+                "gaps",
+                "semantic_evidence",
+                "planning_world_evidence",
+            }
         else:
             raise GroundingContextError("unsupported grounding context schema")
         _require_fields(item, expected, "grounding context")
@@ -523,8 +572,15 @@ class GroundingContextSnapshot:
             gaps=tuple(GroundingGap.from_json(value) for value in gaps),
             semantic_evidence=(
                 _semantic_evidence(item["semantic_evidence"])
-                if schema_version == GROUNDING_CONTEXT_SCHEMA
+                if schema_version
+                in {GROUNDING_CONTEXT_SCHEMA, GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA}
                 and item["semantic_evidence"] is not None
+                else None
+            ),
+            planning_world_evidence=(
+                _planning_world_evidence(item["planning_world_evidence"])
+                if schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+                and item["planning_world_evidence"] is not None
                 else None
             ),
             schema_version=schema_version,
@@ -578,6 +634,7 @@ def _snapshot_payload(
     memory_evidence: tuple[MemoryGroundingEvidence, ...],
     gaps: tuple[GroundingGap, ...],
     semantic_evidence: AuthoritativeSemanticEvidence | None,
+    planning_world_evidence: AuthoritativePlanningWorldEvidence | None,
     schema_version: str,
 ) -> JSONObject:
     """Return the canonical digest body without its self-referential identity."""
@@ -594,6 +651,13 @@ def _snapshot_payload(
         payload["semantic_evidence"] = (
             semantic_evidence.to_json() if semantic_evidence is not None else None
         )
+    elif schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA:
+        payload["semantic_evidence"] = (
+            semantic_evidence.to_json() if semantic_evidence is not None else None
+        )
+        payload["planning_world_evidence"] = (
+            planning_world_evidence.to_json() if planning_world_evidence is not None else None
+        )
     return payload
 
 
@@ -603,6 +667,40 @@ def _semantic_evidence(value: object) -> AuthoritativeSemanticEvidence:
         return AuthoritativeSemanticEvidence.from_json(value)
     except SemanticEvidenceError as error:
         raise GroundingContextError(str(error)) from error
+
+
+def _planning_world_evidence(value: object) -> AuthoritativePlanningWorldEvidence:
+    """Restore planning-world evidence and expose a grounding-domain error."""
+    try:
+        return AuthoritativePlanningWorldEvidence.from_json(value)
+    except PlanningWorldEvidenceError as error:
+        raise GroundingContextError(str(error)) from error
+
+
+def _require_matching_world_identity(
+    semantic_evidence: AuthoritativeSemanticEvidence,
+    planning_world_evidence: AuthoritativePlanningWorldEvidence,
+) -> None:
+    """Keep spatial facts bound to the exact objective and dataset snapshot."""
+    if semantic_evidence.run_id != planning_world_evidence.run_id:
+        raise GroundingContextError("planning world run identity does not match semantic evidence")
+    semantic_scene = semantic_evidence.world_context.get("scene_id")
+    if not isinstance(semantic_scene, str) or semantic_scene != planning_world_evidence.scene_id:
+        raise GroundingContextError(
+            "planning world scene identity does not match semantic evidence"
+        )
+    if semantic_evidence.episode_id != planning_world_evidence.episode_id:
+        raise GroundingContextError(
+            "planning world episode identity does not match semantic evidence"
+        )
+    if semantic_evidence.dataset_revision != planning_world_evidence.dataset_revision:
+        raise GroundingContextError(
+            "planning world dataset revision does not match semantic evidence"
+        )
+    if semantic_evidence.dataset_sha256 != planning_world_evidence.dataset_sha256:
+        raise GroundingContextError(
+            "planning world dataset digest does not match semantic evidence"
+        )
 
 
 def _digest(value: JSONValue) -> str:

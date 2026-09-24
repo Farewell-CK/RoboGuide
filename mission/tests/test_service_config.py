@@ -39,6 +39,14 @@ def test_shared_world_service_configuration_selects_deployment_execution_profile
         settings.execution_profile_path
         == (Path.cwd() / "scenarios/e1-shared-world-episode-51/execution-profile.json").resolve()
     )
+    assert (
+        settings.planning_profile_path
+        == (Path.cwd() / "scenarios/e1-shared-world-episode-51/planning-profile.json").resolve()
+    )
+    assert (
+        settings.grounding_planning_world_evidence_path
+        == (Path.cwd() / "PLANNING_WORLD_EVIDENCE_PLACEHOLDER").resolve()
+    )
 
 
 def test_service_configuration_rejects_ambiguous_risk_contract(tmp_path: Path) -> None:

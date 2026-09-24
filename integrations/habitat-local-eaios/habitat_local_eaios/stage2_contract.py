@@ -107,6 +107,7 @@ class Stage2ActionAudit:
         self._directory = directory
         self._sequence = 0
         self._unavailable = 0
+        self._closed = False
         self._writer = BufferedJsonlWriter(directory / "stage2-actions.jsonl", batch_records=1)
 
     def record(self, document: dict[str, Any]) -> None:
@@ -130,15 +131,40 @@ class Stage2ActionAudit:
         self._writer.append(frozen)
 
     def close(self) -> None:
-        """Save explicit completeness accounting without masking the execution outcome."""
-        self._writer.flush()
-        stats = self._writer.stats()
+        """Save bounded completeness accounting without masking execution outcomes."""
+        if self._closed:
+            return
+        self._closed = True
+        flush_failed = False
+        try:
+            self._writer.flush()
+        except Exception:  # noqa: BLE001 - evidence finalization must be fail-soft
+            flush_failed = True
+            _LOG.exception("Stage2 action audit flush unavailable")
+        try:
+            stats = self._writer.stats()
+        except Exception:  # noqa: BLE001 - evidence accounting must be fail-soft
+            stats = {
+                "batch_capacity_records": 1,
+                "flushes": 0,
+                "pending_records": self._sequence,
+                "records_dropped": 0,
+                "records_written": 0,
+                "write_failures": 1,
+                "write_seconds": 0.0,
+            }
+            flush_failed = True
+            _LOG.exception("Stage2 action audit stats unavailable")
         summary = {
             "schema_version": "roboguide.stage2-action-audit/v0.1",
             "records_seen": self._sequence,
             "records_unavailable": self._unavailable,
             "max_record_bytes": _MAX_RECORD_BYTES,
-            "complete": self._unavailable == 0 and stats["records_written"] == self._sequence,
+            "complete": (
+                not flush_failed
+                and self._unavailable == 0
+                and stats["records_written"] == self._sequence
+            ),
             **stats,
         }
         try:
@@ -146,8 +172,43 @@ class Stage2ActionAudit:
             (self._directory / "stage2-action-audit.json").write_text(
                 json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
-        except OSError:
+        except Exception:  # noqa: BLE001 - evidence summary must be fail-soft
             _LOG.exception("Stage2 action audit summary unavailable")
+
+
+def _raw_history_length(model: Any) -> int | None:
+    """Return the vendor history length only when its exchange format is readable."""
+    history = getattr(model, "chat_history", None)
+    if not isinstance(history, list):
+        return None
+    return len(history)
+
+
+def _latest_tool_call_count(model: Any, previous_length: int | None) -> int | None:
+    """Verify exactly one new raw Provider exchange and count its tool calls."""
+    history = getattr(model, "chat_history", None)
+    if (
+        previous_length is None
+        or not isinstance(history, list)
+        or len(history) != previous_length + 1
+    ):
+        return None
+    exchange = history[-1]
+    if not isinstance(exchange, list):
+        return None
+    for message in reversed(exchange):
+        if isinstance(message, Mapping):
+            role = message.get("role")
+            calls = message.get("tool_calls", _MISSING)
+        else:
+            role = getattr(message, "role", None)
+            calls = getattr(message, "tool_calls", _MISSING)
+        if role != "assistant" or calls is _MISSING:
+            continue
+        if not isinstance(calls, Sequence) or isinstance(calls, (str, bytes)):
+            return None
+        return len(calls)
+    return None
 
 
 def _restore_attribute(instance: Any, name: str, previous: Any) -> None:
@@ -182,6 +243,7 @@ def _guard_agent(
 
         def guarded_model_chat(content: str, crab_planning: bool = False) -> Any:
             """Keep the original response intact and fence the selected execution tool."""
+            history_length = _raw_history_length(model) if not crab_planning else None
             result = original_model_chat(content, crab_planning=crab_planning)
             if crab_planning:
                 return result
@@ -191,7 +253,19 @@ def _guard_agent(
                 else result
             )
             error = None
+            provider_tool_call_count = _latest_tool_call_count(model, history_length)
             try:
+                if provider_tool_call_count is None:
+                    raise Stage2ContractViolation(
+                        agent_name, action, "raw Provider tool-call count is unavailable"
+                    )
+                if provider_tool_call_count != 1:
+                    raise Stage2ContractViolation(
+                        agent_name,
+                        action,
+                        "Provider returned exactly one tool call per execution step; "
+                        f"observed {provider_tool_call_count}",
+                    )
                 if not isinstance(result, tuple) or len(result) != 2:
                     raise Stage2ContractViolation(
                         agent_name, action, "execution model must return an action tuple"
@@ -204,6 +278,7 @@ def _guard_agent(
                 "agent_name": agent_name,
                 "contract": contract.as_dict(),
                 "selected_action": action,
+                "provider_tool_call_count": provider_tool_call_count,
                 "decision": "rejected" if error else "allowed",
                 "reason": error.reason if error else None,
                 "boundary": "before-crab-agent-dispatch",

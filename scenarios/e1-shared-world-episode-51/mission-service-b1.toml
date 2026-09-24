@@ -14,7 +14,9 @@ max_grounding_memory_evidence = 32
 max_grounding_gaps = 32
 grounding_world_payload_schemas = []
 grounding_semantic_evidence_path = "SEMANTIC_EVIDENCE_PLACEHOLDER"
+grounding_planning_world_evidence_path = "PLANNING_WORLD_EVIDENCE_PLACEHOLDER"
 execution_profile_path = "scenarios/e1-shared-world-episode-51/execution-profile.json"
+planning_profile_path = "scenarios/e1-shared-world-episode-51/planning-profile.json"
 max_request_bytes = 1048576
 
 # Deployment decision for E1-I (simulation-only navigation): no approval risk gate;

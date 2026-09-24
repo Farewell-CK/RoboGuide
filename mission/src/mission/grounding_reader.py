@@ -25,6 +25,10 @@ from mission.grounding_context import (
     grounding_selection_policy_ref,
 )
 from mission.models import JSONObject, JSONValue
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningWorldEvidenceError,
+)
 from mission.request_record import DialogueTurn
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
@@ -187,6 +191,7 @@ class HttpMissionGroundingReader:
         max_gaps: int = 32,
         max_acquisition_attempts: int = 2,
         semantic_evidence_path: Path | None = None,
+        planning_world_evidence_path: Path | None = None,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -207,6 +212,7 @@ class HttpMissionGroundingReader:
         self._max_acquisition_attempts = max_acquisition_attempts
         self._transport = transport or UrllibGroundingJsonTransport()
         self._semantic_evidence_path = semantic_evidence_path
+        self._planning_world_evidence_path = planning_world_evidence_path
         if any(not schema.strip() for schema in admitted_world_payload_schemas):
             raise GroundingReadError("admitted World payload schemas must be nonblank")
         self._admitted_world_payload_schemas = admitted_world_payload_schemas
@@ -223,6 +229,7 @@ class HttpMissionGroundingReader:
         state = self._read_state(gaps)
         memory = self._read_memory(gaps)
         semantic_evidence = self._read_semantic_evidence(gaps)
+        planning_world_evidence = self._read_planning_world_evidence(gaps)
         return self._bounded_snapshot(
             request_id=request_id,
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
@@ -231,6 +238,7 @@ class HttpMissionGroundingReader:
             memory_evidence=memory,
             gaps=gaps.finish(),
             semantic_evidence=semantic_evidence,
+            planning_world_evidence=planning_world_evidence,
         )
 
     def _read_semantic_evidence(
@@ -253,6 +261,32 @@ class HttpMissionGroundingReader:
             SemanticEvidenceError,
         ) as error:
             gaps.add("semantic_evidence_unavailable", "authoritative-semantic-evidence", str(error))
+            return None
+
+    def _read_planning_world_evidence(
+        self, gaps: _GroundingGapCollector
+    ) -> AuthoritativePlanningWorldEvidence | None:
+        """Read one fixed pre-reset world artifact and preserve malformed-source gaps."""
+        if self._planning_world_evidence_path is None:
+            return None
+        try:
+            raw = self._planning_world_evidence_path.read_bytes()
+            if len(raw) > MAX_SEMANTIC_EVIDENCE_BYTES:
+                raise GroundingReadError("planning world evidence exceeds local limit")
+            document = json.loads(raw.decode("utf-8"))
+            return AuthoritativePlanningWorldEvidence.from_json(document)
+        except (
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            GroundingReadError,
+            PlanningWorldEvidenceError,
+        ) as error:
+            gaps.add(
+                "planning_world_evidence_unavailable",
+                "authoritative-planning-world-evidence",
+                str(error),
+            )
             return None
 
     def _read_state(self, gaps: _GroundingGapCollector) -> tuple[StateGroundingEvidence, ...]:
@@ -346,6 +380,7 @@ class HttpMissionGroundingReader:
         memory_evidence: tuple[MemoryGroundingEvidence, ...],
         gaps: tuple[GroundingGap, ...],
         semantic_evidence: AuthoritativeSemanticEvidence | None,
+        planning_world_evidence: AuthoritativePlanningWorldEvidence | None,
     ) -> GroundingContextSnapshot:
         """Drop deterministic stable tails until the complete snapshot fits its hard limit."""
         retained_state = list(state_evidence)
@@ -370,6 +405,7 @@ class HttpMissionGroundingReader:
                     gaps=current_gaps,
                     selection_policy_ref=self._selection_policy_ref,
                     semantic_evidence=semantic_evidence,
+                    planning_world_evidence=planning_world_evidence,
                 )
             except GroundingContextSizeError:
                 if retained_memory:

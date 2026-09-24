@@ -30,6 +30,24 @@ Planner/Repairer 输出在进入草稿、审批和提交链之前，由 MI 确�
 保留更高需求、Task DAG、Actor、Context 和 resource scope。未配置时行为不变。
 配置不包含 Node、ResourceId 或 PhysicalEntityId，也不读取 live inventory。
 
+服务也可用 `service.planning_profile_path` 选择启动时冻结的
+`roboguide.deployment-planning-profile/v0.1` 部署能力摘要。它只包含抽象 capability class
+及 Catalog 已定义的 typed facts，供 Planner、Reviewer 和 Repairer 了解部署能够提供的能力类别；
+class id 不是 Actor、Node、Resource 或 PhysicalEntity，profile 也不包含 health、lease、
+reservation 或当前可用性。缺少任务/世界证据时，MI 不得仅凭 profile 选择 capability constraint；
+profile 不能替代 environment-authoritative 的 episode floor 或 start-state evidence。
+
+Habitat 部署还可以通过 `service.grounding_planning_world_evidence_path` 提供
+`roboguide.authoritative-planning-world-evidence/v0.1`。该文件只能包含 reset 前由部署环境
+读取的静态场景事实及其 dataset identity；它不调用 reset、不采样机器人起点、不选择 Node，
+缺失的起点会保留为 `agent_start_state_pending_reset` gap。文件缺失或损坏时，Grounding
+Context 保留 acquisition gap，不把未知事实转换成猜测的楼层、可达性或执行器约束；文件存在
+时会选择 grounding-context v0.3，并原样传给 Planner、Reviewer 和 Repairer。关系事实只允许
+当前版本声明的 `same_floor`/`different_floor`，且端点必须来自精确环境映射。对象实例
+若只有模板路径而没有与 episode label 精确一致的静态句柄，就只能记录 gap；不会把模板变成
+目标实例。正式 B1 provenance 同时校验 v0.3 Context、adapter 文件和 frozen workload identity；
+历史 v0.2 Context 仍按原协议验证。
+
 [shared-world profile](../scenarios/e1-shared-world-episode-51/execution-profile.json)
 把 `mobility.move@v1` / `mobility.navigate@v1` 的 endpoint 独占需求表示为现有 `space:1`。
 两份 Node 配置分别发布容量为 1 的 `habitat-navigation-slot-a/b`，并为两个 operation

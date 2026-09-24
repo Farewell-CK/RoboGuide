@@ -16,6 +16,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningWorldEvidenceError,
+)
+
 from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
 
 PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.3"
@@ -99,6 +104,10 @@ class ProvenanceFailure(StrEnum):
     SEMANTIC_EVIDENCE_INVALID = "semantic_evidence_invalid"
     SEMANTIC_EVIDENCE_IDENTITY_MISMATCH = "semantic_evidence_identity_mismatch"
     MI_SEMANTIC_EVIDENCE_MISMATCH = "mi_semantic_evidence_mismatch"
+    PLANNING_WORLD_EVIDENCE_MISSING = "planning_world_evidence_missing"
+    PLANNING_WORLD_EVIDENCE_INVALID = "planning_world_evidence_invalid"
+    PLANNING_WORLD_EVIDENCE_IDENTITY_MISMATCH = "planning_world_evidence_identity_mismatch"
+    MI_PLANNING_WORLD_EVIDENCE_MISMATCH = "mi_planning_world_evidence_mismatch"
     CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
     EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
@@ -514,7 +523,8 @@ def _check_semantic_evidence(
         if key not in {"schema_version", "context_digest"}
     }
     if (
-        grounding.get("schema_version") != "roboguide.grounding-context/v0.2"
+        grounding.get("schema_version")
+        not in {"roboguide.grounding-context/v0.2", "roboguide.grounding-context/v0.3"}
         or grounding.get("context_digest") != plan_digest(context_body)
         or admitted != semantic
         or admitted.get("digest") != semantic.get("digest")
@@ -522,6 +532,48 @@ def _check_semantic_evidence(
         failures.append(ProvenanceFailure.MI_SEMANTIC_EVIDENCE_MISMATCH)
     if record and record.semantic_evidence_digest != semantic.get("digest"):
         failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)
+    return failures
+
+
+def _check_planning_world_evidence(
+    document: Any,
+    request: dict[str, Any],
+    frozen: dict[str, Any],
+    semantic_document: Any,
+    run_id: str | None,
+) -> list[ProvenanceFailure]:
+    """Bind optional v0.3 planning facts to the adapter artifact and frozen world."""
+    grounding = _object(request.get("grounding_context"))
+    if grounding.get("schema_version") != "roboguide.grounding-context/v0.3":
+        return []
+    if document is None:
+        return [ProvenanceFailure.PLANNING_WORLD_EVIDENCE_MISSING]
+    try:
+        evidence = AuthoritativePlanningWorldEvidence.from_json(document)
+    except PlanningWorldEvidenceError:
+        return [ProvenanceFailure.PLANNING_WORLD_EVIDENCE_INVALID]
+    failures: list[ProvenanceFailure] = []
+    identity = {
+        "episode_id": evidence.episode_id,
+        "scene_id": evidence.scene_id,
+        "dataset_revision": evidence.dataset_revision,
+        "dataset_sha256": evidence.dataset_sha256,
+    }
+    semantic = _object(semantic_document)
+    semantic_identity = _object(semantic.get("identity"))
+    semantic_world = _object(semantic.get("world_context"))
+    if (
+        (run_id is not None and evidence.run_id != run_id)
+        or any(frozen.get(field) != value for field, value in identity.items())
+        or semantic_identity.get("run_id") != evidence.run_id
+        or semantic_identity.get("episode_id") != evidence.episode_id
+        or semantic_world.get("scene_id") != evidence.scene_id
+        or semantic_identity.get("dataset_revision") != evidence.dataset_revision
+        or semantic_identity.get("dataset_sha256") != evidence.dataset_sha256
+    ):
+        failures.append(ProvenanceFailure.PLANNING_WORLD_EVIDENCE_IDENTITY_MISMATCH)
+    if grounding.get("planning_world_evidence") != evidence.to_json():
+        failures.append(ProvenanceFailure.MI_PLANNING_WORLD_EVIDENCE_MISMATCH)
     return failures
 
 
@@ -537,6 +589,7 @@ def verify_b1_provenance(
     failure_evidence: Any = None,
     run_id: str | None = None,
     semantic_evidence: Any = None,
+    planning_world_evidence: Any = None,
 ) -> ProvenanceVerification:
     """Check each reached boundary, allowing only attributable early failures."""
     failures: list[ProvenanceFailure] = []
@@ -598,6 +651,15 @@ def verify_b1_provenance(
             failures.append(ProvenanceFailure.FAILURE_EVIDENCE_MISMATCH)
         return ProvenanceVerification(not failures, tuple(failures), None, False)
     failures.extend(_check_semantic_evidence(semantic_evidence, request, frozen, record, run_id))
+    failures.extend(
+        _check_planning_world_evidence(
+            planning_world_evidence,
+            request,
+            frozen,
+            semantic_evidence,
+            run_id,
+        )
+    )
     if not request.get("request_id") or not request.get("mission_id"):
         failures.append(ProvenanceFailure.MI_RUN_MISSING)
     if record and (

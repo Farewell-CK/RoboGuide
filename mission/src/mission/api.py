@@ -16,6 +16,7 @@ from mission.controller import HttpMissionController
 from mission.execution_profile import load_optional_execution_profile
 from mission.grounding_reader import HttpMissionGroundingReader
 from mission.models import JSONObject
+from mission.planning_profile import load_optional_planning_profile
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
 from mission.responses import (
     ResponsesMissionInterpreter,
@@ -36,25 +37,43 @@ def build_engine(
     capability_catalog = CanonicalCapabilityCatalog.load(planner_settings.capability_catalog_path)
     service_settings = load_service_settings(service_config, repository_root=repository_root)
     execution_profile = load_optional_execution_profile(service_settings.execution_profile_path)
+    planning_profile = load_optional_planning_profile(service_settings.planning_profile_path)
+    if planning_profile is not None:
+        planning_profile.validate_catalog(capability_catalog)
     environment = current_environment()
     controller = HttpMissionController(
         service_settings.controller_endpoint,
         service_settings.controller_timeout_seconds,
     )
     reviewer = (
-        ResponsesMissionReviewer(planner_settings, environment, execution_profile=execution_profile)
+        ResponsesMissionReviewer(
+            planner_settings,
+            environment,
+            execution_profile=execution_profile,
+            planning_profile=planning_profile,
+        )
         if planner_settings.review_enabled
         else None
     )
     repairer = (
-        ResponsesMissionRepairer(planner_settings, environment, execution_profile=execution_profile)
+        ResponsesMissionRepairer(
+            planner_settings,
+            environment,
+            execution_profile=execution_profile,
+            planning_profile=planning_profile,
+        )
         if reviewer is not None and planner_settings.max_repair_attempts > 0
         else None
     )
     engine = MissionRequestEngine(
         MissionRequestStore(service_settings.state_db),
         ResponsesMissionInterpreter(planner_settings, environment),
-        ResponsesMissionPlanner(planner_settings, environment, execution_profile=execution_profile),
+        ResponsesMissionPlanner(
+            planner_settings,
+            environment,
+            execution_profile=execution_profile,
+            planning_profile=planning_profile,
+        ),
         controller,
         capability_catalog,
         service_settings.approval_policy,
@@ -64,6 +83,17 @@ def build_engine(
             "model": planner_settings.llm.model,
             "review_model": planner_settings.llm.review_model,
             "reasoning_effort": planner_settings.llm.reasoning_effort,
+            **(
+                {
+                    "planning_profile": {
+                        "profile_id": planning_profile.profile_id,
+                        "revision": planning_profile.revision,
+                        "digest": planning_profile.profile_digest,
+                    }
+                }
+                if planning_profile is not None
+                else {}
+            ),
         },
         reviewer=reviewer,
         repairer=repairer,
@@ -78,6 +108,7 @@ def build_engine(
             max_gaps=service_settings.max_grounding_gaps,
             max_acquisition_attempts=service_settings.grounding_acquisition_attempts,
             semantic_evidence_path=service_settings.grounding_semantic_evidence_path,
+            planning_world_evidence_path=service_settings.grounding_planning_world_evidence_path,
         ),
     )
     return engine, service_settings

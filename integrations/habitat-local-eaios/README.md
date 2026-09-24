@@ -79,11 +79,25 @@ that every two-goal Mission semantically requires distinct Physical Entities.
 
 The bounded `--pair-wait-s` barrier prevents a half-populated joint episode from running. Expiry
 fails the arrived local execution and writes `evidence/shared-world-start-admission.json` with the
-fixed topology, arrived assignment, and rejection reason. A successful pair writes the same artifact
-with `state: ADMITTED` before reset. Evidence write failures are logged and never change the local
-execution result. Generic Control remains free to run a true one-Actor DAG sequentially on one
-resource after satisfaction releases it; such a plan must use a deployment that implements
-sequential endpoint reuse.
+fixed topology, arrived assignment, and rejection reason. The coordinator also appends every
+admission decision to `shared-world-start-admission.jsonl`, so a later decision cannot silently
+overwrite an earlier rejection. Before reset it verifies that both assignments belong to the same
+Mission and execution Group, target distinct logical Task/Role slots, and map to distinct configured
+agent endpoints. A mismatched pair is rejected before Habitat starts. A successful pair writes the
+same artifact with `state: ADMITTED` before reset. Evidence write failures are logged and never
+change the local execution result. Generic Control remains free to run a true one-Actor DAG
+sequentially on one resource after satisfaction releases it; such a plan must use a deployment that
+implements sequential endpoint reuse.
+
+Before the single shared-world reset, the adapter also writes
+`evidence/authoritative-planning-world-evidence.json` when static scene metadata is available.
+This versioned artifact binds the loaded episode and dataset identity to object/goal region, floor,
+and explicitly supplied same/different-floor relations when the raw episode exposes exact mappings.
+It reads no PDDL `sim_info`,
+object manager, or simulator target index before their reset-time binding. Missing exact object
+instance handles and ambiguous regions remain explicit gaps. It never calls reset, samples agent
+poses, advances the simulator, or selects a Node. Start poses therefore remain an explicit
+`agent_start_state_pending_reset` gap until execution evidence is recorded after reset.
 
 ## Stage2 execution contract guard
 
@@ -112,7 +126,9 @@ read unchanged. Guard rejection is not an assertion about PDDL truth.
 `evidence/stage2-actions.jsonl` contains `roboguide.stage2-action/v0.1` decisions
 for every **selected** execution tool returned by EMOS: raw action, immutable
 invocation digest/destination, agent, local time and completed simulator step.
-EMOS selects the first tool when a response contains several; ignored tool
+The guard also verifies that the current raw Provider response contains exactly
+one tool call; zero or multiple calls fail closed before CrabAgent dispatch.
+EMOS still selects the first tool when a response contains several; ignored tool
 proposals remain in the original chat history. `allowed` means admitted at the
 tool boundary, not physically executed or successful: another agent can reject
 the joint step. EMOS's existing synthetic tool-history `Success` receipt also

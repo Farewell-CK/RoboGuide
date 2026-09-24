@@ -71,6 +71,15 @@ admission 默认空且其 digest 进入 selection policy identity。可恢复的
 唯一待答问题下自动绑定。
 详见 ADR-0037 与 ADR-0038。
 
+部署可以在启动时向 Mission Intelligence 提供经 Canonical Catalog 校验的抽象能力类别摘要，
+以及由环境适配器在执行前读取并绑定 episode、scene 和 dataset identity 的静态世界证据。
+这两类信息分别说明“部署可能具备什么能力”和“当前任务已知的世界事实”，均不包含 live
+Node Inventory、资源可用性或物理执行器选择。环境事实若尚未由 reset 确定，必须保留为
+unknown gap；不得由模型推测楼层、起点或可达性。只有任务需求与已知世界证据共同支持时，
+MI 才能声明具体的 typed capability constraint；Control 仍使用当前 Node 注册和资源承诺
+决定谁、何时、在哪里执行。规划世界证据进入版本化、不可变的 Grounding Context，并在
+B1 中与实际适配器文件及冻结 workload identity 交叉校验。详见 ADR-0044。
+
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability
 并附带可由 Node profile 证明的 typed constraints；Operation 是下发给 Local EAIOS 的 canonical

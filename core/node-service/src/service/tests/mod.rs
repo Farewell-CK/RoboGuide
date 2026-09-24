@@ -77,6 +77,58 @@ fn registration_aggregates_configured_local_systems() {
     );
 }
 
+/// The authored Habitat node capabilities survive parsing and Node registration projection.
+#[test]
+fn habitat_mobility_profiles_reach_registration_with_distinct_floor_support() {
+    use integration::grpc::v0_4::scalar_value::Value as Scalar;
+
+    for (scenario, expected_base, expected_floor, expected_contracts) in [
+        ("e1-shared-world-episode-51/node-a.toml", "legged", true, 2),
+        (
+            "e1-shared-world-episode-51/node-b.toml",
+            "wheeled",
+            false,
+            2,
+        ),
+        ("habitat-local-eaios-c1-s0/node.toml", "legged", true, 1),
+        (
+            "habitat-local-eaios-c1-s0/node-cancel.toml",
+            "legged",
+            true,
+            1,
+        ),
+        ("habitat-local-eaios-c1-s0b/node.toml", "legged", true, 1),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios")
+            .join(scenario);
+        let catalog = crate::NodeServiceConfig::load_compiled(&path)
+            .expect("checked-in Habitat node config compiles");
+        let registration = registration_from_catalog(&catalog);
+        let mobility: Vec<_> = registration
+            .capability_profiles
+            .iter()
+            .filter(|profile| profile.contract.starts_with("mobility."))
+            .collect();
+        assert_eq!(mobility.len(), expected_contracts, "{scenario}");
+        assert!(
+            mobility.iter().all(|profile| {
+                profile
+                    .attributes
+                    .get("base-type")
+                    .and_then(|value| value.value.as_ref())
+                    == Some(&Scalar::StringValue(expected_base.to_string()))
+                    && profile
+                        .attributes
+                        .get("supports-floor-transition")
+                        .and_then(|value| value.value.as_ref())
+                        == Some(&Scalar::BoolValue(expected_floor))
+            }),
+            "{scenario} mobility attributes must retain deployment facts"
+        );
+    }
+}
+
 /// Resolves one checked-in Distributed Spatial Memory scenario file from the crate root.
 fn spatial_scenario_path(file_name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

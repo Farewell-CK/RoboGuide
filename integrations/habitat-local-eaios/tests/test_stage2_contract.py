@@ -46,13 +46,23 @@ class FakeModel:
         self.calls = 0
         self.planning_stage = False
         self.code_execution = False
+        self.chat_history: list[list[dict[str, Any]]] = []
+        self.tool_call_count = 1
 
     def chat(self, content: str, crab_planning: bool = False) -> Any:
-        """Emulate text planning, Provider failure, or the raw selected-tool tuple."""
+        """Emulate a vendor response while preserving its unselected raw tool calls."""
         del content
         self.calls += 1
         if isinstance(self.response, Exception):
             raise self.response
+        if not crab_planning:
+            self.chat_history.append(
+                [
+                    {"role": "user", "content": "observation"},
+                    {"role": "assistant", "tool_calls": [{}] * self.tool_call_count},
+                    {"role": "tool", "content": "first action only"},
+                ]
+            )
         return "planning text" if crab_planning else self.response
 
 
@@ -189,6 +199,91 @@ def test_valid_navigation_is_identical_to_vendor_and_audit_precedes_mutation(
     assert row["selected_action"]["arguments"] == {"target_obj": "location:north"}
     assert row["decision"] == "allowed"
     assert agent.llm_model.calls == reference.llm_model.calls == 1
+
+
+@pytest.mark.parametrize("tool_call_count", [0, 2, 4])
+def test_vendor_multiple_or_empty_raw_tool_calls_fail_before_dispatch(
+    tool_call_count: int, tmp_path: Path
+) -> None:
+    """A valid first tool cannot hide additional actions discarded by original EMOS."""
+    agent = FakeAgent("alpha", ("nav_to_obj", {"target_obj": "location:north"}))
+    agent.llm_model.tool_call_count = tool_call_count
+    audit = Stage2ActionAudit(tmp_path)
+    restore = install_stage2_contract_guard([agent], {"alpha": _contracts()["alpha"]}, audit.record)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="exactly one tool call"):
+            agent.chat("observation")
+        assert agent.dispatched == []
+        assert agent.llm_model.calls == 1
+    finally:
+        restore()
+        audit.close()
+    row = json.loads((tmp_path / "stage2-actions.jsonl").read_text())
+    assert row["decision"] == "rejected"
+    assert row["provider_tool_call_count"] == tool_call_count
+
+
+@pytest.mark.parametrize("fault", ["no-history", "stale-history", "malformed-response"])
+def test_unverifiable_raw_tool_calls_fail_closed(fault: str, tmp_path: Path) -> None:
+    """An apparently valid first action needs a current and readable raw model response."""
+    agent = FakeAgent("alpha", ("nav_to_obj", {"target_obj": "location:north"}))
+
+    def response_without_history(content: str, crab_planning: bool = False) -> Any:
+        """Return the selected action while leaving no current Provider evidence."""
+        del content, crab_planning
+        return agent.llm_model.response
+
+    def response_with_bad_history(content: str, crab_planning: bool = False) -> Any:
+        """Emulate a malformed raw Provider response accompanying a selected action."""
+        del content, crab_planning
+        agent.llm_model.chat_history.append([{"role": "assistant", "tool_calls": "bad"}])
+        return agent.llm_model.response
+
+    if fault == "no-history":
+        del agent.llm_model.chat_history
+        agent.llm_model.chat = response_without_history  # type: ignore[method-assign]
+    elif fault == "stale-history":
+        agent.llm_model.chat_history = [[{"role": "assistant", "tool_calls": [{}]}]]
+        agent.llm_model.chat = response_without_history  # type: ignore[method-assign]
+    else:
+        agent.llm_model.chat = response_with_bad_history  # type: ignore[method-assign]
+    audit = Stage2ActionAudit(tmp_path)
+    restore = install_stage2_contract_guard([agent], {"alpha": _contracts()["alpha"]}, audit.record)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="count is unavailable"):
+            agent.chat("observation")
+        assert agent.dispatched == []
+    finally:
+        restore()
+        audit.close()
+    row = json.loads((tmp_path / "stage2-actions.jsonl").read_text())
+    assert row["provider_tool_call_count"] is None
+    assert row["decision"] == "rejected"
+
+
+def test_audit_finalization_failure_does_not_mask_original_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Evidence finalization cannot replace an existing local contract failure."""
+    agent = FakeAgent("alpha", ("nav_to_obj", {"target_obj": "wrong"}))
+    audit = Stage2ActionAudit(tmp_path)
+    restore = install_stage2_contract_guard([agent], {"alpha": _contracts()["alpha"]}, audit.record)
+
+    def failed_flush() -> None:
+        """Model an unexpected evidence writer flush failure."""
+        raise OSError("evidence unavailable")
+
+    monkeypatch.setattr(audit._writer, "flush", failed_flush)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="canonical destination"):
+            try:
+                agent.chat("observation")
+            finally:
+                audit.close()
+    finally:
+        restore()
+    stats = json.loads((tmp_path / "stage2-action-audit.json").read_text())
+    assert stats["complete"] is False
 
 
 def test_peer_message_does_not_grant_the_receiver_new_navigation_authority(tmp_path: Path) -> None:

@@ -4,7 +4,20 @@ Convert the supplied mission identity and complete `grounded_intent` into an acy
 with role-level execution requirements. Preserve the mission identity and grounded objective
 exactly as supplied. The supplied `capability_catalog` is the complete canonical contract
 vocabulary for this planning request. The immutable `grounding_context` is the same attributed
-evidence already used by the Interpreter; it is not live deployment inventory.
+evidence already used by the Interpreter; it is not live deployment inventory. When
+`deployment_planning_profile` is supplied, it is a startup-frozen, deployment-owned summary
+of abstract capability classes. It is planning evidence, not a list of Nodes, Resources,
+Physical Entities, leases, reservations, health, or current availability.
+
+Use `deployment_planning_profile` only to understand which typed capability facts the deployment
+can offer in the abstract. A class id is not an Actor, robot, Node, or executor selector. Do not
+emit a class id into MissionPlan, infer a concrete assignment, or require a capability merely
+because a class exists. A Role capability constraint must be grounded by the supplied semantic
+requirement and world evidence; when the required world fact is missing, keep the uncertainty
+visible instead of guessing or choosing a provider class.
+When `authoritative_planning_world_evidence` is supplied, use only its explicit spatial facts and
+versioned relations. Its gaps are unknowns: they do not support guessed floors, reachability, start poses, or executor
+assignments. These facts describe the world and never select a Node, Resource, or Physical Entity.
 
 ## Coordination mode and Group shared view
 

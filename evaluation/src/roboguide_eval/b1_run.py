@@ -94,6 +94,13 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
     request = observed_request(
         documents["b1-request-record.json"], documents["b1-request-observations.json"]
     )
+    planning_world_key = "evidence/authoritative-planning-world-evidence.json"
+    planning_world = None
+    if _object(request.get("grounding_context")).get("schema_version") == (
+        "roboguide.grounding-context/v0.3"
+    ):
+        planning_world = load_document(run / planning_world_key)
+        documents[planning_world_key] = planning_world
     sent = _object(request.get("submission_evidence"))
     scoped = scoped_execution_evidence(
         str(request.get("mission_id") or ""),
@@ -115,6 +122,7 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         failure_evidence=failure,
         run_id=run.name,
         semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
+        planning_world_evidence=planning_world,
     )
     failures = [item.value for item in provenance.failures]
     archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)

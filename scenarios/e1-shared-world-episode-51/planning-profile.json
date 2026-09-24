@@ -1,0 +1,64 @@
+{
+  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "authority": "deployment-owned",
+  "identity": {
+    "profile_id": "e1-shared-world-mobility",
+    "revision": "e1-shared-world-capability-2026-09-24",
+    "source": "deployment://e1-shared-world"
+  },
+  "capability_classes": [
+    {
+      "id": "legged-floor-capable",
+      "description": "Abstract mobility capability class with deployment-supported inter-floor navigation.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "wheeled-single-floor",
+      "description": "Abstract mobility capability class limited to deployment-supported single-floor navigation.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:a5c2535d32eba30a4dcb82b7574d02d3ebcf3580ba486eb419428f63fd2a0df8"
+}

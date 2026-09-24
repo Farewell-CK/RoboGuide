@@ -39,7 +39,7 @@ timeout_ms = 5000
 contract = "mobility.navigate@v1"
 kind = "mobility"
 owner = "habitat-local-eaios"
-attributes = {}
+attributes = { "base-type" = "legged", "supports-floor-transition" = true }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

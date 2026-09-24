@@ -140,6 +140,12 @@ requirements；integrated operation 不会把内部 Local How 展开为全局 re
 [`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md) 与
 [`ADR-0034`](docs/decisions/0034-mission-semantic-contract-normalization.md)。
 
+部署可额外提供启动时冻结的抽象能力类别摘要和带 episode/dataset 身份的环境静态事实。
+MI 在同一不可变 Grounding Context 中保留已知事实和未知缺口；尚未 reset 才能确定的机器人
+起点不可推测。能力类别不代表当前可用 Node，只有任务与世界证据支持时才声明 Role 的
+typed constraint，最终匹配和资源承诺仍由 Control 决定。见
+[`ADR-0044`](docs/decisions/0044-deployment-planning-evidence.md)。
+
 Mission Review 不再隐藏在 Planner 调用内部。Reviewer 对 exact draft 返回结构化 issue，Mission
 Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最多自动修复两次，
 `RequestClarification` 返回用户对话，`RejectDraft` 或 repair budget exhausted 才失败。Repairer

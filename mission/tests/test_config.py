@@ -55,9 +55,9 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     """Versioned prompts must demand executable tasks without stealing Control authority."""
     settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
     planner_prompt = settings.prompts.planner_path.read_text(encoding="utf-8")
-    interpreter_prompt = settings.prompts.interpreter_path.read_text(encoding="utf-8")
     reviewer_prompt = settings.prompts.reviewer_path.read_text(encoding="utf-8")
     repairer_prompt = settings.prompts.repairer_path.read_text(encoding="utf-8")
+    interpreter_prompt = settings.prompts.interpreter_path.read_text(encoding="utf-8")
     assert "Do not emit meta-tasks" in planner_prompt
     assert "Do not create Tasks" in interpreter_prompt
     assert "must not select concrete nodes" in planner_prompt
@@ -67,6 +67,18 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     assert "Local EAIOS workflow steps are not over-decomposed" in reviewer_prompt
     assert "Operation is what to execute" in planner_prompt
     assert "do not consult or infer live Node inventory" in planner_prompt
+    assert "deployment_planning_profile" in planner_prompt
+    assert "deployment_planning_profile" in reviewer_prompt
+    assert "deployment_planning_profile" in repairer_prompt
+    assert "authoritative_planning_world_evidence" in planner_prompt
+    assert "authoritative_planning_world_evidence" in reviewer_prompt
+    assert "authoritative_planning_world_evidence" in repairer_prompt
+    assert "planning_world_evidence" in interpreter_prompt
+    assert "class id is not an Actor" in planner_prompt
+    assert "cannot select an Actor" in reviewer_prompt
+    assert "versioned relations" in planner_prompt
+    assert "versioned relations" in reviewer_prompt
+    assert "versioned relations" in repairer_prompt
 
 
 def test_prompts_share_mission_semantic_consistency_rules() -> None:

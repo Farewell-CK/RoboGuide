@@ -308,6 +308,152 @@
         );
     }
 
+    /// Floor-transition constraints filter profiles; an unconstrained task remains eligible on either provider.
+    #[test]
+    fn matching_distinguishes_cross_floor_and_unconstrained_mobility() {
+        for operation in ["navigate", "move"] {
+            let mobility = CapabilityContractRef::new("mobility", operation, "v1")
+                .expect("navigation contract valid");
+            let node = |name: &str, floor_transition: bool| {
+                NodeRegistration::new_with_contracts(
+                    NodeId::new(name).expect("node id valid"),
+                    domain::LocalRuntime::new("fake-habitat", "0.1").expect("runtime valid"),
+                    domain::NodeContractVersion::v0_1(),
+                    vec![Capability::new(CapabilityKind::Mobility, true)],
+                    vec![mobility.clone()],
+                    vec![Resource::new(
+                        ResourceId::new(format!("{name}-space")).expect("resource id valid"),
+                        ResourceKind::Space,
+                        1,
+                    )
+                    .expect("resource valid")],
+                )
+                .with_capability_attributes(BTreeMap::from([(
+                    mobility.clone(),
+                    BTreeMap::from([(
+                        "supports-floor-transition".to_string(),
+                        domain::ExecutionValue::Bool(floor_transition),
+                    )]),
+                )]))
+                .expect("capability attributes valid")
+            };
+            let role = RoleId::new("navigator").expect("role valid");
+            let task = |name: &str, needs_floor_transition: bool| {
+                let requirement = if needs_floor_transition {
+                    domain::CapabilityRequirement::new(
+                        mobility.clone(),
+                        vec![domain::CapabilityConstraint::new(
+                            "supports-floor-transition",
+                            domain::CapabilityConstraintOperator::Equals,
+                            domain::ExecutionValue::Bool(true),
+                        )
+                        .expect("constraint valid")],
+                    )
+                    .expect("capability requirement valid")
+                } else {
+                    domain::CapabilityRequirement::exact(mobility.clone())
+                };
+                TaskRequirement::new(
+                    domain::MissionId::new("mobility-mission").expect("mission valid"),
+                    TaskId::new(name).expect("task valid"),
+                    vec![RoleRequirement::new_normalized(
+                        role.clone(),
+                        None,
+                        vec![requirement],
+                        vec![ResourceRequirement::new(ResourceKind::Space, 1)
+                            .expect("resource requirement valid")],
+                    )
+                    .expect("role requirement valid")],
+                )
+                .expect("task requirement valid")
+            };
+            let now = TimestampMs::new(0);
+            let correlation_id = correlation();
+            let mut control = ControlPlane::new();
+            let mut state = InMemorySharedNodeState::new();
+            let mut events = TestEvents;
+            for registration in [node("spot", true), node("fetch", false)] {
+                control
+                    .register_node(
+                        &mut state,
+                        registration,
+                        NodeStatus::new(NodeHealth::Online, now),
+                        now,
+                        &correlation_id,
+                        &mut events,
+                    )
+                    .expect("registration succeeds");
+            }
+            let cross_floor = control
+                .match_capabilities(
+                    &state,
+                    &task("cross-floor", true),
+                    now,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("Spot has a valid cross-floor capability");
+            assert_eq!(
+                cross_floor.for_role(&role).expect("role exists").node_ids(),
+                &[NodeId::new("spot").expect("node id valid")],
+            );
+            // Unknown provider capability does not satisfy a cross-floor request.
+            control
+                .register_node(
+                    &mut state,
+                    NodeRegistration::new_with_contracts(
+                        NodeId::new("unknown-floor").expect("node id valid"),
+                        domain::LocalRuntime::new("fake-habitat", "0.1")
+                            .expect("runtime valid"),
+                        domain::NodeContractVersion::v0_1(),
+                        vec![Capability::new(CapabilityKind::Mobility, true)],
+                        vec![mobility.clone()],
+                        vec![Resource::new(
+                            ResourceId::new("unknown-floor-space").expect("resource id valid"),
+                            ResourceKind::Space,
+                            1,
+                        )
+                        .expect("resource valid")],
+                    ),
+                    NodeStatus::new(NodeHealth::Online, now),
+                    now,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("unknown provider registration succeeds");
+            let constrained = control
+                .match_capabilities(
+                    &state,
+                    &task("cross-floor-with-unknown", true),
+                    now,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("only proved provider can cross floors");
+            assert_eq!(
+                constrained.for_role(&role).expect("role exists").node_ids(),
+                &[NodeId::new("spot").expect("node id valid")],
+            );
+            let ordinary = control
+                .match_capabilities(
+                    &state,
+                    &task("ordinary-navigation", false),
+                    now,
+                    &correlation_id,
+                    &mut events,
+                )
+                .expect("both nodes can navigate without cross-floor requirement");
+            assert_eq!(
+                ordinary.for_role(&role).expect("role exists").node_ids(),
+                &[
+                    NodeId::new("fetch").expect("node id valid"),
+                    NodeId::new("spot").expect("node id valid"),
+                    NodeId::new("unknown-floor").expect("node id valid"),
+                ],
+            );
+        }
+    }
+
     /// Concurrent missions share node facts while retaining distinct TaskRefs.
     #[test]
     fn multi_mission_matching_shares_state_without_identity_collision() {

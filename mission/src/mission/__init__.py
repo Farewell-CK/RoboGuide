@@ -23,6 +23,20 @@ from mission.grounding_reader import (
 from mission.intent import GroundedIntent
 from mission.models import MissionPlan, MissionPlanError
 from mission.planners import FixturePlanner, MissionPlanner
+from mission.planning_profile import (
+    DeploymentPlanningProfile,
+    PlanningCapabilityClass,
+    PlanningCapabilityFact,
+    PlanningProfileError,
+    load_optional_planning_profile,
+)
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningSpatialFact,
+    PlanningWorldEvidenceError,
+    PlanningWorldGap,
+    PlanningWorldRelation,
+)
 from mission.requests import (
     DialogueSpeaker,
     DialogueTurn,
@@ -55,6 +69,7 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalRule",
     "CanonicalCapabilityCatalog",
+    "DeploymentPlanningProfile",
     "CapabilityCatalogError",
     "DialogueSpeaker",
     "DialogueTurn",
@@ -70,6 +85,14 @@ __all__ = [
     "MissionPlanReviewAttempt",
     "MissionPlanReviewer",
     "MissionPlanError",
+    "PlanningCapabilityClass",
+    "PlanningCapabilityFact",
+    "PlanningProfileError",
+    "AuthoritativePlanningWorldEvidence",
+    "PlanningSpatialFact",
+    "PlanningWorldRelation",
+    "PlanningWorldEvidenceError",
+    "PlanningWorldGap",
     "MissionReviewIssue",
     "MissionPlanner",
     "MissionGroundingReader",
@@ -90,5 +113,6 @@ __all__ = [
     "AuthoritativeSemanticEvidence",
     "SemanticEvidenceError",
     "SemanticExpression",
+    "load_optional_planning_profile",
     "load_settings",
 ]

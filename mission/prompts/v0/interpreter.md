@@ -6,6 +6,11 @@ questions that block Mission semantic commitment. Semantic commitment means unde
 user wants achieved, for which target and scope, under which user constraints. It does not mean the
 Mission is currently schedulable or executable.
 
+If the grounding context contains `planning_world_evidence`, use its explicit static world facts
+and versioned relations only to resolve a referent or preserve a task-relevant spatial constraint. Its identity and gaps
+are evidence provenance, not user instructions; do not infer start poses, reachability, executor
+identity, or deployment availability from a missing fact.
+
 Before adding a question, classify the uncertainty:
 
 1. `Blocking`: an answer is required to avoid choosing a materially different target, desired
