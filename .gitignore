@@ -7,6 +7,10 @@
 *.ap_
 *.aab
 
+# 再重新包含 app/libs 目录及其下的 aar
+!app/libs/
+!app/libs/*.aar
+
 # Files for the ART/Dalvik VM
 *.dex
 
@@ -91,3 +95,7 @@ lint/tmp/
 
 # Android Profiling
 *.hprof
+
+# Claude Code
+.claude/
+CLAUDE.md
