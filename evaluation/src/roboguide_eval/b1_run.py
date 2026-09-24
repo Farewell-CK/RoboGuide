@@ -34,6 +34,7 @@ B1_FILES = (
     "run-failure.json",
     "evidence/authoritative-semantic-evidence.json",
     "evidence/shared-world-summary.json",
+    "planning-world-source.json",
 )
 
 
@@ -96,8 +97,11 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
     )
     planning_world_key = "evidence/authoritative-planning-world-evidence.json"
     planning_world = None
-    if _object(request.get("grounding_context")).get("schema_version") == (
-        "roboguide.grounding-context/v0.3"
+    if (
+        _object(request.get("grounding_context")).get("schema_version")
+        == "roboguide.grounding-context/v0.3"
+        or _object(documents["b1-provenance.json"]).get("schema_version")
+        == PROVENANCE_SCHEMA_VERSION
     ):
         planning_world = load_document(run / planning_world_key)
         documents[planning_world_key] = planning_world
@@ -123,6 +127,7 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         run_id=run.name,
         semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
         planning_world_evidence=planning_world,
+        planning_source=documents["planning-world-source.json"],
     )
     failures = [item.value for item in provenance.failures]
     archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)
@@ -171,7 +176,7 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         "schema": B1_VERDICT_SCHEMA,
         "run_id": run.name,
         "evidence_digest": digest(documents),
-        "provenance_schema": PROVENANCE_SCHEMA_VERSION,
+        "provenance_schema": record.schema_version if record else PROVENANCE_SCHEMA_VERSION,
         "protocol_provenance": "VALID" if admission.provenance_valid else "INVALID",
         "system_outcome": system_outcome,
         "admission": admission.to_json(),

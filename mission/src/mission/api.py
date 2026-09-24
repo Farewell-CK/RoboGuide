@@ -109,6 +109,9 @@ def build_engine(
             max_acquisition_attempts=service_settings.grounding_acquisition_attempts,
             semantic_evidence_path=service_settings.grounding_semantic_evidence_path,
             planning_world_evidence_path=service_settings.grounding_planning_world_evidence_path,
+            planning_world_evidence_required=(
+                service_settings.grounding_planning_world_evidence_required
+            ),
         ),
     )
     return engine, service_settings

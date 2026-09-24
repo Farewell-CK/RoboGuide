@@ -192,6 +192,7 @@ class HttpMissionGroundingReader:
         max_acquisition_attempts: int = 2,
         semantic_evidence_path: Path | None = None,
         planning_world_evidence_path: Path | None = None,
+        planning_world_evidence_required: bool = False,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -213,6 +214,9 @@ class HttpMissionGroundingReader:
         self._transport = transport or UrllibGroundingJsonTransport()
         self._semantic_evidence_path = semantic_evidence_path
         self._planning_world_evidence_path = planning_world_evidence_path
+        if planning_world_evidence_required and planning_world_evidence_path is None:
+            raise GroundingReadError("required planning world evidence needs a configured path")
+        self._planning_world_evidence_required = planning_world_evidence_required
         if any(not schema.strip() for schema in admitted_world_payload_schemas):
             raise GroundingReadError("admitted World payload schemas must be nonblank")
         self._admitted_world_payload_schemas = admitted_world_payload_schemas
@@ -287,6 +291,10 @@ class HttpMissionGroundingReader:
                 "authoritative-planning-world-evidence",
                 str(error),
             )
+            if self._planning_world_evidence_required:
+                raise GroundingReadError(
+                    "required planning world evidence is unavailable or invalid"
+                ) from error
             return None
 
     def _read_state(self, gaps: _GroundingGapCollector) -> tuple[StateGroundingEvidence, ...]:

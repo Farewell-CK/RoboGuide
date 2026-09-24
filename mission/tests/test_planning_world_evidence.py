@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 from mission.grounding_context import GroundingContextSnapshot
-from mission.grounding_reader import HttpMissionGroundingReader
+from mission.grounding_reader import GroundingReadError, HttpMissionGroundingReader
 from mission.models import JSONValue
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
@@ -195,3 +195,32 @@ def test_reader_freezes_planning_world_evidence_and_records_missing_source(tmp_p
     missing = reader.capture("request-2", dialogue, 3)
     assert missing.planning_world_evidence is None
     assert any(gap.code == "planning_world_evidence_unavailable" for gap in missing.gaps)
+
+
+@pytest.mark.parametrize("invalid", ["missing", "malformed", "tampered"])
+def test_required_planning_world_source_stops_before_model_input(
+    tmp_path: Path, invalid: str
+) -> None:
+    """An explicitly required source cannot silently select the legacy v0.2 snapshot."""
+    path = tmp_path / "planning-world.json"
+    if invalid == "malformed":
+        path.write_text("{", encoding="utf-8")
+    elif invalid == "tampered":
+        document = _evidence().to_json()
+        document["facts"] = []
+        path.write_text(json.dumps(document), encoding="utf-8")
+    reader = HttpMissionGroundingReader(
+        "http://controller.test",
+        "http://artifact.test",
+        1.0,
+        4,
+        4,
+        _Transport(),
+        planning_world_evidence_path=path,
+        planning_world_evidence_required=True,
+    )
+    dialogue = (
+        DialogueTurn("turn-1", DialogueSpeaker.USER, DialogueTurnKind.INSTRUCTION, "goal", 1),
+    )
+    with pytest.raises(GroundingReadError, match="required planning world evidence"):
+        reader.capture("request-1", dialogue, 2)

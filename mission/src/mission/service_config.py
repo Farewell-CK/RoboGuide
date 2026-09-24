@@ -40,6 +40,7 @@ class MissionServiceSettings:
     grounding_world_payload_schemas: frozenset[str]
     grounding_semantic_evidence_path: Path | None
     grounding_planning_world_evidence_path: Path | None
+    grounding_planning_world_evidence_required: bool
     execution_profile_path: Path | None
     planning_profile_path: Path | None
     max_request_bytes: int
@@ -76,6 +77,14 @@ def load_service_settings(
     _validate_origin(artifact_endpoint, "artifact_endpoint")
     approval_policy = _approval_policy(service)
     root = repository_root if repository_root is not None else path.parent.parent
+    planning_world_path = _optional_path(service, "grounding_planning_world_evidence_path", root)
+    planning_world_required = service.get("grounding_planning_world_evidence_required", False)
+    if not isinstance(planning_world_required, bool):
+        raise MissionServiceConfigError(
+            "service.grounding_planning_world_evidence_required must be a Boolean"
+        )
+    if planning_world_required and planning_world_path is None:
+        raise MissionServiceConfigError("required planning world evidence needs a configured path")
     return MissionServiceSettings(
         listen_host=host,
         listen_port=port,
@@ -106,9 +115,8 @@ def load_service_settings(
         grounding_semantic_evidence_path=_optional_path(
             service, "grounding_semantic_evidence_path", root
         ),
-        grounding_planning_world_evidence_path=_optional_path(
-            service, "grounding_planning_world_evidence_path", root
-        ),
+        grounding_planning_world_evidence_path=planning_world_path,
+        grounding_planning_world_evidence_required=planning_world_required,
         execution_profile_path=_optional_path(service, "execution_profile_path", root),
         planning_profile_path=_optional_path(service, "planning_profile_path", root),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),

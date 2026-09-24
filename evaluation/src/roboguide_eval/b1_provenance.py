@@ -23,7 +23,10 @@ from mission.planning_world_evidence import (
 
 from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
 
-PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.3"
+PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.4"
+LEGACY_PROVENANCE_SCHEMA_VERSION = "roboguide.e1.b1-provenance/v0.3"
+PLANNING_SOURCE_SCHEMA = "roboguide.e1.planning-world-source/v0.1"
+PLANNING_SOURCE_ARTIFACT = "evidence/authoritative-planning-world-evidence.json"
 SUBMISSION_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
 RUN_FAILURE_SCHEMA = "roboguide.e1.run-failure/v0.1"
@@ -108,6 +111,8 @@ class ProvenanceFailure(StrEnum):
     PLANNING_WORLD_EVIDENCE_INVALID = "planning_world_evidence_invalid"
     PLANNING_WORLD_EVIDENCE_IDENTITY_MISMATCH = "planning_world_evidence_identity_mismatch"
     MI_PLANNING_WORLD_EVIDENCE_MISMATCH = "mi_planning_world_evidence_mismatch"
+    PLANNING_SOURCE_INVALID = "planning_world_source_invalid"
+    REQUIRED_PLANNING_WORLD_EVIDENCE_MISSING = "required_planning_world_evidence_missing"
     CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
     EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
@@ -131,6 +136,7 @@ class B1ProvenanceRecord:
     submission_evidence_digest: str
     failure_evidence_digest: str
     semantic_evidence_digest: str
+    planning_source_digest: str = ""
     benchmark_evidence_digest: str | None = None
     schema_version: str = PROVENANCE_SCHEMA_VERSION
 
@@ -140,8 +146,16 @@ class B1ProvenanceRecord:
 
     @classmethod
     def from_json(cls, value: Any) -> B1ProvenanceRecord | None:
-        """Reject missing/old/malformed artifacts instead of upgrading v0.1."""
-        if not isinstance(value, dict) or value.get("schema_version") != PROVENANCE_SCHEMA_VERSION:
+        """Restore current or explicit v0.3 legacy links without upgrading unknown versions."""
+        if not isinstance(value, dict) or value.get("schema_version") not in {
+            PROVENANCE_SCHEMA_VERSION,
+            LEGACY_PROVENANCE_SCHEMA_VERSION,
+        }:
+            return None
+        if (
+            value["schema_version"] == PROVENANCE_SCHEMA_VERSION
+            and "planning_source_digest" not in value
+        ):
             return None
         try:
             record = cls(**value)
@@ -467,6 +481,8 @@ def _check_semantic_evidence(
     frozen: dict[str, Any],
     record: B1ProvenanceRecord | None,
     run_id: str | None,
+    *,
+    allow_missing_grounding: bool = False,
 ) -> list[ProvenanceFailure]:
     """Bind adapter evidence to the complete frozen workload identity and MI context."""
     failures: list[ProvenanceFailure] = []
@@ -522,7 +538,7 @@ def _check_semantic_evidence(
         for key, value in grounding.items()
         if key not in {"schema_version", "context_digest"}
     }
-    if (
+    if not allow_missing_grounding and (
         grounding.get("schema_version")
         not in {"roboguide.grounding-context/v0.2", "roboguide.grounding-context/v0.3"}
         or grounding.get("context_digest") != plan_digest(context_body)
@@ -533,6 +549,43 @@ def _check_semantic_evidence(
     if record and record.semantic_evidence_digest != semantic.get("digest"):
         failures.append(ProvenanceFailure.SEMANTIC_EVIDENCE_INVALID)
     return failures
+
+
+def required_planning_source(run_id: str, frozen_input: Any) -> dict[str, Any]:
+    """Declare one required run-local planning source before MI deliberation begins."""
+    extract_b1_workload(frozen_input)
+    return {
+        "schema_version": PLANNING_SOURCE_SCHEMA,
+        "run_id": run_id,
+        "input_digest": plan_digest(frozen_input),
+        "required": True,
+        "artifact": PLANNING_SOURCE_ARTIFACT,
+    }
+
+
+def _check_planning_source(
+    document: Any,
+    record: B1ProvenanceRecord | None,
+    frozen: dict[str, Any],
+    run_id: str | None,
+) -> list[ProvenanceFailure]:
+    """Fence a configured source independently of the MI grounding schema."""
+    if record is None or record.schema_version == LEGACY_PROVENANCE_SCHEMA_VERSION:
+        return []
+    source = _object(document)
+    if (
+        set(source) != {"schema_version", "run_id", "input_digest", "required", "artifact"}
+        or source.get("schema_version") != PLANNING_SOURCE_SCHEMA
+        or source.get("required") is not True
+        or source.get("artifact") != PLANNING_SOURCE_ARTIFACT
+        or not isinstance(source.get("run_id"), str)
+        or source.get("run_id") != record.run_id
+        or (run_id is not None and source.get("run_id") != run_id)
+        or source.get("input_digest") != plan_digest(frozen)
+        or record.planning_source_digest != digest(source)
+    ):
+        return [ProvenanceFailure.PLANNING_SOURCE_INVALID]
+    return []
 
 
 def _check_planning_world_evidence(
@@ -590,12 +643,16 @@ def verify_b1_provenance(
     run_id: str | None = None,
     semantic_evidence: Any = None,
     planning_world_evidence: Any = None,
+    planning_source: Any = None,
 ) -> ProvenanceVerification:
     """Check each reached boundary, allowing only attributable early failures."""
     failures: list[ProvenanceFailure] = []
     if record is None:
         failures.append(ProvenanceFailure.PROVENANCE_RECORD_MISSING)
-    elif record.schema_version != PROVENANCE_SCHEMA_VERSION:
+    elif record.schema_version not in {
+        PROVENANCE_SCHEMA_VERSION,
+        LEGACY_PROVENANCE_SCHEMA_VERSION,
+    }:
         failures.append(ProvenanceFailure.SCHEMA_UNSUPPORTED)
     if record and run_id is not None and record.run_id != run_id:
         failures.append(ProvenanceFailure.RUN_ID_MISMATCH)
@@ -612,6 +669,7 @@ def verify_b1_provenance(
         failures.append(ProvenanceFailure.INPUT_DIGEST_MISSING)
     elif record and record.input_digest != digest(frozen):
         failures.append(ProvenanceFailure.INPUT_DIGEST_MISMATCH)
+    failures.extend(_check_planning_source(planning_source, record, frozen, run_id))
     request = observed_request(request_record, request_observations)
     observed_failure = _object(failure_evidence)
     # The workload may fail at SUT startup before MI can mint any request.
@@ -650,7 +708,29 @@ def verify_b1_provenance(
         ):
             failures.append(ProvenanceFailure.FAILURE_EVIDENCE_MISMATCH)
         return ProvenanceVerification(not failures, tuple(failures), None, False)
-    failures.extend(_check_semantic_evidence(semantic_evidence, request, frozen, record, run_id))
+    request_grounding_failure = bool(
+        request_failure(request).get("stage") == "grounding"
+        and request.get("grounding_context") is None
+        and request.get("plan") is None
+    )
+    failures.extend(
+        _check_semantic_evidence(
+            semantic_evidence,
+            request,
+            frozen,
+            record,
+            run_id,
+            allow_missing_grounding=request_grounding_failure,
+        )
+    )
+    if (
+        record is not None
+        and record.schema_version == PROVENANCE_SCHEMA_VERSION
+        and _object(request.get("grounding_context")).get("schema_version")
+        != "roboguide.grounding-context/v0.3"
+        and not request_grounding_failure
+    ):
+        failures.append(ProvenanceFailure.REQUIRED_PLANNING_WORLD_EVIDENCE_MISSING)
     failures.extend(
         _check_planning_world_evidence(
             planning_world_evidence,
@@ -739,6 +819,7 @@ def build_b1_provenance_record(
     execution_attempts_path: Path,
     shared_world_summary_path: Path,
     semantic_evidence_path: Path | None = None,
+    planning_source_path: Path | None = None,
     failure_evidence_path: Path | None = None,
     request_observations_path: Path | None = None,
 ) -> B1ProvenanceRecord:
@@ -761,6 +842,7 @@ def build_b1_provenance_record(
     )
     failure = load_document(failure_evidence_path) if failure_evidence_path else None
     semantic = load_document(semantic_evidence_path) if semantic_evidence_path else None
+    planning_source = load_document(planning_source_path) if planning_source_path else None
     return B1ProvenanceRecord(
         run_id=run_id,
         input_digest=digest(frozen),
@@ -776,7 +858,13 @@ def build_b1_provenance_record(
         semantic_evidence_digest=(
             str(semantic.get("digest")) if isinstance(semantic, dict) else ""
         ),
+        planning_source_digest=digest(planning_source) if planning_source is not None else "",
         benchmark_evidence_digest=digest_document(shared_world_summary_path),
+        schema_version=(
+            PROVENANCE_SCHEMA_VERSION
+            if planning_source_path is not None
+            else LEGACY_PROVENANCE_SCHEMA_VERSION
+        ),
     )
 
 

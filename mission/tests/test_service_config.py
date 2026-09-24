@@ -47,6 +47,22 @@ def test_shared_world_service_configuration_selects_deployment_execution_profile
         settings.grounding_planning_world_evidence_path
         == (Path.cwd() / "PLANNING_WORLD_EVIDENCE_PLACEHOLDER").resolve()
     )
+    assert settings.grounding_planning_world_evidence_required is True
+
+
+@pytest.mark.parametrize("raw", ["true", '"yes"'])
+def test_required_planning_world_configuration_needs_exact_boolean_and_path(
+    tmp_path: Path, raw: str
+) -> None:
+    """Required evidence cannot be enabled ambiguously or without its fixed source."""
+    path = tmp_path / "mission-service.toml"
+    text = Path("config/mission-service.toml").read_text(encoding="utf-8")
+    path.write_text(
+        text.replace("[service]", f"[service]\ngrounding_planning_world_evidence_required = {raw}"),
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionServiceConfigError, match="required planning world|Boolean"):
+        load_service_settings(path, repository_root=tmp_path)
 
 
 def test_service_configuration_rejects_ambiguous_risk_contract(tmp_path: Path) -> None:

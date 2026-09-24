@@ -30,16 +30,21 @@ boundaries. Habitat samples agent start state at reset, after Control assignment
    freezes it in Grounding Context v0.3. When semantic evidence is also supplied, the two
    sources must agree on run, episode, scene, and dataset identity. A missing or malformed
    optional source is an acquisition gap; it does not become a guessed floor or a user
-   clarification by itself.
+   clarification by itself. Deployments may mark a configured source as required: failure
+   to read or validate it then terminates Grounding before any model call, with an
+   attributable system failure rather than an accepted v0.2 context.
    Existing v0.2 contexts remain readable and unchanged.
 4. Interpreter sees the frozen context; Planner, Reviewer, and Repairer receive the same
    planning-world facts and deployment profile. A typed Role constraint requires evidence
    from the actual task and world, not merely the existence of a capability class. Control
    alone matches constraints against current Node registration and commits resources.
-5. B1 provenance accepts v0.2 and v0.3 Grounding Context. For v0.3, it verifies the original
-   adapter artifact against MI's frozen snapshot, the semantic evidence, and the frozen B1
-   workload. This adds no Formal population exclusion based on semantic goal coverage or
-   physical success.
+5. B1 provenance accepts historical v0.2 and v0.3 Grounding Context under its explicit
+   legacy record version. New B1 runs freeze a run-local required-source declaration before
+   starting the SUT and use provenance v0.4 to bind that declaration, the original adapter
+   artifact, MI's frozen snapshot, semantic evidence, and the frozen workload. A configured
+   source cannot silently downgrade an accepted request to v0.2. An attributable early
+   Grounding failure remains a system outcome; this adds no Formal population exclusion
+   based on semantic goal coverage or physical success.
 
 ## Consequences and limits
 

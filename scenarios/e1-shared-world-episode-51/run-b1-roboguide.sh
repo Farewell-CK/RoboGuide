@@ -164,6 +164,8 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
+uv run --project "$REPO" python -m roboguide_eval.b1_planning_source "$RUN" \
+    || { FAILURE_REASON=planning_world_source_declaration_failed; exit 1; }
 if [[ ! -x "$SERVER" || ! -x "$NODE" || ! -f "$MISSION_CONFIG" ]]; then
     FAILURE_REASON=required_sut_binary_missing
     exit 1
@@ -232,6 +234,9 @@ FAILURE_REASON=local_eaios_startup_failed
 # Wait before MI freezes its one immutable grounding snapshot.
 wait_http http://127.0.0.1:28100/v1/health 240 ONLINE
 wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
+uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
+    "$RUN" --check-artifact \
+    || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
 
 "$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
     127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
