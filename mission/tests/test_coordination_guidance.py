@@ -268,6 +268,13 @@ def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None
         "grounded requirement or admitted evidence establishes persistence",
         "preserve enough logical participation capacity",
         "does not by itself prove that eventual PhysicalEntity bindings must be distinct",
+        "Different logical Actors can express the participation needed",
+        "not a guarantee that the deployment or Local How will achieve them",
+        "Control determines feasible bindings",
+        "an environment's official outcome remains a separate authority",
+        "A relation between two destinations, including `different_floor`, does not establish",
+        "admitted start-to-destination evidence",
+        "Unknown start state stays unknown",
     ):
         assert requirement in rules
     for instructions_for_role in instructions:
@@ -279,7 +286,10 @@ def test_all_deliberation_paths_receive_the_same_coordination_contract() -> None
     assert "Review semantic necessity separately from structural validity" in review_rules
     assert "use `RejectDraft`: this is a deployment contract gap" in review_rules
     assert "Report all observed blockers together" in review_rules
+    assert "do not reject it merely because the frozen input cannot prove" in review_rules
+    assert "A repair instruction must be actionable with the supplied evidence" in review_rules
     assert "invalid mechanism is not an unaffected constraint" in instructions[3]
+    assert "treat each Review issue as a claim to check" in instructions[3]
     inputs = [json.loads(cast(str, request[2]["input"])) for request in transport.requests]
     for model_input in inputs:
         assert model_input["grounded_intent"] == intent.to_json()

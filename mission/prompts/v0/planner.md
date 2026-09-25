@@ -65,6 +65,19 @@ explicit restoration mechanism. Otherwise preserve enough logical participation 
 plan to represent a feasible joint state. This effect-preservation check does not by itself prove
 that eventual PhysicalEntity bindings must be distinct, authorize a hard
 `distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
+Different logical Actors can express the participation needed to attempt coexisting effects
+without choosing their eventual PhysicalEntity bindings. The plan describes intended outcomes,
+not a guarantee that the deployment or Local How will achieve them. Control determines feasible
+bindings and the declared satisfaction basis determines Mission completion; an environment's
+official outcome remains a separate authority. Do not add a hard physical-identity constraint
+just to turn an uncertain physical outcome into an apparent planning guarantee.
+
+Apply a mobility capability constraint to the Role that actually needs it. A relation between
+two destinations, including `different_floor`, does not establish either executor's start floor
+or prove that either individual movement crosses floors. Require floor-transition capability
+only when the grounded task and admitted start-to-destination evidence establish that need, or
+when an explicit Mission requirement independently requires it. Unknown start state stays
+unknown; do not infer it from deployment capability classes or target separation.
 
 A Group shared view declares exactly what the cooperation consumes:
 

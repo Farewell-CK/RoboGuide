@@ -58,6 +58,19 @@ explicit restoration mechanism. Otherwise preserve enough logical participation 
 plan to represent a feasible joint state. This effect-preservation check does not by itself prove
 that eventual PhysicalEntity bindings must be distinct, authorize a hard
 `distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
+Different logical Actors can express the participation needed to attempt coexisting effects
+without choosing their eventual PhysicalEntity bindings. The plan describes intended outcomes,
+not a guarantee that the deployment or Local How will achieve them. Control determines feasible
+bindings and the declared satisfaction basis determines Mission completion; an environment's
+official outcome remains a separate authority. Do not add a hard physical-identity constraint
+just to turn an uncertain physical outcome into an apparent planning guarantee.
+
+Apply a mobility capability constraint to the Role that actually needs it. A relation between
+two destinations, including `different_floor`, does not establish either executor's start floor
+or prove that either individual movement crosses floors. Require floor-transition capability
+only when the grounded task and admitted start-to-destination evidence establish that need, or
+when an explicit Mission requirement independently requires it. Unknown start state stays
+unknown; do not infer it from deployment capability classes or target separation.
 
 A Group shared view declares exactly what the cooperation consumes:
 
@@ -101,6 +114,12 @@ Actor/ContextRole/Task references that create that continuity. If the frozen inp
 preserve the Tasks with additional logical participation capacity, require that repair without a hard
 physical-distinctness constraint. Do not misreport this as a need for `requires-active` or a Group
 shared view.
+If the draft already has sufficient logical participation and preserves the required outcomes,
+do not reject it merely because the frozen input cannot prove that a future physical run will
+satisfy every terminal predicate. Do not demand a hard `distinct-physical-entities` constraint
+unless the same frozen authoritative goal and admitted physical-entity evidence can support that
+constraint under the plan's admission rule. A repair instruction must be actionable with the
+supplied evidence; do not send Repairer an instruction that would itself fail admission.
 
 Use `RepairPlan` for an unsupported cooperation mechanism when the supplied facts suffice to choose
 and express the correct mode, and for incomplete genuine cooperation whose contracts are supplied.
@@ -144,8 +163,9 @@ Approve it only when all of the following hold:
   Context `executor_constraints` express required physical distinctness, not a global policy
   to spread Nodes. Pairwise distinct eventual bindings do not name or select those entities, so a
   confirmed multiple-participant requirement can ground that relationship while Actor
-  `physical_entity` remains unset. Do not require distinctness without a semantic reason or fix
-  ungrounded Actors to particular live providers. Under environment-authoritative semantics,
+  `physical_entity` remains unset for a non-authoritative Mission. Do not require distinctness
+  without a semantic reason or fix ungrounded Actors to particular live providers. Under
+  environment-authoritative semantics,
   approve such a constraint only when the goal and admitted physical-entity evidence jointly
   ground every constrained Actor identity;
 - each Role declares all exact capability requirements separately from its canonical semantic
