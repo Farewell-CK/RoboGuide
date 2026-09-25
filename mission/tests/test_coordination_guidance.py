@@ -358,6 +358,61 @@ def test_recovery_removes_only_unsupported_authoritative_constraint() -> None:
     ]
 
 
+def test_repairer_feedback_rechecks_ungrounded_authoritative_constraint() -> None:
+    """Repair validation returns raw evidence and retries without changing frozen inputs."""
+    original = _coordination_plan(cooperative=False)
+    invalid = deepcopy(original)
+    _context(invalid)["executor_constraints"] = [
+        {"kind": "distinct-physical-entities", "context_roles": ["watch", "infer"]}
+    ]
+    transport = FakeTransport(
+        [_response(_provider_plan(invalid)), _response(_provider_plan(original))]
+    )
+    repairer = ResponsesMissionRepairer(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    plan = MissionPlan.from_json(original)
+    review = MissionPlanReview.from_json(
+        {
+            "approved": False,
+            "issues": [
+                {
+                    "code": "physical.executor_requirement",
+                    "path": "/contexts/0/executor_constraints",
+                    "message": "Add physical distinctness for the two roles.",
+                    "required_action": "RepairPlan",
+                }
+            ],
+        }
+    )
+    intent, catalog, grounding = _intent(original), _current_catalog(), _semantic_grounding()
+    with pytest.raises(
+        RejectedPlanError, match="lacks authoritative physical-entity grounding"
+    ) as caught:
+        repairer.repair("mission-inspection", intent, plan, review, catalog, grounding)
+    assert caught.value.provider_output == _provider_plan(invalid)
+    assert caught.value.normalized_output == invalid
+    corrected = repairer.regenerate(
+        "mission-inspection",
+        intent,
+        plan,
+        review,
+        catalog,
+        grounding,
+        caught.value.provider_output,
+        [{"stage": caught.value.stage, "message": str(caught.value)}],
+    )
+    assert corrected.to_json() == original
+    initial_input = json.loads(cast(str, transport.requests[0][2]["input"]))
+    retried_input = json.loads(cast(str, transport.requests[1][2]["input"]))
+    feedback = retried_input.pop("repair_prevalidation_recovery_feedback")
+    assert retried_input == initial_input
+    assert feedback == {
+        "previous_rejected_provider_output": caught.value.provider_output,
+        "validation_errors": [{"stage": caught.value.stage, "message": str(caught.value)}],
+    }
+
+
 def test_authoritative_distinctness_accepts_exact_grounded_entities() -> None:
     """Exact goal-bound identities preserve valid physical executor requirements."""
     raw = _coordination_plan(cooperative=False)

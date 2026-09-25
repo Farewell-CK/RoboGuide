@@ -1,13 +1,13 @@
-"""Rejected Planner draft evidence and pre-validation recovery errors.
+"""Rejected Planner and Repairer draft evidence with pre-validation errors.
 
-A Planner draft that fails DTO normalization or MissionPlan validation is
+A generated draft that fails DTO normalization or MissionPlan validation is
 preserved verbatim before any recovery attempt: the provider's raw output,
 the normalized candidate when normalization succeeded, structured failure
 reasons, and non-sensitive provider identity. Evidence lives on the
 observations side of the request store (never in the public status
 projection) and is versioned so old records without it stay readable.
 
-``RejectedPlanError`` carries the rejected outputs out of the Planner so
+``RejectedPlanError`` carries the rejected outputs out of a model adapter so
 the engine can persist evidence and decide on bounded regeneration
 without the Planner keeping cross-request state. It is raised only for
 model-draft structure errors (``MissionPlanError`` family); provider
@@ -23,9 +23,11 @@ from typing import Any, cast
 from mission.contract_values import JSONObject, JSONValue, MissionPlanError, _object, _text
 from mission.submission_evidence import canonical_plan_digest
 
-REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.1"
+LEGACY_REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.1"
+REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.2"
 MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024
 _VALIDATION_STAGES = ("normalization", "plan_validation")
+_DELIBERATION_STAGES = ("planner", "repairer")
 
 
 class RejectedPlanError(MissionPlanError):
@@ -61,7 +63,7 @@ class RejectedPlanError(MissionPlanError):
 
 @dataclass(frozen=True, slots=True)
 class RejectedDraftEvidence:
-    """Persist one rejected Planner attempt for later audit and recovery.
+    """Persist one rejected model attempt for later audit and recovery.
 
     Attributes:
         request_id: The owning Mission Request.
@@ -69,6 +71,7 @@ class RejectedDraftEvidence:
         attempt_index: One-based position among this request's attempts.
         attempt_id: Stable identity binding request, attempt, and content.
         stage: ``normalization`` or ``plan_validation``.
+        deliberation_stage: Planner or Repairer origin of the generated draft.
         validation_errors: Structured failure reasons from the rejection.
         provider_output: The provider's raw structured output, possibly
             size-truncated with an explicit marker.
@@ -97,7 +100,20 @@ class RejectedDraftEvidence:
     provider_identity: JSONObject
     generated_at_ms: int
     persisted_at_ms: int
+    deliberation_stage: str = "planner"
     schema_version: str = REJECTED_DRAFT_SCHEMA
+
+    def __post_init__(self) -> None:
+        """Keep a legacy Planner record distinct from a versioned Repairer record."""
+        if self.schema_version not in {LEGACY_REJECTED_DRAFT_SCHEMA, REJECTED_DRAFT_SCHEMA}:
+            raise ValueError("unsupported rejected draft evidence schema")
+        if self.deliberation_stage not in _DELIBERATION_STAGES:
+            raise ValueError("unsupported rejected draft deliberation stage")
+        if (
+            self.schema_version == LEGACY_REJECTED_DRAFT_SCHEMA
+            and self.deliberation_stage != "planner"
+        ):
+            raise ValueError("legacy rejected draft evidence can only describe Planner output")
 
     def verify_integrity(self) -> None:
         """Check that stored content still matches its recorded digests.
@@ -138,6 +154,11 @@ class RejectedDraftEvidence:
             "attempt_index": self.attempt_index,
             "attempt_id": self.attempt_id,
             "stage": self.stage,
+            **(
+                {"deliberation_stage": self.deliberation_stage}
+                if self.schema_version == REJECTED_DRAFT_SCHEMA
+                else {}
+            ),
             "validation_errors": [dict(error) for error in self.validation_errors],
             "provider_output": dict(self.provider_output),
             "provider_output_digest": self.provider_output_digest,
@@ -161,11 +182,44 @@ class RejectedDraftEvidence:
             ValueError: On unsupported schemas or malformed fields.
         """
         item = _object(cast("JSONValue", value), "rejected draft evidence")
-        if item.get("schema_version") != REJECTED_DRAFT_SCHEMA:
+        schema_version = item.get("schema_version")
+        if not isinstance(schema_version, str) or schema_version not in {
+            LEGACY_REJECTED_DRAFT_SCHEMA,
+            REJECTED_DRAFT_SCHEMA,
+        }:
             raise ValueError("unsupported rejected draft evidence schema")
+        required = {
+            "schema_version",
+            "request_id",
+            "mission_id",
+            "attempt_index",
+            "attempt_id",
+            "stage",
+            "validation_errors",
+            "provider_output",
+            "provider_output_digest",
+            "normalized_output",
+            "normalized_output_digest",
+            "grounding_context_digest",
+            "semantic_evidence_digest",
+            "provider_identity",
+            "generated_at_ms",
+            "persisted_at_ms",
+        }
+        if schema_version == REJECTED_DRAFT_SCHEMA:
+            required.add("deliberation_stage")
+        if set(item) != required:
+            raise ValueError("rejected draft evidence fields do not match its schema")
         stage = _text(item["stage"], "rejected draft stage")
         if stage not in _VALIDATION_STAGES:
             raise ValueError("unsupported rejected draft stage")
+        deliberation_stage = (
+            "planner"
+            if schema_version == LEGACY_REJECTED_DRAFT_SCHEMA
+            else _text(item["deliberation_stage"], "rejected draft deliberation_stage")
+        )
+        if deliberation_stage not in _DELIBERATION_STAGES:
+            raise ValueError("unsupported rejected draft deliberation stage")
         attempt_index = item["attempt_index"]
         if not isinstance(attempt_index, int) or isinstance(attempt_index, bool):
             raise ValueError("rejected draft attempt index must be an integer")
@@ -220,6 +274,8 @@ class RejectedDraftEvidence:
             ),
             generated_at_ms=_integer(item["generated_at_ms"], "rejected draft generated_at_ms"),
             persisted_at_ms=_integer(item["persisted_at_ms"], "rejected draft persisted_at_ms"),
+            deliberation_stage=deliberation_stage,
+            schema_version=schema_version,
         )
 
 
@@ -267,8 +323,11 @@ def build_rejected_draft_evidence(
     semantic_evidence_digest: str | None,
     provider_identity: JSONObject,
     persisted_at_ms: int,
+    deliberation_stage: str = "planner",
 ) -> RejectedDraftEvidence:
-    """Assemble one evidence document from a rejected Planner attempt."""
+    """Assemble one evidence document from a rejected Planner or Repairer attempt."""
+    if deliberation_stage not in _DELIBERATION_STAGES:
+        raise ValueError("unsupported rejected draft deliberation stage")
     output, _truncated = bounded_provider_output(error.provider_output)
     normalized = error.normalized_output
     return RejectedDraftEvidence(
@@ -292,6 +351,7 @@ def build_rejected_draft_evidence(
         provider_identity=provider_identity,
         generated_at_ms=error.generated_at_ms,
         persisted_at_ms=persisted_at_ms,
+        deliberation_stage=deliberation_stage,
     )
 
 

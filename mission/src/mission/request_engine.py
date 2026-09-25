@@ -40,6 +40,7 @@ from mission.request_record import (
 from mission.request_store import MissionRequestStore
 from mission.review import (
     MissionPlanRepairer,
+    MissionPlanReview,
     MissionPlanReviewAttempt,
     MissionPlanReviewer,
     MissionReviewRoute,
@@ -349,10 +350,13 @@ class MissionRequestEngine:
         re-raises the last rejection so the caller records the MI failure.
         """
         cycle_attempts = 0
-        attempt_base = len(record.rejected_drafts)
         last_error: RejectedPlanError | None = None
         try:
             while True:
+                if last_error is not None:
+                    regenerator = getattr(self._planner, "regenerate", None)
+                    if not callable(regenerator):
+                        raise last_error
                 try:
                     if last_error is None:
                         return (
@@ -364,9 +368,8 @@ class MissionRequestEngine:
                             ),
                             record,
                         )
-                    regenerator = getattr(self._planner, "regenerate", None)
                     if not callable(regenerator):
-                        raise last_error
+                        raise MissionRequestError("Planner regeneration port became unavailable")
                     regenerated_plan = cast(
                         MissionPlan,
                         regenerator(
@@ -384,28 +387,8 @@ class MissionRequestEngine:
                 except RejectedPlanError as error:
                     cycle_attempts += 1
                     last_error = error
-                    # Attempt identities are unique and increasing across the
-                    # whole request history; the budget counts this cycle only.
-                    attempt_index = attempt_base + cycle_attempts
-                    record = self._update(
-                        record,
-                        rejected_drafts=(
-                            *record.rejected_drafts,
-                            build_rejected_draft_evidence(
-                                request_id=record.request_id,
-                                mission_id=record.mission_id,
-                                attempt_index=attempt_index,
-                                error=error,
-                                grounding_context_digest=grounding_context.context_digest,
-                                semantic_evidence_digest=(
-                                    grounding_context.semantic_evidence.evidence_digest
-                                    if grounding_context.semantic_evidence is not None
-                                    else None
-                                ),
-                                provider_identity=self._provider_identity,
-                                persisted_at_ms=self._clock(),
-                            ),
-                        ),
+                    record = self._record_rejected_output(
+                        record, grounding_context, error, "planner"
                     )
                     if cycle_attempts > self._prevalidation_recovery_attempts:
                         raise
@@ -414,6 +397,102 @@ class MissionRequestEngine:
             # fault during regeneration, or an unexpected error — carries the
             # newest persisted record so the caller's failure transition never
             # overwrites already-saved drafts with a stale snapshot.
+            error.record = record  # type: ignore[attr-defined]
+            raise
+
+    def _record_rejected_output(
+        self,
+        record: MissionRequestRecord,
+        grounding_context: GroundingContextSnapshot,
+        error: RejectedPlanError,
+        deliberation_stage: str,
+    ) -> MissionRequestRecord:
+        """Persist one Planner or Repairer model-draft rejection with unique request ordering."""
+        evidence = build_rejected_draft_evidence(
+            request_id=record.request_id,
+            mission_id=record.mission_id,
+            attempt_index=len(record.rejected_drafts) + 1,
+            error=error,
+            grounding_context_digest=grounding_context.context_digest,
+            semantic_evidence_digest=(
+                grounding_context.semantic_evidence.evidence_digest
+                if grounding_context.semantic_evidence is not None
+                else None
+            ),
+            provider_identity=self._provider_identity,
+            persisted_at_ms=self._clock(),
+            deliberation_stage=deliberation_stage,
+        )
+        return self._update(
+            record,
+            rejected_drafts=(*record.rejected_drafts, evidence),
+        )
+
+    def _repair_with_recovery(
+        self,
+        record: MissionRequestRecord,
+        grounded_intent: GroundedIntent,
+        plan: MissionPlan,
+        review: MissionPlanReview,
+        grounding_context: GroundingContextSnapshot,
+    ) -> tuple[MissionPlan, MissionRequestRecord]:
+        """Retry only invalid Repairer drafts under the frozen prevalidation budget.
+
+        Each rejected model output is persisted before regeneration. Provider,
+        identity, and unexpected failures leave the newest persisted request
+        attached to the exception for the caller's terminal transition.
+        """
+        repairer = self._repairer
+        if repairer is None:
+            raise MissionRequestError("repair requires a configured Repairer")
+        cycle_attempts = 0
+        last_error: RejectedPlanError | None = None
+        try:
+            while True:
+                if last_error is not None:
+                    regenerator = getattr(repairer, "regenerate", None)
+                    if not callable(regenerator):
+                        raise last_error
+                try:
+                    if last_error is None:
+                        return (
+                            repairer.repair(
+                                record.mission_id,
+                                grounded_intent,
+                                plan,
+                                review,
+                                self._capability_catalog,
+                                grounding_context,
+                            ),
+                            record,
+                        )
+                    if not callable(regenerator):
+                        raise MissionRequestError("Repairer regeneration port became unavailable")
+                    regenerated = cast(
+                        MissionPlan,
+                        regenerator(
+                            mission_id=record.mission_id,
+                            grounded_intent=grounded_intent,
+                            rejected_plan=plan,
+                            review=review,
+                            capability_catalog=self._capability_catalog,
+                            grounding_context=grounding_context,
+                            previous_provider_output=last_error.provider_output,
+                            validation_errors=[
+                                {"stage": last_error.stage, "message": str(last_error)}
+                            ],
+                        ),
+                    )
+                    return regenerated, record
+                except RejectedPlanError as error:
+                    cycle_attempts += 1
+                    last_error = error
+                    record = self._record_rejected_output(
+                        record, grounding_context, error, "repairer"
+                    )
+                    if cycle_attempts > self._prevalidation_recovery_attempts:
+                        raise
+        except Exception as error:
             error.record = record  # type: ignore[attr-defined]
             raise
 
@@ -562,12 +641,11 @@ class MissionRequestEngine:
                 )
             record = self._update(record, lifecycle=MissionRequestLifecycle.REPAIRING)
             try:
-                repaired_plan = self._repairer.repair(
-                    record.mission_id,
+                repaired_plan, record = self._repair_with_recovery(
+                    record,
                     grounded_intent,
                     plan,
                     review,
-                    self._capability_catalog,
                     self._require_grounding_context(record),
                 )
                 record = self._record_draft(
@@ -578,6 +656,9 @@ class MissionRequestEngine:
                     repair_attempts=record.repair_attempts + 1,
                 )
             except Exception as error:
+                latest = getattr(error, "record", None)
+                if isinstance(latest, MissionRequestRecord):
+                    record = latest
                 return self._update(
                     record,
                     lifecycle=MissionRequestLifecycle.FAILED,

@@ -152,6 +152,13 @@ Your authority is intentionally narrow:
   as `selected-by-later-planning`; Control, Scheduler, Runtime, and Local EAIOS cannot supply that
   user decision.
 
+If `repair_prevalidation_recovery_feedback` is present, the previous replacement failed the
+deterministic admission chain. Keep the original valid `rejected_plan`, Review evidence, and frozen
+grounding as the task inputs; use the previous raw output only to locate the rejected change.
+Resolve every reported validation error before returning a new complete plan. A Review instruction
+does not authorize a change that admission rejects. Do not repeat an invalid hard executor or
+capability constraint, invent evidence to satisfy the error, or claim that validation passed.
+
 For `verifier-evidence`, copy the exact `max_evidence_age_ms` from the supplied `satisfaction_policy`;
 its `policy_ref` and `policy_digest` are system provenance, not invented user constraints. The bound
 limits RoboGuide receive age at satisfaction evaluation, not physical validity, duration, or deadline.

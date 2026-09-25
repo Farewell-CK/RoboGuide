@@ -106,6 +106,48 @@ def _validate_plan_output(
     return plan
 
 
+def _validated_provider_draft(
+    provider_output: JSONObject,
+    canonical_schema: JSONObject,
+    generated_at_ms: int,
+    mission_id: str,
+    grounded_intent: GroundedIntent,
+    capability_catalog: CanonicalCapabilityCatalog,
+    satisfaction_policy: MissionSatisfactionPolicy | None,
+    grounding_context: GroundingContextSnapshot,
+    execution_profile: DeploymentExecutionProfile | None,
+) -> MissionPlan:
+    """Normalize and admit a Planner or Repairer output with durable rejection payloads."""
+    try:
+        normalized = normalize_mission_plan_provider_output(provider_output, canonical_schema)
+    except (MissionPlanError, ProviderMissionPlanError) as error:
+        raise RejectedPlanError(
+            str(error),
+            stage="normalization",
+            provider_output=provider_output,
+            normalized_output=None,
+            generated_at_ms=generated_at_ms,
+        ) from error
+    try:
+        return _validate_plan_output(
+            normalized,
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+            satisfaction_policy,
+            grounding_context,
+            execution_profile,
+        )
+    except MissionPlanError as error:
+        raise RejectedPlanError(
+            str(error),
+            stage="plan_validation",
+            provider_output=provider_output,
+            normalized_output=normalized,
+            generated_at_ms=generated_at_ms,
+        ) from error
+
+
 def _review_schema() -> JSONObject:
     """Return the strict provider schema for structured Mission review evidence."""
     return {
@@ -377,38 +419,17 @@ class ResponsesMissionPlanner:
         )
         generated_at_ms = int(time.time() * 1000)
         provider_output = self._client._extract_output_json(response)
-        try:
-            normalized = normalize_mission_plan_provider_output(provider_output, canonical_schema)
-        except (MissionPlanError, ProviderMissionPlanError) as error:
-            # Both families here describe defects in the model's DTO output
-            # (shape, duplicate parameter keys, unsupported version); local
-            # canonical-schema configuration faults are raised earlier, when
-            # the provider schema is adapted, and never enter this branch.
-            raise RejectedPlanError(
-                str(error),
-                stage="normalization",
-                provider_output=provider_output,
-                normalized_output=None,
-                generated_at_ms=generated_at_ms,
-            ) from error
-        try:
-            return _validate_plan_output(
-                normalized,
-                mission_id,
-                grounded_intent,
-                capability_catalog,
-                self._settings.satisfaction_policy,
-                grounding_context,
-                self._execution_profile,
-            )
-        except MissionPlanError as error:
-            raise RejectedPlanError(
-                str(error),
-                stage="plan_validation",
-                provider_output=provider_output,
-                normalized_output=normalized,
-                generated_at_ms=generated_at_ms,
-            ) from error
+        return _validated_provider_draft(
+            provider_output,
+            canonical_schema,
+            generated_at_ms,
+            mission_id,
+            grounded_intent,
+            capability_catalog,
+            self._settings.satisfaction_policy,
+            grounding_context,
+            self._execution_profile,
+        )
 
 
 class ResponsesMissionReviewer:
@@ -500,32 +521,81 @@ class ResponsesMissionRepairer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlan:
         """Generate and validate one complete replacement draft from structured findings."""
+        return self._repair_attempt(
+            mission_id,
+            grounded_intent,
+            rejected_plan,
+            review,
+            capability_catalog,
+            grounding_context,
+            feedback=None,
+        )
+
+    def regenerate(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        previous_provider_output: JSONObject,
+        validation_errors: list[JSONObject],
+    ) -> MissionPlan:
+        """Retry an invalid repair against the same draft, review, and frozen context."""
+        return self._repair_attempt(
+            mission_id,
+            grounded_intent,
+            rejected_plan,
+            review,
+            capability_catalog,
+            grounding_context,
+            feedback={
+                "previous_rejected_provider_output": previous_provider_output,
+                "validation_errors": cast(JSONValue, validation_errors),
+            },
+        )
+
+    def _repair_attempt(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        feedback: JSONObject | None,
+    ) -> MissionPlan:
+        """Call Repairer once and preserve raw output on model-draft validation failure."""
         canonical_schema = self._client._load_schema()
+        payload: JSONObject = {
+            "mission_id": mission_id,
+            "grounded_intent": grounded_intent.to_json(),
+            "rejected_plan": rejected_plan.to_json(),
+            "satisfaction_policy": self._client._satisfaction_policy_input(),
+            "review": review.to_json(),
+            "capability_catalog": capability_catalog.to_json(),
+            "grounding_context": grounding_context.to_json(),
+            **(
+                {"deployment_execution_profile": self._execution_profile.to_json()}
+                if self._execution_profile is not None
+                else {}
+            ),
+            **(
+                {"deployment_planning_profile": self._planning_profile.to_json()}
+                if self._planning_profile is not None
+                else {}
+            ),
+        }
+        if feedback is not None:
+            payload["repair_prevalidation_recovery_feedback"] = feedback
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
                     _with_semantic_goal(
-                        {
-                            "mission_id": mission_id,
-                            "grounded_intent": grounded_intent.to_json(),
-                            "rejected_plan": rejected_plan.to_json(),
-                            "satisfaction_policy": self._client._satisfaction_policy_input(),
-                            "review": review.to_json(),
-                            "capability_catalog": capability_catalog.to_json(),
-                            "grounding_context": grounding_context.to_json(),
-                            **(
-                                {"deployment_execution_profile": self._execution_profile.to_json()}
-                                if self._execution_profile is not None
-                                else {}
-                            ),
-                            **(
-                                {"deployment_planning_profile": self._planning_profile.to_json()}
-                                if self._planning_profile is not None
-                                else {}
-                            ),
-                        },
+                        payload,
                         grounding_context,
                     ),
                     grounding_context,
@@ -536,10 +606,11 @@ class ResponsesMissionRepairer:
             schema_name="mission_plan_repair_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema),
         )
-        return _validate_plan_output(
-            normalize_mission_plan_provider_output(
-                self._client._extract_output_json(response), canonical_schema
-            ),
+        generated_at_ms = int(time.time() * 1000)
+        return _validated_provider_draft(
+            self._client._extract_output_json(response),
+            canonical_schema,
+            generated_at_ms,
             mission_id,
             grounded_intent,
             capability_catalog,

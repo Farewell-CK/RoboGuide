@@ -116,6 +116,26 @@ class ProviderFailingPlanner:
         raise MissionProviderError("provider returned HTTP 401: unauthorized")
 
 
+class NoRegenerationPlanner:
+    """Produce one invalid initial draft without an optional regeneration port."""
+
+    def __init__(self) -> None:
+        """Start with no model attempts."""
+        self.calls = 0
+
+    def plan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Return one rejected model draft, leaving recovery unavailable."""
+        del mission_id, grounded_intent, capability_catalog, grounding_context
+        self.calls += 1
+        raise _rejection()
+
+
 def _valid_plan(mission_id: str, objective: str) -> MissionPlan:
     """Build one valid independent-mode fixture plan for the given identity."""
     raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -349,6 +369,16 @@ def test_rejected_drafts_survive_store_restart(tmp_path: Path) -> None:
     assert restored.rejected_drafts[0].attempt_id == record.rejected_drafts[0].attempt_id
 
 
+def test_planner_without_regeneration_port_records_one_rejection(tmp_path: Path) -> None:
+    """A missing optional Planner retry port does not duplicate one rejected draft."""
+    planner = NoRegenerationPlanner()
+    record = _engine(tmp_path, planner, budget=2).create("deliver the payload")
+    assert record.lifecycle.value == "Failed"
+    assert planner.calls == 1
+    assert len(record.rejected_drafts) == 1
+    assert record.rejected_drafts[0].deliberation_stage == "planner"
+
+
 def test_raw_and_normalized_digests_bind_their_documents() -> None:
     """Digests bind the exact raw and normalized payloads (case 7)."""
     raw = cast(JSONObject, json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -376,6 +406,49 @@ def test_raw_and_normalized_digests_bind_their_documents() -> None:
     round_trip = RejectedDraftEvidence.from_json(evidence.to_json())
     assert round_trip.provider_output_digest == evidence.provider_output_digest
     assert round_trip.normalized_output_digest == evidence.normalized_output_digest
+    assert round_trip.deliberation_stage == "planner"
+
+
+def test_legacy_rejected_planner_evidence_remains_readable() -> None:
+    """The v0.1 observation shape restores without mislabeling old Planner attempts."""
+    evidence = build_rejected_draft_evidence(
+        request_id="r1",
+        mission_id="m1",
+        attempt_index=1,
+        error=_rejection(),
+        grounding_context_digest=None,
+        semantic_evidence_digest=None,
+        provider_identity={},
+        persisted_at_ms=9,
+    )
+    legacy = evidence.to_json()
+    legacy["schema_version"] = "roboguide.mission.rejected-draft/v0.1"
+    del legacy["deliberation_stage"]
+    restored = RejectedDraftEvidence.from_json(legacy)
+    assert restored.schema_version == legacy["schema_version"]
+    assert restored.deliberation_stage == "planner"
+    assert restored.to_json() == legacy
+    legacy["deliberation_stage"] = "repairer"
+    with pytest.raises(ValueError, match="fields do not match"):
+        RejectedDraftEvidence.from_json(legacy)
+
+
+def test_v02_rejected_draft_requires_explicit_origin() -> None:
+    """Current evidence cannot omit or rename its model-generation stage."""
+    evidence = build_rejected_draft_evidence(
+        request_id="r1",
+        mission_id="m1",
+        attempt_index=1,
+        error=_rejection(),
+        grounding_context_digest=None,
+        semantic_evidence_digest=None,
+        provider_identity={},
+        persisted_at_ms=9,
+    )
+    current = evidence.to_json()
+    del current["deliberation_stage"]
+    with pytest.raises(ValueError, match="fields do not match"):
+        RejectedDraftEvidence.from_json(current)
 
 
 def test_invalid_drafts_do_not_advance_revision_or_approval(tmp_path: Path) -> None:

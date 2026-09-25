@@ -13,6 +13,7 @@ from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import HttpMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.rejected_draft import RejectedPlanError
 from mission.request_record import (
     DialogueSpeaker,
     DialogueTurn,
@@ -23,7 +24,13 @@ from mission.request_record import (
 )
 from mission.request_store import MissionRequestStore
 from mission.requests import MissionRequestEngine
-from mission.review import MissionPlanReview, MissionReviewIssue, ReviewIssueAction
+from mission.responses import MissionProviderError
+from mission.review import (
+    MissionPlanRepairer,
+    MissionPlanReview,
+    MissionReviewIssue,
+    ReviewIssueAction,
+)
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 
 FIXTURE = Path("scenarios/phase1-mission-v0.3/mission-plan.json")
@@ -235,6 +242,119 @@ class UnknownContractRepairer(FakeRepairer):
         return MissionPlan.from_json(raw)
 
 
+class RejectedOutputRepairer:
+    """Reject one model output, then optionally produce a valid replacement."""
+
+    def __init__(self, recover: bool) -> None:
+        """Select a scripted valid retry or repeated model-draft rejection."""
+        self.recover = recover
+        self.repair_calls = 0
+        self.regeneration_calls: list[
+            tuple[
+                MissionPlan,
+                MissionPlanReview,
+                GroundingContextSnapshot,
+                JSONObject,
+                list[JSONObject],
+            ]
+        ] = []
+
+    def repair(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Return a rejected model draft without mutating the admitted input draft."""
+        del mission_id, grounded_intent, review, capability_catalog, grounding_context
+        self.repair_calls += 1
+        raise self._rejection(rejected_plan)
+
+    def regenerate(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        previous_provider_output: JSONObject,
+        validation_errors: list[JSONObject],
+    ) -> MissionPlan:
+        """Expose exact feedback and return a legal draft only when scripted to recover."""
+        del mission_id, grounded_intent, capability_catalog
+        self.regeneration_calls.append(
+            (rejected_plan, review, grounding_context, previous_provider_output, validation_errors)
+        )
+        if not self.recover:
+            raise self._rejection(rejected_plan)
+        return rejected_plan
+
+    @staticmethod
+    def _rejection(plan: MissionPlan) -> RejectedPlanError:
+        """Represent an ungrounded physical constraint in one raw replacement draft."""
+        raw = plan.to_json()
+        contexts = cast(list[JSONObject], raw["contexts"])
+        contexts[0]["coupling_mode"] = "concurrent-cooperation"
+        return RejectedPlanError(
+            "concurrent-cooperation requires a Group shared view",
+            stage="plan_validation",
+            provider_output=raw,
+            normalized_output=raw,
+            generated_at_ms=123,
+        )
+
+
+class NoRegenerationRepairer:
+    """Return one rejected Repairer output without a regeneration capability."""
+
+    def __init__(self) -> None:
+        """Count only the original Repairer call."""
+        self.calls = 0
+
+    def repair(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Expose the rejected output without pretending a retry port exists."""
+        del mission_id, grounded_intent, review, capability_catalog, grounding_context
+        self.calls += 1
+        raise RejectedOutputRepairer._rejection(rejected_plan)
+
+
+class ProviderFaultRepairer(NoRegenerationRepairer):
+    """Fail before producing a model draft to verify provider faults never retry."""
+
+    def repair(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Raise a transport fault with no rejected model output to archive."""
+        del (
+            mission_id,
+            grounded_intent,
+            rejected_plan,
+            review,
+            capability_catalog,
+            grounding_context,
+        )
+        self.calls += 1
+        raise MissionProviderError("provider returned HTTP 401")
+
+
 def _review(action: ReviewIssueAction | None = None) -> MissionPlanReview:
     """Build an approval or one structured blocking Review for Engine tests."""
     if action is None:
@@ -256,11 +376,12 @@ def _engine(
     tmp_path: Path,
     interpreter: FakeInterpreter,
     reviewer: FakeReviewer,
-    repairer: FakeRepairer,
+    repairer: MissionPlanRepairer,
     controller: AcceptingController,
     max_repair_attempts: int = 2,
     planner: FakePlanner | None = None,
     grounding_reader: MissionGroundingReader | None = None,
+    prevalidation_recovery_attempts: int = 0,
 ) -> MissionRequestEngine:
     """Compose one persistent deterministic Review/Repair orchestration fixture."""
     return MissionRequestEngine(
@@ -276,6 +397,7 @@ def _engine(
         repairer=repairer,
         max_repair_attempts=max_repair_attempts,
         grounding_reader=grounding_reader,
+        prevalidation_recovery_attempts=prevalidation_recovery_attempts,
     )
 
 
@@ -424,6 +546,121 @@ def test_repairable_review_produces_a_new_approved_draft_revision(tmp_path: Path
         context_digest,
         context_digest,
     ]
+
+
+def test_rejected_repair_output_is_persisted_and_retried_before_review(tmp_path: Path) -> None:
+    """One invalid Repairer output uses frozen feedback, then a new draft needs Review."""
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN), _review()])
+    repairer = RejectedOutputRepairer(recover=True)
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter(),
+        reviewer,
+        repairer,
+        controller,
+        prevalidation_recovery_attempts=1,
+    )
+
+    accepted = engine.create("执行明确的运输任务")
+
+    assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    assert accepted.draft_revision == 2
+    assert accepted.repair_attempts == 1
+    assert [attempt.draft_revision for attempt in accepted.review_history] == [1, 2]
+    assert len(reviewer.calls) == 2
+    assert repairer.repair_calls == 1
+    assert len(repairer.regeneration_calls) == 1
+    assert controller.submissions == [accepted.plan]
+    assert len(accepted.rejected_drafts) == 1
+    evidence = accepted.rejected_drafts[0]
+    assert evidence.deliberation_stage == "repairer"
+    assert evidence.schema_version == "roboguide.mission.rejected-draft/v0.2"
+    assert evidence.attempt_index == 1
+    assert accepted.grounding_context is not None
+    assert evidence.grounding_context_digest == accepted.grounding_context.context_digest
+    plan, review, context, raw, errors = repairer.regeneration_calls[0]
+    assert plan == reviewer.calls[0]
+    assert review == accepted.review_history[0].review
+    assert context is accepted.grounding_context
+    assert raw == evidence.provider_output
+    assert errors == list(evidence.validation_errors)
+    restored = MissionRequestStore(tmp_path / "review-requests.sqlite3").get(accepted.request_id)
+    assert restored is not None and restored.rejected_drafts == accepted.rejected_drafts
+
+
+def test_rejected_repair_budget_exhaustion_never_submits(tmp_path: Path) -> None:
+    """All invalid Repairer outputs remain visible while the original draft is retained."""
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN)])
+    repairer = RejectedOutputRepairer(recover=False)
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter(),
+        reviewer,
+        repairer,
+        controller,
+        prevalidation_recovery_attempts=1,
+    )
+
+    failed = engine.create("执行明确的运输任务")
+
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert failed.draft_revision == 1
+    assert failed.repair_attempts == 0
+    assert failed.plan == reviewer.calls[0]
+    assert len(failed.review_history) == 1
+    assert [item.deliberation_stage for item in failed.rejected_drafts] == [
+        "repairer",
+        "repairer",
+    ]
+    assert [item.attempt_index for item in failed.rejected_drafts] == [1, 2]
+    assert len(repairer.regeneration_calls) == 1
+    assert controller.submissions == []
+    assert failed.failure_evidence is not None
+    assert failed.failure_evidence["stage"] == "repairer"
+
+
+def test_repair_without_regeneration_port_records_one_rejection(tmp_path: Path) -> None:
+    """A missing optional retry port cannot duplicate one rejected model output."""
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN)])
+    repairer = NoRegenerationRepairer()
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter(),
+        reviewer,
+        repairer,
+        controller,
+        prevalidation_recovery_attempts=2,
+    )
+    failed = engine.create("执行明确的运输任务")
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert len(failed.rejected_drafts) == 1
+    assert repairer.calls == 1
+    assert controller.submissions == []
+
+
+def test_repair_provider_fault_does_not_consume_model_retry_budget(tmp_path: Path) -> None:
+    """Provider failures remain distinct from invalid Repairer drafts."""
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN)])
+    repairer = ProviderFaultRepairer()
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter(),
+        reviewer,
+        repairer,
+        controller,
+        prevalidation_recovery_attempts=2,
+    )
+    failed = engine.create("执行明确的运输任务")
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert failed.rejected_drafts == ()
+    assert failed.failure_evidence is not None
+    assert failed.failure_evidence["stage"] == "repairer"
+    assert repairer.calls == 1
+    assert controller.submissions == []
 
 
 def test_review_clarification_returns_to_dialogue_without_repair(tmp_path: Path) -> None:

@@ -118,6 +118,11 @@ Interpreter 成功且无需 clarification 时，Engine 在进入 Planner provide
 provider-only MissionPlan DTO：canonical `ExecutionIntent.parameters` map 在 strict output schema 中
 表示为 closed key/value entries，接收后拒绝重复或 malformed entry，并还原为 canonical map；随后
 仍由原始 MissionPlan v0.7 parser、implementation validation 与 Capability Catalog 执行最终准入。
+Planner 和 Repairer 生成的非法草案都按原始输出、归一化结果、校验错误、冻结 Grounding 摘要及
+生成阶段保存为 versioned rejected-draft observations。只有模型草案的 normalization 或 plan
+validation 失败会在配置的预校验预算内重试；Provider/身份错误不重试。Repairer 的重试始终使用
+原先通过校验的计划、原 Review 和同一 Grounding Snapshot，合法的新草案还必须再次经 Review，
+不会因为一次恢复输出通过结构校验就自动提交 Control。旧版 v0.1 Planner 拒绝证据继续可读。
 当前 provider 输出的 v0.8 MissionPlan 经过同一 DTO 后，继续使用 v0.8 canonical parser；
 Planner/Repairer 的 `physical_entity` 只有在同一 immutable Grounding snapshot 含 exact、
 fresh、admitted 的实体引用时才能准入。Context 内的 distinct physical executor 约束属于
