@@ -186,6 +186,53 @@ def test_same_floor_and_unresolved_floor_do_not_invent_reachability() -> None:
     assert "no unique semantic floor" in str(unknown["reason"])
 
 
+def test_overlapping_regions_on_one_floor_still_prove_cross_floor_conflict() -> None:
+    """Multiple regions on one floor must not hide a registered floor mismatch."""
+    regions = [
+        _region("start", "floor-upper", 5.0),
+        _region("hallway", "floor-lower", 0.0),
+        _region("stairs", "floor-lower", 0.0),
+    ]
+    env = _environment(
+        {1: (0.0, 5.0, 0.0)},
+        {"goal": (1.0, 0.0, 1.0)},
+        regions=regions,
+    )
+    record = assess_spatial_feasibility(env, 1, _invocation("goal"), _profile(1, False))
+    assert record["status"] == "incompatible"
+    assert record["start"] == {
+        "position": [0.0, 5.0, 0.0],
+        "region_id": "start",
+        "floor_id": "floor-upper",
+    }
+    assert record["destination_entity"] == {
+        "position": [1.0, 0.0, 1.0],
+        "region_id": None,
+        "floor_id": "floor-lower",
+    }
+
+
+def test_overlapping_regions_across_floors_remain_unknown() -> None:
+    """Conflicting loaded floor memberships cannot authorize a floor claim."""
+    regions = [
+        _region("start", "floor-upper", 5.0),
+        _region("goal-lower", "floor-lower", 0.0),
+        _region("goal-other", "floor-other", 0.0),
+    ]
+    env = _environment(
+        {1: (0.0, 5.0, 0.0)},
+        {"goal": (1.0, 0.0, 1.0)},
+        regions=regions,
+    )
+    record = assess_spatial_feasibility(env, 1, _invocation("goal"), _profile(1, False))
+    assert record["status"] == "unknown"
+    assert record["destination_entity"] == {
+        "position": [1.0, 0.0, 1.0],
+        "region_id": None,
+        "floor_id": None,
+    }
+
+
 def test_missing_profile_or_pddl_entity_retains_explicit_unknown() -> None:
     """Missing authoritative facts never become a guessed incompatibility."""
     env = _environment({0: (1.0, 0.0, 1.0)}, {"actual": (2.0, 5.0, 2.0)})
@@ -196,10 +243,15 @@ def test_missing_profile_or_pddl_entity_retains_explicit_unknown() -> None:
 
 
 def test_pair_guard_rejects_before_actor_and_step_and_preserves_evidence(tmp_path: Path) -> None:
-    """One incompatible assignment stops before Stage2, without claiming PDDL failure."""
+    """Same-floor region overlap cannot hide a pair's incompatible assignment."""
     env = _environment(
         {0: (0.0, 0.0, 0.0), 1: (0.0, 5.0, 0.0)},
         {"left": (1.0, 0.0, 0.0), "right": (1.0, 0.0, 0.0)},
+        regions=[
+            _region("lower-hallway", "floor-lower", 0.0),
+            _region("lower-stairs", "floor-lower", 0.0),
+            _region("upper", "floor-upper", 5.0),
+        ],
     )
     gym = SimpleNamespace(reset_calls=0, step_calls=0)
 
@@ -246,6 +298,13 @@ def test_pair_guard_rejects_before_actor_and_step_and_preserves_evidence(tmp_pat
     assert archived["all_admitted"] is False
     assert archived["execution_allowed"] is False
     assert [item["status"] for item in archived["agent_records"]] == ["compatible", "incompatible"]
+    assert all(
+        item["destination_entity"]["floor_id"] == "floor-lower"
+        for item in archived["agent_records"]
+    )
+    assert all(
+        item["destination_entity"]["region_id"] is None for item in archived["agent_records"]
+    )
     assert "pddl_success" not in archived
 
 

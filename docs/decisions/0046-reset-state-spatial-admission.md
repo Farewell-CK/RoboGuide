@@ -26,8 +26,10 @@ Control ownership and changing the goal would violate benchmark authority.
 2. After the one official reset, and before Stage2 `AgentArguments`,
    `actor.act()`, or `gym_env.step()`, the shared-world adapter reads the
    agent base position and the destination entity position through existing
-   read-only Habitat/PDDL APIs. It maps both positions to unique semantic
-   region floor identities and records a versioned decision artifact.
+   read-only Habitat/PDDL APIs. It maps both positions to semantic floors and
+   records a versioned decision artifact. Overlapping regions on one floor
+   prove a floor without proving a unique region identity; overlaps across
+   floors remain unknown.
 3. A different-floor observation paired with an explicit registered
    `supports-floor-transition=false` is an incompatible local deployment
    assignment. The adapter records the reason, preserves terminal evidence,
@@ -57,8 +59,10 @@ inventory, or alter Habitat RNG. Official benchmark truth remains Habitat's
 PDDL outcome.
 
 The initial Episode51 smoke exposed a concrete evidence limit: several actual
-reset positions and PDDL entity positions have no unique loaded semantic
-region AABB. Their floor identity remains `unknown`; the adapter must not
-substitute a guessed height threshold or label this as an admitted route.
-This gate therefore cannot be treated as a sufficient readiness condition for
-the broad E1 comparison.
+reset positions and PDDL entity positions belong to multiple loaded semantic
+regions. When these regions share one floor, the adapter can retain that floor
+without claiming one region; when they span floors, the floor remains `unknown`.
+The adapter must not substitute a guessed height threshold or label a known
+floor as a proven route. This gate is not sufficient readiness for the broad E1
+comparison: it runs after Control commitment and cannot choose a different
+capable executor.

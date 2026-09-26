@@ -326,6 +326,25 @@ def _vector(value: Any) -> list[float]:
 
 def _region_location(position: list[float], regions: list[Any]) -> tuple[str, str] | None:
     """Return a unique opaque region/floor pair containing a static point."""
+    matches = _region_matches(position, regions)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _floor_location(position: list[float], regions: list[Any]) -> tuple[str | None, str] | None:
+    """Return a proven floor even when same-floor semantic regions overlap.
+
+    A region identity is retained only when it is unique. Overlaps across
+    different floors remain unresolved rather than guessing a location.
+    """
+    matches = _region_matches(position, regions)
+    floors = {floor_id for _, floor_id in matches}
+    if len(floors) != 1:
+        return None
+    return (matches[0][0] if len(matches) == 1 else None, next(iter(floors)))
+
+
+def _region_matches(position: list[float], regions: list[Any]) -> list[tuple[str, str]]:
+    """Find valid containing region/floor pairs from loaded Habitat geometry."""
     matches: list[tuple[str, str]] = []
     for region in regions:
         aabb = getattr(region, "aabb", None)
@@ -344,8 +363,7 @@ def _region_location(position: list[float], regions: list[Any]) -> tuple[str, st
         upper = [center_values[index] + size_values[index] / 2.0 for index in range(3)]
         if all(lower[index] <= position[index] <= upper[index] for index in range(3)):
             matches.append((str(region_id), str(floor_id)))
-    unique = sorted(set(matches))
-    return unique[0] if len(unique) == 1 else None
+    return sorted(set(matches))
 
 
 def _digest(value: dict[str, Any]) -> str:

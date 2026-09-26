@@ -19,7 +19,7 @@ from typing import Any, cast
 
 from .evidence_io import write_text_atomic
 from .model import SUPPORTED_OPERATIONS, CanonicalMobilityInvocation, IntegrationError
-from .planning_world_evidence import _region_location
+from .planning_world_evidence import _floor_location
 
 SPATIAL_FEASIBILITY_SCHEMA = "roboguide.habitat-spatial-feasibility/v0.1"
 SPATIAL_PROFILE_SCHEMA = "roboguide.habitat-node-spatial-profile/v0.1"
@@ -198,7 +198,9 @@ def assess_spatial_feasibility(
 
     The destination position is read through the official PDDL ``sim_info``
     entity lookup, while floor identity is read from loaded semantic-region
-    AABBs.  If either position has no unique region, the result is ``unknown``.
+    AABBs. Same-floor region overlaps retain a known floor without inventing
+    one region identity. If either position has no unique floor, the result is
+    ``unknown``.
     A different floor is a deterministic incompatibility only when the
     deployment registration explicitly says that this agent cannot transition
     floors.  A capable agent receives ``compatible`` as an admission result,
@@ -234,8 +236,8 @@ def assess_spatial_feasibility(
             habitat_env.sim.get_agent_data(profile.agent_id).articulated_agent.base_pos
         )
         regions = list(habitat_env.sim.semantic_scene.regions)
-        start_location = _region_location(start_position, regions)
-        destination_location = _region_location(destination_position, regions)
+        start_location = _floor_location(start_position, regions)
+        destination_location = _floor_location(destination_position, regions)
         record["start"] = _location_record(start_position, start_location)
         record["destination_entity"] = _location_record(destination_position, destination_location)
         if start_location is None or destination_location is None:
@@ -263,7 +265,9 @@ def assess_spatial_feasibility(
         return record
 
 
-def _location_record(position: list[float], location: tuple[str, str] | None) -> dict[str, object]:
+def _location_record(
+    position: list[float], location: tuple[str | None, str] | None
+) -> dict[str, object]:
     """Serialize one observed position and its optional semantic location."""
     return {
         "position": position,
