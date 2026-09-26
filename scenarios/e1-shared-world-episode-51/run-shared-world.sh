@@ -12,6 +12,10 @@ MODE="${1:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}
 RUN="${2:?usage: run-shared-world.sh <paired|cancel|negative|single> <run-dir>}"
 # The harness may render {output_dir} relative to its own CWD; pin the run
 # directory to an absolute path so later `cd` (EMOS checkout) cannot move it.
+if [[ -e "$RUN" ]] && [[ -n "$(find "$RUN" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "refusing to overwrite an existing shared-world run: $RUN" >&2
+    exit 1
+fi
 mkdir -p "$RUN"
 RUN="$(cd "$RUN" && pwd)"
 SERVER="$REPO/target/debug/integration-server"
@@ -19,22 +23,13 @@ NODE="$REPO/target/debug/roboguide-node"
 MISSION_ID="mission-e1-i-shared-world-episode-51"
 PIDS=()
 
-# Port hygiene: a previous run's server may survive its trap (SIGTERM is not
-# guaranteed to be prompt). Kill only OUR OWN leftover binaries on these ports,
-# then require the ports to be free before starting anything.
+# A fixed-port smoke must never terminate another run to make room for itself.
 clean_port() {
-    # Kill leftover RoboGuide/Habitat processes holding one of our ports.
-    local port="$1" pid
-    pid=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1 || true)
-    if [[ -n "$pid" ]]; then
-        if ps -p "$pid" -o args= | grep -qE "integration-server|roboguide-node|habitat_local_eaios|mission.api|apps/mission-service/main.py"; then
-            echo "port $port held by leftover pid $pid ($(ps -p "$pid" -o args= | head -c 60)) - killing" >&2
-            kill -9 "$pid" 2>/dev/null || true
-            sleep 1
-        else
-            echo "FATAL: port $port held by foreign process $pid" >&2
-            exit 1
-        fi
+    # Reject any listener, including one from a prior RoboGuide run.
+    local port="$1"
+    if ss -tln | grep -q ":$port "; then
+        echo "FATAL: configured port $port is occupied" >&2
+        exit 1
     fi
 }
 
@@ -121,11 +116,14 @@ elif [[ "$MODE" == "single" ]]; then
     NODES_TO_WAIT=(e1-shared-node-a)
 fi
 
-rm -rf -- "$RUN"
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+    habitat_local_eaios.spatial_feasibility \
+    --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
+    --output "$RUN/spatial-profile.json"
 
 clean_port 25060
 clean_port 28060
@@ -150,6 +148,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --agent-b-id 1 \
         --pair-wait-s "$PAIR_WAIT" \
         --evidence-dir "$RUN/evidence" \
+        --spatial-profile "$RUN/spatial-profile.json" \
         --habitat-config \
             "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \
         --episode-id 51 \

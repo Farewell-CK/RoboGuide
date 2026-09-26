@@ -78,7 +78,11 @@ Node Inventory、资源可用性或物理执行器选择。环境事实若尚未
 unknown gap；不得由模型推测楼层、起点或可达性。只有任务需求与已知世界证据共同支持时，
 MI 才能声明具体的 typed capability constraint；Control 仍使用当前 Node 注册和资源承诺
 决定谁、何时、在哪里执行。规划世界证据进入版本化、不可变的 Grounding Context，并在
-B1 中与实际适配器文件及冻结 workload identity 交叉校验。详见 ADR-0044。
+B1 中与实际适配器文件及冻结 workload identity 交叉校验。Habitat shared-world adapter
+还会把实际注册文件的 digest-bound capability snapshot 带入 reset 后的只读空间 admission：
+明确的跨楼层冲突可以在 Stage2 动作前 fail closed，但 unknown 不会被猜测为可达性，adapter
+也不会重分配 Task 或改变官方目标。该 admission 不取代 Control 的匹配权，也不把正向通过
+误写成路线可达证明。详见 ADR-0044 与 ADR-0046。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability

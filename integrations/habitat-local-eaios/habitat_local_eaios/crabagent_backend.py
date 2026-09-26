@@ -17,6 +17,7 @@ from typing import Any
 from .backend import HabitatBackendConfig, LocalExecutionOutcome
 from .emos_stage2 import EmosStage2Runtime
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .spatial_feasibility import FloorTransitionProfile
 
 SUBTASK_MODES = ("natural-objective", "entity-grounded")
 
@@ -28,6 +29,8 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     subtask_mode: str = "natural-objective"
     evidence_dir: Path = Path("crabagent-evidence")
     run_id: str = "unbound"
+    spatial_capabilities: tuple[FloorTransitionProfile, ...] = ()
+    spatial_profile_path: Path | None = None
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
@@ -35,6 +38,16 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
             raise IntegrationError(
                 f"subtask mode {self.subtask_mode!r} must be one of {SUBTASK_MODES}"
             )
+        agent_ids = [profile.agent_id for profile in self.spatial_capabilities]
+        if len(agent_ids) != len(set(agent_ids)):
+            raise IntegrationError("spatial capability profiles must use distinct agent ids")
+
+    def spatial_capability_for(self, agent_id: int) -> FloorTransitionProfile | None:
+        """Return the startup-frozen spatial profile for one Habitat agent."""
+        return next(
+            (profile for profile in self.spatial_capabilities if profile.agent_id == agent_id),
+            None,
+        )
 
 
 class CrabAgentMobilityBackend:

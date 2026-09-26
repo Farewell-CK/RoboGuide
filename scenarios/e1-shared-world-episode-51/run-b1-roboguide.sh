@@ -177,6 +177,10 @@ fi
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+    habitat_local_eaios.spatial_feasibility \
+    --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
+    --output "$RUN/spatial-profile.json"
 sed -e "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
     -e "s|SEMANTIC_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-semantic-evidence.json|" \
     -e "s|PLANNING_WORLD_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-planning-world-evidence.json|" \
@@ -215,6 +219,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --agent-b-id 1 \
         --pair-wait-s 1200 \
         --evidence-dir "$RUN/evidence" \
+        --spatial-profile "$RUN/spatial-profile.json" \
         --run-id "$(basename "$RUN")" \
         --habitat-config \
             "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \

@@ -17,6 +17,7 @@ from .shared_world import (
     ProcessWorldService,
     SharedWorldCoordinator,
 )
+from .spatial_feasibility import load_spatial_profile_snapshot
 from .store import ExecutionStore
 
 _BACKENDS = ("direct-oracle", "emos-crabagent", "shared-emos-stage2")
@@ -111,6 +112,12 @@ def _arguments() -> argparse.Namespace:
         default=300.0,
         help="shared backend only: bounded episode-start synchronization window",
     )
+    parser.add_argument(
+        "--spatial-profile",
+        type=Path,
+        default=None,
+        help="shared backend: digest-bound Node capability snapshot",
+    )
     return parser.parse_args()
 
 
@@ -122,6 +129,8 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         )
     if arguments.evidence_dir is None:
         raise SystemExit("the shared-emos-stage2 backend requires --evidence-dir")
+    if arguments.spatial_profile is None:
+        raise SystemExit("the shared-emos-stage2 backend requires --spatial-profile")
     if arguments.agent_id == arguments.agent_b_id:
         raise SystemExit("shared-world endpoints must map to distinct Habitat agents")
     config = CrabAgentBackendConfig(
@@ -138,6 +147,8 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         subtask_mode=arguments.subtask_mode,
         evidence_dir=arguments.evidence_dir,
         run_id=arguments.run_id,
+        spatial_capabilities=load_spatial_profile_snapshot(arguments.spatial_profile),
+        spatial_profile_path=arguments.spatial_profile,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
     coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)

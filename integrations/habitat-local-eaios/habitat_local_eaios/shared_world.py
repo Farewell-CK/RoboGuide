@@ -12,6 +12,7 @@ loop, and projects per-agent terminal facts back to each Node's handle.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from .evidence_io import write_text_atomic
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .semantic_evidence import build_authoritative_semantic_evidence
+from .spatial_feasibility import assess_spatial_feasibility
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 from .video_capture import HabitatVideoCapture
@@ -69,6 +71,32 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """Initialize the environment and publish authoritative semantics before readiness."""
         super().initialize()
         _, habitat_env, _, _ = self._require_initialized()
+        config = self._config
+        if isinstance(config, CrabAgentBackendConfig) and config.spatial_profile_path is not None:
+            configured_ids = tuple(profile.agent_id for profile in config.spatial_capabilities)
+            if configured_ids != tuple(sorted(self._agent_ids)):
+                self.close()
+                raise IntegrationError(
+                    "spatial capability snapshot does not cover the configured shared-world agents"
+                )
+            try:
+                self._write_json(
+                    "spatial-capability-profile-used.json",
+                    {
+                        "schema_version": "roboguide.habitat-node-spatial-profile-used/v0.1",
+                        "source_path": str(config.spatial_profile_path),
+                        "snapshot_digest": (
+                            "sha256:"
+                            + hashlib.sha256(config.spatial_profile_path.read_bytes()).hexdigest()
+                        ),
+                        "profiles": [profile.as_dict() for profile in config.spatial_capabilities],
+                    },
+                )
+            except Exception as error:
+                self.close()
+                raise IntegrationError(
+                    f"spatial capability evidence initialization failed: {error}"
+                ) from error
         try:
             document = build_authoritative_semantic_evidence(
                 habitat_env,
@@ -148,6 +176,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 f"subtask-agent-{agent_id}-{task_suffix}.txt", self._subtask(invocation)
             )
             self._write_text(f"subtask-agent-{agent_id}.txt", self._subtask(invocation))
+            phase = "spatial_feasibility"
+            self._admit_spatial_feasibility(agent_id, invocation, habitat_env)
+            phase = "serial_policy_loop"
             assignment = self._assigned_arguments(self._serial_text_context, invocation)
             running(agent_id, f"shared EMOS Stage2 serial task {invocation.task_id} started")
             initial_values = self._serial_initial_positions[str(agent_id)]
@@ -276,6 +307,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             text_context = habitat_env.task.get_task_text_context()
             text_context["episode_id"] = habitat_env.current_episode.episode_id
             self._write_text("scene_description.txt", str(text_context["scene_description"]))
+            setup_phase = "spatial_feasibility"
+            self._admit_pair_spatial_feasibility(invocations, habitat_env)
+            setup_phase = "task_context"
             for agent_id in agent_ids:
                 self._write_text(
                     f"subtask-agent-{agent_id}.txt",
@@ -333,6 +367,84 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     0,
                     f"execution_exception:{setup_phase}",
                 )
+
+    def _admit_pair_spatial_feasibility(
+        self,
+        invocations: dict[int, CanonicalMobilityInvocation],
+        habitat_env: Any,
+    ) -> None:
+        """Record both reset-state checks and reject explicit floor conflicts."""
+        records = [
+            self._spatial_record(agent_id, invocation, habitat_env)
+            for agent_id, invocation in sorted(invocations.items())
+        ]
+        incompatible = [record for record in records if record.get("status") == "incompatible"]
+        self._write_json(
+            "spatial-feasibility.json",
+            {
+                "schema_version": "roboguide.habitat-spatial-feasibility-batch/v0.1",
+                "agent_records": records,
+                "all_admitted": all(record["status"] == "compatible" for record in records),
+                "execution_allowed": not incompatible,
+            },
+        )
+        if incompatible:
+            self._write_json(
+                "spatial-feasibility-failure.json",
+                {
+                    "schema_version": "roboguide.habitat-spatial-feasibility-failure/v0.1",
+                    "reason": "deployment capability is incompatible with reset-state destination",
+                    "records": incompatible,
+                },
+            )
+            raise IntegrationError(
+                "shared-world spatial feasibility rejected an incompatible assignment"
+            )
+
+    def _admit_spatial_feasibility(
+        self,
+        agent_id: int,
+        invocation: CanonicalMobilityInvocation,
+        habitat_env: Any,
+    ) -> None:
+        """Record one serial reset-state check before allowing Stage2 to act."""
+        record = self._spatial_record(agent_id, invocation, habitat_env)
+        self._write_json(
+            "spatial-feasibility.json",
+            {
+                "schema_version": "roboguide.habitat-spatial-feasibility-batch/v0.1",
+                "agent_records": [record],
+                "all_admitted": record["status"] == "compatible",
+                "execution_allowed": record["status"] != "incompatible",
+            },
+        )
+        if record.get("status") == "incompatible":
+            self._write_json(
+                "spatial-feasibility-failure.json",
+                {
+                    "schema_version": "roboguide.habitat-spatial-feasibility-failure/v0.1",
+                    "reason": "deployment capability is incompatible with reset-state destination",
+                    "records": [record],
+                },
+            )
+            raise IntegrationError(
+                "shared-world spatial feasibility rejected an incompatible assignment"
+            )
+
+    def _spatial_record(
+        self,
+        agent_id: int,
+        invocation: CanonicalMobilityInvocation,
+        habitat_env: Any,
+    ) -> dict[str, object]:
+        """Assess one invocation using startup-frozen deployment capability facts."""
+        config = self._config
+        profile = (
+            config.spatial_capability_for(agent_id)
+            if isinstance(config, CrabAgentBackendConfig)
+            else None
+        )
+        return assess_spatial_feasibility(habitat_env, agent_id, invocation, profile)
 
     def _pair_loop(
         self,

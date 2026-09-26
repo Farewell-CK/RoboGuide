@@ -103,3 +103,27 @@ Node-to-agent mapping and the versioned source of floor-transition claims.
 Any automatic cross-floor Role requirement additionally needs grounded
 start/goal-floor facts available **before** matching, with freshness and
 provenance; the current implementation does not fabricate them.
+
+## Reset-state execution admission
+
+The shared-world launcher freezes the capability attributes from the exact
+Node TOML files used for registration into `spatial-profile.json`, including
+each source file digest. The Habitat child rechecks those digests before it
+serves the endpoints. After the one official `reset()` and before constructing
+any Stage2 `AgentArguments` or calling `actor.act()`, the adapter reads the
+actual agent base position and the official PDDL destination entity position.
+It maps both through the loaded semantic-region floor ids and writes
+`evidence/spatial-feasibility.json`.
+
+An explicit different-floor result paired with a registered
+`supports-floor-transition=false` is a deployment incompatibility. The
+adapter writes `spatial-feasibility-failure.json`, preserves reset and
+terminal diagnostics, and fails the local executions before any action or
+Gym step. It does not reassign the Task, edit the destination, or synthesize
+`pddl_success`. Same-floor, capable-agent, missing-region, missing-profile,
+and other unresolved cases remain respectively admitted or `unknown`. The
+artifact records `execution_allowed` separately from `all_admitted`, so an
+unknown floor cannot be mistaken for positive feasibility. A positive decision
+proves only that this specific capability conflict was not established, not
+route reachability. Actual Episode51 reset evidence has unresolved semantic
+regions, so this check alone does not fix its task allocation.

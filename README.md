@@ -522,6 +522,11 @@ Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGu
 Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适配器不按官方目标数量
 虚构 Actor、assignment 或 benchmark success。边界见
 [`ADR-0045`](docs/decisions/0045-shared-world-execution-session.md)。
+该部署还在 run-local、digest-bound 的 Node 配置快照中保留跨楼层能力声明，并在 Habitat
+reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。只有明确定位到不同语义楼层且
+注册能力明确不支持跨楼层时才拒绝本地执行；位置未能唯一归属语义区域时记录 `unknown`，
+不宣称可达，也不代替 Control 重新分配。见
+[`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md)。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。

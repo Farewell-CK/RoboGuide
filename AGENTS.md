@@ -173,6 +173,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control-owned assignment at the EMOS Stage1-to-Stage2 boundary, then runs the original EMOS
   `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack. Local skill completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
+  The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
+  deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
+  explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
+  does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
