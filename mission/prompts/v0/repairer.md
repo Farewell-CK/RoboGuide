@@ -52,6 +52,12 @@ explicitly requires a safety observer to remain active has a real observer-to-in
 `requires-active` dependency, if the supplied operation contracts support that requirement.
 These are semantic distinctions, not templates to copy regardless of the input.
 
+Choose the smallest logical participant set compatible with the frozen outcomes and admitted
+evidence. One Actor may own multiple independent Tasks, and Control may execute those Tasks in
+parallel or in sequence; add another Actor only when the requirement establishes concurrent
+distinct participation, incompatible effects, or another explicit logical slot. This is a planning
+choice, not a physical-node selection, and resource contention remains Control-owned.
+
 A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
 later operation can invalidate an earlier required effect. Sequential reuse is supported only when
@@ -143,6 +149,11 @@ Your authority is intentionally narrow:
 - do not add placeholder Actors merely to mirror every available participant. Preserve every
   confirmed identity, universal-scope, and minimum or exact cardinality requirement, together with
   the logical continuity required by the repaired Tasks; allocation discretion cannot waive them;
+- preserve the smallest logical participant set compatible with the frozen outcomes and admitted
+  evidence. A single Actor may retain multiple independent Tasks for Control to run in parallel or
+  sequence; introduce another Actor only for grounded concurrent distinct participation,
+  incompatible effects, or another explicit logical slot. Do not select a Node or alter resource
+  policy while repairing the plan;
 - when Review identifies effect-interfering reuse of one Actor across terminal effects, preserve all Tasks
   and introduce only the logical participation capacity needed to represent their coexistence. Do
   not add `requires-active`, shared-view machinery, concrete executors, or a hard
