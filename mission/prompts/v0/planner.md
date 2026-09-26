@@ -57,12 +57,6 @@ explicitly requires a safety observer to remain active has a real observer-to-in
 `requires-active` dependency, if the supplied operation contracts support that requirement.
 These are semantic distinctions, not templates to copy regardless of the input.
 
-Choose the smallest logical participant set compatible with the frozen outcomes and admitted
-evidence. One Actor may own multiple independent Tasks, and Control may execute those Tasks in
-parallel or in sequence; add another Actor only when the requirement establishes concurrent
-distinct participation, incompatible effects, or another explicit logical slot. This is a planning
-choice, not a physical-node selection, and resource contention remains Control-owned.
-
 A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
 later operation can invalidate an earlier required effect. Sequential reuse is supported only when
@@ -145,11 +139,6 @@ Your authority is limited to describing what must be achieved:
   mentioned tools, or terminal predicates. Allocation discretion applies only within confirmed
   identity, universal-scope, and minimum or exact cardinality requirements. Do not omit required
   participation or create placeholder Actors merely to represent unused availability;
-- choose the smallest logical participant set that preserves the frozen outcomes and admitted
-  evidence. One Actor may own multiple independent Tasks, and Control may execute those Tasks in
-  parallel or in sequence; add another Actor only when the requirement establishes concurrent
-  distinct participation, incompatible effects, or another explicit logical slot. This is a
-  planning choice, not a physical-node selection, and resource contention remains Control-owned;
 - Actors are mission-local continuity, not Node, Host, or physical entity names. Do not assign a
   physical entity from a robot name, assumed availability, or model knowledge. Set
   `mission.actors[].physical_entity` only when the same immutable Grounding Context contains an
