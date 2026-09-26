@@ -17,6 +17,11 @@ from mission.grounding_context import (
 )
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.planning_world_evidence import (
+    AuthoritativePlanningWorldEvidence,
+    PlanningWorldGap,
+    PlanningWorldRelation,
+)
 from mission.rejected_draft import RejectedPlanError
 from mission.responses import (
     ResponsesMissionPlanner,
@@ -320,6 +325,49 @@ def test_authoritative_goal_rejects_ungrounded_executor_distinctness() -> None:
             _current_catalog(),
             _semantic_grounding(),
         )
+
+
+def test_destination_floor_relation_does_not_ground_executor_distinctness() -> None:
+    """Separated destinations and unknown starts never identify physical executors."""
+    base = _semantic_grounding()
+    semantic = base.semantic_evidence
+    assert semantic is not None
+    planning_world = AuthoritativePlanningWorldEvidence.create(
+        run_id=semantic.run_id,
+        episode_id=semantic.episode_id,
+        scene_id="scene-51",
+        dataset_revision=semantic.dataset_revision,
+        dataset_sha256=semantic.dataset_sha256,
+        source_revision="scene-source-1",
+        relations=(PlanningWorldRelation("target-a", "different_floor", "target-b"),),
+        gaps=(PlanningWorldGap("agent_start_state_pending_reset", "start states remain unknown"),),
+    )
+    grounding = GroundingContextSnapshot.create(
+        request_id=base.request_id,
+        dialogue_digest=base.dialogue_digest,
+        captured_at_ms=base.captured_at_ms,
+        semantic_evidence=semantic,
+        planning_world_evidence=planning_world,
+    )
+    valid = _coordination_plan(cooperative=False)
+    planner = ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        FakeTransport([_response(_provider_plan(valid))]),
+    )
+    assert planner.plan("mission-inspection", _intent(valid), _current_catalog(), grounding)
+
+    invented = deepcopy(valid)
+    _context(invented)["executor_constraints"] = [
+        {"kind": "distinct-physical-entities", "context_roles": ["watch", "infer"]}
+    ]
+    planner = ResponsesMissionPlanner(
+        _local_settings(),
+        {"OPENAI_API_KEY": "test-only-key"},
+        FakeTransport([_response(_provider_plan(invented))]),
+    )
+    with pytest.raises(RejectedPlanError, match="lacks authoritative physical-entity grounding"):
+        planner.plan("mission-inspection", _intent(invented), _current_catalog(), grounding)
 
 
 def test_recovery_removes_only_unsupported_authoritative_constraint() -> None:
