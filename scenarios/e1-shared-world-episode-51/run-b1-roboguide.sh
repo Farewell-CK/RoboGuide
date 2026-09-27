@@ -242,6 +242,11 @@ wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
     "$RUN" --check-artifact \
     || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+    habitat_local_eaios.spatial_feasibility \
+    --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
+    --output "$RUN/spatial-profile.json" --verify-sources \
+    || { FAILURE_REASON=spatial_profile_source_mismatch; exit 1; }
 uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility "$RUN" \
     || { FAILURE_REASON=preassignment_feasibility_unavailable; exit 1; }
 

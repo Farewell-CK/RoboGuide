@@ -193,6 +193,24 @@ def load_spatial_profile_snapshot(path: Path) -> tuple[FloorTransitionProfile, .
         raise IntegrationError(f"cannot admit deployment spatial profile: {error}") from error
 
 
+def verify_spatial_profile_sources(path: Path, node_configs: tuple[tuple[int, Path], ...]) -> None:
+    """Require the frozen profile to equal the exact configured Node declarations.
+
+    The Habitat Python 3.9 child checks source byte digests but cannot parse TOML
+    with its standard library. This deployment preflight runs under Python 3.11
+    before Control starts, so a recomputed snapshot digest cannot substitute
+    different capability facts or endpoint identities for the Node sources.
+    """
+    load_spatial_profile_snapshot(path)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        expected = build_spatial_profile_snapshot(node_configs)
+    except (OSError, ValueError, TypeError) as error:
+        raise IntegrationError(f"cannot verify deployment spatial profile: {error}") from error
+    if document != expected:
+        raise IntegrationError("deployment spatial profile differs from configured Node sources")
+
+
 def assess_spatial_feasibility(
     habitat_env: Any,
     agent_id: int,
@@ -322,13 +340,18 @@ def _digest(value: dict[str, object]) -> str:
 
 
 def main() -> None:
-    """Build an exact run-local Node registration snapshot with Python 3.11+."""
+    """Build or verify a run-local Node registration snapshot with Python 3.11+."""
     parser = argparse.ArgumentParser(description="Freeze Node spatial capability facts")
     parser.add_argument("--node-a", type=Path, required=True)
     parser.add_argument("--node-b", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--verify-sources", action="store_true")
     arguments = parser.parse_args()
-    document = build_spatial_profile_snapshot(((0, arguments.node_a), (1, arguments.node_b)))
+    node_configs = ((0, arguments.node_a), (1, arguments.node_b))
+    if arguments.verify_sources:
+        verify_spatial_profile_sources(arguments.output, node_configs)
+        return
+    document = build_spatial_profile_snapshot(node_configs)
     write_text_atomic(arguments.output, json.dumps(document, sort_keys=True, indent=2) + "\n")
 
 

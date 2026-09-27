@@ -25,9 +25,11 @@ from habitat_local_eaios.preassignment_feasibility import (  # noqa: E402
 from habitat_local_eaios.shared_world import SharedEmosStage2Runtime  # noqa: E402
 from habitat_local_eaios.spatial_feasibility import (  # noqa: E402
     FloorTransitionProfile,
+    _digest,
     assess_spatial_feasibility,
     build_spatial_profile_snapshot,
     load_spatial_profile_snapshot,
+    verify_spatial_profile_sources,
 )
 
 _ROOT = Path(__file__).parents[3]
@@ -127,6 +129,7 @@ def test_exact_node_registration_snapshot_round_trip_and_source_change(tmp_path:
     profiles = load_spatial_profile_snapshot(snapshot)
     assert [profile.node_id for profile in profiles] == ["e1-shared-node-a", "e1-shared-node-b"]
     assert [profile.support_for("mobility.move@v1") for profile in profiles] == [True, False]
+    verify_spatial_profile_sources(snapshot, ((0, a), (1, b)))
     tampered = json.loads(snapshot.read_text(encoding="utf-8"))
     tampered["agents"][1]["operation_support"]["mobility.move@v1"] = True
     snapshot.write_text(json.dumps(tampered), encoding="utf-8")
@@ -139,6 +142,34 @@ def test_exact_node_registration_snapshot_round_trip_and_source_change(tmp_path:
     b.write_bytes(b.read_bytes() + b"\n# changed after snapshot\n")
     with pytest.raises(IntegrationError, match="Node config changed"):
         load_spatial_profile_snapshot(snapshot)
+
+
+@pytest.mark.parametrize("field", ["operation_support", "node_id", "agent_id"])
+def test_resealed_spatial_profile_cannot_replace_node_source_facts(
+    tmp_path: Path, field: str
+) -> None:
+    """A fresh digest cannot replace exact Node capability or endpoint declarations."""
+    source = _ROOT / "scenarios/e1-shared-world-episode-51"
+    a = tmp_path / "a.toml"
+    b = tmp_path / "b.toml"
+    a.write_bytes((source / "node-a.toml").read_bytes())
+    b.write_bytes((source / "node-b.toml").read_bytes())
+    snapshot = tmp_path / "profile.json"
+    document = build_spatial_profile_snapshot(((0, a), (1, b)))
+    second = cast(dict[str, Any], cast(list[Any], document["agents"])[1])
+    if field == "operation_support":
+        support = cast(dict[str, bool], second["operation_support"])
+        support["mobility.move@v1"] = True
+    elif field == "node_id":
+        second["node_id"] = "substituted-node"
+    else:
+        second["agent_id"] = 2
+    body = {key: value for key, value in document.items() if key != "digest"}
+    document["digest"] = _digest(body)
+    snapshot.write_text(json.dumps(document), encoding="utf-8")
+    load_spatial_profile_snapshot(snapshot)
+    with pytest.raises(IntegrationError, match="differs from configured Node sources"):
+        verify_spatial_profile_sources(snapshot, ((0, a), (1, b)))
 
 
 @pytest.mark.parametrize(

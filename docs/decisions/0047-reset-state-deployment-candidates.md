@@ -43,6 +43,9 @@ world.
    can shift a coordinate by one bit and reject an otherwise intact artifact.
 3. The B1 launcher binds the matrix to its frozen run, episode, scene, dataset,
    semantic evidence, Node-profile digest, and seed before starting Control.
+   Before Control starts, the launcher also reconstructs the spatial profile
+   from the exact Node config files and rejects any changed endpoint identity
+   or capability value, even if the profile's unkeyed digest was recomputed.
    The Controller loads the bounded matrix as an optional deployment-owned
    source and checks its schema, content digest, endpoint coverage, reset
    positions, and decision consistency. The source is not Mission Grounding,
