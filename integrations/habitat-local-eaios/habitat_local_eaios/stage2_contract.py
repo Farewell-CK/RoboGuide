@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -231,6 +232,39 @@ def _restore_attribute(instance: Any, name: str, previous: Any) -> None:
         setattr(instance, name, previous)
 
 
+def _bound_navigation_tools(actions: object, destination: str) -> list[dict[str, Any]]:
+    """Narrow only the original navigation argument schema to this execution's target.
+
+    The EMOS model and tool names remain intact. The selected action still passes
+    the independent raw-output contract guard before any vendor dispatch.
+    """
+    if not isinstance(actions, list) or not all(isinstance(action, dict) for action in actions):
+        raise IntegrationError("Stage2 model tool declarations are unavailable")
+    offered = deepcopy(actions)
+    navigation = [action for action in offered if action.get("name") == "nav_to_obj"]
+    if len(navigation) != 1:
+        raise IntegrationError("Stage2 navigation tool declaration is ambiguous")
+    parameters = navigation[0].get("parameters")
+    properties = parameters.get("properties") if isinstance(parameters, dict) else None
+    target = properties.get("target_obj") if isinstance(properties, dict) else None
+    required = parameters.get("required") if isinstance(parameters, dict) else None
+    if (
+        not isinstance(target, dict)
+        or target.get("type") != "string"
+        or not isinstance(required, list)
+        or "target_obj" not in required
+        or (
+            "enum" in target
+            and (not isinstance(target["enum"], list) or destination not in target["enum"])
+        )
+    ):
+        raise IntegrationError(
+            "Stage2 navigation target schema cannot bind the committed destination"
+        )
+    target["enum"] = [destination]
+    return offered
+
+
 def _guard_agent(
     agent: Any,
     contract: Stage2ExecutionContract,
@@ -256,7 +290,16 @@ def _guard_agent(
         def guarded_model_chat(content: str, crab_planning: bool = False) -> Any:
             """Keep the original response intact and fence the selected execution tool."""
             history_length = _raw_history_length(model) if not crab_planning else None
-            result = original_model_chat(content, crab_planning=crab_planning)
+            original_actions = getattr(model, "actions", _MISSING)
+            if not crab_planning and contract.expected_destination is not None:
+                model.actions = _bound_navigation_tools(
+                    original_actions, contract.expected_destination
+                )
+            try:
+                result = original_model_chat(content, crab_planning=crab_planning)
+            finally:
+                if not crab_planning and contract.expected_destination is not None:
+                    _restore_attribute(model, "actions", original_actions)
             if crab_planning:
                 return result
             action = (

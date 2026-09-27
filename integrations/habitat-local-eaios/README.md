@@ -116,13 +116,22 @@ operation profile; broad robot capability alone does not authorize it.
 The `natural-objective` Stage2 assignment preserves the canonical objective and states the exact
 committed `parameters.destination` as the target for this execution's `nav_to_obj`. A joint
 Mission objective can mention other entities without making them alternate destinations for this
-one invocation. This changes only the assignment text that replaces EMOS Stage1 output; the
-original EMOS Stage2 model, tools, skills and selected action remain untouched. The guard still
+one invocation. The original EMOS Stage2 model, tool implementations, skills and selected action
+remain untouched. The adapter changes assignment text and one execution-scoped tool argument
+schema as described below. The guard still
 rejects a wrong target instead of silently correcting it.
+
+For each assigned execution, the adapter also narrows only the original `nav_to_obj.target_obj`
+Provider schema to an enum containing the committed destination. Other tool names, descriptions,
+and schemas stay as supplied by EMOS. The original tool declaration is restored after the call,
+including Provider exceptions, and the raw returned target still goes through the independent
+Contract Guard. An incompatible vendor navigation schema fails closed before any model call.
+This is a B1 Local EAIOS contract affordance and must be recorded when comparing against an EMOS
+arm with an unconstrained tool schema.
 
 The guard installs only on the execution's agent instances and looks up each
 model after its normal lazy initialization. It preserves the original Prompt,
-tool schema, model response, planning calls, accepted action mapping and skill
+model response, planning calls, accepted action mapping and skill
 implementation. A rejected action returns `local-contract-failure`, without a
 retry or substitute action. The shared episode stops before the next Gym step;
 unfinished sibling work reports `sibling-local-contract-failure`, and already

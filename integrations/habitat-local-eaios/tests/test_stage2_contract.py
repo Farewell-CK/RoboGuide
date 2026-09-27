@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -48,11 +49,24 @@ class FakeModel:
         self.code_execution = False
         self.chat_history: list[list[dict[str, Any]]] = []
         self.tool_call_count = 1
+        self.actions: list[dict[str, Any]] = [
+            {
+                "name": "nav_to_obj",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"target_obj": {"type": "string"}},
+                    "required": ["target_obj"],
+                },
+            },
+            {"name": "wait", "parameters": {"type": "object", "properties": {}}},
+        ]
+        self.offered_actions: list[dict[str, Any]] | None = None
 
     def chat(self, content: str, crab_planning: bool = False) -> Any:
         """Emulate a vendor response while preserving its unselected raw tool calls."""
         del content
         self.calls += 1
+        self.offered_actions = deepcopy(self.actions)
         if isinstance(self.response, Exception):
             raise self.response
         if not crab_planning:
@@ -201,6 +215,46 @@ def test_valid_navigation_is_identical_to_vendor_and_audit_precedes_mutation(
     assert agent.llm_model.calls == reference.llm_model.calls == 1
 
 
+def test_provider_navigation_schema_is_bound_and_restored_without_rewriting_output(
+    tmp_path: Path,
+) -> None:
+    """The same vendor tools expose one committed target while raw wrong output still fails."""
+    agent = FakeAgent("alpha", ("nav_to_obj", {"target_obj": "location:south"}))
+    original = deepcopy(agent.llm_model.actions)
+    original_actions = agent.llm_model.actions
+    audit = Stage2ActionAudit(tmp_path)
+    restore = install_stage2_contract_guard([agent], {"alpha": _contracts()["alpha"]}, audit.record)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="canonical destination"):
+            agent.chat("observation")
+    finally:
+        restore()
+        audit.close()
+    assert agent.dispatched == []
+    assert agent.llm_model.actions is original_actions
+    assert agent.llm_model.actions == original
+    assert agent.llm_model.offered_actions is not None
+    offered = agent.llm_model.offered_actions
+    assert [action["name"] for action in offered] == ["nav_to_obj", "wait"]
+    assert offered[0]["parameters"]["properties"]["target_obj"]["enum"] == ["location:north"]
+
+
+def test_unbindable_navigation_schema_fails_before_provider_and_dispatch() -> None:
+    """An incompatible vendor schema cannot silently bypass the committed parameter."""
+    agent = FakeAgent("alpha", ("nav_to_obj", {"target_obj": "location:north"}))
+    agent.llm_model.actions[0]["parameters"]["properties"]["target_obj"]["type"] = "number"
+    restore = install_stage2_contract_guard(
+        [agent], {"alpha": _contracts()["alpha"]}, lambda row: None
+    )
+    try:
+        with pytest.raises(IntegrationError, match="cannot bind"):
+            agent.chat("observation")
+    finally:
+        restore()
+    assert agent.llm_model.calls == 0
+    assert agent.dispatched == []
+
+
 @pytest.mark.parametrize("tool_call_count", [0, 2, 4])
 def test_vendor_multiple_or_empty_raw_tool_calls_fail_before_dispatch(
     tool_call_count: int, tmp_path: Path
@@ -333,6 +387,7 @@ def test_planning_untouched_provider_failure_not_retried_and_methods_restored() 
     """Lazy model planning stays original; Provider errors preserve identity and call count."""
     failure = RuntimeError("provider sentinel")
     agent = FakeAgent("alpha", ("wait", {}))
+    original_actions = agent.llm_model.actions
     restore = install_stage2_contract_guard(
         [agent], {"alpha": _contracts()["alpha"]}, lambda row: None
     )
@@ -344,6 +399,7 @@ def test_planning_untouched_provider_failure_not_retried_and_methods_restored() 
             agent.chat("observation")
         assert caught.value is failure
         assert agent.llm_model.calls == before + 1
+        assert agent.llm_model.actions is original_actions
         assert "chat" not in vars(agent.llm_model)
     finally:
         restore()

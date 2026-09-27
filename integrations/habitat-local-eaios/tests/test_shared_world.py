@@ -628,6 +628,16 @@ class ContractModel:
         self.calls = 0
         self.model = "offline-model"
         self.chat_history: list[list[dict[str, Any]]] = []
+        self.actions = [
+            {
+                "name": "nav_to_obj",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"target_obj": {"type": "string"}},
+                    "required": ["target_obj"],
+                },
+            }
+        ]
 
     def chat(self, observation: str, crab_planning: bool = False) -> Any:
         """Return one raw selected tool without changing the fake simulator."""

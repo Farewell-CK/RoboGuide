@@ -169,9 +169,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   behind a responsive loopback HTTP facade, and reports terminal state only from the local execution
   outcome. Cancel acceptance is not `CANCELLED`. Node Service reacquires bounded transient status
   observation failures using the durable local handle and never redispatches Execute; budget
-  exhaustion remains explicit physical ambiguity. The Controlled backend injects only the
-  Control-owned assignment at the EMOS Stage1-to-Stage2 boundary, then runs the original EMOS
-  `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack. Local skill completion,
+  exhaustion remains explicit physical ambiguity. The Controlled backend injects the
+  Control-owned assignment at the EMOS Stage1-to-Stage2 boundary and binds its one navigation
+  target in the execution-scoped Provider tool schema. It runs the original EMOS
+  `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack without rewriting a
+  model-selected action; the independent Contract Guard still rejects wrong targets. Local skill
+  completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
