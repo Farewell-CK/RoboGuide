@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import HabitatBackendConfig, LocalExecutionOutcome
-from .emos_stage2 import EmosStage2Runtime
+from .emos_stage2 import EmosStage2Runtime, format_stage2_subtask
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .spatial_feasibility import FloorTransitionProfile
 
@@ -98,7 +98,5 @@ class CrabAgentMobilityBackend:
         self._runtime = None
 
     def _subtask(self, invocation: CanonicalMobilityInvocation) -> str:
-        """Return the deployment-selected semantic assignment supplied to Stage2."""
-        if self._config.subtask_mode == "natural-objective":
-            return invocation.objective
-        return f"Navigate to {invocation.destination}."
+        """Describe the same assignment the original Stage2 runtime will receive."""
+        return format_stage2_subtask(invocation, self._config.subtask_mode)

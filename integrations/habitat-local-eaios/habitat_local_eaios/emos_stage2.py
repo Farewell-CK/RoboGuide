@@ -24,6 +24,27 @@ from .stage2_contract import (
 _LOG = logging.getLogger(__name__)
 
 
+def format_stage2_subtask(invocation: CanonicalMobilityInvocation, mode: str) -> str:
+    """Preserve the objective while binding Stage2's navigation target to the intent.
+
+    The EMOS model still chooses its own tool call. This text exposes the
+    committed parameter that the local contract guard will enforce; it never
+    changes the destination or repairs a model-selected action.
+    """
+    if mode == "entity-grounded":
+        return f"Navigate to {invocation.destination}."
+    if mode != "natural-objective":
+        raise IntegrationError(f"unsupported Stage2 subtask mode {mode!r}")
+    destination = json.dumps(invocation.destination, ensure_ascii=False)
+    return (
+        f"{invocation.objective}\n\n"
+        f"Assigned navigation destination for this execution: {destination}. "
+        "If you call nav_to_obj, use this exact entity as target_obj. "
+        "Other entities in the overall objective are not alternative destinations "
+        "for this execution."
+    )
+
+
 def _make_episode_gym_environment(
     config: Any,
     episode_id: str,
@@ -801,10 +822,8 @@ class EmosStage2Runtime:
         }
 
     def _subtask(self, invocation: CanonicalMobilityInvocation) -> str:
-        """Return the configured semantic assignment without Local How."""
-        if self._config.subtask_mode == "natural-objective":
-            return invocation.objective
-        return f"Navigate to {invocation.destination}."
+        """Return the configured assignment with its exact committed destination."""
+        return format_stage2_subtask(invocation, self._config.subtask_mode)
 
     def _agent_position(self) -> tuple[float, float, float]:
         """Read the assigned simulated robot's current base position."""

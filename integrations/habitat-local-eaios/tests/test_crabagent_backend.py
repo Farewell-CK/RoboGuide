@@ -249,7 +249,9 @@ def test_wrapper_delegates_to_persistent_original_stage2(
 def test_subtask_modes_only_change_assignment_text(tmp_path: Path) -> None:
     """Natural and entity-grounded modes must not select a different skill path."""
     objective = "使用语义目标移动到园区大门。"
-    assert CrabAgentMobilityBackend(_config(tmp_path))._subtask(_invocation(objective)) == objective
+    natural = CrabAgentMobilityBackend(_config(tmp_path))._subtask(_invocation(objective))
+    assert natural.startswith(objective)
+    assert 'Assigned navigation destination for this execution: "any_targets|0".' in natural
     assert (
         CrabAgentMobilityBackend(_config(tmp_path, "entity-grounded"))._subtask(_invocation())
         == "Navigate to any_targets|0."
@@ -282,7 +284,8 @@ def test_committed_assignment_replaces_only_stage1_output(
         )
     }
     assigned = runtime._assigned_arguments(context, _invocation())
-    assert assigned["agent_0"].values["subtask_description"] == _invocation().objective
+    assert assigned["agent_0"].values["subtask_description"].startswith(_invocation().objective)
+    assert '"any_targets|0"' in assigned["agent_0"].values["subtask_description"]
     assert assigned["agent_1"].values["subtask_description"] == "Nothing to do"
     assert assigned["agent_0"].values["task_description"] == _invocation().objective
 

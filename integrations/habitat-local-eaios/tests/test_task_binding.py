@@ -62,6 +62,7 @@ def _runtime(subtask_mode: str) -> SharedEmosStage2Runtime:
     runtime._config = types.SimpleNamespace(
         subtask_mode=subtask_mode,
         episode_id="51",
+        agent_id=0,
     )
     runtime._agent_ids = (0, 1)
     return runtime
@@ -136,10 +137,10 @@ def test_binding_rejects_missing_or_unknown_agent_slots(monkeypatch: pytest.Monk
         )
 
 
-def test_natural_objective_does_not_change_canonical_invocation(
+def test_natural_objective_exposes_canonical_destination_to_stage2(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Natural wording preserves the canonical objective while remaining separately auditable."""
+    """Stage2 sees the committed target even when the objective names several entities."""
     utils = types.ModuleType("habitat_mas.utils")
     utils.AgentArguments = FakeAgentArguments  # type: ignore[attr-defined]
     package = types.ModuleType("habitat_mas")
@@ -152,4 +153,37 @@ def test_natural_objective_does_not_change_canonical_invocation(
     for agent_id, invocation in invocations.items():
         values = assigned[f"agent_{agent_id}"].values
         assert values["task_description"] == invocation.objective
-        assert values["subtask_description"] == invocation.objective
+        assert values["subtask_description"].startswith(invocation.objective)
+        assert (
+            f'Assigned navigation destination for this execution: "{invocation.destination}".'
+            in values["subtask_description"]
+        )
+        assert "use this exact entity as target_obj" in values["subtask_description"]
+
+
+def test_single_actor_joint_objective_retains_its_one_committed_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A joint outcome cannot obscure the exact target of one serial execution."""
+    utils = types.ModuleType("habitat_mas.utils")
+    utils.AgentArguments = FakeAgentArguments  # type: ignore[attr-defined]
+    package = types.ModuleType("habitat_mas")
+    package.utils = utils  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "habitat_mas", package)
+    monkeypatch.setitem(sys.modules, "habitat_mas.utils", utils)
+    original = _invocations()[0]
+    invocation = CanonicalMobilityInvocation(
+        mission_id=original.mission_id,
+        task_id=original.task_id,
+        group_id=original.group_id,
+        role_id=original.role_id,
+        operation=original.operation,
+        objective="Jointly satisfy pickup_marker|7 and delivery_marker|7.",
+        parameters={"destination": "delivery_marker|7"},
+        resource_ids=original.resource_ids,
+    )
+    assigned = _runtime("natural-objective")._assigned_arguments(_context(), invocation)
+    text = assigned["agent_0"].values["subtask_description"]
+    assert text.startswith(invocation.objective)
+    assert 'Assigned navigation destination for this execution: "delivery_marker|7".' in text
+    assert assigned["agent_1"].values["subtask_description"] == "Nothing to do"

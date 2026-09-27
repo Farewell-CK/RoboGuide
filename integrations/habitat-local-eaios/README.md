@@ -72,32 +72,31 @@ physical attempt.
 
 The `shared-emos-stage2` profile has a stricter episode-start contract than the single-agent
 backend. One process owns one official Habitat episode and exactly two configured agent endpoints.
-It starts the single reset only after two Control-committed assignments arrive through distinct
-endpoints. It does not support running one endpoint and later reusing that endpoint for a second
-assignment inside the same official episode. This is a deployment topology limit, not a statement
-that every two-goal Mission semantically requires distinct Physical Entities.
+It resets once before MI freezes environment evidence. Two independent Actors require
+Control-committed assignments on distinct endpoints before joint execution. One independent
+Actor may run successive Control-dispatched Tasks on its retained endpoint in that same reset
+world. Other topologies fail closed. These are deployment limits, not claims that a joint goal
+semantically requires distinct Physical Entities.
 
-The bounded `--pair-wait-s` barrier prevents a half-populated joint episode from running. Expiry
+The bounded `--pair-wait-s` barrier prevents a half-populated two-Actor execution from running. Expiry
 fails the arrived local execution and writes `evidence/shared-world-start-admission.json` with the
 fixed topology, arrived assignment, and rejection reason. The coordinator also appends every
 admission decision to `shared-world-start-admission.jsonl`, so a later decision cannot silently
 overwrite an earlier rejection. Before reset it verifies that both assignments belong to the same
 Mission and execution Group, target distinct logical Task/Role slots, and map to distinct configured
-agent endpoints. A mismatched pair is rejected before Habitat starts. A successful pair writes the
-same artifact with `state: ADMITTED` before reset. Evidence write failures are logged and never
+agent endpoints. A mismatched pair is rejected before Stage2 starts. A successful pair writes the
+same artifact with `state: ADMITTED` before execution. Evidence write failures are logged and never
 change the local execution result. Generic Control remains free to run a true one-Actor DAG
 sequentially on one resource after satisfaction releases it; such a plan must use a deployment that
 implements sequential endpoint reuse.
 
-Before the single shared-world reset, the adapter also writes
-`evidence/authoritative-planning-world-evidence.json` when static scene metadata is available.
-This versioned artifact binds the loaded episode and dataset identity to object/goal region, floor,
-and explicitly supplied same/different-floor relations when the raw episode exposes exact mappings.
-It reads no PDDL `sim_info`,
-object manager, or simulator target index before their reset-time binding. Missing exact object
-instance handles and ambiguous regions remain explicit gaps. It never calls reset, samples agent
-poses, advances the simulator, or selects a Node. Start poses therefore remain an explicit
-`agent_start_state_pending_reset` gap until execution evidence is recorded after reset.
+After the single shared-world reset, the adapter writes
+`evidence/authoritative-planning-world-evidence.json`. Its v0.2 schema binds the loaded episode
+and dataset identity to static object/goal region and floor facts, and may add conservative
+single-location witnesses for direct official geometric terminal conjunctions. A witness is a
+reset snapshot, not a route or success result. Missing exact geometry remains an explicit gap.
+The builder performs no additional reset or simulator step, and MI receives no agent start pose or
+Node selection authority; the separate Control preassignment evidence retains that information.
 
 ## Stage2 execution contract guard
 
@@ -113,6 +112,13 @@ agent retains its own invocation-bound destination. Pick, place, reset-arm and
 unknown tools are outside this implemented navigation profile. A future local
 integration that legitimately requires another action must provide an explicit
 operation profile; broad robot capability alone does not authorize it.
+
+The `natural-objective` Stage2 assignment preserves the canonical objective and states the exact
+committed `parameters.destination` as the target for this execution's `nav_to_obj`. A joint
+Mission objective can mention other entities without making them alternate destinations for this
+one invocation. This changes only the assignment text that replaces EMOS Stage1 output; the
+original EMOS Stage2 model, tools, skills and selected action remain untouched. The guard still
+rejects a wrong target instead of silently correcting it.
 
 The guard installs only on the execution's agent instances and looks up each
 model after its normal lazy initialization. It preserves the original Prompt,
