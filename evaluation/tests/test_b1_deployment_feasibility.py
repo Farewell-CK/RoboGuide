@@ -20,6 +20,9 @@ def test_cross_language_float_digest_golden_is_stable() -> None:
     assert _content_digest({"a": [1e-7, -0.0, 1.0], "b": "目标"}) == (
         "sha256:1ddb467cd0b0f8a661f022b93bae56e7dd457c530d75f55e03fbc3d84724fd8c"
     )
+    assert _content_digest({"a": [-1.9126900434494019]}) == (
+        "sha256:d7c35e78037b280f3263068c3ad0c72bcf2f2e515160495244441c6fbe5e135f"
+    )
 
 
 def _source(run: Path) -> dict[str, Any]:

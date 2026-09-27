@@ -447,6 +447,13 @@ mod tests {
             content_digest(&body).expect("digest computes"),
             "sha256:1ddb467cd0b0f8a661f022b93bae56e7dd457c530d75f55e03fbc3d84724fd8c"
         );
+        let reset_decimal: serde_json::Value =
+            serde_json::from_str(r#"{"a":[-1.9126900434494019]}"#)
+                .expect("actual reset decimal parses exactly");
+        assert_eq!(
+            content_digest(&reset_decimal).expect("digest computes"),
+            "sha256:d7c35e78037b280f3263068c3ad0c72bcf2f2e515160495244441c6fbe5e135f"
+        );
     }
 
     /// Adapt one checked-in scenario to a v0.8 submission without provider calls.

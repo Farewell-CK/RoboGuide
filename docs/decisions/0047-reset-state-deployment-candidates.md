@@ -38,7 +38,9 @@ world.
    remains in force.
    Its digest maps each finite floating value to its exact IEEE-754 bits before
    canonical JSON encoding, so Python and Rust agree even when they render a
-   small decimal exponent differently.
+   small decimal exponent differently. The Controller's JSON parser enables
+   exact float round-tripping; without it, parsing an actual Habitat decimal
+   can shift a coordinate by one bit and reject an otherwise intact artifact.
 3. The B1 launcher binds the matrix to its frozen run, episode, scene, dataset,
    semantic evidence, Node-profile digest, and seed before starting Control.
    The Controller loads the bounded matrix as an optional deployment-owned
