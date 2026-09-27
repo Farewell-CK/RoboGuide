@@ -46,6 +46,26 @@ boundaries. Habitat samples agent start state at reset, after Control assignment
    Grounding failure remains a system outcome; this adds no Formal population exclusion
    based on semantic goal coverage or physical success.
 
+## Reset-state goal witness extension (2026-09-27)
+
+ADR-0047 moved the shared-world's sole official reset before Mission submission. The Habitat
+adapter may now publish planning-world evidence v0.2 after that already-required reset. V0.1
+remains an accepted static source. V0.2 adds only a bounded geometric witness: when the
+environment's official predicate geometry proves that one participant exactly at a named
+goal entity would satisfy every listed conjunct in that reset snapshot, it records the exact
+predicate paths, witness entity, conservatively rounded maximum distance, and official
+tolerance. It records an unavailable gap when the bound geometry cannot be read. The adapter
+does not call reset, step, or `Predicate.is_true` to produce this planning evidence.
+
+This witness can support a plan with fewer logical participants or Tasks only if the canonical
+operation and all other required effects remain faithful to the grounded objective. It is not
+a route, a Node or Physical Entity selector, a persistence guarantee for movable entities, a
+Task satisfaction result, or official benchmark success. MI still does not receive the reset
+agent starts or live Node inventory; Control retains the separate full preassignment matrix
+and all placement authority. Grounding Context binds witness paths to the exact frozen
+semantic goal and the same run/episode/scene/dataset identity. The Reviewer must not reject
+another semantically sound topology merely because a witness exists.
+
 ## Consequences and limits
 
 This separates task semantics, static environment knowledge, abstract deployment capability,

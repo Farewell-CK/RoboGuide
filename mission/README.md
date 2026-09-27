@@ -38,9 +38,12 @@ reservation 或当前可用性。缺少任务/世界证据时，MI 不得仅凭 
 profile 不能替代 environment-authoritative 的 episode floor 或 start-state evidence。
 
 Habitat 部署还可以通过 `service.grounding_planning_world_evidence_path` 提供
-`roboguide.authoritative-planning-world-evidence/v0.1`。该文件只能包含 reset 前由部署环境
-读取的静态场景事实及其 dataset identity；它不调用 reset、不采样机器人起点、不选择 Node，
-缺失的起点会保留为 `agent_start_state_pending_reset` gap。文件缺失或损坏时，Grounding
+`roboguide.authoritative-planning-world-evidence/v0.1` 静态场景证据。共享世界在执行已有的
+唯一一次 reset 后发布 v0.2：除静态事实外，仅在 Habitat 官方几何谓词的当前实体位置和
+阈值均可读、且保守毫米舍入仍成立时，记录一个终态谓词的单位置 witness。该 witness 只
+证明 reset 快照中一个参与者**精确位于**具名目标中心时多个谓词可以同时成立；它不证明
+导航路径、后续物体位置、Task completion 或官方终态成功。两版均不选择 Node 或物理机器人，
+v0.2 中的起点仍保留在 Control 部署证据而不进入 MI。文件缺失或损坏时，Grounding
 Context 保留 acquisition gap，不把未知事实转换成猜测的楼层、可达性或执行器约束；文件存在
 时会选择 grounding-context v0.3，并原样传给 Planner、Reviewer 和 Repairer。关系事实只允许
 当前版本声明的 `same_floor`/`different_floor`，且端点必须来自精确环境映射。对象实例

@@ -213,11 +213,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   hardware-validated deployment responsibility.
 - `mission/` contains the Python Mission Intelligence package and its tests.
 - Optional deployment planning input is startup-frozen abstract capability-class evidence plus
-  versioned environment-authoritative static world facts. The latter enters Grounding Context
+  versioned environment-authoritative world facts. The latter enters Grounding Context
   v0.3 with explicit unknown gaps and exact run/episode/scene/dataset identity; v0.2 remains
   compatible. Neither source grants MI live Node/Resource inventory or executor-selection
   authority. A Role feasibility constraint requires grounded task and world evidence; Control
-  alone matches current Node registration and commits resources. See ADR-0044.
+  alone matches current Node registration and commits resources. After the existing single
+  shared-world reset, planning-world evidence v0.2 may add an exact official geometric
+  single-location witness for a joint terminal goal. It is a snapshot planning option, not a
+  route, physical assignment, task completion, or benchmark outcome. See ADR-0044.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current
