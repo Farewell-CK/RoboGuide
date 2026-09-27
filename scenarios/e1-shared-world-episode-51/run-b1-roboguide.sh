@@ -242,7 +242,10 @@ wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
     "$RUN" --check-artifact \
     || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
+uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility "$RUN" \
+    || { FAILURE_REASON=preassignment_feasibility_unavailable; exit 1; }
 
+ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
 "$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
     127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
 PIDS+=($!)
