@@ -27,7 +27,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     let address = listener.local_addr().expect("listener has address");
     let server = async {
         let (mut stream, _) = listener.accept().await.expect("request connects");
-        handle_http_connection(&mut stream, &controller, &event_log, &gate, &clock)
+        handle_http_connection(&mut stream, &controller, &event_log, &gate, &clock, None)
             .await
             .expect("rejection is a valid HTTP response");
     };

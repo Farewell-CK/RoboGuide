@@ -23,14 +23,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Schema marker for the Phase 1 server checkpoint including Mission orchestration.
+/// Schema marker for the Controller wrapper including deployment candidate restrictions.
 ///
-/// The outer version advances with the inner Integration checkpoint so old
-/// checkpoints are rejected instead of being decoded with a different shape.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+/// The wrapper advances when a previous binary would silently ignore a new
+/// authority field, fencing downgrade even though the inner JSON is compatible.
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
 
-/// Immediately previous wrapper accepted for one-step coordination checkpoint migration.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
+/// Immediately previous wrapper accepted with no deployment candidate restrictions.
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -332,6 +332,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .map(|path| load_physical_entity_registry_file(Path::new(path)))
         .transpose()?;
+    let deployment_feasibility_path =
+        std::env::var_os("ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH").map(PathBuf::from);
+    let deployment_feasibility = deployment_feasibility_path
+        .as_deref()
+        .map(DeploymentFeasibility::load)
+        .transpose()
+        .map_err(|error| format!("deployment feasibility startup failed: {error}"))?
+        .map(Arc::new);
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
@@ -455,6 +463,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         controller.bridge.control(),
         &controller.orchestrator,
     )?;
+    for restriction in controller.bridge.control().actor_candidate_restrictions() {
+        if deployment_feasibility
+            .as_ref()
+            .is_none_or(|snapshot| snapshot.digest() != restriction.evidence_digest())
+        {
+            return Err(
+                "restored actor candidate restriction lacks its original deployment evidence"
+                    .into(),
+            );
+        }
+    }
     if initialize_checkpoint
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()
@@ -475,6 +494,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let controller = Arc::new(Mutex::new(controller));
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();
+    let http_deployment_feasibility = deployment_feasibility.clone();
     let http_event_write_gate = event_write_gate.clone();
     let http_clock = process_clock.clone();
     let receiver_event_log = event_log.clone();
@@ -506,6 +526,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http_event_log,
             http_event_write_gate,
             http_clock,
+            http_deployment_feasibility,
         )
         .await
         {

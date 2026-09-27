@@ -452,6 +452,9 @@ impl ControlPlane {
         let actor_authority_node = role
             .actor_id()
             .and_then(|actor_id| self.actor_authority_node(requirement.mission_id(), actor_id));
+        let actor_candidate_restriction = role.actor_id().and_then(|actor_id| {
+            self.actor_candidate_restriction(requirement.mission_id(), actor_id)
+        });
         let candidate_node_ids = state
             .nodes()
             .into_iter()
@@ -460,6 +463,11 @@ impl ControlPlane {
                 actor_authority_node
                     .as_ref()
                     .is_none_or(|node_id| snapshot.node_id() == node_id)
+            })
+            .filter(|snapshot| {
+                actor_candidate_restriction.is_none_or(|restriction| {
+                    restriction.allowed_nodes().contains(snapshot.node_id())
+                })
             })
             .filter(|snapshot| {
                 operation.map_or_else(

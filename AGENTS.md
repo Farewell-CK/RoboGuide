@@ -177,6 +177,16 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
+- The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
+  a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
+  and the exact Node-config floor facts, then reuses those observations for Stage2. The optional
+  Controller deployment adapter intersects each logical Actor's exact-intent candidate Nodes
+  with current Control eligibility; it does not select or bind an executor. B1 cross-checks the
+  matrix against the frozen workload and source digests before Controller startup. The current
+  paired endpoint profile requires one exclusive `space:1` slot per Role and one capacity-one
+  slot per endpoint; unsupported topology or known candidate shortage fails before submission.
+  Unknown geometry remains unknown, and local post-assignment admission still applies. See
+  ADR-0047.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.

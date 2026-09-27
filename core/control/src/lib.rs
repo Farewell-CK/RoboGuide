@@ -38,7 +38,7 @@ use domain::{
 };
 use ports::SharedStateError;
 use registry_provenance::RegistryProvenance;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 /// Default maximum age for a node status used by Control eligibility policy.
@@ -69,6 +69,9 @@ pub struct ControlCheckpoint {
     /// Deployment-owned actor placement constraints represented as values for stable JSON.
     #[serde(default)]
     actor_node_constraints: Vec<ActorNodeConstraint>,
+    /// Mission-scoped deployment candidate restrictions installed before first matching.
+    #[serde(default)]
+    actor_candidate_restrictions: Vec<ActorCandidateRestriction>,
     /// Mission binding semantics keyed by mission identity.
     #[serde(default)]
     mission_binding_semantics: Vec<(domain::MissionId, domain::MissionBindingSemantics)>,
@@ -120,6 +123,54 @@ impl ActorNodeConstraint {
     pub const fn node_id(&self) -> &NodeId {
         &self.node_id
     }
+}
+
+/// Deployment evidence that narrows one logical Actor's eligible Node set.
+///
+/// This is a candidate filter, never a binding, reservation, or physical task
+/// interpretation. Control still checks current registration, operation support,
+/// health, resources, and commitment authority on every decision.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ActorCandidateRestriction {
+    /// Mission namespace for the immutable accepted-plan decision.
+    mission_id: MissionId,
+    /// Logical Actor constrained by the deployment evidence.
+    actor_id: ActorId,
+    /// Nodes permitted by the fixed deployment observation.
+    allowed_nodes: BTreeSet<NodeId>,
+    /// Digest of the deployment observation used for this decision.
+    evidence_digest: String,
+}
+
+impl ActorCandidateRestriction {
+    /// Returns the Mission owning this restriction.
+    pub const fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// Returns the logical Actor whose candidates are narrowed.
+    pub const fn actor_id(&self) -> &ActorId {
+        &self.actor_id
+    }
+
+    /// Returns the permitted current Node identities without selecting one.
+    pub const fn allowed_nodes(&self) -> &BTreeSet<NodeId> {
+        &self.allowed_nodes
+    }
+
+    /// Returns the exact source evidence digest.
+    pub fn evidence_digest(&self) -> &str {
+        &self.evidence_digest
+    }
+}
+
+/// Accept only canonical lowercase SHA-256 source identities for durable restrictions.
+fn valid_evidence_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 /// Evaluates freshness using RoboGuide-local receive and decision times.
@@ -331,6 +382,9 @@ pub struct ControlPlane {
     pub(crate) actor_bindings: BTreeMap<(MissionId, ActorId), ActorBinding>,
     /// Deployment-owned actor placement constraints applied before first successful binding.
     pub(crate) actor_node_constraints: BTreeMap<(MissionId, ActorId), ActorNodeConstraint>,
+    /// Deployment candidate restrictions persisted with Control authority.
+    pub(crate) actor_candidate_restrictions:
+        BTreeMap<(MissionId, ActorId), ActorCandidateRestriction>,
     /// Current deployment topology, deliberately reacquired rather than checkpointed.
     pub(crate) physical_entity_registry: Option<domain::PhysicalEntityRegistrySnapshot>,
     /// Durable revision/digest watermark that survives separately from current topology.
@@ -369,6 +423,7 @@ impl ControlPlane {
             calendar_version: 0,
             actor_bindings: BTreeMap::new(),
             actor_node_constraints: BTreeMap::new(),
+            actor_candidate_restrictions: BTreeMap::new(),
             physical_entity_registry: None,
             registry_provenance: None,
             mission_binding_semantics: BTreeMap::new(),
@@ -387,6 +442,11 @@ impl ControlPlane {
             calendar_version: self.calendar_version,
             actor_bindings: self.actor_bindings.values().cloned().collect(),
             actor_node_constraints: self.actor_node_constraints.values().cloned().collect(),
+            actor_candidate_restrictions: self
+                .actor_candidate_restrictions
+                .values()
+                .cloned()
+                .collect(),
             mission_binding_semantics: self
                 .mission_binding_semantics
                 .iter()
@@ -456,6 +516,34 @@ impl ControlPlane {
             {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint actor placement conflicts with committed actor binding".to_string(),
+                ));
+            }
+        }
+        let mut actor_candidate_restrictions = BTreeMap::new();
+        for restriction in checkpoint.actor_candidate_restrictions {
+            let key = (restriction.mission_id.clone(), restriction.actor_id.clone());
+            if restriction.allowed_nodes.is_empty()
+                || !valid_evidence_digest(&restriction.evidence_digest)
+                || actor_candidate_restrictions
+                    .insert(key, restriction)
+                    .is_some()
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint contains invalid actor candidate restriction".to_string(),
+                ));
+            }
+        }
+        for (key, restriction) in &actor_candidate_restrictions {
+            if actor_bindings
+                .get(key)
+                .is_some_and(|binding| !restriction.allowed_nodes.contains(binding.node_id()))
+                || actor_node_constraints.get(key).is_some_and(|placement| {
+                    !restriction.allowed_nodes.contains(placement.node_id())
+                })
+            {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint actor candidate restriction conflicts with binding or placement"
+                        .to_string(),
                 ));
             }
         }
@@ -560,6 +648,7 @@ impl ControlPlane {
             calendar_version: checkpoint.calendar_version,
             actor_bindings,
             actor_node_constraints,
+            actor_candidate_restrictions,
             physical_entity_registry: None,
             registry_provenance: checkpoint.registry_provenance,
             mission_binding_semantics,
@@ -633,6 +722,13 @@ impl ControlPlane {
         {
             return Err(ControlError::InvalidProposal(
                 "actor binding violates deployment placement constraint".to_string(),
+            ));
+        }
+        if let Some(restriction) = self.actor_candidate_restrictions.get(&key)
+            && !restriction.allowed_nodes.contains(node_id)
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor binding violates deployment candidate restriction".to_string(),
             ));
         }
         let Some(semantics) = self.mission_binding_semantics.get(mission_id) else {
@@ -892,6 +988,15 @@ impl ControlPlane {
                 "actor placement conflicts with committed actor binding".to_string(),
             ));
         }
+        if self
+            .actor_candidate_restrictions
+            .get(&key)
+            .is_some_and(|restriction| !restriction.allowed_nodes.contains(&node_id))
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor placement conflicts with deployment candidate restriction".to_string(),
+            ));
+        }
         if let Some(existing) = self.actor_node_constraints.get(&key) {
             if existing.node_id() != &node_id {
                 return Err(ControlError::InvalidProposal(
@@ -918,6 +1023,66 @@ impl ControlPlane {
     /// Returns all deployment placement constraints in stable Mission/Actor order.
     pub fn actor_node_constraints(&self) -> impl Iterator<Item = &ActorNodeConstraint> {
         self.actor_node_constraints.values()
+    }
+
+    /// Installs an idempotent deployment candidate filter before Actor binding.
+    pub fn set_actor_candidate_restriction(
+        &mut self,
+        mission_id: MissionId,
+        actor_id: ActorId,
+        allowed_nodes: BTreeSet<NodeId>,
+        evidence_digest: String,
+    ) -> Result<(), ControlError> {
+        if allowed_nodes.is_empty() || !valid_evidence_digest(&evidence_digest) {
+            return Err(ControlError::InvalidProposal(
+                "actor candidate restriction is empty or lacks a valid evidence digest".to_string(),
+            ));
+        }
+        let key = (mission_id.clone(), actor_id.clone());
+        if self
+            .actor_bindings
+            .get(&key)
+            .is_some_and(|binding| !allowed_nodes.contains(binding.node_id()))
+            || self
+                .actor_node_constraints
+                .get(&key)
+                .is_some_and(|placement| !allowed_nodes.contains(placement.node_id()))
+        {
+            return Err(ControlError::InvalidProposal(
+                "actor candidate restriction conflicts with binding or placement".to_string(),
+            ));
+        }
+        let restriction = ActorCandidateRestriction {
+            mission_id,
+            actor_id,
+            allowed_nodes,
+            evidence_digest,
+        };
+        if let Some(existing) = self.actor_candidate_restrictions.get(&key) {
+            if existing != &restriction {
+                return Err(ControlError::InvalidProposal(
+                    "mission actor already has a different candidate restriction".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        self.actor_candidate_restrictions.insert(key, restriction);
+        Ok(())
+    }
+
+    /// Returns the deployment's permitted Node set for one logical Actor.
+    pub fn actor_candidate_restriction(
+        &self,
+        mission_id: &MissionId,
+        actor_id: &ActorId,
+    ) -> Option<&ActorCandidateRestriction> {
+        self.actor_candidate_restrictions
+            .get(&(mission_id.clone(), actor_id.clone()))
+    }
+
+    /// Enumerates durable deployment candidate restrictions in Mission/Actor order.
+    pub fn actor_candidate_restrictions(&self) -> impl Iterator<Item = &ActorCandidateRestriction> {
+        self.actor_candidate_restrictions.values()
     }
 
     /// Returns the node currently authorized to realize one Mission actor.

@@ -281,6 +281,14 @@ impl ControlPlane {
                 .iter_mut()
                 .find(|candidate| candidate.role_id() == role.role_id())
                 .expect("candidate exists");
+            if let Some(actor_id) = role.actor_id()
+                && let Some(restriction) =
+                    self.actor_candidate_restriction(requirement.mission_id(), actor_id)
+            {
+                role_candidates
+                    .node_ids
+                    .retain(|node_id| restriction.allowed_nodes().contains(node_id));
+            }
             role_candidates.node_ids.retain(|node_id| {
                 self.node_is_eligible_for_role_operation(state, node_id, role, operation, timestamp)
             });

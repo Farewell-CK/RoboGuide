@@ -13,6 +13,7 @@ pub(crate) async fn serve_http(
     event_log: state::SqliteEventLog,
     event_write_gate: Arc<Mutex<()>>,
     clock: Arc<runtime::SystemMonotonicClock>,
+    deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     loop {
@@ -21,6 +22,7 @@ pub(crate) async fn serve_http(
         let log = event_log.clone();
         let write_gate = event_write_gate.clone();
         let shared_clock = clock.clone();
+        let shared_feasibility = deployment_feasibility.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_http_connection(
                 &mut stream,
@@ -28,6 +30,7 @@ pub(crate) async fn serve_http(
                 &log,
                 &write_gate,
                 &shared_clock,
+                shared_feasibility.as_deref(),
             )
             .await
             {
@@ -45,6 +48,7 @@ pub(crate) async fn handle_http_connection(
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
     clock: &runtime::SystemMonotonicClock,
+    deployment_feasibility: Option<&DeploymentFeasibility>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let request = match tokio::time::timeout(
         CONTROL_HTTP_REQUEST_TIMEOUT,
@@ -175,29 +179,52 @@ pub(crate) async fn handle_http_connection(
                         bridge,
                         orchestrator,
                     } = &mut candidate;
-                    validate_actor_placement_coverage(bridge.control(), &plan).and_then(|_| {
-                        let submit_correlation =
-                            domain::CorrelationId::new(format!("submit-{mission_id}"))
+                    let eligibility = deployment_feasibility
+                        .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))
+                        .transpose();
+                    eligibility
+                        .and_then(|restrictions| {
+                            if let Some(restrictions) = restrictions {
+                                let snapshot =
+                                    deployment_feasibility.expect("restriction has source");
+                                for (actor_id, nodes) in restrictions {
+                                    bridge
+                                        .control_mut()
+                                        .set_actor_candidate_restriction(
+                                            mission_id.clone(),
+                                            actor_id,
+                                            nodes,
+                                            snapshot.digest().to_string(),
+                                        )
+                                        .map_err(|error| error.to_string())?;
+                                }
+                            }
+                            Ok(())
+                        })
+                        .and_then(|_| validate_actor_placement_coverage(bridge.control(), &plan))
+                        .and_then(|_| {
+                            let submit_correlation =
+                                domain::CorrelationId::new(format!("submit-{mission_id}"))
+                                    .map_err(|error| error.to_string())?;
+                            orchestrator
+                                .submit(
+                                    plan.clone(),
+                                    group_id.clone(),
+                                    bridge.control_mut(),
+                                    now,
+                                    &submit_correlation,
+                                    &mut events,
+                                )
                                 .map_err(|error| error.to_string())?;
-                        orchestrator
-                            .submit(
-                                plan.clone(),
-                                group_id.clone(),
-                                bridge.control_mut(),
-                                now,
-                                &submit_correlation,
-                                &mut events,
-                            )
-                            .map_err(|error| error.to_string())?;
-                        bridge
-                            .register_execution_relations(
-                                &plan,
-                                &group_id,
-                                now,
-                                &submit_correlation,
-                            )
-                            .map_err(|error| error.to_string())
-                    })
+                            bridge
+                                .register_execution_relations(
+                                    &plan,
+                                    &group_id,
+                                    now,
+                                    &submit_correlation,
+                                )
+                                .map_err(|error| error.to_string())
+                        })
                 };
                 operation
                     .and_then(|_| {

@@ -215,6 +215,116 @@ fn actor_placement_constraint_checkpoint_is_durable_and_conflict_checked() {
     ));
 }
 
+/// Reset-state deployment evidence narrows candidates without creating an Actor binding.
+#[test]
+fn actor_candidate_restriction_is_durable_and_enforced_at_match_and_bind() {
+    let (mission, t1, _) = continuity_plan();
+    let mission_id = mission.goal().mission_id().clone();
+    let actor = domain::ActorId::new("carrier").expect("actor id valid");
+    let dog_a = NodeId::new("dog-a").expect("node id valid");
+    let dog_b = NodeId::new("dog-b").expect("node id valid");
+    let evidence = format!("sha256:{}", "a".repeat(64));
+    let mut control = ControlPlane::new();
+    control
+        .set_actor_candidate_restriction(
+            mission_id.clone(),
+            actor.clone(),
+            std::collections::BTreeSet::from([dog_b.clone()]),
+            evidence.clone(),
+        )
+        .expect("deployment candidate evidence is accepted");
+    assert!(control.actor_binding(&mission_id, &actor).is_none());
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = TestEvents;
+    let now = TimestampMs::new(0);
+    let correlation_id = correlation();
+    for (node, resource) in [(dog_a.clone(), "space-a"), (dog_b.clone(), "space-b")] {
+        control
+            .register_node(
+                &mut state,
+                actor_node_with_contracts(
+                    node.as_str(),
+                    CapabilityKind::Mobility,
+                    &["go-to-shelf", "return-user"],
+                    resource,
+                    ResourceKind::Space,
+                ),
+                NodeStatus::new(NodeHealth::Online, now),
+                now,
+                &correlation_id,
+                &mut events,
+            )
+            .expect("registration valid");
+    }
+    let candidates = control
+        .match_capabilities_for_mission(&state, &mission, &t1, now, &correlation_id, &mut events)
+        .expect("matching intersects deployment and registration");
+    assert_eq!(candidates.roles()[0].node_ids(), std::slice::from_ref(&dog_b));
+    assert!(matches!(
+        control.validate_actor_binding_intent(&mission_id, &actor, &dog_a),
+        Err(ControlError::InvalidProposal(reason)) if reason.contains("candidate restriction")
+    ));
+    let checkpoint = serde_json::to_string(&control.checkpoint()).expect("checkpoint serializes");
+    let mut restored = ControlPlane::restore(
+        serde_json::from_str(&checkpoint).expect("checkpoint decodes"),
+    )
+    .expect("checkpoint restores candidate evidence");
+    assert_eq!(
+        restored
+            .actor_candidate_restriction(&mission_id, &actor)
+            .expect("restriction retained")
+            .evidence_digest(),
+        evidence
+    );
+    assert!(matches!(
+        restored.set_actor_node_constraint(mission_id, actor, dog_a),
+        Err(ControlError::InvalidProposal(reason)) if reason.contains("candidate restriction")
+    ));
+}
+
+/// Missing candidate identities and malformed evidence cannot enter durable Control authority.
+#[test]
+fn actor_candidate_restriction_rejects_empty_and_conflicting_input() {
+    let mission_id = domain::MissionId::new("mission-candidate").expect("mission id valid");
+    let actor_id = domain::ActorId::new("carrier").expect("actor id valid");
+    let dog_a = NodeId::new("dog-a").expect("node id valid");
+    let dog_b = NodeId::new("dog-b").expect("node id valid");
+    let evidence = format!("sha256:{}", "b".repeat(64));
+    let mut control = ControlPlane::new();
+    assert!(control
+        .set_actor_candidate_restriction(
+            mission_id.clone(),
+            actor_id.clone(),
+            std::collections::BTreeSet::new(),
+            evidence.clone(),
+        )
+        .is_err());
+    assert!(control
+        .set_actor_candidate_restriction(
+            mission_id.clone(),
+            actor_id.clone(),
+            std::collections::BTreeSet::from([dog_a.clone()]),
+            "sha256:invalid".to_string(),
+        )
+        .is_err());
+    control
+        .set_actor_candidate_restriction(
+            mission_id.clone(),
+            actor_id.clone(),
+            std::collections::BTreeSet::from([dog_a]),
+            evidence.clone(),
+        )
+        .expect("valid restriction accepted");
+    assert!(control
+        .set_actor_candidate_restriction(
+            mission_id,
+            actor_id,
+            std::collections::BTreeSet::from([dog_b]),
+            evidence,
+        )
+        .is_err());
+}
+
 /// Group binding rejects an assignment that bypassed mission-aware placement matching.
 #[test]
 fn actor_placement_constraint_is_enforced_again_at_group_bind() {

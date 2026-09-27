@@ -527,6 +527,14 @@ reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。只有�
 注册能力明确不支持跨楼层时才拒绝本地执行；位置未能唯一归属语义区域时记录 `unknown`，
 不宣称可达，也不代替 Control 重新分配。见
 [`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md)。
+当前 shared-world B1 部署在 endpoint 就绪前完成唯一一次 reset，冻结实际起点与精确
+operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同一份 observations。
+`integrations/habitat-local-eaios/habitat_local_eaios/preassignment_feasibility.py` 生成
+版本化矩阵；`evaluation/src/roboguide_eval/b1_deployment_feasibility.py` 将它与冻结输入
+及来源 digest 交叉绑定；`apps/integration-server/src/application/deployment_feasibility.rs`
+在部署可选启用时核对证据并收窄 Control 候选。Control 仍独占实时匹配、调度和 Commit，
+未知空间证据不冒充可达性，官方成败仍由 Habitat 判定。见
+[`ADR-0047`](docs/decisions/0047-reset-state-deployment-candidates.md)。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。

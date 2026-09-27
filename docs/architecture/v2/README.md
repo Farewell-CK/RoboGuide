@@ -79,10 +79,13 @@ unknown gap；不得由模型推测楼层、起点或可达性。只有任务需
 MI 才能声明具体的 typed capability constraint；Control 仍使用当前 Node 注册和资源承诺
 决定谁、何时、在哪里执行。规划世界证据进入版本化、不可变的 Grounding Context，并在
 B1 中与实际适配器文件及冻结 workload identity 交叉校验。Habitat shared-world adapter
-还会把实际注册文件的 digest-bound capability snapshot 带入 reset 后的只读空间 admission：
-明确的跨楼层冲突可以在 Stage2 动作前 fail closed，但 unknown 不会被猜测为可达性，adapter
-也不会重分配 Task 或改变官方目标。该 admission 不取代 Control 的匹配权，也不把正向通过
-误写成路线可达证明。详见 ADR-0044 与 ADR-0046。
+还会把实际注册文件的 digest-bound capability snapshot 带入 reset 后的只读空间 admission。
+在该部署中，唯一一次 Habitat reset 发生在 endpoint ONLINE 和 Mission 提交之前；子进程
+冻结实际起点、候选 endpoint 对精确 mobility intent 的负向可行性证据，并将同一份
+observations 交给后续 Stage2。Control 在应用层将该部署证据与实时注册及资源事实取交集，
+仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。明确的
+跨楼层冲突可在匹配前排除；未知仍保留，原本的本地执行检查继续生效，正向结果不代表
+路线可达。详见 ADR-0044、ADR-0046 与 ADR-0047。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability

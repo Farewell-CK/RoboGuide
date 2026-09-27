@@ -1,6 +1,7 @@
 //! Durable application transitions split by orchestration responsibility.
 
 mod actor_placement;
+mod deployment_feasibility;
 mod dispatch;
 mod outcomes;
 mod persistence;
@@ -12,6 +13,7 @@ pub(crate) use actor_placement::{
     load_actor_placement_file, validate_actor_placement_coverage,
     validate_restored_actor_placement_coverage,
 };
+pub(crate) use deployment_feasibility::DeploymentFeasibility;
 #[cfg(test)]
 pub(crate) use dispatch::{deferred_dispatch, node_accepts_execution_session};
 pub(crate) use dispatch::{drive_ready_tasks, drive_rebound_attempts};

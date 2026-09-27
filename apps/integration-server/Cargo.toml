@@ -15,6 +15,7 @@ state = { path = "../../core/state" }
 runtime = { path = "../../core/runtime" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
 tokio = { version = "1.53", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tonic = { version = "0.14.6", features = ["transport"] }
 
