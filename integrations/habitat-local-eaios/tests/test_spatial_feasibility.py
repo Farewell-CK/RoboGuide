@@ -14,9 +14,14 @@ INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
+import habitat_local_eaios.shared_world as shared_world_module  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
 from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
+from habitat_local_eaios.preassignment_feasibility import (  # noqa: E402
+    PREASSIGNMENT_FEASIBILITY_SCHEMA,
+    build_preassignment_feasibility,
+)
 from habitat_local_eaios.shared_world import SharedEmosStage2Runtime  # noqa: E402
 from habitat_local_eaios.spatial_feasibility import (  # noqa: E402
     FloorTransitionProfile,
@@ -34,6 +39,7 @@ def _profile(agent_id: int, support: bool | None) -> FloorTransitionProfile:
     """Create one startup-frozen profile fact independent of robot names."""
     return FloorTransitionProfile(
         agent_id,
+        f"node-{agent_id}",
         tuple((operation, support) for operation in _OPERATIONS),
         _DIGEST,
     )
@@ -119,6 +125,7 @@ def test_exact_node_registration_snapshot_round_trip_and_source_change(tmp_path:
         encoding="utf-8",
     )
     profiles = load_spatial_profile_snapshot(snapshot)
+    assert [profile.node_id for profile in profiles] == ["e1-shared-node-a", "e1-shared-node-b"]
     assert [profile.support_for("mobility.move@v1") for profile in profiles] == [True, False]
     tampered = json.loads(snapshot.read_text(encoding="utf-8"))
     tampered["agents"][1]["operation_support"]["mobility.move@v1"] = True
@@ -156,6 +163,135 @@ def test_cross_floor_decision_uses_actual_reset_start_and_registered_fact(
         "floor_id": "floor-upper",
     }
     assert record["route_reachability_proven"] is False
+
+
+def test_preassignment_matrix_uses_one_observed_reset_and_exact_intents() -> None:
+    """Preassignment evidence records negative facts without creating a Task or acting."""
+    env = _environment(
+        {0: (0.0, 0.0, 0.0), 1: (0.0, 5.0, 0.0)},
+        {"goal": (1.0, 0.0, 0.0)},
+    )
+    semantic: dict[str, Any] = {
+        "identity": {
+            "run_id": "run",
+            "episode_id": "episode",
+            "dataset_revision": "dataset-v1",
+            "dataset_sha256": "0" * 64,
+        },
+        "world_context": {"scene_id": "scene", "entity_catalog": ["goal"]},
+        "digest": _DIGEST,
+    }
+    evidence = build_preassignment_feasibility(
+        env, semantic, (_profile(0, True), _profile(1, False)), _DIGEST, 40, (0, 1)
+    )
+    assert evidence["schema_version"] == PREASSIGNMENT_FEASIBILITY_SCHEMA
+    assert evidence["identity"]["habitat_seed"] == 40
+    assert evidence["initial_agent_positions"] == {
+        "0": [0.0, 0.0, 0.0],
+        "1": [0.0, 5.0, 0.0],
+    }
+    assert [record["status"] for record in evidence["records"]] == [
+        "compatible",
+        "incompatible",
+        "compatible",
+        "incompatible",
+    ]
+    assert all(record["destination"] == "goal" for record in evidence["records"])
+    assert all(record["route_reachability_proven"] is False for record in evidence["records"])
+    assert evidence["digest"].startswith("sha256:")
+    semantic["world_context"]["scene_id"] = "other"
+    with pytest.raises(IntegrationError, match="differs from semantic evidence"):
+        build_preassignment_feasibility(
+            env, semantic, (_profile(0, True), _profile(1, False)), _DIGEST, 40, (0, 1)
+        )
+
+
+def test_shared_world_initialization_freezes_actual_reset_before_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The advertised artifact and later execution share exactly one reset world."""
+    source = _ROOT / "scenarios/e1-shared-world-episode-51"
+    node_paths = (tmp_path / "a.toml", tmp_path / "b.toml")
+    for name, path in zip(("node-a.toml", "node-b.toml"), node_paths, strict=True):
+        path.write_bytes((source / name).read_bytes())
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(
+        json.dumps(build_spatial_profile_snapshot(((0, node_paths[0]), (1, node_paths[1])))),
+        encoding="utf-8",
+    )
+    profiles = load_spatial_profile_snapshot(profile_path)
+    env = _environment(
+        {0: (0.0, 0.0, 0.0), 1: (0.0, 5.0, 0.0)},
+        {"goal": (1.0, 0.0, 0.0)},
+    )
+    resets: list[int] = []
+
+    def reset() -> dict[str, int]:
+        """Record the one real lifecycle reset in the fake simulator."""
+        resets.append(1)
+        return {"reset": len(resets)}
+
+    def initialize_vendor(self: EmosStage2Runtime) -> None:
+        """Install a vendor-shaped world without importing Habitat or Stage2."""
+        self._gym_env = SimpleNamespace(reset=reset)
+        self._habitat_env = env
+        self._episode = env.current_episode
+        self._actor = object()
+        self._agent_access = object()
+
+    def semantic(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Supply an already frozen authoritative semantic identity."""
+        del args, kwargs
+        assert resets == [1]
+        return {
+            "identity": {
+                "run_id": "run",
+                "episode_id": "episode",
+                "dataset_revision": "dataset-v1",
+                "dataset_sha256": "0" * 64,
+            },
+            "world_context": {"scene_id": "scene", "entity_catalog": ["goal"]},
+            "digest": _DIGEST,
+        }
+
+    def planning(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Keep unrelated planning evidence out of this lifecycle check."""
+        del args, kwargs
+        assert resets == [1]
+        return {"schema_version": "offline-planning"}
+
+    monkeypatch.setattr(EmosStage2Runtime, "initialize", initialize_vendor)
+    monkeypatch.setattr(shared_world_module, "build_authoritative_semantic_evidence", semantic)
+    monkeypatch.setattr(
+        shared_world_module, "build_authoritative_planning_world_evidence", planning
+    )
+    runtime = SharedEmosStage2Runtime(
+        CrabAgentBackendConfig(
+            config_path=tmp_path / "unused.yaml",
+            episode_id="episode",
+            agent_id=0,
+            max_steps=10,
+            step_period_ms=0,
+            seed=40,
+            evidence_dir=tmp_path,
+            run_id="run",
+            spatial_capabilities=profiles,
+            spatial_profile_path=profile_path,
+        ),
+        (0, 1),
+    )
+    runtime.initialize()
+    evidence = json.loads((tmp_path / "preassignment-feasibility.json").read_text())
+    assert resets == [1]
+    assert runtime._prepared_observations == {"reset": 1}
+    assert evidence["identity"]["episode_reset_count"] == 1
+    assert evidence["initial_agent_positions"] == {
+        "0": [0.0, 0.0, 0.0],
+        "1": [0.0, 5.0, 0.0],
+    }
+    with pytest.raises(IntegrationError, match="already been reset"):
+        runtime._prepare_reset()
+    assert resets == [1]
 
 
 def test_habitat_vector_object_is_read_as_three_coordinates() -> None:
@@ -283,6 +419,8 @@ def test_pair_guard_rejects_before_actor_and_step_and_preserves_evidence(tmp_pat
         ),
     )
     runtime._require_initialized = lambda: (gym, env, actor, object())  # type: ignore[method-assign]
+    runtime._prepared_observations = None
+    runtime._prepare_reset()
     running: list[int] = []
     with pytest.raises(IntegrationError, match="spatial feasibility rejected"):
         runtime.execute_pair(
@@ -352,6 +490,6 @@ def test_profile_used_evidence_failure_closes_initialized_world(
     runtime._require_initialized = lambda: (object(), object(), object(), object())  # type: ignore[method-assign]
     closed: list[bool] = []
     runtime.close = lambda: closed.append(True)  # type: ignore[method-assign]
-    with pytest.raises(IntegrationError, match="spatial capability evidence initialization failed"):
+    with pytest.raises(IntegrationError, match="shared-world initialization failed"):
         runtime.initialize()
     assert closed == [True]

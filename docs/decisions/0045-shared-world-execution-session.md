@@ -40,7 +40,9 @@ registration, or the next assignment's absence.
 3. The Habitat shared-world adapter admits only its explicitly supported
    topologies: two independent Actors on distinct configured endpoints, or
    one independent Actor whose successive Tasks reuse its assigned endpoint.
-   Unsupported coordination topologies fail before reset. The descriptor
+   Unsupported coordination topologies fail before Stage2 execution. ADR-0047
+   moves the single reset before assignment, so topology rejection can occur
+   after reset without creating physical steps or an official benchmark outcome. The descriptor
    does not make a Task ready or authorize resource reuse: Control alone
    commits, releases, and dispatches each Task. A follow-on assignment must
    have the same Group/session digest and endpoint and satisfy declared DAG

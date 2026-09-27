@@ -290,6 +290,7 @@ class SerialRuntimeHarness(SharedEmosStage2Runtime):
         self._agent_access = object()
         self._diagnostics = cast(Any, RecordingDiagnostics())
         self.observation_inputs: list[int] = []
+        self._prepare_reset()
 
     def _assigned_arguments(
         self, text_context: dict[str, Any], invocation: CanonicalMobilityInvocation
@@ -585,6 +586,12 @@ def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) ->
     runtime = LoopHarness(tmp_path, diagnostics)
     habitat_env = SimpleNamespace(
         episodes=[],
+        current_episode=SimpleNamespace(episode_id="51", scene_id="scene"),
+        sim=SimpleNamespace(
+            get_agent_data=lambda _agent_id: SimpleNamespace(
+                articulated_agent=SimpleNamespace(base_pos=(0.0, 0.0, 0.0))
+            )
+        ),
         task=SimpleNamespace(
             get_task_text_context=lambda: (_ for _ in ()).throw(
                 RuntimeError("task context failure sentinel")
@@ -600,6 +607,8 @@ def test_post_reset_setup_exception_records_terminal_evidence(tmp_path: Path) ->
         PolicyActor(),
         SimpleNamespace(masks_shape=(1,)),
     )
+    runtime._prepared_observations = None
+    runtime._prepare_reset()
     with pytest.raises(IntegrationError, match="task context failure sentinel"):
         runtime.execute_pair({}, lambda: False, lambda agent_id, detail: None)
     assert diagnostics.reset_calls == 1

@@ -8,10 +8,11 @@
 The Habitat mobility deployment registers typed capability facts such as
 whether a configured agent can transition between semantic floors. A Mission
 Plan can be semantically valid while a particular reset places an agent on a
-different floor from its assigned destination. The current shared-world
-adapter receives committed assignments before the one official Habitat reset,
-so it cannot prove that episode-specific start-state condition during Mission
-Intelligence planning.
+different floor from its assigned destination. The initial shared-world
+implementation received committed assignments before the one official Habitat
+reset, so it could not prove the episode-specific start-state condition during
+matching. ADR-0047 later moves reset before endpoint readiness and adds a
+separate Control candidate filter; this local post-assignment check remains.
 
 Failing to distinguish these facts allowed a single-floor deployment to spend
 the full physical step budget on an assignment that the deployment itself
@@ -48,11 +49,9 @@ This closes a concrete negative feasibility gap without adding a Core or
 MissionPlan field and without turning benchmark predicates into executor
 identity constraints. It makes an impossible assignment fail early and
 reviewably, but it cannot improve the success rate by itself: Control still
-owns assignment, and the current pre-reset Mission grounding has no
-episode-specific agent start floors. A future pre-assignment start-state
-contract may let MI express a justified capability requirement before
-matching; that is a separate change requiring identity, freshness, and
-reproducibility review.
+owns assignment, and Mission grounding does not choose a physical agent.
+ADR-0047 defines a separate, versioned pre-assignment deployment observation
+consumed by Control without adding live Node inventory to MI.
 
 The check does not calculate paths, invoke navigation, read live Node
 inventory, or alter Habitat RNG. Official benchmark truth remains Habitat's
@@ -64,5 +63,5 @@ regions. When these regions share one floor, the adapter can retain that floor
 without claiming one region; when they span floors, the floor remains `unknown`.
 The adapter must not substitute a guessed height threshold or label a known
 floor as a proven route. This gate is not sufficient readiness for the broad E1
-comparison: it runs after Control commitment and cannot choose a different
-capable executor.
+comparison on its own: it runs after Control commitment and cannot choose a
+different capable executor. ADR-0047 adds the earlier candidate filter.

@@ -35,6 +35,7 @@ class FloorTransitionProfile:
     """
 
     agent_id: int
+    node_id: str
     operation_support: tuple[tuple[str, bool | None], ...]
     source_digest: str
 
@@ -42,6 +43,8 @@ class FloorTransitionProfile:
         """Reject malformed deployment capability identity before execution."""
         if self.agent_id < 0:
             raise ValueError("agent_id must be non-negative")
+        if not self.node_id.strip():
+            raise ValueError("node_id must be nonblank")
         if (
             not self.source_digest.startswith("sha256:")
             or len(self.source_digest) != len("sha256:") + 64
@@ -64,6 +67,7 @@ class FloorTransitionProfile:
         """Return the exact profile fact for durable evidence."""
         return {
             "agent_id": self.agent_id,
+            "node_id": self.node_id,
             "source_digest": self.source_digest,
             "operation_support": dict(self.operation_support),
         }
@@ -177,6 +181,7 @@ def load_spatial_profile_snapshot(path: Path) -> tuple[FloorTransitionProfile, .
             profiles.append(
                 FloorTransitionProfile(
                     agent_id,
+                    item["node_id"],
                     tuple(sorted(support.items())),
                     digest,
                 )
@@ -206,11 +211,24 @@ def assess_spatial_feasibility(
     floors.  A capable agent receives ``compatible`` as an admission result,
     while the evidence still states that route reachability was not proven.
     """
+    return assess_destination_floor_compatibility(
+        habitat_env, agent_id, invocation.operation, invocation.destination, profile
+    )
+
+
+def assess_destination_floor_compatibility(
+    habitat_env: Any,
+    agent_id: int,
+    operation: str,
+    destination: str,
+    profile: FloorTransitionProfile | None,
+) -> dict[str, object]:
+    """Check an exact destination against a reset agent without an execution handle."""
     record: dict[str, object] = {
         "schema_version": SPATIAL_FEASIBILITY_SCHEMA,
         "agent_id": agent_id,
-        "destination": invocation.destination,
-        "operation": invocation.operation,
+        "destination": destination,
+        "operation": operation,
         "profile": profile.as_dict() if profile is not None else None,
         "status": "unknown",
         "reason": "spatial evidence unavailable",
@@ -228,17 +246,17 @@ def assess_spatial_feasibility(
     try:
         problem = habitat_env.task.pddl_problem
         sim_info = problem.sim_info
-        entity = problem.get_entity(invocation.destination)
-        if entity is None:
-            raise IntegrationError(f"destination entity {invocation.destination!r} is unresolved")
-        destination_position = _vector(sim_info.get_entity_pos(entity))
         start_position = _vector(
             habitat_env.sim.get_agent_data(profile.agent_id).articulated_agent.base_pos
         )
         regions = list(habitat_env.sim.semantic_scene.regions)
         start_location = _floor_location(start_position, regions)
-        destination_location = _floor_location(destination_position, regions)
         record["start"] = _location_record(start_position, start_location)
+        entity = problem.get_entity(destination)
+        if entity is None:
+            raise IntegrationError(f"destination entity {destination!r} is unresolved")
+        destination_position = _vector(sim_info.get_entity_pos(entity))
+        destination_location = _floor_location(destination_position, regions)
         record["destination_entity"] = _location_record(destination_position, destination_location)
         if start_location is None or destination_location is None:
             record["reason"] = "start or destination has no unique semantic floor"
@@ -249,7 +267,7 @@ def assess_spatial_feasibility(
             record["status"] = "compatible"
             record["reason"] = "start and destination are on the same semantic floor"
             return record
-        supports_transition = profile.support_for(invocation.operation)
+        supports_transition = profile.support_for(operation)
         if supports_transition is False:
             record["status"] = "incompatible"
             record["reason"] = "registered agent cannot transition between semantic floors"

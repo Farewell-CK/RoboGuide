@@ -4,10 +4,11 @@ One process owns exactly one Habitat simulator world, one official episode
 state, and one original EMOS Stage2 multi-agent policy.  Two independent
 RoboGuide Nodes reach this world through two loopback Local EAIOS endpoints;
 each endpoint keeps its own durable execution store and local handles.  The
-coordinator waits until both Control-committed assignments have arrived
-(bounded benchmark episode-start synchronization, never a Mission semantic
-dependency), resets the episode exactly once, runs the original joint policy
-loop, and projects per-agent terminal facts back to each Node's handle.
+coordinator resets the episode exactly once before accepting assignments so
+deployment feasibility can be observed from the actual start state. It then
+waits for Control-committed assignments (bounded benchmark synchronization,
+never a Mission semantic dependency), runs the original joint policy loop,
+and projects per-agent terminal facts back to each Node's handle.
 """
 
 from __future__ import annotations
@@ -35,8 +36,9 @@ from .emos_stage2 import EmosStage2Runtime
 from .evidence_io import write_text_atomic
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
+from .preassignment_feasibility import build_preassignment_feasibility
 from .semantic_evidence import build_authoritative_semantic_evidence
-from .spatial_feasibility import assess_spatial_feasibility
+from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 from .video_capture import HabitatVideoCapture
@@ -66,24 +68,31 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             preview_path=config.live_preview_path,
             preview_period_steps=config.live_preview_period_steps,
         )
+        self._prepared_observations: Any | None = None
+        self._reset_started = False
 
     def initialize(self) -> None:
-        """Initialize the environment and publish authoritative semantics before readiness."""
+        """Reset once, then publish evidence from that same world before readiness."""
+        if getattr(self, "_prepared_observations", None) is not None:
+            return
         super().initialize()
         _, habitat_env, _, _ = self._require_initialized()
         config = self._config
-        if isinstance(config, CrabAgentBackendConfig) and config.spatial_profile_path is not None:
-            configured_ids = tuple(profile.agent_id for profile in config.spatial_capabilities)
-            if configured_ids != tuple(sorted(self._agent_ids)):
-                self.close()
-                raise IntegrationError(
-                    "spatial capability snapshot does not cover the configured shared-world agents"
-                )
-            try:
+        try:
+            if (
+                isinstance(config, CrabAgentBackendConfig)
+                and config.spatial_profile_path is not None
+            ):
+                configured_ids = tuple(profile.agent_id for profile in config.spatial_capabilities)
+                if configured_ids != tuple(sorted(self._agent_ids)):
+                    raise IntegrationError(
+                        "spatial capability snapshot does not cover the configured "
+                        "shared-world agents"
+                    )
                 self._write_json(
                     "spatial-capability-profile-used.json",
                     {
-                        "schema_version": "roboguide.habitat-node-spatial-profile-used/v0.1",
+                        "schema_version": "roboguide.habitat-node-spatial-profile-used/v0.2",
                         "source_path": str(config.spatial_profile_path),
                         "snapshot_digest": (
                             "sha256:"
@@ -92,12 +101,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         "profiles": [profile.as_dict() for profile in config.spatial_capabilities],
                     },
                 )
-            except Exception as error:
-                self.close()
-                raise IntegrationError(
-                    f"spatial capability evidence initialization failed: {error}"
-                ) from error
-        try:
+            self._prepare_reset()
             document = build_authoritative_semantic_evidence(
                 habitat_env,
                 run_id=getattr(self._config, "run_id", ""),
@@ -106,12 +110,6 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 episode=self._episode,
             )
             self._write_json("authoritative-semantic-evidence.json", document)
-        except Exception as error:
-            self.close()
-            raise IntegrationError(
-                f"authoritative semantic evidence initialization failed: {error}"
-            ) from error
-        try:
             planning_document = build_authoritative_planning_world_evidence(
                 habitat_env,
                 run_id=getattr(self._config, "run_id", ""),
@@ -119,11 +117,60 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 episode=self._episode,
             )
             self._write_json("authoritative-planning-world-evidence.json", planning_document)
+            if (
+                isinstance(config, CrabAgentBackendConfig)
+                and config.spatial_profile_path is not None
+            ):
+                admitted_profiles = load_spatial_profile_snapshot(config.spatial_profile_path)
+                if admitted_profiles != config.spatial_capabilities:
+                    raise IntegrationError(
+                        "spatial capability profile changed before reset admission"
+                    )
+                profile_document = json.loads(
+                    config.spatial_profile_path.read_text(encoding="utf-8")
+                )
+                snapshot = build_preassignment_feasibility(
+                    habitat_env,
+                    document,
+                    admitted_profiles,
+                    profile_document["digest"],
+                    config.seed,
+                    self._agent_ids,
+                )
+                self._write_json("preassignment-feasibility.json", snapshot)
         except Exception as error:
-            self.close()
-            raise IntegrationError(
-                f"authoritative planning world evidence initialization failed: {error}"
-            ) from error
+            if getattr(self, "_reset_started", False):
+                self._record_terminal_diagnostics(
+                    habitat_env, 0, "execution_exception:initialization"
+                )
+            try:
+                self.close()
+            except Exception:  # noqa: BLE001 - preserve the original initialization failure
+                _LOG.exception("shared-world cleanup failed after initialization")
+            raise IntegrationError(f"shared-world initialization failed: {error}") from error
+
+    def _prepare_reset(self) -> None:
+        """Reset once before matching and retain exactly those observations for Stage2."""
+        if getattr(self, "_reset_started", False):
+            raise IntegrationError("shared-world episode has already been reset")
+        gym_env, habitat_env, _, _ = self._require_initialized()
+        self._reset_started = True
+        habitat_env.episodes = [self._episode]
+        observations = gym_env.reset()
+        if isinstance(observations, tuple):
+            observations = observations[0]
+        if observations is None:
+            raise IntegrationError("shared-world reset returned no observations")
+        self._episode_started_at = time.time()
+        self._initial_positions = initial_agent_positions(habitat_env, self._agent_ids)
+        self._diagnostics.record_reset(habitat_env, self._config)
+        self._record_video(0, observations, {})
+        self._prepared_observations = observations
+        self._serial_observations = observations
+        self._serial_agent_id: int | None = None
+        self._serial_steps = 0
+        self._serial_initial_positions = self._initial_positions
+        self._serial_started_at = self._episode_started_at
 
     def execute_serial(
         self,
@@ -142,22 +189,12 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         phase = "serial_reset"
         terminal_recorded = False
         try:
-            if not hasattr(self, "_serial_observations"):
-                habitat_env.episodes = [self._episode]
-                observations = gym_env.reset()
-                if isinstance(observations, tuple):
-                    observations = observations[0]
-                self._serial_observations = observations
+            if self._prepared_observations is None:
+                raise IntegrationError("shared-world reset evidence is unavailable")
+            if self._serial_agent_id is None:
                 self._serial_agent_id = agent_id
-                self._serial_steps = 0
-                self._serial_initial_positions = initial_agent_positions(
-                    habitat_env, self._agent_ids
-                )
-                self._diagnostics.record_reset(habitat_env, original_config)
-                self._record_video(0, observations, {})
                 self._serial_text_context = habitat_env.task.get_task_text_context()
                 self._serial_text_context["episode_id"] = habitat_env.current_episode.episode_id
-                self._serial_started_at = time.time()
                 self._write_text(
                     "scene_description.txt", str(self._serial_text_context["scene_description"])
                 )
@@ -294,16 +331,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         gym_env, habitat_env, actor, access = self._require_initialized()
         agent_ids = self._agent_ids
         loop_owns_terminal_diagnostics = False
-        setup_phase = "gym_reset"
+        setup_phase = "prepared_reset"
         try:
-            habitat_env.episodes = [self._episode]
-            observations = gym_env.reset()
-            if isinstance(observations, tuple):
-                observations = observations[0]
-            self._diagnostics.record_reset(habitat_env, self._config)
-            self._record_video(0, observations, {})
+            if self._prepared_observations is None:
+                raise IntegrationError("shared-world reset evidence is unavailable")
+            observations = self._prepared_observations
             setup_phase = "task_context"
-            episode_started_at = time.time()
+            episode_started_at = self._episode_started_at
             text_context = habitat_env.task.get_task_text_context()
             text_context["episode_id"] = habitat_env.current_episode.episode_id
             self._write_text("scene_description.txt", str(text_context["scene_description"]))
@@ -334,7 +368,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 # evidence: paired arms must compare these recorded facts,
                 # never assume equal seeds imply equal initial states.
                 "habitat_seed": self._config.seed,
-                "initial_agent_positions": initial_agent_positions(habitat_env, agent_ids),
+                "initial_agent_positions": self._initial_positions,
             }
             loop_owns_terminal_diagnostics = True
             outcomes, steps, done, info = self._pair_loop(
