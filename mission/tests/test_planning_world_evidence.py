@@ -10,13 +10,16 @@ from typing import cast
 import pytest
 from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import GroundingReadError, HttpMissionGroundingReader
-from mission.models import JSONValue
+from mission.models import JSONObject, JSONValue
 from mission.planning_world_evidence import (
+    RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
     AuthoritativePlanningWorldEvidence,
+    PlanningGoalWitness,
     PlanningSpatialFact,
     PlanningWorldEvidenceError,
     PlanningWorldGap,
     PlanningWorldRelation,
+    planning_world_review_payload,
 )
 from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
@@ -53,6 +56,92 @@ def test_planning_world_evidence_round_trips_and_orders_facts() -> None:
     ]
     assert restored.gaps[0].code == "agent_start_state_pending_reset"
     assert restored.relations[0].relation == "different_floor"
+
+
+def test_reset_goal_witness_round_trip_and_semantic_binding() -> None:
+    """A reset witness covers exact authoritative conjuncts without selecting a Node."""
+    base = _evidence()
+    evidence = AuthoritativePlanningWorldEvidence.create(
+        run_id=base.run_id,
+        episode_id=base.episode_id,
+        scene_id=base.scene_id,
+        dataset_revision=base.dataset_revision,
+        dataset_sha256=base.dataset_sha256,
+        source_revision="reset-geometry-v1",
+        schema_version=RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+        goal_witnesses=(
+            PlanningGoalWitness(
+                ("/goal/operands/0", "/goal/operands/1"),
+                "TARGET_any_targets|0",
+                1676,
+                2000,
+            ),
+        ),
+    )
+    assert AuthoritativePlanningWorldEvidence.from_json(evidence.to_json()) == evidence
+    provider_payload = planning_world_review_payload(evidence)
+    assert provider_payload is not None
+    assert provider_payload["goal_witnesses"] == [
+        {
+            "predicate_paths": ["/goal/operands/0", "/goal/operands/1"],
+            "destination_entity_id": "TARGET_any_targets|0",
+            "max_distance_mm": 1676,
+            "tolerance_mm": 2000,
+        }
+    ]
+    assert (
+        cast(JSONObject, provider_payload["guidance"])[
+            "facts_do_not_select_nodes_or_physical_entities"
+        ]
+        is True
+    )
+    goal = SemanticExpression.logical(
+        "and",
+        (
+            SemanticExpression.predicate("any_at", ("any_targets|0",)),
+            SemanticExpression.predicate("any_at", ("TARGET_any_targets|0",)),
+        ),
+    )
+    semantic = AuthoritativeSemanticEvidence.create(
+        run_id=base.run_id,
+        episode_id=base.episode_id,
+        revision="goal-v1",
+        dataset_revision=base.dataset_revision,
+        dataset_sha256=base.dataset_sha256,
+        goal=goal,
+        world_context={
+            "scene_id": base.scene_id,
+            "entity_catalog": ["any_targets|0", "TARGET_any_targets|0"],
+        },
+    )
+    snapshot = GroundingContextSnapshot.create(
+        "request",
+        "sha256:" + "b" * 64,
+        1,
+        semantic_evidence=semantic,
+        planning_world_evidence=evidence,
+    )
+    assert GroundingContextSnapshot.from_json(snapshot.to_json()) == snapshot
+    tampered = copy.deepcopy(evidence.to_json())
+    cast(list[dict[str, object]], tampered["goal_witnesses"])[0]["tolerance_mm"] = 1000
+    with pytest.raises(PlanningWorldEvidenceError, match="distance exceeds tolerance"):
+        AuthoritativePlanningWorldEvidence.from_json(tampered)
+    with pytest.raises(ValueError, match="requires a direct terminal conjunction"):
+        GroundingContextSnapshot.create(
+            "request",
+            "sha256:" + "b" * 64,
+            1,
+            semantic_evidence=AuthoritativeSemanticEvidence.create(
+                run_id=base.run_id,
+                episode_id=base.episode_id,
+                revision="wrong-goal",
+                dataset_revision=base.dataset_revision,
+                dataset_sha256=base.dataset_sha256,
+                goal=SemanticExpression.predicate("any_at", ("any_targets|0",)),
+                world_context={"scene_id": base.scene_id, "entity_catalog": ["any_targets|0"]},
+            ),
+            planning_world_evidence=evidence,
+        )
 
 
 def test_planning_world_evidence_digest_rejects_tampering() -> None:

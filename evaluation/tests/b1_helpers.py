@@ -16,7 +16,9 @@ from mission.controller import HttpMissionController
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.models import MissionPlan
 from mission.planning_world_evidence import (
+    RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
     AuthoritativePlanningWorldEvidence,
+    PlanningGoalWitness,
     PlanningSpatialFact,
     PlanningWorldGap,
     PlanningWorldRelation,
@@ -114,6 +116,7 @@ def make_run(
     repaired: bool = False,
     omit_second_goal: bool = False,
     planning_world: bool = False,
+    planning_witness: bool = False,
 ) -> Path:
     """Build evidence through actual MI orchestration and HTTP boundary, stopping on failure."""
     run = root / f"run-{case}"
@@ -143,7 +146,11 @@ def make_run(
                 SemanticExpression.predicate("any_at", ("TARGET_any_targets|0",)),
             ),
         ),
-        world_context={"scene_id": "scene-51", "agent_ids": [0, 1], "entity_catalog": []},
+        world_context={
+            "scene_id": "scene-51",
+            "agent_ids": [0, 1],
+            "entity_catalog": ["any_targets|0", "TARGET_any_targets|0"],
+        },
     )
     write_json(run / "evidence/authoritative-semantic-evidence.json", semantic.to_json())
     planning_evidence = (
@@ -162,6 +169,23 @@ def make_run(
                 PlanningWorldRelation("any_targets|0", "different_floor", "TARGET_any_targets|0"),
             ),
             gaps=(PlanningWorldGap("agent_start_state_pending_reset", "reset has not run"),),
+            schema_version=(
+                RESET_PLANNING_WORLD_EVIDENCE_SCHEMA
+                if planning_witness
+                else "roboguide.authoritative-planning-world-evidence/v0.1"
+            ),
+            goal_witnesses=(
+                (
+                    PlanningGoalWitness(
+                        ("/goal/operands/0", "/goal/operands/1"),
+                        "TARGET_any_targets|0",
+                        1676,
+                        2000,
+                    ),
+                )
+                if planning_witness
+                else ()
+            ),
         )
         if planning_world
         else None

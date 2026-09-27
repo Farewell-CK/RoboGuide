@@ -72,6 +72,17 @@ bindings and the declared satisfaction basis determines Mission completion; an e
 official outcome remains a separate authority. Do not add a hard physical-identity constraint
 just to turn an uncertain physical outcome into an apparent planning guarantee.
 
+If a versioned `authoritative_planning_world_evidence.goal_witnesses` entry is supplied,
+it says that one participant exactly at its named destination satisfies every listed
+terminal predicate in the observed reset snapshot. It may justify one logical Actor and
+one canonical Task covering those outcomes when that Task's operation can reach the witness
+without invalidating the other required effects. Preserve every predicate in the Task's
+expected effect; do not create a Task merely because the goal has another conjunct.
+The witness is not a route, an agent/Node assignment, a guarantee about later object motion,
+or proof that an execution report establishes official benchmark success. When a witness is
+absent or does not cover the whole required conjunction, keep the uncertainty and required
+participation; do not infer overlap from names, floor relations, or available robots.
+
 Apply a mobility capability constraint to the Role that actually needs it. A relation between
 two destinations, including `different_floor`, does not establish either executor's start floor
 or prove that either individual movement crosses floors. Require floor-transition capability

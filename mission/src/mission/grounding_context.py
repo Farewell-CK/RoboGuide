@@ -701,6 +701,29 @@ def _require_matching_world_identity(
         raise GroundingContextError(
             "planning world dataset digest does not match semantic evidence"
         )
+    if planning_world_evidence.goal_witnesses:
+        goal = semantic_evidence.goal
+        catalog = semantic_evidence.world_context.get("entity_catalog")
+        if goal.kind != "logical" or goal.operator != "and" or goal.quantifier is not None:
+            raise GroundingContextError(
+                "planning goal witness requires a direct terminal conjunction"
+            )
+        expected_paths = tuple(
+            sorted(f"/goal/operands/{index}" for index in range(len(goal.operands)))
+        )
+        for witness in planning_world_evidence.goal_witnesses:
+            if (
+                witness.predicate_paths != expected_paths
+                or any(operand.kind != "predicate" for operand in goal.operands)
+                or not isinstance(catalog, list)
+                or witness.destination_entity_id not in catalog
+                or not any(
+                    witness.destination_entity_id in operand.arguments for operand in goal.operands
+                )
+            ):
+                raise GroundingContextError(
+                    "planning goal witness is not bound to the semantic goal"
+                )
 
 
 def _digest(value: JSONValue) -> str:

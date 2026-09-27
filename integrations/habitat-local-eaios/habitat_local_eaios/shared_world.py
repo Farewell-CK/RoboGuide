@@ -115,6 +115,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 run_id=getattr(self._config, "run_id", ""),
                 episode_id=self._config.episode_id,
                 episode=self._episode,
+                reset_goal_geometry=True,
             )
             self._write_json("authoritative-planning-world-evidence.json", planning_document)
             if (

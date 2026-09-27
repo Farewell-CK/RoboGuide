@@ -1,4 +1,4 @@
-"""Build neutral spatial planning facts from a loaded Habitat episode before reset."""
+"""Build neutral planning facts from a loaded Habitat episode and optional reset state."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from typing import Any
 from .semantic_evidence import _dataset_identity, _expression
 
 _SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.1"
+_RESET_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.2"
 _SOURCE_REVISION = "habitat-local-eaios-episode-static-scene/v0.1"
+_RESET_SOURCE_REVISION = "habitat-local-eaios-reset-goal-geometry/v0.2"
 
 
 class PlanningWorldEvidenceBuildError(RuntimeError):
@@ -24,13 +26,13 @@ def build_authoritative_planning_world_evidence(
     run_id: str,
     episode_id: str,
     episode: Any | None = None,
+    reset_goal_geometry: bool = False,
 ) -> dict[str, Any]:
-    """Read the selected episode and static scene without reset or simulator mutation.
+    """Read selected-episode facts and optional already-reset goal geometry.
 
-    Habitat binds PDDL ``sim_info`` and instantiates episode objects during reset.
-    Neither is a valid source before MI freezes its input. Only the selected
-    dataset episode and already loaded scene regions are read here; unresolved
-    object and agent locations remain explicit gaps.
+    The caller owns reset and passes ``reset_goal_geometry`` only afterward.
+    This builder neither resets nor steps the simulator. Missing geometric
+    evidence remains an explicit gap and never becomes a guessed witness.
     """
     if not run_id.strip() or not episode_id.strip():
         raise PlanningWorldEvidenceBuildError("run_id and episode_id must be nonblank")
@@ -47,8 +49,16 @@ def build_authoritative_planning_world_evidence(
     facts: list[dict[str, str]] = []
     gaps: list[dict[str, str]] = [
         {
-            "code": "agent_start_state_pending_reset",
-            "detail": "agent start state is sampled by reset and is unavailable during planning",
+            "code": (
+                "agent_start_state_not_admitted_for_mi"
+                if reset_goal_geometry
+                else "agent_start_state_pending_reset"
+            ),
+            "detail": (
+                "reset agent start and Node eligibility remain Control deployment evidence"
+                if reset_goal_geometry
+                else "agent start state is sampled by reset and is unavailable during planning"
+            ),
         }
     ]
     regions = _regions(getattr(environment, "sim", None), gaps)
@@ -57,9 +67,10 @@ def build_authoritative_planning_world_evidence(
         _append_object_facts(selected, regions, facts, gaps)
         _append_target_facts(environment, selected, regions, facts, gaps)
     _append_floor_relation(selected, relations, gaps)
+    goal_witnesses = _reset_goal_witnesses(environment, gaps) if reset_goal_geometry else []
     gaps = list({(item["code"], item["detail"]): item for item in gaps}.values())
     body: dict[str, Any] = {
-        "schema_version": _SCHEMA,
+        "schema_version": _RESET_SCHEMA if reset_goal_geometry else _SCHEMA,
         "authority": "environment-authoritative",
         "identity": {
             "run_id": run_id,
@@ -67,7 +78,9 @@ def build_authoritative_planning_world_evidence(
             "scene_id": scene_id,
             "dataset_revision": dataset_revision,
             "dataset_sha256": dataset_sha256,
-            "source_revision": _SOURCE_REVISION,
+            "source_revision": (
+                _RESET_SOURCE_REVISION if reset_goal_geometry else _SOURCE_REVISION
+            ),
         },
         "facts": sorted(facts, key=lambda item: item["entity_id"]),
         "relations": sorted(
@@ -80,7 +93,88 @@ def build_authoritative_planning_world_evidence(
         ),
         "gaps": sorted(gaps, key=lambda item: (item["code"], item["detail"])),
     }
+    if reset_goal_geometry:
+        body["goal_witnesses"] = goal_witnesses
     return {**body, "digest": _digest(body)}
+
+
+def _reset_goal_witnesses(environment: Any, gaps: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Find conservative single-location witnesses for official geometric conjuncts.
+
+    Habitat's ``any_at`` predicate measures 3-D distance from an articulated
+    agent base to each entity. A center is reported only when it lies within
+    every conjunct's official tolerance after conservative millimetre rounding.
+    This read-only snapshot does not claim a route or future goal truth.
+    """
+    try:
+        problem = environment.task.pddl_problem
+        expression = _expression(problem.goal)
+        if (
+            expression.get("kind") != "logical"
+            or expression.get("operator") != "and"
+            or expression.get("quantifier") is not None
+            or expression.get("variables") != []
+        ):
+            return []
+        operands = expression.get("operands")
+        if (
+            not isinstance(operands, list)
+            or len(operands) < 2
+            or any(
+                not isinstance(item, dict)
+                or item.get("kind") != "predicate"
+                or item.get("name") != "any_at"
+                or not isinstance(item.get("arguments"), list)
+                or len(item["arguments"]) != 1
+                for item in operands
+            )
+        ):
+            return []
+        sim_info = problem.sim_info
+        threshold = float(sim_info.robot_at_thresh)
+        if not math.isfinite(threshold) or threshold <= 0:
+            raise ValueError("official robot-at tolerance is unavailable")
+        tolerance_mm = math.floor(threshold * 1000)
+        if tolerance_mm <= 0:
+            return []
+        names = [item["arguments"][0] for item in operands]
+        if any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
+            raise ValueError("official goal entity identities are ambiguous")
+        positions: dict[str, tuple[float, float, float]] = {}
+        for name in names:
+            entity = problem.get_entity(name)
+            if entity is None:
+                raise ValueError("official goal entity is unresolved")
+            raw = sim_info.get_entity_pos(entity)
+            values = raw.tolist() if callable(getattr(raw, "tolist", None)) else raw
+            position = tuple(float(value) for value in values)
+            if len(position) != 3 or not all(math.isfinite(value) for value in position):
+                raise ValueError("official goal entity position is unavailable")
+            positions[name] = position
+        predicate_paths = sorted(f"/goal/operands/{index}" for index in range(len(names)))
+        witnesses = []
+        for name in sorted(names):
+            max_distance_mm = math.ceil(
+                max(math.dist(positions[name], positions[other]) for other in names) * 1000
+            )
+            if max_distance_mm <= tolerance_mm:
+                witnesses.append(
+                    {
+                        "predicate_paths": predicate_paths,
+                        "destination_entity_id": name,
+                        "max_distance_mm": max_distance_mm,
+                        "tolerance_mm": tolerance_mm,
+                    }
+                )
+        return witnesses
+    except Exception as error:  # noqa: BLE001 - optional planning read must not abort reset
+        gaps.append(
+            {
+                "code": "reset_goal_geometry_unavailable",
+                "detail": f"official reset goal geometry could not be read: {type(error).__name__}",
+            }
+        )
+        return []
 
 
 def _regions(sim: Any, gaps: list[dict[str, str]]) -> list[Any]:

@@ -121,6 +121,70 @@ def test_builder_reports_static_object_and_goal_floor_facts_without_reset(tmp_pa
     assert environment.sim.reset_calls == 0
 
 
+def test_reset_goal_witness_uses_official_tolerance_and_exact_entity_positions(
+    tmp_path: Path,
+) -> None:
+    """A reset geometric overlap permits one witness without a simulator step."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    positions = {
+        "any_targets|0": (0.0, 0.0, 0.0),
+        "TARGET_any_targets|0": (1.675, 0.0, 0.0),
+    }
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: name
+    problem.sim_info = SimpleNamespace(
+        robot_at_thresh=2.0, get_entity_pos=lambda entity: positions[entity]
+    )
+    document = build_authoritative_planning_world_evidence(
+        environment, run_id="run-51", episode_id="51", reset_goal_geometry=True
+    )
+    assert document["schema_version"] == "roboguide.authoritative-planning-world-evidence/v0.2"
+    assert [item["destination_entity_id"] for item in document["goal_witnesses"]] == [
+        "TARGET_any_targets|0",
+        "any_targets|0",
+    ]
+    assert all(item["max_distance_mm"] == 1675 for item in document["goal_witnesses"])
+    assert all(item["tolerance_mm"] == 2000 for item in document["goal_witnesses"])
+    assert environment.sim.reset_calls == 0
+
+    positions["TARGET_any_targets|0"] = (2.001, 0.0, 0.0)
+    separated = build_authoritative_planning_world_evidence(
+        environment, run_id="run-51", episode_id="51", reset_goal_geometry=True
+    )
+    assert separated["goal_witnesses"] == []
+
+
+def test_reset_goal_witness_unavailable_is_explicit_and_does_not_guess(tmp_path: Path) -> None:
+    """An unbound PDDL simulator yields a gap instead of a positive claim."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    document = build_authoritative_planning_world_evidence(
+        _environment(dataset), run_id="run-51", episode_id="51", reset_goal_geometry=True
+    )
+    assert document["goal_witnesses"] == []
+    assert any(gap["code"] == "reset_goal_geometry_unavailable" for gap in document["gaps"])
+
+
+def test_reset_goal_witness_does_not_simplify_quantified_goals(tmp_path: Path) -> None:
+    """A quantified conjunction cannot be treated as two direct terminal predicates."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    problem = environment.task.pddl_problem
+    problem.goal.quantifier = SimpleNamespace(value="forall")
+    problem.get_entity = lambda name: name
+    problem.sim_info = SimpleNamespace(
+        robot_at_thresh=2.0,
+        get_entity_pos=lambda entity: (0.0, 0.0, 0.0),
+    )
+    document = build_authoritative_planning_world_evidence(
+        environment, run_id="run-51", episode_id="51", reset_goal_geometry=True
+    )
+    assert document["goal_witnesses"] == []
+
+
 def test_builder_keeps_unresolved_regions_as_explicit_gaps(tmp_path: Path) -> None:
     """A missing floor mapping never becomes a guessed planning constraint."""
     dataset = tmp_path / "dataset.json.gz"

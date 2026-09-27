@@ -53,6 +53,22 @@ def test_v03_planning_world_evidence_preserves_b1_admission_and_goal_diagnostic(
     assert verdict["context"]["semantic_goal_diagnostic"][0]["status"] == "partial"
 
 
+def test_reset_goal_witness_keeps_b1_provenance_and_admission_independent(tmp_path: Path) -> None:
+    """A v0.2 witness is bound to frozen MI input but does not decide benchmark success."""
+    run = make_run(tmp_path, case="B", planning_world=True, planning_witness=True)
+    _upgrade_required_source(run)
+    preflight_artifact(run)
+    request = json.loads((run / "b1-request-record.json").read_text(encoding="utf-8"))
+    witnesses = request["grounding_context"]["planning_world_evidence"]["goal_witnesses"]
+    assert len(witnesses) == 1
+    assert witnesses[0]["destination_entity_id"] == "TARGET_any_targets|0"
+    verdict = assess_b1_directory(run)
+    assert verdict["admission"]["provenance_valid"] is True
+    assert verdict["admission"]["valid_for_formal_population"] is True
+    assert verdict["admission"]["benchmark_authority_available"] is True
+    assert verdict["admission"]["benchmark_outcome"] == "BENCHMARK_FALSE"
+
+
 def test_missing_or_tampered_planning_world_artifact_fails_closed(tmp_path: Path) -> None:
     """MI's embedded world facts cannot substitute for missing or altered adapter evidence."""
     run = make_run(tmp_path, planning_world=True)
