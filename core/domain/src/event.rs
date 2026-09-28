@@ -234,6 +234,19 @@ pub enum EventPayload {
         /// Task whose local execution aggregate completed.
         task_ref: TaskRef,
     },
+    /// An attributed final verifier verdict was admitted against current physical attempts.
+    TaskVerifierVerdictObserved {
+        /// Task whose expected effect the external source assessed.
+        task_ref: TaskRef,
+        /// Configured deployment source identity.
+        source_id: String,
+        /// Startup-frozen source revision.
+        source_revision: String,
+        /// Digest of the immutable verdict artifact retained by the deployment.
+        verdict_digest: String,
+        /// Source verdict; false is not Task satisfaction.
+        satisfied: bool,
+    },
     /// Orchestration accepted the declared evidence basis as Task semantic satisfaction.
     TaskSatisfied {
         /// Group retaining the Mission execution context.

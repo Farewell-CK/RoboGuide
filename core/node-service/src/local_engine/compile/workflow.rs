@@ -130,6 +130,9 @@ pub(super) fn validate_expression_sources(
             if pointer == "/invocation" || pointer.starts_with("/invocation/") {
                 return Ok(());
             }
+            if pointer == "/attempt_id" {
+                return Ok(());
+            }
             if pointer == "/artifacts" || pointer.starts_with("/artifacts/") {
                 return Ok(());
             }

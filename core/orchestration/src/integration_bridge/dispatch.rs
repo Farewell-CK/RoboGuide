@@ -367,6 +367,16 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime.attempt_history()
     }
 
+    /// Returns the current physical attempt for one exact committed Task Role slot.
+    pub fn current_task_attempt_id(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+    ) -> Option<&str> {
+        self.runtime.current_attempt_id(group_id, task_ref, role_id)
+    }
+
     /// Returns exact current commands whose physical attempt still requires reconciliation.
     pub fn current_unknown_attempts(&self) -> Vec<ExecutionCommand> {
         self.runtime.current_unknown_attempts()

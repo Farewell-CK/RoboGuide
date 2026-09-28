@@ -233,7 +233,7 @@ fn sqlite_event_log_survives_reopen() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "event-1");
     assert_eq!(events[0].correlation_id, "test-correlation");
-    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V11);
+    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V12);
     let payload: EventPayload =
         serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
     assert!(matches!(
@@ -281,6 +281,42 @@ fn event_decoder_rejects_task_satisfaction_under_v10_marker() {
     assert!(matches!(
         log.decoded_events(),
         Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v11")
+    ));
+}
+
+/// A v11 row cannot claim external verifier provenance introduced by codec v12.
+#[test]
+fn event_decoder_rejects_verifier_verdict_under_v11_marker() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let path = directory.path().join("events-task-verifier-v12.sqlite3");
+    let correlation = CorrelationId::new("task-verifier-v12").expect("correlation valid");
+    let mut log = SqliteEventLog::open(&path).expect("event log opens");
+    log.append(
+        TimestampMs::new(50),
+        &correlation,
+        None,
+        EventPayload::TaskVerifierVerdictObserved {
+            task_ref: TaskRef::new(
+                MissionId::new("mission-a").expect("mission id valid"),
+                TaskId::new("task-a").expect("task id valid"),
+            ),
+            source_id: "verifier-a".into(),
+            source_revision: format!("sha256:{}", "a".repeat(64)),
+            verdict_digest: format!("sha256:{}", "b".repeat(64)),
+            satisfied: true,
+        },
+    );
+    log.connection
+        .lock()
+        .expect("event connection lock is available")
+        .execute(
+            "UPDATE events SET payload_schema = ?1 WHERE sequence = 1",
+            [EVENT_PAYLOAD_SCHEMA_V11],
+        )
+        .expect("fixture marker changes to v11");
+    assert!(matches!(
+        log.decoded_events(),
+        Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v12")
     ));
 }
 
