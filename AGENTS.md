@@ -247,6 +247,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   automatic repair, and routes missing user facts back to clarification instead of letting Repair
   invent them. Structured DialogueTurn history remains separate from internal review evidence, and
   context-aware approval rules persist the exact reasons bound to an immutable draft.
+  Planner and Repairer strict provider schemas bind `mission.id` to the current Request;
+  local identity validation remains authoritative. A violating raw/normalized draft is
+  persisted as bounded rejected-draft v0.3 evidence and fails without regeneration or
+  Controller submission; transport/authentication faults have no invented draft evidence.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy

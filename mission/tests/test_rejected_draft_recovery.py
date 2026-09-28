@@ -13,7 +13,9 @@ from mission.contract_values import MissionPlanError
 from mission.grounding_context import GroundingContextSnapshot
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.provider_errors import MissionIdentityError
 from mission.rejected_draft import (
+    IDENTITY_REJECTED_DRAFT_SCHEMA,
     RejectedDraftEvidence,
     RejectedPlanError,
     build_rejected_draft_evidence,
@@ -520,6 +522,83 @@ def test_provider_faults_never_trigger_recovery(tmp_path: Path) -> None:
     assert planner.calls == 1
     assert record.rejected_drafts == ()
     assert record.failure_evidence is not None
+
+
+def test_identity_fault_keeps_bound_raw_draft_without_retry(tmp_path: Path) -> None:
+    """One wrong-ID model draft is archived, then remains a terminal MI failure."""
+    from mission.responses import ResponsesMissionPlanner
+    from test_planners import FakeTransport, _local_settings, _provider_plan, _response, _v0_8_plan
+
+    raw_plan = _v0_8_plan()
+    cast(JSONObject, raw_plan["mission"])["id"] = "mission-unrequested"
+    raw_output = _provider_plan(raw_plan)
+    transport = FakeTransport([_response(raw_output)])
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+    )
+    engine = _engine(tmp_path, planner, budget=2)
+
+    record = engine.create("deliver the payload through the approved route")
+
+    assert record.lifecycle.value == "Failed"
+    assert record.plan is None
+    assert record.issues == ("model changed the requested mission id",)
+    assert len(transport.requests) == 1
+    assert len(record.rejected_drafts) == 1
+    evidence = record.rejected_drafts[0]
+    assert evidence.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+    assert evidence.stage == "identity_validation"
+    assert evidence.deliberation_stage == "planner"
+    assert evidence.provider_output == raw_output
+    assert cast(JSONObject, cast(JSONObject, evidence.normalized_output)["mission"])["id"] == (
+        "mission-unrequested"
+    )
+    assert evidence.mission_id == record.mission_id
+    assert record.grounding_context is not None
+    assert evidence.grounding_context_digest == record.grounding_context.context_digest
+    assert evidence.provider_output_digest == canonical_plan_digest(raw_output)
+    evidence.verify_integrity()
+    assert record.failure_evidence is not None
+    assert record.failure_evidence["stage"] == "planner"
+    assert "rejected_drafts" not in record.to_json()
+    assert record.observations().rejected_drafts == (evidence,)
+    reopened = MissionRequestStore(tmp_path / "requests.sqlite3")
+    restored = reopened.get(record.request_id)
+    assert restored is not None and restored.rejected_drafts == (evidence,)
+    tampered = json.loads(json.dumps(evidence.to_json()))
+    tampered["normalized_output"]["mission"]["id"] = "mission-tampered"
+    with pytest.raises(ValueError, match="normalized output does not match"):
+        RejectedDraftEvidence.from_json(tampered).verify_integrity()
+    tampered["stage"] = "plan_validation"
+    with pytest.raises(ValueError, match="unsupported rejected draft stage"):
+        RejectedDraftEvidence.from_json(tampered)
+
+
+def test_oversized_identity_draft_is_explicitly_bounded() -> None:
+    """Identity evidence keeps full digests when raw and normalized bytes exceed budget."""
+    raw = cast(JSONObject, {"mission": {"id": "mission-wrong"}, "blob": "x" * (300 * 1024)})
+    error = MissionIdentityError(
+        "model changed the requested mission id",
+        provider_output=raw,
+        normalized_output=raw,
+        generated_at_ms=1,
+    )
+    evidence = build_rejected_draft_evidence(
+        request_id="request-test",
+        mission_id="mission-expected",
+        attempt_index=1,
+        error=error,
+        grounding_context_digest=None,
+        semantic_evidence_digest=None,
+        provider_identity={},
+        persisted_at_ms=2,
+    )
+    assert evidence.provider_output["truncated"] is True
+    assert cast(JSONObject, evidence.normalized_output)["truncated"] is True
+    assert evidence.provider_output_digest == canonical_plan_digest(raw)
+    assert evidence.normalized_output_digest == canonical_plan_digest(raw)
+    evidence.verify_integrity()
+    assert RejectedDraftEvidence.from_json(evidence.to_json()) == evidence
 
 
 def test_recovery_inputs_stay_frozen(tmp_path: Path) -> None:

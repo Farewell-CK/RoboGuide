@@ -19,6 +19,12 @@ from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
+from mission.provider_errors import (
+    MissionIdentityError,
+)
+from mission.provider_errors import (
+    MissionProviderError as MissionProviderError,
+)
 from mission.provider_mission_plan import (
     ProviderMissionPlanError,
     build_mission_plan_provider_schema,
@@ -34,10 +40,6 @@ from mission.satisfaction_policy import (
 )
 from mission.semantic_admission import validate_authoritative_executor_constraints
 from mission.semantic_evidence import semantic_goal_review_payload
-
-
-class MissionProviderError(RuntimeError):
-    """Report a transport, provider response, or model review failure."""
 
 
 class JsonTransport(Protocol):
@@ -96,15 +98,15 @@ def _validate_plan_output(
 ) -> MissionPlan:
     """Validate one generated draft against identity, implementation, and Catalog boundaries."""
     plan = MissionPlan.from_json(value)
+    if plan.mission.mission_id != mission_id:
+        raise MissionProviderError("model changed the requested mission id")
+    if plan.mission.objective != grounded_intent.objective:
+        raise MissionProviderError("model changed the requested mission objective")
     if execution_profile is not None:
         plan = execution_profile.apply(plan)
     plan.validate_implementation_support()
     plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
     validate_authoritative_executor_constraints(plan, grounding_context)
-    if plan.mission.mission_id != mission_id:
-        raise MissionProviderError("model changed the requested mission id")
-    if plan.mission.objective != grounded_intent.objective:
-        raise MissionProviderError("model changed the requested mission objective")
     capability_catalog.validate_plan(plan)
     validate_satisfaction_policy(plan, satisfaction_policy, grounding_context.semantic_evidence)
     return plan
@@ -146,6 +148,13 @@ def _validated_provider_draft(
         raise RejectedPlanError(
             str(error),
             stage="plan_validation",
+            provider_output=provider_output,
+            normalized_output=normalized,
+            generated_at_ms=generated_at_ms,
+        ) from error
+    except MissionProviderError as error:
+        raise MissionIdentityError(
+            str(error),
             provider_output=provider_output,
             normalized_output=normalized,
             generated_at_ms=generated_at_ms,
@@ -231,9 +240,11 @@ class _ResponsesClient:
             raise MissionProviderError("Mission Plan schema must be a JSON object")
         return cast(JSONObject, decoded)
 
-    def _mission_plan_provider_schema(self, canonical_schema: JSONObject) -> JSONObject:
-        """Return the current MissionPlan schema adapted to the strict provider DTO."""
-        return build_mission_plan_provider_schema(canonical_schema)
+    def _mission_plan_provider_schema(
+        self, canonical_schema: JSONObject, mission_id: str
+    ) -> JSONObject:
+        """Bind the strict provider DTO to this request's exact Mission identity."""
+        return build_mission_plan_provider_schema(canonical_schema, mission_id=mission_id)
 
     def _load_prompt(self, path: Path) -> str:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
@@ -427,7 +438,7 @@ class ResponsesMissionPlanner:
                 sort_keys=True,
             ),
             schema_name="mission_plan_v0",
-            schema=self._client._mission_plan_provider_schema(canonical_schema),
+            schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
         )
         generated_at_ms = int(time.time() * 1000)
         provider_output = self._client._extract_output_json(response)
@@ -620,7 +631,7 @@ class ResponsesMissionRepairer:
                 sort_keys=True,
             ),
             schema_name="mission_plan_repair_v0",
-            schema=self._client._mission_plan_provider_schema(canonical_schema),
+            schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
         )
         generated_at_ms = int(time.time() * 1000)
         return _validated_provider_draft(

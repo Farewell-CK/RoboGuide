@@ -1,8 +1,8 @@
 """Rejected Planner and Repairer draft evidence with pre-validation errors.
 
-A generated draft that fails DTO normalization or MissionPlan validation is
-preserved verbatim before any recovery attempt: the provider's raw output,
-the normalized candidate when normalization succeeded, structured failure
+A generated draft that fails DTO normalization, MissionPlan validation, or
+request identity validation retains bounded evidence: the provider's raw
+output, the normalized candidate when normalization succeeded, structured failure
 reasons, and non-sensitive provider identity. Evidence lives on the
 observations side of the request store (never in the public status
 projection) and is versioned so old records without it stay readable.
@@ -11,8 +11,8 @@ projection) and is versioned so old records without it stay readable.
 the engine can persist evidence and decide on bounded regeneration
 without the Planner keeping cross-request state. It is raised only for
 model-draft structure errors (``MissionPlanError`` family); provider
-transport, authentication, and task-identity violations stay
-``MissionProviderError`` and never trigger recovery.
+transport and authentication faults stay outside draft evidence. Identity
+violations retain the candidate as a distinct non-recoverable provider fault.
 """
 
 from __future__ import annotations
@@ -21,10 +21,12 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from mission.contract_values import JSONObject, JSONValue, MissionPlanError, _object, _text
+from mission.provider_errors import MissionIdentityError
 from mission.submission_evidence import canonical_plan_digest
 
 LEGACY_REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.1"
 REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.2"
+IDENTITY_REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.3"
 MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024
 _VALIDATION_STAGES = ("normalization", "plan_validation")
 _DELIBERATION_STAGES = ("planner", "repairer")
@@ -70,7 +72,8 @@ class RejectedDraftEvidence:
         mission_id: The Mission identity the draft was generated for.
         attempt_index: One-based position among this request's attempts.
         attempt_id: Stable identity binding request, attempt, and content.
-        stage: ``normalization`` or ``plan_validation``.
+        stage: ``normalization``, ``plan_validation``, or the v0.3-only
+            ``identity_validation`` terminal rejection.
         deliberation_stage: Planner or Repairer origin of the generated draft.
         validation_errors: Structured failure reasons from the rejection.
         provider_output: The provider's raw structured output, possibly
@@ -105,8 +108,21 @@ class RejectedDraftEvidence:
 
     def __post_init__(self) -> None:
         """Keep a legacy Planner record distinct from a versioned Repairer record."""
-        if self.schema_version not in {LEGACY_REJECTED_DRAFT_SCHEMA, REJECTED_DRAFT_SCHEMA}:
+        if self.schema_version not in {
+            LEGACY_REJECTED_DRAFT_SCHEMA,
+            REJECTED_DRAFT_SCHEMA,
+            IDENTITY_REJECTED_DRAFT_SCHEMA,
+        }:
             raise ValueError("unsupported rejected draft evidence schema")
+        allowed_stages = (
+            ("identity_validation",)
+            if self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+            else _VALIDATION_STAGES
+        )
+        if self.stage not in allowed_stages:
+            raise ValueError("rejected draft stage does not match its schema")
+        if self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA and self.normalized_output is None:
+            raise ValueError("identity rejection requires normalized draft evidence")
         if self.deliberation_stage not in _DELIBERATION_STAGES:
             raise ValueError("unsupported rejected draft deliberation stage")
         if (
@@ -139,10 +155,15 @@ class RejectedDraftEvidence:
         normalized = self.normalized_output
         if normalized is not None:
             digest_value = self.normalized_output_digest
+            if not isinstance(digest_value, str):
+                raise ValueError("rejected draft normalized output does not match its digest")
             if (
-                not isinstance(digest_value, str)
-                or canonical_plan_digest(normalized) != digest_value
+                self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+                and normalized.get("truncated") is True
             ):
+                if not isinstance(normalized.get("byte_length"), int):
+                    raise ValueError("truncated normalized draft lacks its byte length")
+            elif canonical_plan_digest(normalized) != digest_value:
                 raise ValueError("rejected draft normalized output does not match its digest")
 
     def to_json(self) -> JSONObject:
@@ -156,7 +177,7 @@ class RejectedDraftEvidence:
             "stage": self.stage,
             **(
                 {"deliberation_stage": self.deliberation_stage}
-                if self.schema_version == REJECTED_DRAFT_SCHEMA
+                if self.schema_version != LEGACY_REJECTED_DRAFT_SCHEMA
                 else {}
             ),
             "validation_errors": [dict(error) for error in self.validation_errors],
@@ -186,6 +207,7 @@ class RejectedDraftEvidence:
         if not isinstance(schema_version, str) or schema_version not in {
             LEGACY_REJECTED_DRAFT_SCHEMA,
             REJECTED_DRAFT_SCHEMA,
+            IDENTITY_REJECTED_DRAFT_SCHEMA,
         }:
             raise ValueError("unsupported rejected draft evidence schema")
         required = {
@@ -206,12 +228,17 @@ class RejectedDraftEvidence:
             "generated_at_ms",
             "persisted_at_ms",
         }
-        if schema_version == REJECTED_DRAFT_SCHEMA:
+        if schema_version != LEGACY_REJECTED_DRAFT_SCHEMA:
             required.add("deliberation_stage")
         if set(item) != required:
             raise ValueError("rejected draft evidence fields do not match its schema")
         stage = _text(item["stage"], "rejected draft stage")
-        if stage not in _VALIDATION_STAGES:
+        allowed_stages = (
+            ("identity_validation",)
+            if schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+            else _VALIDATION_STAGES
+        )
+        if stage not in allowed_stages:
             raise ValueError("unsupported rejected draft stage")
         deliberation_stage = (
             "planner"
@@ -318,7 +345,7 @@ def build_rejected_draft_evidence(
     request_id: str,
     mission_id: str,
     attempt_index: int,
-    error: RejectedPlanError,
+    error: RejectedPlanError | MissionIdentityError,
     grounding_context_digest: str | None,
     semantic_evidence_digest: str | None,
     provider_identity: JSONObject,
@@ -330,6 +357,10 @@ def build_rejected_draft_evidence(
         raise ValueError("unsupported rejected draft deliberation stage")
     output, _truncated = bounded_provider_output(error.provider_output)
     normalized = error.normalized_output
+    identity_failure = isinstance(error, MissionIdentityError)
+    normalized_evidence = normalized
+    if normalized is not None and identity_failure:
+        normalized_evidence = bounded_provider_output(normalized)[0]
     return RejectedDraftEvidence(
         request_id=request_id,
         mission_id=mission_id,
@@ -342,7 +373,7 @@ def build_rejected_draft_evidence(
         validation_errors=({"stage": error.stage, "message": str(error)},),
         provider_output=output,
         provider_output_digest=provider_output_digest(error.provider_output),
-        normalized_output=normalized,
+        normalized_output=normalized_evidence,
         normalized_output_digest=(
             canonical_plan_digest(normalized) if normalized is not None else None
         ),
@@ -352,6 +383,9 @@ def build_rejected_draft_evidence(
         generated_at_ms=error.generated_at_ms,
         persisted_at_ms=persisted_at_ms,
         deliberation_stage=deliberation_stage,
+        schema_version=(
+            IDENTITY_REJECTED_DRAFT_SCHEMA if identity_failure else REJECTED_DRAFT_SCHEMA
+        ),
     )
 
 

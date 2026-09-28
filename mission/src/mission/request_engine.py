@@ -22,6 +22,7 @@ from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundi
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
+from mission.provider_errors import MissionIdentityError
 from mission.rejected_draft import (
     RejectedDraftEvidence,
     RejectedPlanError,
@@ -392,6 +393,11 @@ class MissionRequestEngine:
                     )
                     if cycle_attempts > self._prevalidation_recovery_attempts:
                         raise
+                except MissionIdentityError as error:
+                    record = self._record_rejected_output(
+                        record, grounding_context, error, "planner"
+                    )
+                    raise
         except Exception as error:
             # Any exception leaving the loop — budget exhaustion, a provider
             # fault during regeneration, or an unexpected error — carries the
@@ -404,7 +410,7 @@ class MissionRequestEngine:
         self,
         record: MissionRequestRecord,
         grounding_context: GroundingContextSnapshot,
-        error: RejectedPlanError,
+        error: RejectedPlanError | MissionIdentityError,
         deliberation_stage: str,
     ) -> MissionRequestRecord:
         """Persist one Planner or Repairer model-draft rejection with unique request ordering."""
@@ -492,6 +498,11 @@ class MissionRequestEngine:
                     )
                     if cycle_attempts > self._prevalidation_recovery_attempts:
                         raise
+                except MissionIdentityError as error:
+                    record = self._record_rejected_output(
+                        record, grounding_context, error, "repairer"
+                    )
+                    raise
         except Exception as error:
             error.record = record  # type: ignore[attr-defined]
             raise

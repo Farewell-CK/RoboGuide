@@ -13,6 +13,7 @@ from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import HttpMissionGroundingReader, MissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.provider_errors import MissionIdentityError
 from mission.rejected_draft import RejectedPlanError
 from mission.request_record import (
     DialogueSpeaker,
@@ -355,6 +356,31 @@ class ProviderFaultRepairer(NoRegenerationRepairer):
         raise MissionProviderError("provider returned HTTP 401")
 
 
+class IdentityFaultRepairer(NoRegenerationRepairer):
+    """Emit one wrong-ID repair draft to verify terminal evidence routing."""
+
+    def repair(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        rejected_plan: MissionPlan,
+        review: MissionPlanReview,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+    ) -> MissionPlan:
+        """Retain the raw candidate, then fail without generating a second attempt."""
+        del mission_id, grounded_intent, review, capability_catalog, grounding_context
+        self.calls += 1
+        raw = rejected_plan.to_json()
+        cast(JSONObject, raw["mission"])["id"] = "mission-unrequested"
+        raise MissionIdentityError(
+            "model changed the requested mission id",
+            provider_output=raw,
+            normalized_output=raw,
+            generated_at_ms=123,
+        )
+
+
 def _review(action: ReviewIssueAction | None = None) -> MissionPlanReview:
     """Build an approval or one structured blocking Review for Engine tests."""
     if action is None:
@@ -661,6 +687,35 @@ def test_repair_provider_fault_does_not_consume_model_retry_budget(tmp_path: Pat
     assert failed.failure_evidence["stage"] == "repairer"
     assert repairer.calls == 1
     assert controller.submissions == []
+
+
+def test_repair_identity_fault_keeps_draft_without_retry_or_submission(tmp_path: Path) -> None:
+    """A wrong-ID Repairer output is archived under Repairer and fails closed."""
+    reviewer = FakeReviewer([_review(ReviewIssueAction.REPAIR_PLAN)])
+    repairer = IdentityFaultRepairer()
+    controller = AcceptingController()
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter(),
+        reviewer,
+        repairer,
+        controller,
+        prevalidation_recovery_attempts=2,
+    )
+
+    failed = engine.create("执行明确的运输任务")
+
+    assert failed.lifecycle is MissionRequestLifecycle.FAILED
+    assert repairer.calls == 1
+    assert controller.submissions == []
+    assert len(failed.rejected_drafts) == 1
+    evidence = failed.rejected_drafts[0]
+    assert evidence.deliberation_stage == "repairer"
+    assert evidence.stage == "identity_validation"
+    assert evidence.mission_id == failed.mission_id
+    assert cast(JSONObject, evidence.provider_output["mission"])["id"] == ("mission-unrequested")
+    assert failed.failure_evidence is not None
+    assert failed.failure_evidence["stage"] == "repairer"
 
 
 def test_review_clarification_returns_to_dialogue_without_repair(tmp_path: Path) -> None:

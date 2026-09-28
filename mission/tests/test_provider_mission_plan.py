@@ -127,7 +127,7 @@ def _audit_optional_properties(
 def test_provider_schema_audits_every_canonical_optional_property() -> None:
     """Every strict nullable optional field has omission or canonical-null semantics."""
     canonical = _canonical_schema()
-    provider = build_mission_plan_provider_schema(canonical)
+    provider = build_mission_plan_provider_schema(canonical, mission_id="mission-audit")
 
     omission_paths, canonical_null_paths = _audit_optional_properties(canonical, provider)
 
@@ -146,6 +146,34 @@ def test_provider_schema_audits_every_canonical_optional_property() -> None:
         "$.$defs.task.properties.coupling_mode",
     }
     assert canonical_null_paths == {"$.$defs.shared_view.properties.spatial_reference"}
+
+
+def test_provider_schema_binds_only_the_requested_mission_identity() -> None:
+    """Each call fences its own ID without mutating the shared canonical schema."""
+    canonical = _canonical_schema()
+    original = json.dumps(canonical, sort_keys=True)
+    first = build_mission_plan_provider_schema(canonical, mission_id="mission-one")
+    second = build_mission_plan_provider_schema(canonical, mission_id="mission-two")
+
+    first_id = cast(JSONObject, cast(JSONObject, first["properties"])["mission"])["properties"]
+    second_id = cast(JSONObject, cast(JSONObject, second["properties"])["mission"])["properties"]
+    assert cast(JSONObject, first_id)["id"] == {"type": "string", "enum": ["mission-one"]}
+    assert cast(JSONObject, second_id)["id"] == {"type": "string", "enum": ["mission-two"]}
+    assert json.dumps(canonical, sort_keys=True) == original
+
+
+def test_provider_schema_rejects_blank_or_unexpected_identity_contract() -> None:
+    """A malformed local schema cannot silently lose request-specific fencing."""
+    from mission.provider_mission_plan import ProviderMissionPlanError
+
+    with pytest.raises(ProviderMissionPlanError, match="nonblank"):
+        build_mission_plan_provider_schema(_canonical_schema(), mission_id="")
+    canonical = _canonical_schema()
+    mission = cast(JSONObject, cast(JSONObject, canonical["properties"])["mission"])
+    properties = cast(JSONObject, mission["properties"])
+    properties["id"] = {"type": "string"}
+    with pytest.raises(ProviderMissionPlanError, match="unexpected"):
+        build_mission_plan_provider_schema(canonical, mission_id="mission-one")
 
 
 def test_provider_null_for_optional_fields_normalizes_to_canonical_omission() -> None:

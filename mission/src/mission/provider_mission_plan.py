@@ -86,11 +86,29 @@ def adapt_mission_plan_schema_for_provider(schema: JSONObject) -> JSONObject:
     return adapted
 
 
-def build_mission_plan_provider_schema(schema: JSONObject) -> JSONObject:
-    """Build the strict provider DTO schema from one canonical MissionPlan schema."""
+def build_mission_plan_provider_schema(schema: JSONObject, *, mission_id: str) -> JSONObject:
+    """Build a strict provider DTO fenced to one request's Mission ID.
+
+    The canonical schema stays generic. The request-specific constraint is
+    placed only on the copied provider projection, before any model call.
+    """
     adapted = adapt_mission_plan_schema_for_provider(schema)
     projected = _project_strict_provider_schema(adapted)
-    return _object(projected, "provider schema")
+    provider = _object(projected, "provider schema")
+    if not mission_id:
+        raise ProviderMissionPlanError("provider Mission identity must be nonblank")
+    root_properties = _object(provider.get("properties"), "provider schema.properties")
+    mission_schema = _object(root_properties.get("mission"), "provider schema.mission")
+    mission_properties = _object(
+        mission_schema.get("properties"), "provider schema.mission.properties"
+    )
+    mission_id_schema = _object(
+        mission_properties.get("id"), "provider schema.mission.properties.id"
+    )
+    if mission_id_schema.get("$ref") != "#/$defs/id":
+        raise ProviderMissionPlanError("provider Mission identity schema is unexpected")
+    mission_properties["id"] = {"type": "string", "enum": [mission_id]}
+    return provider
 
 
 def normalize_mission_plan_provider_output(

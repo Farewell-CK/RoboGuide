@@ -61,6 +61,12 @@ Node local lock 仅保留为本地防线。这里的 units 是所选独占资源
 顺序任务仍可在资源释放后复用同一个 endpoint。当前 shared-world coordinator 要等待两个
 endpoint assignment 才启动，是 Local EAIOS 的执行方式，不是通用单机器人任务语义。
 
+Planner 与 Repairer 的每次 Provider 请求把当前 Mission Request 的 `mission.id` 限定在
+请求专属的 strict output schema 中；独立的本地身份校验仍会拒绝不匹配的返回值。若模型
+越过 schema 返回了错误身份，MI 不自动改写 ID、不触发草案再生、也不提交 Control，
+而是将有界的原始/归一化草案及完整内容 digest 绑定在内部 rejected-draft v0.3 观测
+证据中。传输和鉴权错误没有模型草案，仍只记录失败信息；既有 v0.1/v0.2 证据可继续恢复。
+
 ```bash
 uv sync --dev
 uv run mission-service
