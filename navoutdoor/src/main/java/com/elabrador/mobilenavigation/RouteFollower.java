@@ -4,6 +4,10 @@ import java.util.Collections;
 import java.util.List;
 
 final class RouteFollower {
+    private static final long MISMATCH_GRACE_NANOS = 3_000_000_000L;
+    private static final long RECOVERY_CONFIRMATION_WINDOW_NANOS = 5_000_000_000L;
+    private static final double MIN_RECOVERY_FORWARD_WINDOW_METERS = 100.0;
+    private static final double RECOVERY_PROGRESS_TOLERANCE_METERS = 30.0;
     static final class Guidance {
         final String action;
         final String instruction;
@@ -45,9 +49,17 @@ final class RouteFollower {
     private double[] cumulativeMeters = new double[0];
     private double routeGeometryMeters;
     private double lastProgressMeters = -1.0;
+    /** Timestamp of the last accepted route match. */
     private long lastFixNanos=-1;
+    /** Timestamp of the last fix examined, including rejected fixes. */
+    private long lastSeenFixNanos=-1;
     private double advanceBudget=12;
     private Guidance lastGuidance;
+    private Guidance lastUpdateResult;
+    private long mismatchStartedNanos=-1;
+    private long recoveryCandidateNanos=-1;
+    private double recoveryCandidateProgress=-1;
+    private int recoveryCandidateCount;
     private String waitingReason="等待有效 GPS 路线匹配";
     synchronized String waitingReason(){return waitingReason;}
 
@@ -63,16 +75,18 @@ final class RouteFollower {
                 ? 0.0
                 : cumulativeMeters[cumulativeMeters.length - 1];
         lastProgressMeters = -1.0;
-        lastFixNanos=-1; advanceBudget=12; lastGuidance=null;
+        resetMatchState();
+        waitingReason="等待有效 GPS 路线匹配";
     }
 
     synchronized void clear() {
-        lastFixNanos=-1; advanceBudget=12; lastGuidance=null;
+        resetMatchState();
         route = null;
         points = Collections.emptyList();
         cumulativeMeters = new double[0];
         routeGeometryMeters = 0.0;
         lastProgressMeters = -1.0;
+        waitingReason="等待有效 GPS 路线匹配";
     }
 
     synchronized boolean hasRoute() {
@@ -92,20 +106,54 @@ final class RouteFollower {
         }
         // Legacy aligned mode accepts both network and GPS fixes; accuracy is diagnostic.
         if(!Float.isFinite(accuracyMeters)||accuracyMeters<0)accuracyMeters=0;
-        if(fixNanos<lastFixNanos){waitingReason="GPS 时间倒退";return null;}
-        if(fixNanos==lastFixNanos)return lastGuidance;
-        if(lastFixNanos>=0)advanceBudget=Math.min(15,advanceBudget+3*Math.min(5,(fixNanos-lastFixNanos)/1e9));
-        lastFixNanos=fixNanos;
+        if(fixNanos<lastSeenFixNanos){waitingReason="GPS 时间倒退";return null;}
+        if(fixNanos==lastSeenFixNanos)return lastUpdateResult;
+        lastSeenFixNanos=fixNanos;
+        double candidateAdvanceBudget=advanceBudget;
+        if(lastFixNanos>=0)candidateAdvanceBudget=Math.min(15,advanceBudget
+                +3*Math.min(5,Math.max(0,(fixNanos-lastFixNanos)/1e9)));
         AmapRouteClient.GeoPoint current = AmapRouteClient.wgs84ToGcj02(
                 wgsLatitude, wgsLongitude);
-        Match match = findClosestMatch(current);
-        if(match.distanceMeters>Math.max(25,accuracyMeters*2)){
-            waitingReason="GPS 与连续路线段不一致，请确认定位或重新选择目的地";
-            lastGuidance=null;return null;
+        double matchThreshold=Math.max(25,accuracyMeters*2);
+        Match match = findClosestMatch(current,candidateAdvanceBudget,true);
+        boolean recovered=false;
+        if(match.distanceMeters>matchThreshold){
+            Match recovery=findClosestMatch(current,Double.POSITIVE_INFINITY,false);
+            if(recovery.distanceMeters<=matchThreshold && recoveryProgressAllowed(recovery,fixNanos)){
+                if(recoveryCandidateNanos>=0
+                        && fixNanos-recoveryCandidateNanos<=RECOVERY_CONFIRMATION_WINDOW_NANOS
+                        && Math.abs(recovery.progressMeters-recoveryCandidateProgress)
+                        <=RECOVERY_PROGRESS_TOLERANCE_METERS){
+                    recoveryCandidateCount++;
+                } else {
+                    recoveryCandidateCount=1;
+                }
+                recoveryCandidateNanos=fixNanos;
+                recoveryCandidateProgress=recovery.progressMeters;
+                if(recoveryCandidateCount>=2){
+                    match=recovery;
+                    recovered=true;
+                }
+            } else {
+                clearRecoveryCandidate();
+            }
+            if(!recovered){
+                if(mismatchStartedNanos<0)mismatchStartedNanos=fixNanos;
+                long mismatchAge=Math.max(0,fixNanos-mismatchStartedNanos);
+                waitingReason=recoveryCandidateCount>0
+                        ?"定位短暂跳出连续路线，正在自动恢复匹配"
+                        :"定位暂时无法匹配路线，正在等待定位恢复";
+                lastUpdateResult=mismatchAge<=MISMATCH_GRACE_NANOS?lastGuidance:null;
+                return lastUpdateResult;
+            }
         }
+        mismatchStartedNanos=-1;
+        clearRecoveryCandidate();
+        lastFixNanos=fixNanos;
+        advanceBudget=recovered?12:candidateAdvanceBudget;
         double previous=lastProgressMeters;
         lastProgressMeters = Math.max(lastProgressMeters, match.progressMeters);
-        if(previous>=0)advanceBudget=Math.max(0,advanceBudget-(lastProgressMeters-previous));
+        if(previous>=0&&!recovered)advanceBudget=Math.max(0,advanceBudget-(lastProgressMeters-previous));
 
         double apiProgress = routeGeometryMeters > 0.0
                 ? lastProgressMeters / routeGeometryMeters * route.distanceMeters
@@ -152,10 +200,36 @@ final class RouteFollower {
                 offRoute,
                 arrived);
         waitingReason="";
-        return lastGuidance;
+        lastUpdateResult=lastGuidance;
+        return lastUpdateResult;
     }
 
-    private Match findClosestMatch(AmapRouteClient.GeoPoint current) {
+    private boolean recoveryProgressAllowed(Match recovery,long fixNanos){
+        if(lastProgressMeters<0)return recovery.progressMeters<=MIN_RECOVERY_FORWARD_WINDOW_METERS;
+        double elapsedSeconds=lastFixNanos<0?0:Math.max(0,(fixNanos-lastFixNanos)/1e9);
+        double forwardWindow=Math.max(MIN_RECOVERY_FORWARD_WINDOW_METERS,30+5*elapsedSeconds);
+        return recovery.progressMeters>=lastProgressMeters-15
+                && recovery.progressMeters<=lastProgressMeters+forwardWindow;
+    }
+
+    private void clearRecoveryCandidate(){
+        recoveryCandidateNanos=-1;
+        recoveryCandidateProgress=-1;
+        recoveryCandidateCount=0;
+    }
+
+    private void resetMatchState(){
+        lastFixNanos=-1;
+        lastSeenFixNanos=-1;
+        advanceBudget=12;
+        lastGuidance=null;
+        lastUpdateResult=null;
+        mismatchStartedNanos=-1;
+        clearRecoveryCandidate();
+    }
+
+    private Match findClosestMatch(AmapRouteClient.GeoPoint current,double progressBudget,
+                                   boolean constrainProgress) {
         double bestDistance = Double.MAX_VALUE;
         double bestProgress = 0.0;
         double latitudeRadians = Math.toRadians(current.latitude);
@@ -165,9 +239,10 @@ final class RouteFollower {
         for (int i = 0; i < points.size() - 1; i++) {
             double segmentStart = cumulativeMeters[i];
             double segmentEnd = cumulativeMeters[i + 1];
-            if(lastProgressMeters<0 && segmentStart>25)continue;
-            if (lastProgressMeters >= 0.0 && (segmentEnd < lastProgressMeters - 15.0
-                    || segmentStart>lastProgressMeters+advanceBudget)) {
+            if(constrainProgress && lastProgressMeters<0 && segmentStart>25)continue;
+            if (constrainProgress && lastProgressMeters >= 0.0
+                    && (segmentEnd < lastProgressMeters - 15.0
+                    || segmentStart>lastProgressMeters+progressBudget)) {
                 continue;
             }
 
@@ -182,10 +257,10 @@ final class RouteFollower {
             double lengthSquared = dx * dx + dy * dy;
             double t = lengthSquared <= 0.001 ? 0.0 : -(ax * dx + ay * dy) / lengthSquared;
             t = Math.max(0.0, Math.min(1.0, t));
-            if(lastProgressMeters<0 && segmentEnd>segmentStart)
+            if(constrainProgress && lastProgressMeters<0 && segmentEnd>segmentStart)
                 t=Math.min(t,Math.max(0,(25-segmentStart)/(segmentEnd-segmentStart)));
-            if(lastProgressMeters>=0 && segmentEnd>segmentStart)
-                t=Math.min(t,Math.max(0,(lastProgressMeters+advanceBudget-segmentStart)/(segmentEnd-segmentStart)));
+            if(constrainProgress && lastProgressMeters>=0 && segmentEnd>segmentStart)
+                t=Math.min(t,Math.max(0,(lastProgressMeters+progressBudget-segmentStart)/(segmentEnd-segmentStart)));
             double x = ax + t * dx;
             double y = ay + t * dy;
             double distance = Math.hypot(x, y);

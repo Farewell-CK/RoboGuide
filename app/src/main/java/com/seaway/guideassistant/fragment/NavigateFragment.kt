@@ -21,7 +21,6 @@ import com.elabrador.mobilenavigation.LocalPlanSnapshot
 import com.elabrador.mobilenavigation.OutdoorNavController
 import com.elabrador.mobilenavigation.PlaceSuggestion
 import com.elabrador.mobilenavigation.VisionHintSettings
-import com.moyoung.glasses.conn.protos.DeviceStatus
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.base.Constant
@@ -32,7 +31,6 @@ import com.seaway.guideassistant.robot.RobotConversationLog
 import com.seaway.guideassistant.utils.announceA11y
 import com.seaway.guideassistant.voice.VoiceErrorReason
 import com.seaway.guideassistant.voice.VoiceInputController
-import com.seaway.guideassistant.ws.DeviceStatusData
 import com.seaway.guideassistant.ws.DeviceType
 import com.seaway.guideassistant.ws.DeviceWatchClient
 import com.seaway.smallutils.ToastUtil
@@ -422,7 +420,11 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     private inner class OutdoorListener : OutdoorNavController.Listener {
         override fun onCameraStatus(text: String) {
             bind.tvCameraStatus.text = text
-            val deviceStatus = if (text.contains("已连接")) "online" else  if (text.contains("")) "offline" else "error"
+            val deviceStatus = when {
+                text.contains("已连接") || text.contains("运行中") -> "online"
+                text.contains("已断开") -> "offline"
+                else -> "error"
+            }
             DeviceWatchClient.reportDeviceStatus(DeviceType.DEPTH_CAMERA,"深度相机",deviceStatus)
         }
 
