@@ -256,6 +256,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   EAIOS adapter, while Controller and B1 provenance validate the neutral source/verdict contract.
   Missing evidence never becomes local completion or benchmark success. See ADR-0039 and ADR-0048;
   MissionPlan, Grounding, and Control commitment authority remain unchanged.
+- The B1 shared-world Mission config opts into authoritative-goal confirmation (ADR-0049):
+  every DAG-terminal Task in a generated plan must use the exact full frozen goal and configured
+  verifier contract with `verifier-evidence`. Prerequisites may retain `execution-report` for their
+  own local effects. This is a Mission policy, not an Actor count, Node selection, or benchmark
+  admission rule; unsupported goal syntax fails before a Provider call.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace

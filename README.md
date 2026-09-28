@@ -66,6 +66,11 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   ingress 只接纳启动时冻结的 source、精确 Task predicate 和当前物理 attempt；无证据时拒绝
   verifier-backed 计划，见 [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)
   与 [ADR-0048](docs/decisions/0048-deployment-task-verifier-ingress.md)；
+- B1 shared-world runner 默认使用 `scenarios/e1-shared-world-episode-51/mission-config-b1.toml`
+  的显式权威终态确认策略：MI 的每个 DAG 末端 Task 必须绑定完整冻结目标的 verifier
+  contract/predicate。普通 `config/mission.toml` 保留原有可选 basis；此策略不改变
+  MissionPlan、节点选择或 Habitat 官方判定，见
+  [ADR-0049](docs/decisions/0049-authoritative-goal-satisfaction-policy.md)；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过

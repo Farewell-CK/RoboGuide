@@ -153,6 +153,12 @@ Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能�
 MissionPlan shape、Runtime/Control authority 均不改变。当前可选的 deployment-owned terminal
 verifier ingress 只接纳与启动时冻结的 source、精确 predicate、当前物理 attempt 相符的证据；
 缺失或无效证据不会被 local Completed 替代，见 ADR-0039 与 ADR-0048。
+部署可显式要求环境权威联合终态由独立 verifier 确认。该策略仅在冻结的权威目标存在时
+生效：MI 草案校验要求每个 Task DAG 末端引用同一完整目标的精确 verifier contract、predicate
+与 receive-age bound；前置 Task 仍可在其自身操作契约下使用 `execution-report`。没有此策略时，
+`execution-report` 仅接受 Local EAIOS 已承诺的操作完成语义，不能因 Task 描述声称联合
+物理终态就被解释为独立真值。策略不凭谓词数推断 Actor 数，不修改 MissionPlan 或 Control
+authority；目标语法不受当前 verifier 支持时暴露部署能力缺口，不能弱化目标。见 ADR-0049。
 
 ## 3. 核心抽象
 
