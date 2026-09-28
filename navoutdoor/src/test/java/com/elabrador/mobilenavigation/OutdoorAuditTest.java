@@ -155,6 +155,31 @@ public class OutdoorAuditTest {
         assertSame(first,f.update(0,100*M,3,Float.NaN,2_000_000_000L));
         assertNull(f.update(0,100*M,3,Float.NaN,6_000_000_000L));
     }
+    @Test public void sustainedCoherentOffRouteFixesRecommendAutomaticReroute(){
+        RouteFollower f=straight(200);
+        f.update(0,0,3,Float.NaN,1_000_000_000L);
+        f.update(0,100*M,5,Float.NaN,2_000_000_000L);
+        assertFalse(f.shouldRequestAutomaticReroute());
+        f.update(2*M,101*M,5,Float.NaN,3_000_000_000L);
+        assertFalse(f.shouldRequestAutomaticReroute());
+        f.update(4*M,102*M,5,Float.NaN,5_000_000_000L);
+        assertTrue(f.shouldRequestAutomaticReroute());
+    }
+    @Test public void oneGpsOutlierNeverRequestsAutomaticReroute(){
+        RouteFollower f=straight(200);
+        f.update(0,0,3,Float.NaN,1_000_000_000L);
+        f.update(0,100*M,3,Float.NaN,2_000_000_000L);
+        assertFalse(f.shouldRequestAutomaticReroute());
+        assertNotNull(f.update(2*M,0,3,Float.NaN,3_000_000_000L));
+        assertFalse(f.shouldRequestAutomaticReroute());
+    }
+    @Test public void poorAccuracyDoesNotReplaceRouteAutomatically(){
+        RouteFollower f=straight(200);
+        f.update(0,0,3,Float.NaN,1_000_000_000L);
+        f.update(0,200*M,80,Float.NaN,2_000_000_000L);
+        f.update(1*M,201*M,80,Float.NaN,4_000_000_000L);
+        assertFalse(f.shouldRequestAutomaticReroute());
+    }
     private RouteFollower straight(int meters){
         RouteFollower f=new RouteFollower();
         f.setRoute(new AmapRouteClient.RouteResult("终点",0,0,meters,meters,"直行",0,

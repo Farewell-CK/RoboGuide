@@ -6,6 +6,9 @@ import java.util.List;
 final class RouteFollower {
     private static final long MISMATCH_GRACE_NANOS = 3_000_000_000L;
     private static final long RECOVERY_CONFIRMATION_WINDOW_NANOS = 5_000_000_000L;
+    private static final long AUTO_REROUTE_MIN_MISMATCH_NANOS = 3_000_000_000L;
+    private static final int AUTO_REROUTE_MIN_FIXES = 3;
+    private static final float AUTO_REROUTE_MAX_ACCURACY_METERS = 50.0f;
     private static final double MIN_RECOVERY_FORWARD_WINDOW_METERS = 100.0;
     private static final double RECOVERY_PROGRESS_TOLERANCE_METERS = 30.0;
     static final class Guidance {
@@ -57,11 +60,16 @@ final class RouteFollower {
     private Guidance lastGuidance;
     private Guidance lastUpdateResult;
     private long mismatchStartedNanos=-1;
+    private long lastMismatchFixNanos=-1;
+    private AmapRouteClient.GeoPoint lastMismatchPoint;
+    private int consecutiveMismatchFixes;
+    private boolean automaticRerouteRecommended;
     private long recoveryCandidateNanos=-1;
     private double recoveryCandidateProgress=-1;
     private int recoveryCandidateCount;
     private String waitingReason="等待有效 GPS 路线匹配";
     synchronized String waitingReason(){return waitingReason;}
+    synchronized boolean shouldRequestAutomaticReroute(){return automaticRerouteRecommended;}
 
     synchronized void setRoute(AmapRouteClient.RouteResult route) {
         this.route = route;
@@ -105,6 +113,8 @@ final class RouteFollower {
             waitingReason="等待有效手机位置";return null;
         }
         // Legacy aligned mode accepts both network and GPS fixes; accuracy is diagnostic.
+        boolean hasRerouteQualityAccuracy=Float.isFinite(accuracyMeters)
+                && accuracyMeters>=0 && accuracyMeters<=AUTO_REROUTE_MAX_ACCURACY_METERS;
         if(!Float.isFinite(accuracyMeters)||accuracyMeters<0)accuracyMeters=0;
         if(fixNanos<lastSeenFixNanos){waitingReason="GPS 时间倒退";return null;}
         if(fixNanos==lastSeenFixNanos)return lastUpdateResult;
@@ -138,7 +148,7 @@ final class RouteFollower {
                 clearRecoveryCandidate();
             }
             if(!recovered){
-                if(mismatchStartedNanos<0)mismatchStartedNanos=fixNanos;
+                recordMismatch(current,accuracyMeters,fixNanos,hasRerouteQualityAccuracy);
                 long mismatchAge=Math.max(0,fixNanos-mismatchStartedNanos);
                 waitingReason=recoveryCandidateCount>0
                         ?"定位短暂跳出连续路线，正在自动恢复匹配"
@@ -147,8 +157,7 @@ final class RouteFollower {
                 return lastUpdateResult;
             }
         }
-        mismatchStartedNanos=-1;
-        clearRecoveryCandidate();
+        clearMismatchState();
         lastFixNanos=fixNanos;
         advanceBudget=recovered?12:candidateAdvanceBudget;
         double previous=lastProgressMeters;
@@ -218,14 +227,49 @@ final class RouteFollower {
         recoveryCandidateCount=0;
     }
 
+    /**
+     * A single outlier must never replace the route.  Automatic re-routing is recommended only
+     * after several different, spatially coherent fixes remain outside the current route match.
+     * Accuracy is used as a quality gate, not as proof that the coordinate is correct.
+     */
+    private void recordMismatch(AmapRouteClient.GeoPoint current,float accuracyMeters,long fixNanos,
+                                boolean hasRerouteQualityAccuracy){
+        boolean coherent=false;
+        if(lastMismatchPoint!=null && lastMismatchFixNanos>=0 && fixNanos>lastMismatchFixNanos){
+            double elapsedSeconds=Math.min(5.0,(fixNanos-lastMismatchFixNanos)/1e9);
+            double allowedSeparation=Math.max(25.0,accuracyMeters*2.0+elapsedSeconds*4.0);
+            coherent=AmapRouteClient.distanceMeters(lastMismatchPoint,current)<=allowedSeparation;
+        }
+        if(coherent){
+            consecutiveMismatchFixes++;
+        } else {
+            consecutiveMismatchFixes=1;
+            mismatchStartedNanos=fixNanos;
+        }
+        lastMismatchPoint=current;
+        lastMismatchFixNanos=fixNanos;
+        long mismatchAge=Math.max(0,fixNanos-mismatchStartedNanos);
+        automaticRerouteRecommended=hasRerouteQualityAccuracy
+                && consecutiveMismatchFixes>=AUTO_REROUTE_MIN_FIXES
+                && mismatchAge>=AUTO_REROUTE_MIN_MISMATCH_NANOS;
+    }
+
+    private void clearMismatchState(){
+        mismatchStartedNanos=-1;
+        lastMismatchFixNanos=-1;
+        lastMismatchPoint=null;
+        consecutiveMismatchFixes=0;
+        automaticRerouteRecommended=false;
+        clearRecoveryCandidate();
+    }
+
     private void resetMatchState(){
         lastFixNanos=-1;
         lastSeenFixNanos=-1;
         advanceBudget=12;
         lastGuidance=null;
         lastUpdateResult=null;
-        mismatchStartedNanos=-1;
-        clearRecoveryCandidate();
+        clearMismatchState();
     }
 
     private Match findClosestMatch(AmapRouteClient.GeoPoint current,double progressBudget,
