@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>导盲助手 · Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=9" />
+</head>
+<body>
+  <div id="app" class="app" role="application" aria-label="导盲助手应用">
+
+    <!-- 状态栏 -->
+    <header class="status-bar" aria-hidden="true">
+      <span class="time" id="clock">09:41</span>
+      <div class="status-icons">
+        <span class="signal">●●●●</span>
+        <span class="wifi">Wi‑Fi</span>
+        <span class="battery">87%</span>
+      </div>
+    </header>
+
+    <!-- 关键词唤醒栏 -->
+    <div class="wake-bar" id="wake-bar" role="status" aria-live="polite" aria-label="语音唤醒状态">
+      <span class="wake-pulse" aria-hidden="true"></span>
+      <div class="wake-text">
+        <strong id="wake-status">待命中</strong>
+        <span id="wake-hint">说「小助小助」或「导盲助手」唤醒智能体</span>
+      </div>
+      <button class="wake-demo-btn" id="wake-demo-btn" type="button" aria-label="模拟唤醒词">演示唤醒</button>
+    </div>
+
+    <!-- ========== 页面：首页 ========== -->
+    <section id="page-home" class="page active" aria-label="首页">
+      <div class="page-header">
+        <h1 class="visually-hidden">导盲助手首页</h1>
+        <div class="home-header-row">
+          <p class="greeting" id="greeting">你好，欢迎使用导盲助手</p>
+          <button class="btn-logout" id="logout-btn" type="button" aria-label="退出登录">退出</button>
+        </div>
+        <button class="voice-fab" id="global-voice-btn" aria-label="点击开始语音，再次点击结束">
+          <span class="mic-icon" aria-hidden="true">🎙</span>
+          <span class="voice-label">点击说话</span>
+        </button>
+      </div>
+
+      <!-- 设备状态卡片 -->
+      <div class="section-title" role="heading" aria-level="2">我的设备</div>
+      <div class="device-grid" id="device-grid">
+        <article class="device-card connected" data-device="glasses" tabindex="0" role="button" aria-label="导盲眼镜，已连接，电量78%，点击查看详情">
+          <div class="device-icon glasses" aria-hidden="true">👓</div>
+          <div class="device-info">
+            <h3>导盲眼镜</h3>
+            <p class="conn-status connected-text">已连接 · Wi‑Fi</p>
+            <div class="battery-bar" role="progressbar" aria-valuenow="78" aria-valuemin="0" aria-valuemax="100">
+              <div class="battery-fill" style="width:78%"></div>
+            </div>
+            <span class="battery-text">电量 78%</span>
+          </div>
+          <span class="device-chevron" aria-hidden="true">›</span>
+        </article>
+
+        <article class="device-card connected" data-device="cane" tabindex="0" role="button" aria-label="导盲杖，已连接，电量65%，点击查看详情">
+          <div class="device-icon cane" aria-hidden="true">🦯</div>
+          <div class="device-info">
+            <h3>导盲杖</h3>
+            <p class="conn-status connected-text">已连接 · 蓝牙</p>
+            <div class="battery-bar" role="progressbar" aria-valuenow="65" aria-valuemin="0" aria-valuemax="100">
+              <div class="battery-fill" style="width:65%"></div>
+            </div>
+            <span class="battery-text">电量 65%</span>
+          </div>
+          <span class="device-chevron" aria-hidden="true">›</span>
+        </article>
+
+        <article class="device-card disconnected" data-device="dog" tabindex="0" role="button" aria-label="机器狗，未连接，点击查看详情">
+          <div class="device-icon dog" aria-hidden="true">🐕</div>
+          <div class="device-info">
+            <h3>机器狗</h3>
+            <p class="conn-status disconnected-text">未连接</p>
+            <button class="btn-sm bind-btn" data-action="bind-dog">点击绑定</button>
+          </div>
+          <span class="device-chevron" aria-hidden="true">›</span>
+        </article>
+      </div>
+
+      <!-- 快捷功能 -->
+      <div class="section-title" role="heading" aria-level="2">快捷功能</div>
+      <div class="quick-actions">
+        <button class="action-card primary" data-nav="navigate" aria-label="出行导航，导航与避障同时工作">
+          <span class="action-icon" aria-hidden="true">🧭</span>
+          <span class="action-title">出行导航</span>
+          <span class="action-desc">导航+避障同步运行</span>
+        </button>
+        <button class="action-card" data-nav="obstacle" aria-label="单独开启避障模式">
+          <span class="action-icon" aria-hidden="true">🛡</span>
+          <span class="action-title">避障模式</span>
+          <span class="action-desc">无需导航 · 独立使用</span>
+        </button>
+        <button class="action-card" data-nav="agent" aria-label="与智能体对话">
+          <span class="action-icon" aria-hidden="true">💬</span>
+          <span class="action-title">智能体</span>
+          <span class="action-desc">语音操控全部功能</span>
+        </button>
+        <button class="action-card" data-nav="devices" aria-label="设备管理">
+          <span class="action-icon" aria-hidden="true">⚙</span>
+          <span class="action-title">设备管理</span>
+          <span class="action-desc">绑定 · 状态 · 电量</span>
+        </button>
+      </div>
+
+      <!-- 当前出行摘要（导航+避障融合） -->
+      <div class="nav-summary" id="nav-summary" hidden>
+        <div class="nav-summary-header">
+          <span class="nav-badge">出行中</span>
+          <span class="nav-badge obstacle-badge" id="home-obstacle-badge">避障运行</span>
+          <button class="btn-text" data-action="stop-nav">结束</button>
+        </div>
+        <p class="nav-dest" id="nav-dest-text">前往 天安门东站</p>
+        <p class="nav-instruction" id="nav-instruction-text" aria-live="polite">前方50米右转，然后直行200米</p>
+        <p class="nav-voice-hint" id="nav-voice-hint" aria-live="polite" hidden>🔊 导航播报中…</p>
+        <p class="nav-voice-hint obs-voice-hint" id="obs-voice-hint" aria-live="polite" hidden>🛡 避障播报中…</p>
+        <div class="cane-direction-mini" id="home-cane-dir" aria-label="导盲杖方向提醒">
+          <span class="cane-dir-icon" id="home-cane-icon">↑</span>
+          <span class="cane-dir-text" id="home-cane-text">直行 · 杖体前方长震</span>
+        </div>
+      </div>
+
+      <!-- 单独避障运行摘要 -->
+      <div class="obstacle-summary" id="obstacle-summary" hidden>
+        <div class="nav-summary-header">
+          <span class="nav-badge obstacle-only-badge">避障中</span>
+          <button class="btn-text" data-action="stop-obstacle">关闭</button>
+        </div>
+        <p class="obstacle-summary-text" id="obstacle-summary-text" aria-live="polite">眼镜识别中 · 导盲杖震动反馈已启用</p>
+      </div>
+    </section>
+
+    <!-- ========== 页面：智能体对话 ========== -->
+    <section id="page-agent" class="page" aria-label="智能体对话">
+      <div class="page-top-bar">
+        <button class="back-btn" data-back aria-label="返回首页">← 返回</button>
+        <h2>智能体助手</h2>
+        <span class="agent-status online">在线</span>
+      </div>
+
+      <div class="agent-hint" role="note">
+        随时说「小助小助」唤醒我。我可以帮您：注册账号、绑定设备、规划路线、查询电量…
+      </div>
+
+      <div class="chat-area" id="chat-area" role="log" aria-live="polite" aria-label="对话记录">
+        <div class="msg agent">
+          <div class="msg-avatar" aria-hidden="true">🤖</div>
+          <div class="msg-bubble">
+            <p>您好！我是导盲助手智能体。您可以说：</p>
+            <ul class="suggestions">
+              <li><button class="chip" data-say="帮我把导盲眼镜连上">帮我把导盲眼镜连上</button></li>
+              <li><button class="chip" data-say="从天安门到西单怎么走">从天安门到西单怎么走</button></li>
+              <li><button class="chip" data-say="导盲杖还有多少电">导盲杖还有多少电</button></li>
+              <li><button class="chip" data-say="开启避障模式">开启避障模式</button></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="voice-input-bar">
+        <div class="waveform" id="waveform" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <button class="voice-btn-large" id="agent-voice-btn" aria-label="点击开始语音，再次点击结束">
+          <span class="mic-large" aria-hidden="true">🎙</span>
+          <span>点击说话</span>
+        </button>
+        <p class="voice-tip">再次点击结束 · 点取消退出</p>
+      </div>
+    </section>
+
+    <!-- ========== 页面：融合出行（导航+避障） ========== -->
+    <section id="page-navigate" class="page" aria-label="融合出行导航">
+      <div class="page-top-bar">
+        <button class="back-btn" data-back aria-label="返回首页">← 返回</button>
+        <h2>出行导航</h2>
+        <span class="fusion-badge" id="fusion-badge">导航+避障</span>
+      </div>
+
+      <!-- 融合状态条 -->
+      <div class="fusion-status-bar" id="fusion-status-bar">
+        <div class="fusion-status-item active" id="fusion-nav-status">
+          <span class="fsi-dot"></span>路线导航
+        </div>
+        <div class="fusion-status-item active" id="fusion-obs-status">
+          <span class="fsi-dot"></span>实时避障
+        </div>
+        <div class="fusion-status-item" id="fusion-cane-status">
+          <span class="fsi-dot"></span>杖体指引
+        </div>
+      </div>
+
+      <div class="route-form">
+        <label class="route-field">
+          <span class="field-label">起点</span>
+          <div class="field-row">
+            <span class="field-dot start" aria-hidden="true"></span>
+            <input type="text" id="route-from" value="我的位置" aria-label="起点" readonly />
+            <button class="locate-btn" aria-label="使用当前位置">📍</button>
+          </div>
+        </label>
+        <label class="route-field">
+          <span class="field-label">终点</span>
+          <div class="field-row">
+            <span class="field-dot end" aria-hidden="true"></span>
+            <input type="text" id="route-to" placeholder="说出或输入目的地" aria-label="终点" />
+            <button class="voice-inline" aria-label="语音输入目的地">🎙</button>
+          </div>
+        </label>
+        <button class="btn-primary full" id="plan-route-btn">规划路线</button>
+      </div>
+
+      <!-- 地图区域（模拟） -->
+      <div class="map-container" aria-label="地图预览">
+        <div class="map-mock" id="map-mock">
+          <svg viewBox="0 0 360 280" class="map-svg" aria-hidden="true">
+            <rect width="360" height="280" fill="#1a2332"/>
+            <path d="M40,220 Q120,180 200,140 T340,60" stroke="#4fc3f7" stroke-width="4" fill="none" stroke-dasharray="8,4" id="route-line"/>
+            <circle cx="40" cy="220" r="10" fill="#66bb6a"/>
+            <circle cx="340" cy="60" r="10" fill="#ef5350"/>
+            <text x="50" y="235" fill="#a0aec0" font-size="11">起点</text>
+            <text x="300" y="55" fill="#a0aec0" font-size="11">终点</text>
+          </svg>
+          <div class="map-overlay">
+            <span class="map-tag" id="map-distance">全程 3.2 公里</span>
+            <span class="map-tag" id="map-duration">约 42 分钟</span>
+          </div>
+        </div>
+        <div class="user-marker" aria-hidden="true">📍</div>
+      </div>
+
+      <!-- 路线步骤 -->
+      <div class="route-steps" id="route-steps">
+        <div class="section-title">路线指引 <span class="inline-status active" id="voice-nav-status">双语音播报</span></div>
+        <!-- 双通道语音播报：导航 + 避障 -->
+        <div class="dual-voice-panel" id="dual-voice-panel" hidden>
+          <div class="voice-channel nav-channel" aria-live="polite">
+            <span class="channel-label">🧭 导航语音</span>
+            <p id="voice-nav-current">—</p>
+          </div>
+          <div class="voice-channel obs-channel" aria-live="polite">
+            <span class="channel-label">🛡 避障语音</span>
+            <p id="voice-obs-current">—</p>
+          </div>
+        </div>
+        <ol class="steps-list" id="steps-list">
+          <li class="step active" data-step="0">
+            <span class="step-icon">🚶</span>
+            <div class="step-content">
+              <strong>直行 200 米</strong>
+              <span>沿长安街向东</span>
+            </div>
+          </li>
+          <li class="step" data-step="1">
+            <span class="step-icon">↱</span>
+            <div class="step-content">
+              <strong>右转进入东单北大街</strong>
+              <span>路口有语音提示</span>
+            </div>
+          </li>
+          <li class="step" data-step="2">
+            <span class="step-icon">🚇</span>
+            <div class="step-content">
+              <strong>乘坐地铁 1 号线</strong>
+              <span>天安门东 → 西单，3 站</span>
+            </div>
+          </li>
+          <li class="step" data-step="3">
+            <span class="step-icon">🚶</span>
+            <div class="step-content">
+              <strong>出站后直行 150 米</strong>
+              <span>到达目的地西单大悦城</span>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+      <button class="btn-primary full start-nav-btn" id="start-nav-btn">开始融合出行</button>
+
+      <!-- 导盲杖方向指引 -->
+      <div class="cane-direction-panel" id="cane-direction-panel" aria-live="polite">
+        <div class="section-title">导盲杖方向指引</div>
+        <div class="cane-compass" id="cane-compass">
+          <div class="compass-ring">
+            <span class="compass-n">北</span>
+            <span class="compass-e">东</span>
+            <span class="compass-s">南</span>
+            <span class="compass-w">西</span>
+            <div class="compass-arrow" id="compass-arrow" aria-hidden="true">↑</div>
+          </div>
+        </div>
+        <div class="cane-feedback-grid">
+          <div class="cane-fb-item" id="cane-fb-direction">
+            <span class="cfb-label">行进方向</span>
+            <strong id="cane-dir-label">直行</strong>
+          </div>
+          <div class="cane-fb-item" id="cane-fb-vibration">
+            <span class="cfb-label">震动模式</span>
+            <strong id="cane-vib-label">前方长震 ×2</strong>
+          </div>
+          <div class="cane-fb-item full-width">
+            <span class="cfb-label">语音+震动提醒</span>
+            <p id="cane-hint-text">导盲杖将通过震动指示前进方向，避障时叠加侧向震动</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 实时避障（与导航同步） -->
+      <div class="fusion-obstacle-section" id="fusion-obstacle-section">
+        <div class="section-title">实时避障 <span class="inline-status active" id="inline-obs-status">运行中</span></div>
+        <div class="obstacle-pipeline compact" role="list" aria-label="避障数据流">
+          <div class="pipeline-node" role="listitem">
+            <span class="node-icon">👓</span>
+            <span class="node-label">眼镜</span>
+          </div>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <div class="pipeline-node" role="listitem">
+            <span class="node-icon">📱</span>
+            <span class="node-label">手机</span>
+          </div>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <div class="pipeline-node" role="listitem">
+            <span class="node-icon">🦯</span>
+            <span class="node-label">杖体</span>
+          </div>
+        </div>
+        <div class="camera-preview compact-preview" aria-label="眼镜摄像头实时画面">
+          <canvas id="seg-canvas" width="360" height="180"></canvas>
+          <div class="preview-label">导航中 · 避障并行</div>
+          <div class="detection-tags" id="detection-tags">
+            <span class="tag danger">行人 · 左前方 1.2m</span>
+            <span class="tag warning">台阶 · 正前方 0.8m</span>
+            <span class="tag safe">通道 · 右前方可通行</span>
+          </div>
+        </div>
+        <div class="avoidance-panel compact" aria-live="polite">
+          <div class="avoidance-alert" id="avoidance-alert">
+            <span class="alert-icon" aria-hidden="true">⚠</span>
+            <div>
+              <strong id="avoidance-title">正前方有台阶</strong>
+              <p id="avoidance-desc">建议向右偏移，导盲杖右侧短震，不影响前进方向指引</p>
+            </div>
+          </div>
+          <div class="vibration-indicator">
+            <span class="vib-label">避障震动</span>
+            <div class="vib-pattern right" id="vib-pattern">
+              <span></span><span></span><span class="active"></span>
+            </div>
+            <span class="vib-dir" id="vib-dir">右侧 · 短震×3</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 页面：单独避障 ========== -->
+    <section id="page-obstacle" class="page" aria-label="避障模式">
+      <div class="page-top-bar">
+        <button class="back-btn" data-back aria-label="返回首页">← 返回</button>
+        <h2>避障模式</h2>
+        <span class="obstacle-status" id="obstacle-status">未启动</span>
+      </div>
+
+      <div class="standalone-hint" role="note">
+        无需开启导航，可单独使用避障。导盲眼镜采集图像，手机本地识别障碍物，导盲杖震动提醒。
+      </div>
+
+      <div class="obstacle-pipeline" role="list" aria-label="避障数据流">
+        <div class="pipeline-node" role="listitem">
+          <span class="node-icon">👓</span>
+          <span class="node-label">眼镜采集</span>
+          <span class="node-detail">Wi‑Fi 实时图像</span>
+        </div>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <div class="pipeline-node" role="listitem">
+          <span class="node-icon">📱</span>
+          <span class="node-label">手机计算</span>
+          <span class="node-detail">本地障碍物识别</span>
+        </div>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <div class="pipeline-node" role="listitem">
+          <span class="node-icon">🦯</span>
+          <span class="node-label">杖体反馈</span>
+          <span class="node-detail">方向震动提醒</span>
+        </div>
+      </div>
+
+      <div class="camera-preview" aria-label="眼镜摄像头实时画面">
+        <canvas id="seg-canvas-standalone" width="360" height="240"></canvas>
+        <div class="preview-label">独立避障 · 实时场景理解</div>
+        <div class="detection-tags" id="detection-tags-standalone">
+          <span class="tag danger">行人 · 左前方 1.2m</span>
+          <span class="tag warning">台阶 · 正前方 0.8m</span>
+          <span class="tag safe">通道 · 右前方可通行</span>
+        </div>
+      </div>
+
+      <div class="avoidance-panel" aria-live="polite">
+        <div class="avoidance-alert">
+          <span class="alert-icon" aria-hidden="true">⚠</span>
+          <div>
+            <strong id="avoidance-title-standalone">正前方有台阶</strong>
+            <p id="avoidance-desc-standalone">建议向右偏移 30 厘米，导盲杖已震动提示</p>
+          </div>
+        </div>
+        <div class="vibration-indicator" aria-label="导盲杖震动模式">
+          <span class="vib-label">震动模式</span>
+          <div class="vib-pattern right" id="vib-pattern-standalone">
+            <span></span><span></span><span class="active"></span>
+          </div>
+          <span class="vib-dir" id="vib-dir-standalone">右侧 · 短震×3</span>
+        </div>
+      </div>
+
+      <button class="btn-primary full" id="toggle-obstacle">开启避障</button>
+      <p class="obstacle-footnote">出行导航时避障将自动融合运行，也可在此单独开启</p>
+    </section>
+
+    <!-- ========== 页面：设备管理 ========== -->
+    <section id="page-devices" class="page" aria-label="设备管理">
+      <div class="page-top-bar">
+        <button class="back-btn" data-back aria-label="返回首页">← 返回</button>
+        <h2>设备管理</h2>
+        <button class="btn-text" id="scan-devices">扫描设备</button>
+      </div>
+
+      <div class="scan-animation" id="scan-panel" hidden>
+        <div class="radar" aria-hidden="true"></div>
+        <p>正在搜索附近设备…</p>
+      </div>
+
+      <div class="device-list" id="device-list">
+        <article class="device-detail-card connected">
+          <div class="ddc-header">
+            <span class="ddc-icon">👓</span>
+            <div>
+              <h3>导盲眼镜 Pro</h3>
+              <span class="ddc-id">SN: GL-2024-00821</span>
+            </div>
+            <span class="badge connected">已连接</span>
+          </div>
+          <div class="ddc-stats">
+            <div class="stat"><span>连接方式</span><strong>Wi‑Fi 5GHz</strong></div>
+            <div class="stat"><span>电量</span><strong>78%</strong></div>
+            <div class="stat"><span>信号</span><strong>优秀</strong></div>
+            <div class="stat"><span>固件</span><strong>v2.1.0</strong></div>
+          </div>
+          <div class="ddc-actions">
+            <button class="btn-outline">断开连接</button>
+            <button class="btn-outline">固件升级</button>
+          </div>
+        </article>
+
+        <article class="device-detail-card connected">
+          <div class="ddc-header">
+            <span class="ddc-icon">🦯</span>
+            <div>
+              <h3>智能导盲杖</h3>
+              <span class="ddc-id">SN: CN-2024-01567</span>
+            </div>
+            <span class="badge connected">已连接</span>
+          </div>
+          <div class="ddc-stats">
+            <div class="stat"><span>连接方式</span><strong>蓝牙 BLE</strong></div>
+            <div class="stat"><span>电量</span><strong>65%</strong></div>
+            <div class="stat"><span>震动</span><strong>已启用</strong></div>
+            <div class="stat"><span>固件</span><strong>v1.8.3</strong></div>
+          </div>
+          <div class="ddc-actions">
+            <button class="btn-outline">断开连接</button>
+            <button class="btn-outline">测试震动</button>
+          </div>
+        </article>
+
+        <article class="device-detail-card">
+          <div class="ddc-header">
+            <span class="ddc-icon">🐕</span>
+            <div>
+              <h3>导盲机器狗</h3>
+              <span class="ddc-id">未发现设备</span>
+            </div>
+            <span class="badge">未连接</span>
+          </div>
+          <p class="ddc-hint">请确保机器狗已开机并处于配对模式，然后说"绑定机器狗"或点击扫描。</p>
+          <button class="btn-primary full bind-dog-btn">绑定机器狗</button>
+        </article>
+      </div>
+
+      <div class="logout-section">
+        <button class="btn-secondary full" id="logout-btn-devices" type="button">退出登录</button>
+      </div>
+    </section>
+
+    <!-- ========== 页面：登录 / 注册 ========== -->
+    <section id="page-login" class="page login-page" aria-label="登录注册">
+      <div class="login-hero">
+        <div class="logo" aria-hidden="true">🧭</div>
+        <h1>导盲助手</h1>
+        <p class="tagline">语音优先 · 智能导航 · 安全出行</p>
+      </div>
+
+      <div class="auth-tabs" role="tablist" aria-label="登录或注册">
+        <button class="auth-tab active" id="tab-login" type="button" role="tab" aria-selected="true" aria-controls="auth-panel-login">登录</button>
+        <button class="auth-tab" id="tab-register" type="button" role="tab" aria-selected="false" aria-controls="auth-panel-register">注册</button>
+      </div>
+
+      <!-- 登录面板 -->
+      <div class="auth-panel active" id="auth-panel-login" role="tabpanel" aria-labelledby="tab-login">
+        <form class="login-form" id="login-form" onsubmit="return false">
+          <label>
+            <span>手机号</span>
+            <input type="tel" id="login-phone" placeholder="请输入手机号" aria-label="手机号" maxlength="11" />
+          </label>
+          <label>
+            <span>验证码</span>
+            <div class="code-row">
+              <input type="text" id="login-code" placeholder="验证码" aria-label="验证码" maxlength="6" />
+              <button type="button" class="btn-outline" id="login-send-code">获取验证码</button>
+            </div>
+          </label>
+          <button type="button" class="btn-primary full" id="login-btn">登录</button>
+        </form>
+        <p class="auth-switch">还没有账号？<button type="button" class="link-btn" id="go-register">立即注册</button></p>
+      </div>
+
+      <!-- 注册面板 -->
+      <div class="auth-panel" id="auth-panel-register" role="tabpanel" aria-labelledby="tab-register" hidden>
+        <form class="login-form" id="register-form" onsubmit="return false">
+          <label>
+            <span>姓名</span>
+            <input type="text" id="register-name" placeholder="请输入您的姓名" aria-label="姓名" />
+          </label>
+          <label>
+            <span>手机号</span>
+            <input type="tel" id="register-phone" placeholder="请输入手机号" aria-label="手机号" maxlength="11" />
+          </label>
+          <label>
+            <span>验证码</span>
+            <div class="code-row">
+              <input type="text" id="register-code" placeholder="验证码" aria-label="验证码" maxlength="6" />
+              <button type="button" class="btn-outline" id="register-send-code">获取验证码</button>
+            </div>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="register-bind-glasses" checked />
+            <span>注册后自动绑定导盲眼镜</span>
+          </label>
+          <button type="button" class="btn-primary full" id="register-btn">注册并登录</button>
+        </form>
+        <p class="auth-switch">已有账号？<button type="button" class="link-btn" id="go-login">返回登录</button></p>
+      </div>
+
+      <div class="voice-login">
+        <p>或使用语音注册 / 登录</p>
+        <button class="voice-btn-large" id="login-voice-btn" aria-label="语音注册或登录">
+          <span class="mic-large" aria-hidden="true">🎙</span>
+          <span>语音注册账号</span>
+        </button>
+        <p class="voice-example">"我是张三，手机号138xxxx，帮我注册并绑定眼镜"</p>
+      </div>
+    </section>
+
+    <!-- 底部导航 -->
+    <nav class="bottom-nav" aria-label="主导航" id="bottom-nav">
+      <button class="nav-item active" data-page="home" aria-label="首页" aria-current="page">
+        <span class="nav-icon" aria-hidden="true">🏠</span>
+        <span>首页</span>
+      </button>
+      <button class="nav-item" data-page="navigate" aria-label="出行导航">
+        <span class="nav-icon" aria-hidden="true">🧭</span>
+        <span>出行</span>
+      </button>
+      <button class="nav-item agent-nav" data-page="agent" aria-label="智能体">
+        <span class="nav-icon mic-nav" aria-hidden="true">🎙</span>
+        <span>智能体</span>
+      </button>
+      <button class="nav-item" data-page="obstacle" aria-label="避障">
+        <span class="nav-icon" aria-hidden="true">🛡</span>
+        <span>避障</span>
+      </button>
+      <button class="nav-item" data-page="devices" aria-label="设备">
+        <span class="nav-icon" aria-hidden="true">⚙</span>
+        <span>设备</span>
+      </button>
+    </nav>
+
+    <!-- 设备详情弹层 -->
+    <div class="device-sheet-backdrop" id="device-sheet-backdrop" hidden></div>
+    <div class="device-sheet" id="device-sheet" role="dialog" aria-labelledby="device-sheet-title" aria-modal="true" hidden>
+      <div class="device-sheet-handle" aria-hidden="true"></div>
+      <div class="device-sheet-header">
+        <span class="device-sheet-icon" id="device-sheet-icon">👓</span>
+        <div>
+          <h3 id="device-sheet-title">设备详情</h3>
+          <span class="device-sheet-sn" id="device-sheet-sn"></span>
+        </div>
+        <button class="device-sheet-close" id="device-sheet-close" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="device-sheet-body" id="device-sheet-body"></div>
+      <div class="device-sheet-actions" id="device-sheet-actions"></div>
+    </div>
+
+    <!-- 语音反馈 Toast -->
+    <div class="voice-toast" id="voice-toast" role="status" aria-live="assertive" hidden>
+      <span class="toast-icon" aria-hidden="true">🔊</span>
+      <span class="toast-text" id="toast-text"></span>
+    </div>
+
+    <!-- 语音聆听浮层 -->
+    <div class="listening-overlay" id="listening-overlay" hidden aria-hidden="true" role="dialog" aria-label="语音输入">
+      <div class="listening-ring"></div>
+      <p>正在聆听…</p>
+      <p class="listening-hint">再次点击麦克风结束 · 点取消或空白处退出</p>
+      <button class="listening-cancel" id="listening-cancel" type="button" aria-label="取消语音输入">取消</button>
+    </div>
+  </div>
+
+  <script src="app.js?v=9"></script>
+</body>
+</html>

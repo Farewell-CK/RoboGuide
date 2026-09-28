@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Robonix Client</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_rtdl">RTDL</string>
+    <string name="nav_audio">Audio</string>
+    <string name="nav_settings">Settings</string>
+    <string name="send">Send</string>
+    <string name="steer">Steer</string>
+    <string name="stop">Stop</string>
+    <string name="voice">Voice</string>
+    <string name="connect">Connect</string>
+    <string name="connected">Connected</string>
+    <string name="offline">Offline</string>
+    <string name="robot_host">Robot Host</string>
+    <string name="atlas_port">Atlas Port</string>
+    <string name="user_id">User ID</string>
+    <string name="save_settings">Save Settings</string>
+    <string name="new_session">New Session</string>
+    <string name="test_mic">Test Mic</string>
+    <string name="test_speaker">Test Speaker</string>
+</resources>

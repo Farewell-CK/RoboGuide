@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package robonix.atlas;
+
+option java_package = "com.robonix.proto.atlas";
+option java_outer_classname = "AtlasProto";
+option java_multiple_files = true;
+
+enum Transport {
+  TRANSPORT_UNSPECIFIED = 0;
+  TRANSPORT_GRPC = 1;
+  TRANSPORT_ROS2 = 2;
+  TRANSPORT_MCP = 3;
+}
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_PRIMITIVE = 1;
+  KIND_SERVICE = 2;
+  KIND_SKILL = 3;
+}
+
+enum LifecycleState {
+  STATE_UNSPECIFIED = 0;
+  STATE_REGISTERED = 1;
+  STATE_INACTIVE = 2;
+  STATE_ACTIVE = 3;
+  STATE_ERROR = 4;
+  STATE_TERMINATED = 5;
+}
+
+message GrpcParams {
+  string proto_file = 1;
+  string service_name = 2;
+  string method = 3;
+}
+
+message TransportParams {
+  oneof kind {
+    GrpcParams grpc = 1;
+  }
+}
+
+message Capability {
+  string provider_id = 1;
+  Kind provider_kind = 2;
+  string contract_id = 3;
+  Transport transport = 4;
+  TransportParams params = 5;
+  string description = 6;
+}
+
+message CapabilityProvider {
+  string id = 1;
+  Kind kind = 2;
+  string namespace = 3;
+  string capability_md_path = 4;
+  uint64 last_heartbeat_ms = 5;
+  LifecycleState state = 6;
+  string state_detail = 7;
+  repeated Capability capabilities = 8;
+}
+
+message QueryRequest {
+  Kind kind = 1;
+  string id = 2;
+  string contract_id = 3;
+  Transport transport = 4;
+  string namespace_prefix = 5;
+}
+
+message QueryResponse {
+  repeated CapabilityProvider providers = 1;
+}
+
+message ConnectCapabilityRequest {
+  string consumer_id = 1;
+  string provider_id = 2;
+  string contract_id = 3;
+  Transport transport = 4;
+}
+
+message ConnectCapabilityResponse {
+  string channel_id = 1;
+  string endpoint = 2;
+  TransportParams params = 3;
+}
+
+service Atlas {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc ConnectCapability(ConnectCapabilityRequest) returns (ConnectCapabilityResponse);
+}

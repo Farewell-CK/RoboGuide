@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package robonix.pilot;
+
+option java_package = "com.robonix.proto.pilot";
+option java_outer_classname = "PilotProto";
+option java_multiple_files = true;
+
+message CapabilityCall {
+  string call_id = 1;
+  string provider_id = 2;
+  string contract_id = 3;
+  string args_json = 4;
+}
+
+message CapabilityCallResult {
+  string call_id = 1;
+  string provider_id = 2;
+  string contract_id = 3;
+  bool success = 4;
+  string output = 5;
+  string error = 6;
+}
+
+message RtdlNode {
+  uint32 node_kind = 1;
+  repeated uint32 children = 2;
+  CapabilityCall call = 3;
+  string op_id = 4;
+  string description = 5;
+}
+
+message Plan {
+  string plan_id = 1;
+  string session_id = 2;
+  uint32 round = 3;
+  repeated RtdlNode nodes = 4;
+  uint32 root_index = 5;
+}
+
+message RtdlNodeState {
+  string plan_id = 1;
+  uint32 node_index = 2;
+  uint32 node_kind = 3;
+  uint32 state = 4;
+  string operator_detail = 5;
+  CapabilityCallResult leaf_result = 6;
+  string op_id = 7;
+  string description = 8;
+}
+
+message BatchResult {
+  string plan_id = 1;
+  string session_id = 2;
+  uint32 round = 3;
+  repeated RtdlNodeState results = 4;
+  bool any_failed = 5;
+}
+
+message SessionStatusEvent {
+  string session_id = 1;
+  uint32 state = 2;
+  string message = 3;
+}
+
+message TaskStateEvent {
+  string goal = 1;
+  string success_criterion = 2;
+  string status = 3;
+}
+
+message PilotEvent {
+  uint32 event_kind = 1;
+  string session_id = 2;
+  string text_chunk = 3;
+  Plan plan = 4;
+  BatchResult batch_result = 5;
+  SessionStatusEvent status = 6;
+  string final_text = 7;
+  RtdlNodeState node_state = 8;
+  TaskStateEvent task_state = 9;
+}
+
+message Task {
+  string task_id = 1;
+  string session_id = 2;
+  uint32 source = 3;
+  string text = 4;
+  bytes audio_data = 5;
+  string context_json = 6;
+  uint64 timestamp_ms = 7;
+}

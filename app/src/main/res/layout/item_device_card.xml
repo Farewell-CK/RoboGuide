@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:orientation="horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/dp_72"
+    android:gravity="center_vertical"
+    android:background="@drawable/bg_card"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="@dimen/dp_14"
+    android:layout_marginBottom="@dimen/dp_12">
+
+    <TextView
+        android:id="@+id/tv_icon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:importantForAccessibility="no"
+        android:text="👓"
+        android:textSize="@dimen/sp_28" />
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="@dimen/dp_14">
+
+        <TextView
+            android:id="@+id/tv_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="设备名称"
+            android:textColor="@color/color_text"
+            android:textSize="@dimen/sp_16"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/dp_6">
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_badge_connected"
+                android:paddingHorizontal="@dimen/dp_8"
+                android:paddingVertical="@dimen/dp_2"
+                android:text="@string/device_status_connected"
+                android:textColor="@color/whitesmoke"
+                android:textSize="@dimen/sp_12" />
+
+            <TextView
+                android:id="@+id/tv_battery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_10"
+                android:text="电量 78%"
+                android:textColor="@color/color_text_muted"
+                android:textSize="@dimen/sp_13" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/iv_chevron"
+        android:layout_width="@dimen/dp_20"
+        android:layout_height="@dimen/dp_20"
+        android:contentDescription="@string/cd_device_chevron"
+        android:src="@drawable/ic_chevron_right" />
+</LinearLayout>

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package robonix.voiceprint;
+
+option java_package = "com.robonix.proto.voiceprint";
+option java_outer_classname = "VoiceprintProto";
+option java_multiple_files = true;
+
+message Enroll_Request {
+  string user_id = 1;
+  string user_name = 2;
+  bytes audio_data = 3;
+  string encoding = 4;
+  uint32 sample_rate_hz = 5;
+}
+message Enroll_Response {
+  bool success = 1;
+  string error = 2;
+}

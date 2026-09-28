@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/color_bg"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/dp_20">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/obstacle_title"
+                android:textColor="@color/color_text"
+                android:textSize="@dimen/sp_22"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_10"
+                android:text="@string/obstacle_hint"
+                android:textColor="@color/color_text_muted"
+                android:textSize="@dimen/sp_14" />
+
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_16"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tv_status"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:accessibilityLiveRegion="polite"
+                    android:text="@string/obstacle_status_off"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btn_toggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:minWidth="@dimen/dp_120"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="@drawable/bg_btn_primary"
+                    android:paddingHorizontal="@dimen/dp_16"
+                    android:text="@string/obstacle_btn_start"
+                    android:textColor="@color/color_bg"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/panel_scenario"
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dp_20"
+                android:background="@drawable/bg_card"
+                android:padding="@dimen/dp_16"
+                android:visibility="gone"
+                android:accessibilityLiveRegion="polite">
+
+                <TextView
+                    android:id="@+id/tv_scenario_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/color_primary"
+                    android:textSize="@dimen/sp_17"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_scenario_desc"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8"
+                    android:textColor="@color/color_text"
+                    android:textSize="@dimen/sp_14" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_14"
+                    android:text="@string/obstacle_vib_dir_label"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="@dimen/sp_12" />
+
+                <TextView
+                    android:id="@+id/tv_vib_dir"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:textColor="@color/color_accent"
+                    android:textSize="@dimen/sp_15"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chip_group_tags"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_12" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</layout>
