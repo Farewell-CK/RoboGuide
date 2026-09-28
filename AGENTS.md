@@ -271,6 +271,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
   RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces
   persisted evidence; it never bypasses RoboGuide to call a simulator skill.
+- Optional B1 goal-geometry diagnostics read the terminal Habitat snapshot and its actual
+  `robot_at_thresh` to compare the deployed 3D `any_at` result with a world-X/Z-only
+  counterfactual. They require matching provenance and official terminal evidence, remain
+  unavailable on missing/mismatched inputs, and never enter Formal admission, Mission
+  satisfaction, or benchmark success. The Local EAIOS records the threshold read-only;
+  evaluation owns the offline calculation and sidecar.
 - `console/` contains the experimental read-only Mission Journey visualizer
   (early development; layout and features are still evolving): a zero-dependency
   static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static

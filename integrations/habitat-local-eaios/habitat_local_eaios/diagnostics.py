@@ -18,6 +18,7 @@ explicitly labeled as inferred and never presented as observed Stage2 events.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -27,7 +28,7 @@ from typing import Any, cast
 
 from .evidence_io import write_text_atomic
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.3"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.4"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
@@ -133,6 +134,17 @@ def _pddl_reference_position(sim: Any, agent_id: int) -> list[float]:
     """Read the transform origin used by Habitat's official any-at predicate."""
     agent = sim.get_agent_data(agent_id).articulated_agent
     return [float(component) for component in agent.base_transformation.translation]
+
+
+def _robot_at_threshold(problem: Any) -> float:
+    """Read the active PDDL any-at tolerance without choosing a new threshold."""
+    value = problem.sim_info.robot_at_thresh
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError("PDDL robot-at threshold is not numeric")
+    threshold = float(value)
+    if not math.isfinite(threshold) or threshold <= 0:
+        raise ValueError("PDDL robot-at threshold must be finite and positive")
+    return threshold
 
 
 def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
@@ -643,6 +655,7 @@ class PhysicalDiagnostics:
                 ],
                 "goal_conjunct_values": self._official_conjunct_values(problem),
                 "goal_entity_positions": self._goal_entity_positions(problem),
+                "robot_at_threshold_m": _read(_robot_at_threshold, problem),
                 "official_pddl_success": self._metrics(habitat_env).get("pddl_success"),
                 "collection_configuration": {
                     "max_step_records": self._max_step_records,
@@ -743,11 +756,14 @@ class PhysicalDiagnostics:
             return
         self.flush_boundary()
         try:
+            episode = getattr(habitat_env, "current_episode", None)
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim
             document: dict[str, Any] = {
                 "schema_version": DIAGNOSTICS_SCHEMA,
                 "phase": "terminal_world_state",
+                "episode_id": _read(lambda: str(episode.episode_id)) if episode else _UNAVAILABLE,
+                "scene_id": _read(lambda: str(episode.scene_id)) if episode else _UNAVAILABLE,
                 "termination_reason": reason,
                 "simulator_steps": steps,
                 "agents": {
@@ -760,6 +776,7 @@ class PhysicalDiagnostics:
                 },
                 "goal_conjunct_values": self._official_conjunct_values(problem),
                 "goal_entity_positions": self._goal_entity_positions(problem),
+                "robot_at_threshold_m": _read(_robot_at_threshold, problem),
                 "official_metrics": self._metrics(habitat_env),
                 "dropped_diagnostic_records": self._dropped_records,
                 "collection_stats": self._collection_stats(),

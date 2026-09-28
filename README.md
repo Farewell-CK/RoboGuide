@@ -71,6 +71,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   contract/predicate。普通 `config/mission.toml` 保留原有可选 basis；此策略不改变
   MissionPlan、节点选择或 Habitat 官方判定，见
   [ADR-0049](docs/decisions/0049-authoritative-goal-satisfaction-policy.md)；
+- B1 自动归档另外生成可选的终态几何诊断，分别记录 Habitat 官方 `pddl_success`、按同一
+  阈值重建的三维 `any_at` 和忽略高度后的 X/Z 反事实结果；诊断缺失或与官方终态矛盾时
+  标记 unavailable，绝不改变 benchmark success 或 Formal admission。见
+  [Eval Harness](evaluation/README.md)；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过

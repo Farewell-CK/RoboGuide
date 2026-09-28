@@ -37,6 +37,23 @@ socket 等待至多 2 秒；大小探测最多额外保留一个字节。每次�
 中的 SUT failure owner。Formal admission、semantic goal diagnostic 与官方 benchmark
 判定规则保持不变；完整分页仍不能使缺少真实任务注册事件的归档通过 provenance。
 
+### B1 终态高度对照诊断
+
+启用物理诊断的新 B1 运行会在 `evidence/diagnostics-terminal.json` v0.4 中只读记录
+本次实际 PDDL `robot_at_thresh`。自动归档额外写出
+`evidence/goal-geometry-diagnostic.json`：对冻结 goal 中可表达的 `any_at` 谓词，
+使用终态目标位置与所有 agent 的 PDDL 参考位置，计算完整三维距离和忽略世界 Y
+坐标后的 X/Z 距离。两个谓词都在**同一个终态**成立才得到联合反事实 true；并不要求
+两个不同机器人。计算支持任意已记录的 agent 数量。
+
+结果以 Habitat 原始 `pddl_success` 为官方值；三维重建必须与它一致，否则对照
+标记 unavailable。源摘要、终态 episode/scene/step、机器人集合、阈值、目标或 provenance 缺失/不匹配
+也标记 unavailable。X/Z 结果仅为诊断性的假设重算，不是另一套官方评分，不能进入
+Formal/benchmark population 或替代 Mission satisfaction。旧版 v0.3 终态诊断没有直接
+记录阈值，因此不会被自动伪装成 v0.4 对照。需要离线重算时可运行
+`uv run python -m roboguide_eval.b1_goal_geometry <run-dir> --output <new-output-path>`，
+输出应放在新目录以保留原始归档。
+
 ## 边界（必须遵守）
 
 - Eval Harness 不属于 RoboGuide Core、Runtime、Control Plane、State & Memory

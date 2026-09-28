@@ -109,7 +109,7 @@ class FakeProblem:
     def __init__(self, conjuncts: list[FakePredicate]) -> None:
         """Hold the conjuncts and a bound sim_info."""
         self.goal = type("Goal", (), {"sub_exprs": conjuncts})()
-        self.sim_info = type("SimInfo", (), {"bound": True})()
+        self.sim_info = type("SimInfo", (), {"bound": True, "robot_at_thresh": 2.0})()
 
     def get_entity(self, name: str) -> Any:
         """Resolve every requested entity to a stub object."""
@@ -288,6 +288,7 @@ def test_terminal_goal_entity_positions_are_read_from_final_world(tmp_path: Path
     assert terminal["goal_entity_positions"]["any_targets|0"] == [6.0, 7.0, 8.0]
     assert terminal["goal_entity_positions"]["TARGET_any_targets|0"] == [3.0, 4.0, 5.0]
     assert terminal["schema_version"] == DIAGNOSTICS_SCHEMA
+    assert terminal["robot_at_threshold_m"]["_status"] == "unavailable"
 
 
 def test_pddl_reference_position_is_distinct_from_navigation_ground_point(
@@ -304,6 +305,24 @@ def test_pddl_reference_position_is_distinct_from_navigation_ground_point(
     for document in (initial, terminal):
         assert document["agents"]["0"]["position"] == [0.5, 1.0, 2.0]
         assert document["agents"]["0"]["pddl_reference_position"] == [0.5, 1.48, 2.0]
+        assert document["robot_at_threshold_m"] == 2.0
+        assert document["episode_id"] == "51"
+        assert document["scene_id"] == FakeEpisode.scene_id
+
+
+def test_invalid_pddl_threshold_stays_unavailable_without_changing_execution(
+    tmp_path: Path,
+) -> None:
+    """A missing or nonfinite tolerance cannot become a fabricated comparison."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    env.task.pddl_problem.sim_info.robot_at_thresh = float("nan")
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 1, "episode_done")
+    initial = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert initial["robot_at_threshold_m"]["_status"] == "unavailable"
+    assert terminal["robot_at_threshold_m"]["_status"] == "unavailable"
 
 
 def test_unreadable_pddl_reference_is_marked_without_losing_navigation_pose(

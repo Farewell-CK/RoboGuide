@@ -48,6 +48,8 @@ def test_explicit_sut_startup_failure_remains_formal(
     assert verdict["admission"]["valid_for_formal_population"] is True
     assert verdict["admission"]["valid_for_benchmark_population"] is False
     assert collect(run)["values"]["system_failure"] is True
+    diagnostic = json.loads((run / "evidence/goal-geometry-diagnostic.json").read_text())
+    assert diagnostic["status"] == "unavailable"
 
 
 def test_controller_process_failure_precedes_missing_benchmark(tmp_path: Path) -> None:
@@ -134,3 +136,40 @@ def test_collector_requires_matching_request_and_observations(
     assert fetch.call_count == 6
     assert observations["request_record_digest"] == plan_digest(request)
     assert result["admission"]["provenance_valid"] is True
+
+
+def test_optional_geometry_write_failure_does_not_change_b1_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed research sidecar cannot relabel an already archived B1 run."""
+    run = tmp_path / "startup-failure"
+    run.mkdir()
+    write_json(
+        run / "b1-input-used.json",
+        {
+            "schema": "roboguide.e1.b1-input/v0.1",
+            "instruction": "perform the frozen task",
+            "episode_id": "51",
+            "seed": 40,
+            "scene_id": "scene-51",
+            "dataset_revision": "dataset-1",
+            "dataset_sha256": "a" * 64,
+        },
+    )
+    monkeypatch.setattr("roboguide_eval.b1_artifacts._fetch", Mock(return_value=None))
+    monkeypatch.setattr(
+        "roboguide_eval.b1_artifacts.write_goal_geometry_diagnostic",
+        Mock(side_effect=OSError("diagnostic disk unavailable")),
+    )
+    verdict = collect_b1_artifacts(
+        run,
+        request_id="",
+        mission_endpoint="http://unused",
+        controller_endpoint="http://unused",
+        owner=FailureOwner.SUT_SYSTEM,
+        component="controller",
+        reason="sut_process_exited_before_collection",
+    )
+    assert verdict["admission"]["provenance_valid"] is True
+    assert verdict["admission"]["valid_for_formal_population"] is True
+    assert not (run / "evidence/goal-geometry-diagnostic.json").exists()
