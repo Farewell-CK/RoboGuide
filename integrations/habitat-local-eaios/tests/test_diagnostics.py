@@ -123,6 +123,7 @@ class FakeAgent:
         """Start at a distinct base pose."""
         self.base_pos = [0.5, 1.0, 2.0]
         self.base_rot = 0.25
+        self.base_transformation = type("Transform", (), {"translation": [0.5, 1.48, 2.0]})()
 
 
 class FakeSim:
@@ -252,6 +253,99 @@ def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> Non
     assert document["schema_version"] == DIAGNOSTICS_SCHEMA
     assert document["seed"] is None  # config stub carries no seed
     assert document["habitat_seed_config"] == 40
+
+
+def test_terminal_goal_entity_positions_are_read_from_final_world(tmp_path: Path) -> None:
+    """Retain moved goal objects at terminal time instead of reusing reset geometry."""
+
+    class GoalPositions:
+        """Expose mutable official entity positions to the read-only recorder."""
+
+        def __init__(self) -> None:
+            """Start with two distinct goal locations."""
+            self.positions = {
+                "any_targets|0": [0.0, 1.0, 2.0],
+                "TARGET_any_targets|0": [3.0, 4.0, 5.0],
+            }
+
+        def get_entity_pos(self, entity: Any) -> list[float]:
+            """Return the current location without advancing the environment."""
+            return self.positions[entity.name]
+
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv(
+        [FakePredicate("any_targets|0", False), FakePredicate("TARGET_any_targets|0", False)]
+    )
+    source = GoalPositions()
+    env.task.pddl_problem.sim_info = source
+    diagnostics.record_reset(env, None)
+    source.positions["any_targets|0"] = [6.0, 7.0, 8.0]
+    diagnostics.record_terminal(env, 10, "episode_done")
+
+    initial = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert initial["goal_entity_positions"]["any_targets|0"] == [0.0, 1.0, 2.0]
+    assert terminal["goal_entity_positions"]["any_targets|0"] == [6.0, 7.0, 8.0]
+    assert terminal["goal_entity_positions"]["TARGET_any_targets|0"] == [3.0, 4.0, 5.0]
+    assert terminal["schema_version"] == DIAGNOSTICS_SCHEMA
+
+
+def test_pddl_reference_position_is_distinct_from_navigation_ground_point(
+    tmp_path: Path,
+) -> None:
+    """Record Habitat's transform origin separately from the robot base ground point."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 1, "episode_done")
+
+    initial = json.loads((tmp_path / "evidence/diagnostics-initial.json").read_text())
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    for document in (initial, terminal):
+        assert document["agents"]["0"]["position"] == [0.5, 1.0, 2.0]
+        assert document["agents"]["0"]["pddl_reference_position"] == [0.5, 1.48, 2.0]
+
+
+def test_unreadable_pddl_reference_is_marked_without_losing_navigation_pose(
+    tmp_path: Path,
+) -> None:
+    """Missing vendor transform leaves a diagnostic gap without discarding base pose."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    del env.sim._agents[0].base_transformation
+    diagnostics.record_terminal(env, 1, "episode_done")
+
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert terminal["agents"]["0"]["position"] == [0.5, 1.0, 2.0]
+    assert terminal["agents"]["0"]["pddl_reference_position"]["_status"] == "unavailable"
+
+
+def test_unreadable_terminal_goal_entity_does_not_hide_other_position(
+    tmp_path: Path,
+) -> None:
+    """Keep one failed entity read explicit while retaining the other live target."""
+
+    class PartialGoalPositions:
+        """Expose one readable and one failing official position query."""
+
+        def get_entity_pos(self, entity: Any) -> list[float]:
+            """Raise for one entity without mutating any world state."""
+            if entity.name == "any_targets|0":
+                raise RuntimeError("entity pose unavailable")
+            return [3.0, 4.0, 5.0]
+
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv(
+        [FakePredicate("any_targets|0", False), FakePredicate("TARGET_any_targets|0", False)]
+    )
+    env.task.pddl_problem.sim_info = PartialGoalPositions()
+    diagnostics.record_terminal(env, 10, "execution_exception:actor_act:InternalServerError")
+
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    positions = terminal["goal_entity_positions"]
+    assert positions["any_targets|0"]["_status"] == "unavailable"
+    assert positions["TARGET_any_targets|0"] == [3.0, 4.0, 5.0]
+    assert terminal["termination_reason"] == "execution_exception:actor_act:InternalServerError"
 
 
 def test_structured_habitat_seed_shape_is_read_without_nested_habitat_key(

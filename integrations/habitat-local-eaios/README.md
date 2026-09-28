@@ -159,6 +159,18 @@ claiming a truncated action is complete. This profile is an admission boundary,
 not a model correctness or navigation-convergence guarantee. It adds no global
 RoboGuide authority, MissionPlan fields or new Habitat success rules.
 
+When `ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1`, `diagnostics-steps.jsonl` and
+`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.3`. The
+initial and terminal snapshots include `goal_entity_positions`, read through
+Habitat's authoritative PDDL entity mapping at the corresponding world state.
+Each target is recorded independently; an unreadable target is marked
+`unavailable` and never replaced with a guessed pose. These positions are
+diagnostic evidence only and do not alter PDDL evaluation or execution.
+Agent records also distinguish the navigation `position` (articulated base
+ground point) from `pddl_reference_position` (the articulated base transform
+origin used by Habitat's `any_at` predicate). This avoids comparing a goal
+entity against the wrong robot point when the embodiment has a base offset.
+
 The shared-world deployment also accepts `roboguide.execution-session/v0.1`
 metadata derived from an accepted MissionPlan. Two independent Actors retain
 the distinct-endpoint start barrier. One independent Actor can run successive

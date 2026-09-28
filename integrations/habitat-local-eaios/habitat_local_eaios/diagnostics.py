@@ -27,7 +27,7 @@ from typing import Any, cast
 
 from .evidence_io import write_text_atomic
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.2"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.3"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
@@ -127,6 +127,12 @@ def _position(sim: Any, agent_id: int) -> Any:
     return [
         float(component) for component in sim.get_agent_data(agent_id).articulated_agent.base_pos
     ]
+
+
+def _pddl_reference_position(sim: Any, agent_id: int) -> list[float]:
+    """Read the transform origin used by Habitat's official any-at predicate."""
+    agent = sim.get_agent_data(agent_id).articulated_agent
+    return [float(component) for component in agent.base_transformation.translation]
 
 
 def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
@@ -485,6 +491,29 @@ class PhysicalDiagnostics:
         """Read the official measure cache without recomputation side effects."""
         return _read(lambda: dict(habitat_env.get_metrics())) or {}
 
+    def _goal_entity_positions(self, problem: Any) -> dict[str, Any]:
+        """Read current positions of exact goal entities without changing the world.
+
+        Each failed entity read remains unavailable independently, so one
+        missing target cannot hide the other target's observed position.
+        """
+        if not self._predicates:
+            self._load_predicates(problem)
+        if not self._predicates:
+            return {"_status": _UNAVAILABLE, "reason": "goal conjuncts unavailable"}
+        sim_info = getattr(problem, "sim_info", None)
+        positions: dict[str, Any] = {}
+        for _label, predicate in self._predicates:
+            for argument in getattr(predicate, "_arg_values", None) or ():
+                name = getattr(argument, "name", None)
+                if isinstance(name, str) and name not in positions:
+                    positions[name] = (
+                        _read(_entity_position, sim_info, problem, name)
+                        if sim_info is not None
+                        else {"_status": _UNAVAILABLE, "reason": "sim_info unbound"}
+                    )
+        return positions
+
     def _agent_skill_state(self, actor: Any, agent_id: int) -> dict[str, Any]:
         """Read one agent's live skill bookkeeping through read-only attributes."""
         policies = getattr(actor, "_active_policies", None)
@@ -604,6 +633,7 @@ class PhysicalDiagnostics:
                 "agents": {
                     str(agent_id): {
                         "position": _read(_position, sim, agent_id),
+                        "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
                     }
                     for agent_id in self._agent_ids
@@ -612,7 +642,7 @@ class PhysicalDiagnostics:
                     _read(lambda p=predicate: repr(p)) for _, predicate in self._predicates
                 ],
                 "goal_conjunct_values": self._official_conjunct_values(problem),
-                "goal_entity_positions": {},
+                "goal_entity_positions": self._goal_entity_positions(problem),
                 "official_pddl_success": self._metrics(habitat_env).get("pddl_success"),
                 "collection_configuration": {
                     "max_step_records": self._max_step_records,
@@ -620,17 +650,6 @@ class PhysicalDiagnostics:
                     "write_batch_records": self._step_writer.stats()["batch_capacity_records"],
                 },
             }
-            sim_info = getattr(problem, "sim_info", None)
-            if sim_info is not None:
-                entity_positions: dict[str, Any] = {}
-                for _label, predicate in self._predicates:
-                    for argument in getattr(predicate, "_arg_values", None) or ():
-                        name = getattr(argument, "name", None)
-                        if isinstance(name, str):
-                            entity_positions[name] = _read(
-                                _entity_position, sim_info, problem, name
-                            )
-                document["goal_entity_positions"] = entity_positions
             self._write_json("diagnostics-initial.json", document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
@@ -695,6 +714,7 @@ class PhysicalDiagnostics:
                 )
                 agent_records[str(agent_id)] = {
                     "position": _read(_position, sim, agent_id),
+                    "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                     "rotation": _read(_rotation, sim, agent_id),
                     "skill_state": skill_state,
                     "skill_exit_reason": self._skill_exit_reason(
@@ -733,11 +753,13 @@ class PhysicalDiagnostics:
                 "agents": {
                     str(agent_id): {
                         "position": _read(_position, sim, agent_id),
+                        "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
                     }
                     for agent_id in self._agent_ids
                 },
                 "goal_conjunct_values": self._official_conjunct_values(problem),
+                "goal_entity_positions": self._goal_entity_positions(problem),
                 "official_metrics": self._metrics(habitat_env),
                 "dropped_diagnostic_records": self._dropped_records,
                 "collection_stats": self._collection_stats(),
