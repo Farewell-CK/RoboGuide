@@ -780,6 +780,11 @@ projection、跨 Controller 复制）和 MVP Definition 均未完成；
 它要求 per-capability readiness 与强 localization evidence，不把旧的 process health 或
 `has_map=true` 当作稳定成功证据。
 
+Habitat shared-world 的可选物理诊断 v0.5 记录原始 Oracle 实际选中的导航点、
+一次原始寻路调用的成败，以及通过 Habitat 语义区域包含关系可唯一确定的机器人和目标楼层；缺失或歧义明确标为
+unavailable。它不重新寻路、不改变运动或官方 PDDL 成绩。旧 v0.4 终态证据仍可用于
+独立的 B1 三维与 X/Z 反事实诊断。
+
 ## Mission Intelligence 开发
 
 Mission 配置位于 [`config/mission.toml`](config/mission.toml)，版本化 Prompt 位于

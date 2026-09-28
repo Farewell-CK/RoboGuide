@@ -452,6 +452,7 @@ def test_pair_guard_rejects_before_actor_and_step_and_preserves_evidence(tmp_pat
         SimpleNamespace(
             record_reset=lambda *_args: None,
             record_terminal=lambda *_args: None,
+            install_nav_probes=lambda *_args: None,
         ),
     )
     runtime._require_initialized = lambda: (gym, env, actor, object())  # type: ignore[method-assign]

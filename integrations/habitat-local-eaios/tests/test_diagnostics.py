@@ -6,6 +6,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -132,6 +133,7 @@ class FakeSim:
     def __init__(self) -> None:
         """Create the served agents."""
         self._agents = {0: FakeAgent(), 1: FakeAgent()}
+        self.semantic_scene: Any = None
 
     def get_agent_data(self, agent_id: int) -> Any:
         """Return one agent's data record."""
@@ -209,6 +211,50 @@ class FakeActor:
         ]
 
 
+class FakePathfinder:
+    """Expose one path-query result without simulator dependencies."""
+
+    def __init__(self, success: bool) -> None:
+        """Retain the outcome and count actual pathfinder calls."""
+        self.success = success
+        self.calls = 0
+
+    def find_path(self, path: Any) -> bool:
+        """Fill a path only when the single original query succeeds."""
+        self.calls += 1
+        if self.success:
+            path.points = [path.requested_start, path.requested_end]
+        return self.success
+
+
+class FakeOracleAction:
+    """Match the original Oracle target and path method call structure."""
+
+    def __init__(self, success: bool) -> None:
+        """Build one navigation action with a replaceable pathfinder field."""
+        self.pathfinder = FakePathfinder(success)
+        self.skill_done = False
+
+    def _get_target_for_idx(self, index: int) -> tuple[list[float], list[float]]:
+        """Return the original selected nav point and PDDL entity position."""
+        assert index == 0
+        return [1.0, 0.0, 2.0], [1.2, 2.0, 2.2]
+
+    def _path_to_point(self, point: list[float]) -> list[list[float]]:
+        """Follow the EMOS pathfinder call and fallback structure exactly."""
+        path = type("Path", (), {})()
+        path.requested_start = [0.0, 0.0, 0.0]
+        path.requested_end = point
+        if not self.pathfinder.find_path(path):
+            return [path.requested_start, point]
+        return cast(list[list[float]], path.points)
+
+    def step(self) -> list[list[float]]:
+        """Issue one actual target selection followed by one path query."""
+        point, _ = self._get_target_for_idx(0)
+        return self._path_to_point(point)
+
+
 def make_diagnostics(tmp_path: Path, enabled: bool = True) -> PhysicalDiagnostics:
     """Build one recorder over a fresh evidence directory."""
     return PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled, 3_050, write_batch_records=1)
@@ -236,6 +282,135 @@ def test_disabled_diagnostics_write_nothing_and_read_nothing(tmp_path: Path) -> 
     diagnostics.record_terminal(env, 1, "episode_done")
     assert not (tmp_path / "evidence").exists() or not any((tmp_path / "evidence").iterdir())
     assert env.task.pddl_problem.goal.sub_exprs[0].evaluated == 0
+
+
+@pytest.mark.parametrize("path_success", [True, False])
+def test_nav_probe_captures_original_query_without_repeating_it(
+    tmp_path: Path, path_success: bool
+) -> None:
+    """A one-query Oracle step retains its result and fallback evidence."""
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    action = FakeOracleAction(path_success)
+    original_pathfinder = action.pathfinder
+    original_target = action._get_target_for_idx
+    original_path = action._path_to_point
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(env, None)
+    diagnostics.install_nav_probes(env)
+
+    result = action.step()
+    assert action.pathfinder is original_pathfinder
+    assert original_pathfinder.calls == 1
+    assert len(result) == 2
+    diagnostics.record_step(
+        1,
+        ["nav_to_obj", "wait"],
+        FakeFlatAction([1.0, 0.0]),
+        env,
+        FakeActor([FakeSkill(1, 1000), FakeSkill(1, 1000)], ["nav_to_obj", "wait"]),
+        False,
+        {"pddl_success": False},
+        {},
+    )
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    observed = row["agents"]["0"]["oracle_navigation"]
+    assert observed["selected_target_index"] == 0
+    assert observed["target_selection_count"] == 1
+    assert observed["final_navigation_target"] == [1.0, 0.0, 2.0]
+    assert observed["pddl_entity_target"] == [1.2, 2.0, 2.2]
+    assert observed["pathfinder_success"] is path_success
+    assert observed["path_query_count"] == 1
+    assert observed["original_two_point_fallback"] is (not path_success)
+    assert observed["pathfinder_requested_end"] == [1.0, 0.0, 2.0]
+    assert observed["returned_path_points"] == 2
+    diagnostics.record_terminal(env, 1, "episode_done")
+    assert action._get_target_for_idx == original_target
+    assert action._path_to_point == original_path
+    assert "_get_target_for_idx" not in vars(action)
+    assert "_path_to_point" not in vars(action)
+
+
+def test_disabled_nav_probe_leaves_oracle_instance_unmodified(tmp_path: Path) -> None:
+    """The default-off recorder never replaces action or pathfinder methods."""
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    action = FakeOracleAction(False)
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    original_path = action._path_to_point
+    diagnostics = make_diagnostics(tmp_path, enabled=False)
+    diagnostics.install_nav_probes(env)
+    action.step()
+    assert action._path_to_point == original_path
+    assert action.pathfinder.calls == 1
+
+
+def test_nav_probe_preserves_original_path_exception(tmp_path: Path) -> None:
+    """Navigation exceptions propagate and the original pathfinder is restored."""
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    action = FakeOracleAction(True)
+    original_pathfinder = action.pathfinder
+
+    def broken_find_path(path: Any) -> bool:
+        """Raise the physical error that diagnostics must not replace."""
+        del path
+        raise RuntimeError("physical pathfinder failure")
+
+    original_pathfinder.find_path = broken_find_path  # type: ignore[method-assign]
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.install_nav_probes(env)
+    with pytest.raises(RuntimeError, match="physical pathfinder failure"):
+        action.step()
+    assert action.pathfinder is original_pathfinder
+    diagnostics.record_terminal(env, 0, "execution_exception:physical_pathfinder")
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert terminal["termination_reason"] == "execution_exception:physical_pathfinder"
+
+
+def test_terminal_semantic_floor_is_observed_or_explicitly_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A unique loaded floor is reported; ambiguous geometry stays unknown."""
+    monkeypatch.setitem(sys.modules, "magnum", SimpleNamespace(Vector3=lambda *coords: coords))
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    region = type(
+        "Region",
+        (),
+        {
+            "id": "room-a",
+            "level": type("Level", (), {"id": "floor-a"})(),
+            "aabb": type("AABB", (), {"center": [0.5, 1.0, 2.0], "sizes": [4, 4, 4]})(),
+            "contains": lambda self, point: point == (0.5, 1.0, 2.0),
+        },
+    )()
+    env.sim.semantic_scene = type("Scene", (), {"regions": [region]})()
+    env.task.pddl_problem.sim_info.get_entity_pos = lambda entity: [0.5, 1.0, 2.0]
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 0, "episode_done")
+    terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert terminal["agents"]["0"]["semantic_location"] == {
+        "region_id": "room-a",
+        "floor_id": "floor-a",
+        "method": "habitat_semantic_region_contains",
+    }
+    assert terminal["goal_entity_locations"]["any_targets|0"]["floor_id"] == "floor-a"
+
+    env.sim.semantic_scene.regions.append(
+        type(
+            "Region",
+            (),
+            {
+                "id": "room-b",
+                "level": type("Level", (), {"id": "floor-b"})(),
+                "aabb": type("AABB", (), {"center": [0.5, 1.0, 2.0], "sizes": [4, 4, 4]})(),
+                "contains": lambda self, point: point == (0.5, 1.0, 2.0),
+            },
+        )()
+    )
+    diagnostics.record_terminal(env, 0, "episode_done")
+    ambiguous = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+    assert ambiguous["agents"]["0"]["semantic_location"]["_status"] == "unavailable"
 
 
 def test_each_official_conjunct_is_recorded_independently(tmp_path: Path) -> None:

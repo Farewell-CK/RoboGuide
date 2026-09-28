@@ -160,7 +160,7 @@ not a model correctness or navigation-convergence guarantee. It adds no global
 RoboGuide authority, MissionPlan fields or new Habitat success rules.
 
 When `ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1`, `diagnostics-steps.jsonl` and
-`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.4`. The
+`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.5`. The
 initial and terminal snapshots include `goal_entity_positions`, read through
 Habitat's authoritative PDDL entity mapping at the corresponding world state.
 Each target is recorded independently; an unreadable target is marked
@@ -173,6 +173,14 @@ entity against the wrong robot point when the embodiment has a base offset.
 Both snapshots read the active PDDL `robot_at_thresh`; the terminal snapshot
 also records episode and scene identity for the optional run-local geometry
 comparison. Missing fields remain unavailable rather than changing execution.
+The v0.5 observer also records a floor from the loaded Habitat semantic region's
+read-only `contains` method, when it uniquely contains the observed point,
+for physical agent bases and PDDL target entities. A probe around the existing
+Oracle target selection and pathfinder call records the actual selected navigation
+point and `find_path` result once per original call. It does not issue a new path
+query or change the selected point, movement, or official metric. Ambiguous floors,
+unsupported action layouts and steps without an Oracle call remain unavailable.
+The optional B1 geometry sidecar accepts both v0.4 and v0.5 terminal snapshots.
 
 The shared-world deployment also accepts `roboguide.execution-session/v0.1`
 metadata derived from an accepted MissionPlan. Two independent Actors retain

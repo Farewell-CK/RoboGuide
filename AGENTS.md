@@ -277,6 +277,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   unavailable on missing/mismatched inputs, and never enter Formal admission, Mission
   satisfaction, or benchmark success. The Local EAIOS records the threshold read-only;
   evaluation owns the offline calculation and sidecar.
+- Opt-in Habitat physical diagnostics v0.5 observe the original Oracle target and
+  pathfinder calls once, record their actual selected navigation point and path
+  query result, and use exact read-only semantic-region containment for bases and goal entities.
+  They never issue a second path query, choose a route, or alter official success;
+  ambiguous or unsupported observations remain unavailable. Evaluation accepts
+  archived v0.4 and current v0.5 terminal geometry evidence.
 - `console/` contains the experimental read-only Mission Journey visualizer
   (early development; layout and features are still evolving): a zero-dependency
   static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static

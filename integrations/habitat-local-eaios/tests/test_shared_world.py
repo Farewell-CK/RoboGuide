@@ -101,6 +101,10 @@ class RecordingDiagnostics:
         del habitat_env, config
         self.reset_calls += 1
 
+    def install_nav_probes(self, habitat_env: object) -> None:
+        """Accept the optional post-reset Oracle observer boundary."""
+        del habitat_env
+
     def record_step(self, step: int, *args: object, **kwargs: object) -> None:
         """Buffer one successful pre-failure simulator step."""
         del args, kwargs

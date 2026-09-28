@@ -167,6 +167,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         self._episode_started_at = time.time()
         self._initial_positions = initial_agent_positions(habitat_env, self._agent_ids)
         self._diagnostics.record_reset(habitat_env, self._config)
+        self._diagnostics.install_nav_probes(habitat_env)
         self._record_video(0, observations, {})
         self._prepared_observations = observations
         self._serial_observations = observations
