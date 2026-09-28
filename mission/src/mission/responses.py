@@ -27,7 +27,11 @@ from mission.provider_mission_plan import (
 from mission.rejected_draft import RejectedPlanError
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
-from mission.satisfaction_policy import MissionSatisfactionPolicy, validate_satisfaction_policy
+from mission.satisfaction_policy import (
+    MissionSatisfactionPolicy,
+    authoritative_goal_predicate,
+    validate_satisfaction_policy,
+)
 from mission.semantic_admission import validate_authoritative_executor_constraints
 from mission.semantic_evidence import semantic_goal_review_payload
 
@@ -102,7 +106,7 @@ def _validate_plan_output(
     if plan.mission.objective != grounded_intent.objective:
         raise MissionProviderError("model changed the requested mission objective")
     capability_catalog.validate_plan(plan)
-    validate_satisfaction_policy(plan, satisfaction_policy)
+    validate_satisfaction_policy(plan, satisfaction_policy, grounding_context.semantic_evidence)
     return plan
 
 
@@ -178,12 +182,17 @@ def _review_schema() -> JSONObject:
 
 
 def _with_semantic_goal(
-    payload: JSONObject, grounding_context: GroundingContextSnapshot
+    payload: JSONObject,
+    grounding_context: GroundingContextSnapshot,
+    policy: MissionSatisfactionPolicy | None,
 ) -> JSONObject:
-    """Add explicit frozen-goal guidance without changing non-B1 provider inputs."""
+    """Supply the frozen goal and exact policy predicate without changing ordinary inputs."""
     goal = semantic_goal_review_payload(grounding_context.semantic_evidence)
     if goal is None:
         return payload
+    predicate = authoritative_goal_predicate(policy, grounding_context.semantic_evidence)
+    if predicate is not None:
+        goal["required_verifier_predicate"] = predicate
     return {**payload, "authoritative_semantic_goal": goal}
 
 
@@ -409,7 +418,10 @@ class ResponsesMissionPlanner:
             instructions=self._client._load_prompt(self._settings.prompts.planner_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
-                    _with_semantic_goal(payload, grounding_context), grounding_context
+                    _with_semantic_goal(
+                        payload, grounding_context, self._settings.satisfaction_policy
+                    ),
+                    grounding_context,
                 ),
                 ensure_ascii=False,
                 sort_keys=True,
@@ -457,7 +469,9 @@ class ResponsesMissionReviewer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Review the plan against its exact grounded input and authority boundaries."""
-        validate_satisfaction_policy(plan, self._settings.satisfaction_policy)
+        validate_satisfaction_policy(
+            plan, self._settings.satisfaction_policy, grounding_context.semantic_evidence
+        )
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
@@ -482,6 +496,7 @@ class ResponsesMissionReviewer:
                             ),
                         },
                         grounding_context,
+                        self._settings.satisfaction_policy,
                     ),
                     grounding_context,
                 ),
@@ -597,6 +612,7 @@ class ResponsesMissionRepairer:
                     _with_semantic_goal(
                         payload,
                         grounding_context,
+                        self._settings.satisfaction_policy,
                     ),
                     grounding_context,
                 ),

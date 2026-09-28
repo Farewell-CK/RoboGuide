@@ -186,6 +186,17 @@ gap, not a user ambiguity. Do not remove the verifier, use null for its required
 requested effect to escape that gap. A user tolerance conflicting with the policy needs a deployment
 policy decision; do not silently override either one.
 
+When `satisfaction_policy.authoritative_goal_confirmation` is present alongside
+`authoritative_semantic_goal.required_verifier_predicate`, the deployment explicitly requires
+independent confirmation of the **whole frozen joint terminal goal**. Every Task with no DAG
+dependent must use `verifier-evidence` with the policy's exact `verifier_contract`, that exact
+predicate string, and the policy's receive-age bound. Earlier prerequisite Tasks may use
+`execution-report` only for their own local outcomes; their reports do not confirm the joint goal.
+Keep the actual Task decomposition and dependencies grounded in the requested work. Do not add a
+verification-only meta-Task, invent a dependency, or split/change the goal to satisfy the policy.
+Without this explicit policy, choose the basis from the operation's actual success contract and the
+requested acceptance semantics; a physical-world outcome alone does not force a second verifier.
+
 Words such as verify, confirm, inspect, or check do not alone require a second independent verifier.
 Judge the requested result against the actual Catalog operation semantics. `execution-report` may
 accept completing a check/reporting its result when that is the entire expected effect; it cannot

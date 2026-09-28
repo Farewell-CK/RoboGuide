@@ -178,6 +178,13 @@ escape schema or Review. A null policy supplies no default; absent/conflicting p
 deployment policy decision, not a guessed repair or user clarification. A Review issue cannot grant
 authority to override that policy or user constraints.
 
+When the frozen `satisfaction_policy.authoritative_goal_confirmation` and
+`authoritative_semantic_goal.required_verifier_predicate` require independent confirmation, restore
+the exact verifier contract, full joint predicate, and receive-age bound on every DAG-terminal Task.
+Keep legitimate earlier Tasks and dependencies; do not invent a verification-only meta-Task,
+dependency, physical executor, or weaker goal to make a replacement pass validation. Without that
+explicit policy, preserve the ordinary operation-success versus independent-evidence distinction.
+
 Words such as verify, confirm, inspect, or check do not alone require a second independent verifier.
 Use the same Catalog/expected-effect test as Planner and Reviewer: completing a check/reporting its
 result may use `execution-report`, but observing whether P holds does not establish P as true.

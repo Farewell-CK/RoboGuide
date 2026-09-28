@@ -13,6 +13,8 @@ from mission.models import JSONObject, JSONValue
 SEMANTIC_EVIDENCE_SCHEMA = "roboguide.authoritative-semantic-evidence/v0.2"
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _LOGICAL_OPERATORS = {"and", "or", "nand", "nor"}
+_VERIFIER_ATOM = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\Z")
+_VERIFIER_ENTITY = re.compile(r"[A-Za-z0-9_.|/-]+\Z")
 
 
 class SemanticEvidenceError(ValueError):
@@ -278,6 +280,38 @@ def semantic_goal_review_payload(
             "do_not_split_joint_objective_into_independent_missions": True,
         },
     }
+
+
+def exact_goal_verifier_predicate(goal: SemanticExpression) -> str | None:
+    """Render only the exact goal syntax supported by a terminal verifier source.
+
+    Unsupported operators, quantifiers, or identifiers remain unavailable rather
+    than being rewritten into a weaker expression. The Habitat producer applies
+    the same versioned syntax when advertising its supported predicate.
+    """
+    if goal.kind == "predicate":
+        if (
+            goal.name is None
+            or _VERIFIER_ATOM.fullmatch(goal.name) is None
+            or not goal.arguments
+            or any(_VERIFIER_ENTITY.fullmatch(item) is None for item in goal.arguments)
+        ):
+            return None
+        return f"{goal.name}({', '.join(goal.arguments)})"
+    if (
+        goal.operator not in {"and", "or"}
+        or goal.quantifier is not None
+        or goal.variables
+        or len(goal.operands) < 2
+    ):
+        return None
+    rendered = [exact_goal_verifier_predicate(item) for item in goal.operands]
+    if any(item is None for item in rendered):
+        return None
+    supported = [item for item in rendered if item is not None]
+    return f" {goal.operator.upper()} ".join(
+        f"({item})" if " AND " in item or " OR " in item else item for item in supported
+    )
 
 
 def semantic_evidence_digest(value: JSONObject) -> str:
