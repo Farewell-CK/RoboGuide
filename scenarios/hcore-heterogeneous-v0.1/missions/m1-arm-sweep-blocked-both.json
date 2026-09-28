@@ -1,0 +1,80 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-arm-sweep-blocked-both",
+    "objective": "初始状态就是双向遮挡: 狗 (-45°, r=0.92) 与可移动障碍 obs2 (+45°, r=0.90) 第 0 帧就停在机械臂回转环带内, 各封一侧; 目标 crate1 在方位 +176° (机械臂正后方)。机械臂左右摆动各探一次, 两侧都撞上东西, 本地判定无法回转 -> FAILED。",
+    "actors": [
+      {
+        "id": "actor-arm"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-arm-sweep",
+      "roles": [
+        {
+          "id": "ctx-role-arm",
+          "actor": "actor-arm"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "sequential-handoff"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-relocate-crate",
+      "description": "机械臂抓取 crate1。短弧 (经 +45° 的可移动障碍) 与长弧 (经 -45° 的狗) 都被占住, 机械臂先左右各摆一次试探, 两侧皆挡后本地失败。",
+      "context_id": "ctx-arm-sweep",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-relocate",
+          "context_role": "ctx-role-arm",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "object",
+                  "name": "relocate",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "object",
+              "name": "relocate",
+              "version": "v1"
+            },
+            "objective": "抓取 crate1 (机械臂正后方)。",
+            "parameters": {
+              "object": "crate1",
+              "destination": "arm_pick_spot"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "crate1 已被抓起。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}
