@@ -173,6 +173,7 @@ class OutdoorNavController(
         private const val VISION_KEY = "key"
         private const val VISION_ENDPOINT = "endpoint"
         private const val VISION_MODEL = "model"
+        private const val AUTOMATIC_REROUTE_MIN_INTERVAL_MS = 15_000L
 
         private fun createDepthPalette(): IntArray {
             val palette = IntArray(256)
@@ -294,6 +295,8 @@ class OutdoorNavController(
     private var destinationGeneration = 0L
     private var pendingDestinationSearch: Runnable? = null
     private var selectedDestination: AmapRouteClient.PlaceSuggestion? = null
+    private var automaticRerouteInFlight = false
+    private var lastAutomaticRerouteRequestMillis = -AUTOMATIC_REROUTE_MIN_INTERVAL_MS
     /** 定位到达前发起的附近地点搜索请求的关键字：定位权限刚授予时手机定位尚未就位，
      * 记下关键字待 [onLocation] 首次收到定位后自动补搜一次，避免用户必须重启应用。 */
     private var pendingLocationSearchKeyword: String? = null
@@ -766,6 +769,8 @@ class OutdoorNavController(
      */
     private fun stopNavigationAndClearRoute() {
         destinationGeneration++
+        automaticRerouteInFlight = false
+        lastAutomaticRerouteRequestMillis = -AUTOMATIC_REROUTE_MIN_INTERVAL_MS
         guidanceStabilizer.reset()
         guidanceTextComposer.reset()
         navigationActive = false
@@ -794,6 +799,7 @@ class OutdoorNavController(
             if (location.hasAccuracy()) location.accuracy else Float.NaN,
             Float.NaN,
             location.elapsedRealtimeNanos)
+        maybeRequestAutomaticReroute(location)
         if (guidance == null) {
             listener.onNavigationStatus(routeFollower.waitingReason(), true)
             return
@@ -914,6 +920,77 @@ class OutdoorNavController(
             text += "\nVINS 已重置：请让手机顶部与 D455F 镜头同向，然后点击重新标定"
         }
         listener.onCalibrationStatus(text, ready, manualRecalibrationRequired)
+    }
+
+    /**
+     * Recover from a sustained GPS/route mismatch without forcing the user to end navigation.
+     * RouteFollower rejects short-lived jumps first.  This method only runs after several
+     * coherent fixes remain unmatched for three seconds, keeps at most one request in flight,
+     * and rate-limits failures.
+     */
+    private fun maybeRequestAutomaticReroute(location: Location) {
+        if (!navigationActive || !routeFollower.shouldRequestAutomaticReroute() ||
+            automaticRerouteInFlight || released
+        ) return
+
+        val now = SystemClock.elapsedRealtime()
+        val fixAgeNanos = SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
+        if (fixAgeNanos < 0L || fixAgeNanos > TimeUnit.SECONDS.toNanos(5)) return
+        if (now - lastAutomaticRerouteRequestMillis < AUTOMATIC_REROUTE_MIN_INTERVAL_MS) return
+        val route = currentRoute ?: return
+        val routeClient = amapRouteClient ?: return
+        val key = amapWebKey.trim()
+        if (key.isEmpty()) return
+
+        val destination = selectedDestination ?: AmapRouteClient.PlaceSuggestion(
+            route.destinationName,
+            "",
+            route.destinationLatitude,
+            route.destinationLongitude,
+            0)
+        val requestGeneration = destinationGeneration
+        automaticRerouteInFlight = true
+        lastAutomaticRerouteRequestMillis = now
+        NavigationAudit.log(
+            "AUTO_REROUTE_REQUEST accuracy=${if (location.hasAccuracy()) location.accuracy else Float.NaN}" +
+                " destination=${route.destinationName}")
+        listener.onRouteStatus("定位持续偏离当前路线，正在自动更新步行路线…")
+
+        routeClient.planWalkingRoute(key, Location(location), destination,
+            object : AmapRouteClient.Callback {
+                override fun onSuccess(result: AmapRouteClient.RouteResult) {
+                    runOnUiThread {
+                        automaticRerouteInFlight = false
+                        if (requestGeneration != destinationGeneration || released ||
+                            !navigationActive
+                        ) return@runOnUiThread
+                        currentRoute = result
+                        routeFollower.setRoute(result)
+                        resetLocalPlanning()
+                        requestLocalPlanRefresh()
+                        NavigationAudit.log(
+                            "AUTO_REROUTE_SUCCESS distance=${result.distanceMeters}" +
+                                " steps=${result.steps.size}")
+                        listener.onRouteStatus(String.format(
+                            Locale.CHINA,
+                            "%s\n路线已根据当前位置自动更新 · 剩余 %.2f km",
+                            result.destinationName,
+                            result.distanceMeters / 1000f))
+                        updateNavigationGuidance()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        automaticRerouteInFlight = false
+                        if (requestGeneration != destinationGeneration || released ||
+                            !navigationActive
+                        ) return@runOnUiThread
+                        NavigationAudit.log("AUTO_REROUTE_FAILURE message=$message")
+                        listener.onRouteStatus("自动路线更新暂未成功，系统将继续尝试")
+                    }
+                }
+            })
     }
 
     // ---------------------------------------------------------------------
