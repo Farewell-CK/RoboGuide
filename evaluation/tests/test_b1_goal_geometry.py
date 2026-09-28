@@ -62,12 +62,17 @@ def _evidence(agent_count: int = 2) -> tuple[dict[str, Any], ...]:
 
 
 @pytest.mark.parametrize("agent_count", [1, 2, 4])
+@pytest.mark.parametrize("terminal_schema", ["v0.4", "v0.5"])
 def test_horizontal_counterfactual_never_replaces_official_three_d_result(
     agent_count: int,
+    terminal_schema: str,
 ) -> None:
     """A lower-floor robot may satisfy both X/Z projections but not the 3D goal."""
-    result = assess_goal_geometry(*_evidence(agent_count))
+    semantic, terminal, summary, verdict = _evidence(agent_count)
+    terminal["schema_version"] = f"roboguide.e1.physical-diagnostics/{terminal_schema}"
+    result = assess_goal_geometry(semantic, terminal, summary, verdict)
     assert result["schema_version"] == GEOMETRY_SCHEMA
+    assert result["terminal_diagnostics_schema"] == terminal["schema_version"]
     assert result["status"] == "available"
     assert result["official_pddl_success"] is False
     assert result["reconstructed_three_d_goal"] is False
