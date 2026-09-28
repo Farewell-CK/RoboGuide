@@ -35,8 +35,3 @@ build-debug:
       - .gradle/
   script:
     - ./gradlew assembleDebug
-  artifacts:
-    name: "debug-apk-${CI_COMMIT_SHORT_SHA}"
-    paths:
-      - app/build/outputs/apk/debug/*.apk
-    expire_in: 1 week
