@@ -132,4 +132,33 @@ public class OutdoorAuditTest {
         assertFalse(f.update(0,0,33,Float.NaN,1_000_000_000L).arrived);
         assertTrue(f.update(15*M,0,33,Float.NaN,6_000_000_000L).arrived);
     }
+    @Test public void oneGpsJumpKeepsLastGuidanceAndNormalFixRecovers(){
+        RouteFollower f=straight(200);
+        RouteFollower.Guidance first=f.update(0,0,3,Float.NaN,1_000_000_000L);
+        RouteFollower.Guidance jumped=f.update(0,100*M,3,Float.NaN,2_000_000_000L);
+        assertSame(first,jumped);
+        RouteFollower.Guidance recovered=f.update(2*M,0,3,Float.NaN,3_000_000_000L);
+        assertNotNull(recovered);
+        assertTrue(recovered.remainingMeters<first.remainingMeters);
+    }
+    @Test public void twoConsistentFixesOutsideProgressWindowReanchorWithoutRestart(){
+        RouteFollower f=straight(200);
+        RouteFollower.Guidance first=f.update(0,0,3,Float.NaN,1_000_000_000L);
+        assertSame(first,f.update(80*M,0,3,Float.NaN,2_000_000_000L));
+        RouteFollower.Guidance recovered=f.update(82*M,0,3,Float.NaN,3_000_000_000L);
+        assertNotNull(recovered);
+        assertTrue(recovered.remainingMeters<140);
+    }
+    @Test public void persistentPositionFarFromRouteStopsUsingStaleGuidance(){
+        RouteFollower f=straight(200);
+        RouteFollower.Guidance first=f.update(0,0,3,Float.NaN,1_000_000_000L);
+        assertSame(first,f.update(0,100*M,3,Float.NaN,2_000_000_000L));
+        assertNull(f.update(0,100*M,3,Float.NaN,6_000_000_000L));
+    }
+    private RouteFollower straight(int meters){
+        RouteFollower f=new RouteFollower();
+        f.setRoute(new AmapRouteClient.RouteResult("终点",0,0,meters,meters,"直行",0,
+                Collections.emptyList(),Arrays.asList(point(0,0),point(meters,0))));
+        return f;
+    }
 }

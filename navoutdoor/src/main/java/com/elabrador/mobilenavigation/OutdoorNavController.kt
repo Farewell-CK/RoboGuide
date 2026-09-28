@@ -232,6 +232,10 @@ class OutdoorNavController(
     @Volatile private var latestLocalPlan: LocalPlanner.PathResult = LocalPlanner.PathResult.waitingForTarget()
     private val routeFollower = RouteFollower()
     private val dynamicHeadingCalibrator = DynamicHeadingCalibrator()
+    /** A real VINS frame restart invalidates the heading transform.  Do not
+     * silently auto-align a new frame before the user has physically aligned
+     * the phone top with the D455F and confirmed it. */
+    @Volatile private var manualRecalibrationRequired = false
     private var currentRoute: AmapRouteClient.RouteResult? = null
     @Volatile private var navigationActive = false
     /** 附近地点搜索可使用较新的网络粗定位。 */
@@ -869,7 +873,9 @@ class OutdoorNavController(
     // ---------------------------------------------------------------------
 
     fun calibrateHeading() {
+        manualRecalibrationRequired = false
         dynamicHeadingCalibrator.startAutoAligned()
+        tryAutoAlignedCalibration()
         renderDynamicHeadingCalibration()
         resetLocalPlanning()
         requestLocalPlanRefresh()
@@ -880,6 +886,7 @@ class OutdoorNavController(
     }
 
     private fun tryAutoAlignedCalibration() {
+        if (manualRecalibrationRequired) return
         if (dynamicHeadingCalibrator.isReady()) return
         val headingAge = if (latestHeadingNanos == 0L) Long.MAX_VALUE else
             SystemClock.elapsedRealtimeNanos() - latestHeadingNanos
@@ -903,8 +910,10 @@ class OutdoorNavController(
                 "等待真北修正位置：可使用网络定位，无需高精度 GPS"
             }
         }
-        // VINS 重启或尚未完成对齐时必须显示重新标定按钮，供用户重新摆正后确认。
-        listener.onCalibrationStatus(text, ready, !ready)
+        if (manualRecalibrationRequired) {
+            text += "\nVINS 已重置：请让手机顶部与 D455F 镜头同向，然后点击重新标定"
+        }
+        listener.onCalibrationStatus(text, ready, manualRecalibrationRequired)
     }
 
     // ---------------------------------------------------------------------
@@ -1451,6 +1460,7 @@ class OutdoorNavController(
         vinsInitialized = false
         latestVinsPose = null
         latestVinsPoseNanos = 0L
+        manualRecalibrationRequired = true
         resetVinsDependents()
     }
 
@@ -1485,6 +1495,7 @@ class OutdoorNavController(
 
     private fun closeVins() {
         val local = vinsMono
+        val hadUsableVinsFrame = vinsInitialized || dynamicHeadingCalibrator.isReady()
         vinsMono = null
         latestVinsPose = null
         vinsInitialized = false
@@ -1493,6 +1504,7 @@ class OutdoorNavController(
         synchronized(vinsEstimateQueueLock) {
             pendingVinsEstimates.clear()
         }
+        if (hadUsableVinsFrame) manualRecalibrationRequired = true
         resetVinsDependents()
         local?.close()
     }
