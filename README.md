@@ -62,8 +62,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   `execution-report` 或 `verifier-evidence` satisfaction policy；
 - Planner/Reviewer/Repairer 共用 `config/mission.toml` 中显式的 satisfaction policy；其 ref/digest
   随模型输入保留，生成的 verifier receive-age bound 必须匹配配置。当前五秒窗口是系统接受
-  策略，不是模型猜测、Task duration 或物理真值保证。Generic verifier ingress 仍 deferred，见
-  [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)；
+  策略，不是模型猜测、Task duration 或物理真值保证。可选的 deployment-owned terminal verifier
+  ingress 只接纳启动时冻结的 source、精确 Task predicate 和当前物理 attempt；无证据时拒绝
+  verifier-backed 计划，见 [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)
+  与 [ADR-0048](docs/decisions/0048-deployment-task-verifier-ingress.md)；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过

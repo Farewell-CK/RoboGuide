@@ -150,7 +150,9 @@ Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能�
 该 policy 只规定已接收 verdict 在 satisfaction 判定时允许的年龄，不证明物理真值、source
 采样新鲜度或 verifier 当前可用性。Verification operation 的执行完成能否被接受，取决于其
 明确承诺与 requested effect，而不是 `verify` 名称；独立 positive-verdict 要求仍保留。
-MissionPlan shape、Runtime/Control authority 和 generic verifier ingress 均不改变，见 ADR-0039。
+MissionPlan shape、Runtime/Control authority 均不改变。当前可选的 deployment-owned terminal
+verifier ingress 只接纳与启动时冻结的 source、精确 predicate、当前物理 attempt 相符的证据；
+缺失或无效证据不会被 local Completed 替代，见 ADR-0039 与 ADR-0048。
 
 ## 3. 核心抽象
 

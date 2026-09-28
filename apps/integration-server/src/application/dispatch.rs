@@ -31,6 +31,7 @@ pub(crate) fn drive_ready_tasks(
                 let ControllerState {
                     bridge,
                     orchestrator,
+                    ..
                 } = controller;
                 match orchestrator.prepare_task(
                     &mission_id,

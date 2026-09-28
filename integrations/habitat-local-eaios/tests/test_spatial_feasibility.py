@@ -274,16 +274,21 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
         """Supply an already frozen authoritative semantic identity."""
         del args, kwargs
         assert resets == [1]
-        return {
+        body: dict[str, object] = {
+            "schema_version": "roboguide.authoritative-semantic-evidence/v0.2",
+            "authority": "environment-authoritative",
             "identity": {
                 "run_id": "run",
                 "episode_id": "episode",
+                "revision": "goal-1",
                 "dataset_revision": "dataset-v1",
                 "dataset_sha256": "0" * 64,
             },
-            "world_context": {"scene_id": "scene", "entity_catalog": ["goal"]},
-            "digest": _DIGEST,
+            "objective_scope": "joint_terminal_state",
+            "goal": {"kind": "predicate", "name": "any_at", "arguments": ["goal"]},
+            "world_context": {"scene_id": "scene", "agent_ids": [0, 1], "entity_catalog": ["goal"]},
         }
+        return {**body, "digest": _digest(body)}
 
     def planning(*args: Any, **kwargs: Any) -> dict[str, Any]:
         """Keep unrelated planning evidence out of this lifecycle check."""

@@ -132,6 +132,13 @@ target = "/invocation"
 kind = "pointer"
 pointer = "/invocation"
 
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
+
 [[operations.workflow.status]]
 id = "status"
 connection = "habitat-http"
@@ -211,6 +218,13 @@ target = "/invocation"
 [operations.workflow.execute.request.bindings.value]
 kind = "pointer"
 pointer = "/invocation"
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
 
 [[operations.workflow.status]]
 id = "status"

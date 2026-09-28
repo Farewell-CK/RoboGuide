@@ -41,6 +41,7 @@ from .semantic_evidence import build_authoritative_semantic_evidence
 from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
+from .task_verifier import build_task_verifier_source, build_task_verifier_verdict
 from .video_capture import HabitatVideoCapture
 
 _LOG = logging.getLogger("roboguide.habitat_local_eaios.shared_world")
@@ -110,6 +111,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 episode=self._episode,
             )
             self._write_json("authoritative-semantic-evidence.json", document)
+            self._write_json("task-verifier-source.json", build_task_verifier_source(document))
             planning_document = build_authoritative_planning_world_evidence(
                 habitat_env,
                 run_id=getattr(self._config, "run_id", ""),
@@ -1747,6 +1749,16 @@ class SharedWorldCoordinator:
                     summary,
                     serial_task_outcomes=self._serial_outcomes,
                 )
+                verifier_invocations: list[CanonicalMobilityInvocation] = []
+                for arrival_endpoint, arrival_id in self._serial_arrivals:
+                    arrival = arrival_endpoint.store().get(arrival_id)
+                    if arrival is None:
+                        _LOG.warning("serial verifier evidence lost a retained Task invocation")
+                        verifier_invocations = []
+                        break
+                    verifier_invocations.append(arrival["invocation"])
+                if verifier_invocations:
+                    self._publish_verifier_verdict_best_effort(summary, verifier_invocations)
             store.mark_terminal(execution_id, outcome)
             self._serial_waited_from = self._monotonic()
         except Exception as error:  # noqa: BLE001 - local failure cannot become success
@@ -1797,6 +1809,7 @@ class SharedWorldCoordinator:
         try:
             outcomes, summary = self._world.run_pair(invocations, cancellation_requested, running)
             self._publish_summary_best_effort(outcomes, summary)
+            self._publish_verifier_verdict_best_effort(summary, list(invocations.values()))
             for agent_id, outcome in outcomes.items():
                 endpoints[agent_id].store().mark_terminal(handles[agent_id], outcome)
         except Exception as error:  # noqa: BLE001 - terminal failure must reach both nodes
@@ -1860,6 +1873,32 @@ class SharedWorldCoordinator:
             )
         except Exception:  # noqa: BLE001 - evidence cannot become execution authority
             _LOG.exception("shared-world terminal summary unavailable")
+
+    def _publish_verifier_verdict_best_effort(
+        self,
+        summary: dict[str, Any],
+        invocations: list[CanonicalMobilityInvocation],
+    ) -> None:
+        """Publish exact official-goal evidence before local terminal visibility."""
+        try:
+            source_path = self._evidence_dir / "task-verifier-source.json"
+            source = json.loads(source_path.read_text(encoding="utf-8"))
+            semantic = json.loads(
+                (self._evidence_dir / "authoritative-semantic-evidence.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            if source != build_task_verifier_source(semantic):
+                raise IntegrationError("task verifier source changed after world reset")
+            verdict = build_task_verifier_verdict(
+                source, summary.get("official_metrics"), invocations
+            )
+            if verdict is None:
+                _LOG.warning("official goal verifier verdict unavailable")
+                return
+            self._write_json("task-verifier-verdict.json", verdict)
+        except Exception:  # noqa: BLE001 - verifier failure cannot rewrite physical outcome
+            _LOG.exception("official goal verifier verdict could not be published")
 
     def _write_json(self, name: str, value: object) -> None:
         """Persist one deterministic JSON evidence file."""

@@ -691,6 +691,8 @@ mod tests {
                 integration::GrpcNodeRouter::default(),
             ),
             orchestrator: MissionOrchestrator::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: None,
         }));
         let gate = Arc::new(Mutex::new(()));
         let clock = runtime::SystemMonotonicClock::new();
@@ -712,6 +714,7 @@ mod tests {
                 &gate,
                 &clock,
                 Some(&feasibility),
+                None,
             )
             .await
             .expect("deployment rejection is an HTTP response");

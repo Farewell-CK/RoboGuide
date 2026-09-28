@@ -7,6 +7,7 @@ pub(crate) fn drive_application_timer(
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
     now: domain::TimestampMs,
+    verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _write_guard = event_write_gate
         .lock()
@@ -26,6 +27,23 @@ pub(crate) fn drive_application_timer(
         resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
         apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
         apply_runtime_outcomes(&mut candidate, now, &correlation, &mut events)?;
+        if let Some(feed) = verifier_feed {
+            match feed.read_verdict() {
+                Ok(Some(verdict)) => match validate_task_verifier(&candidate, feed, &verdict) {
+                    Ok(()) => apply_task_verifier(
+                        &mut candidate,
+                        feed,
+                        &verdict,
+                        now,
+                        &correlation,
+                        &mut events,
+                    )?,
+                    Err(error) => eprintln!("task verifier verdict rejected: {error}"),
+                },
+                Ok(None) => {}
+                Err(error) => eprintln!("task verifier evidence unavailable: {error}"),
+            }
+        }
         drive_ready_tasks(&mut candidate, now, &correlation, &mut events)?;
         drive_rebound_attempts(&mut candidate, now, &correlation)?;
         if let Some(error) = event_log.take_error()? {

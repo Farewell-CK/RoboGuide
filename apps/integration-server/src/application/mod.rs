@@ -7,6 +7,7 @@ mod outcomes;
 mod persistence;
 mod physical_entity_registry;
 mod recovery;
+mod task_verifier;
 mod timer;
 
 pub(crate) use actor_placement::{
@@ -26,5 +27,9 @@ pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};
 pub(crate) use recovery::{
     apply_runtime_events, begin_current_ambiguity_recoveries, resume_pending_recoveries,
+};
+pub(crate) use task_verifier::{
+    TaskVerifierFeed, apply_task_verifier, validate_restored_verifier_source,
+    validate_task_verifier,
 };
 pub(crate) use timer::drive_application_timer;

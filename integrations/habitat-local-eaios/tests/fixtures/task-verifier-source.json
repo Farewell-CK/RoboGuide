@@ -1,0 +1,22 @@
+{
+  "digest": "sha256:37592584dc384b740f689b17d4ecd7fd7d527fdf18b74bd6e6ba62b793467b3d",
+  "identity": {
+    "dataset_revision": "dataset-1",
+    "dataset_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "episode_id": "51",
+    "run_id": "run-1",
+    "scene_id": "scene.glb"
+  },
+  "schema_version": "roboguide.task-verifier-source/v0.1",
+  "source_id": "habitat-official-pddl",
+  "source_revision": "sha256:b6504a170f62f89bbd174e7cdbe1a527c9e9ed665f2a2b0443ab2538fb0b823e",
+  "supported_predicates": [
+    "any_at(any_targets|0) AND any_at(TARGET_any_targets|0)"
+  ],
+  "verdict_finality": "terminal",
+  "verifier": {
+    "name": "verify",
+    "namespace": "observation",
+    "version": "v1"
+  }
+}

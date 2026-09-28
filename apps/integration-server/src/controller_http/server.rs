@@ -14,6 +14,7 @@ pub(crate) async fn serve_http(
     event_write_gate: Arc<Mutex<()>>,
     clock: Arc<runtime::SystemMonotonicClock>,
     deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
+    verifier_feed: Option<Arc<TaskVerifierFeed>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     loop {
@@ -23,6 +24,7 @@ pub(crate) async fn serve_http(
         let write_gate = event_write_gate.clone();
         let shared_clock = clock.clone();
         let shared_feasibility = deployment_feasibility.clone();
+        let shared_verifier_feed = verifier_feed.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_http_connection(
                 &mut stream,
@@ -31,6 +33,7 @@ pub(crate) async fn serve_http(
                 &write_gate,
                 &shared_clock,
                 shared_feasibility.as_deref(),
+                shared_verifier_feed.as_deref(),
             )
             .await
             {
@@ -49,6 +52,7 @@ pub(crate) async fn handle_http_connection(
     event_write_gate: &Arc<Mutex<()>>,
     clock: &runtime::SystemMonotonicClock,
     deployment_feasibility: Option<&DeploymentFeasibility>,
+    verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let request = match tokio::time::timeout(
         CONTROL_HTTP_REQUEST_TIMEOUT,
@@ -160,6 +164,21 @@ pub(crate) async fn handle_http_connection(
                     .await;
                 }
             };
+            let verifier_admission = match verifier_feed {
+                Some(feed) => feed.validate_plan(&plan),
+                None if plan.task_graph().tasks().iter().any(|task| {
+                    matches!(task.satisfaction_basis(), domain::TaskSatisfactionBasis::VerifierEvidence(_))
+                }) => Err("Mission requires verifier evidence but no deployment verifier source is configured".to_string()),
+                None => Ok(()),
+            };
+            if let Err(error) = verifier_admission {
+                return write_http_response(
+                    stream,
+                    "422 Unprocessable Entity",
+                    serde_json::json!({"error": error}),
+                )
+                .await;
+            }
             let mission_id = plan.goal().mission_id().clone();
             let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
             let _write_guard = event_write_gate
@@ -178,6 +197,7 @@ pub(crate) async fn handle_http_connection(
                     let ControllerState {
                         bridge,
                         orchestrator,
+                        ..
                     } = &mut candidate;
                     let eligibility = deployment_feasibility
                         .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))
@@ -404,6 +424,7 @@ pub(crate) async fn handle_http_connection(
                     let ControllerState {
                         bridge,
                         orchestrator,
+                        ..
                     } = &mut candidate;
                     orchestrator
                         .request_cancel(

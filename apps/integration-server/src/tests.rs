@@ -18,6 +18,8 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator: MissionOrchestrator::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
     }));
     let gate = Arc::new(Mutex::new(()));
     let clock = runtime::SystemMonotonicClock::new();
@@ -27,9 +29,17 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     let address = listener.local_addr().expect("listener has address");
     let server = async {
         let (mut stream, _) = listener.accept().await.expect("request connects");
-        handle_http_connection(&mut stream, &controller, &event_log, &gate, &clock, None)
-            .await
-            .expect("rejection is a valid HTTP response");
+        handle_http_connection(
+            &mut stream,
+            &controller,
+            &event_log,
+            &gate,
+            &clock,
+            None,
+            None,
+        )
+        .await
+        .expect("rejection is a valid HTTP response");
     };
     let client = async {
         let mut stream = tokio::net::TcpStream::connect(address)
@@ -63,6 +73,83 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
             .expect("checkpoint reads")
             .is_none()
     );
+}
+
+/// HTTP admission refuses a verifier Task before creating a Group when no source exists.
+#[tokio::test]
+async fn verifier_plan_without_deployment_source_is_not_submitted() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+        .expect("event log opens");
+    let controller = Arc::new(Mutex::new(ControllerState {
+        bridge: IntegrationRuntimeBridge::new(
+            control::ControlPlane::new(),
+            state::InMemorySharedNodeState::new(),
+            event_log.clone(),
+            integration::GrpcNodeRouter::default(),
+        ),
+        orchestrator: MissionOrchestrator::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
+    }));
+    let mut plan: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../scenarios/e1-shared-world-episode-51/mission-plan.json"
+    ))
+    .expect("canonical plan fixture");
+    plan["tasks"][0]["satisfaction"] = serde_json::json!({
+        "expected_effect": "joint goal observed", "basis": "verifier-evidence",
+        "verifier": {
+            "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+            "predicate": "goal-predicate", "max_evidence_age_ms": 5000
+        }
+    });
+    let body = plan.to_string();
+    let gate = Arc::new(Mutex::new(()));
+    let clock = runtime::SystemMonotonicClock::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener binds");
+    let address = listener.local_addr().expect("listener has address");
+    let server = async {
+        let (mut stream, _) = listener.accept().await.expect("request connects");
+        handle_http_connection(
+            &mut stream,
+            &controller,
+            &event_log,
+            &gate,
+            &clock,
+            None,
+            None,
+        )
+        .await
+        .expect("admission rejection is a valid HTTP response");
+    };
+    let client = async {
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("client connects");
+        let request = format!(
+            "POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("request writes");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .await
+            .expect("response reads");
+        assert!(response.starts_with("HTTP/1.1 422 Unprocessable Entity"));
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(server, client)
+    })
+    .await
+    .expect("HTTP rejection completes");
+    assert_eq!(event_log.latest_sequence().expect("events readable"), 0);
 }
 
 /// Builds one actor-free Mission whose bound role may be rebound between eligible Nodes.
@@ -727,6 +814,8 @@ fn recovery_driver_rebinds_existing_commitment_first() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator,
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
     };
 
     resume_role_recovery(

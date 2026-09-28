@@ -70,6 +70,8 @@ pub(crate) fn server_checkpoint_json(
         schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
         integration_json,
         orchestration_json,
+        verifier_seen: controller.verifier_seen.clone(),
+        verifier_source_digest: controller.verifier_source_digest.clone(),
     })
     .map_err(|error| format!("controller checkpoint wrapper failure: {error}").into())
 }

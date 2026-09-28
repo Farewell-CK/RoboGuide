@@ -155,6 +155,8 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator,
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
     };
     drive_ready_tasks(
         &mut controller,
@@ -178,7 +180,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
     execution_fact(&mut controller, other_attempt, 1, ExecutionPhase::Accepted);
     let controller = Arc::new(Mutex::new(controller));
     let gate = Arc::new(Mutex::new(()));
-    drive_application_timer(&controller, &events, &gate, TimestampMs::new(5))
+    drive_application_timer(&controller, &events, &gate, TimestampMs::new(5), None)
         .expect("cardinality shortage must not reach the server fatal channel");
     {
         let live = controller.lock().unwrap();
@@ -221,7 +223,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
         2,
         ExecutionPhase::Completed,
     );
-    drive_application_timer(&controller, &events, &gate, TimestampMs::new(6)).unwrap();
+    drive_application_timer(&controller, &events, &gate, TimestampMs::new(6), None).unwrap();
     assert_eq!(
         controller
             .lock()
@@ -270,7 +272,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
             ))
             .unwrap();
     }
-    drive_application_timer(&controller, &events, &gate, TimestampMs::new(8)).unwrap();
+    drive_application_timer(&controller, &events, &gate, TimestampMs::new(8), None).unwrap();
     let mut live = controller.lock().unwrap();
     let resumed = live
         .bridge
@@ -297,7 +299,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
     execution_fact(&mut live, &second_attempt, 1, ExecutionPhase::Accepted);
     execution_fact(&mut live, &second_attempt, 2, ExecutionPhase::Completed);
     drop(live);
-    drive_application_timer(&controller, &events, &gate, TimestampMs::new(9)).unwrap();
+    drive_application_timer(&controller, &events, &gate, TimestampMs::new(9), None).unwrap();
     assert_eq!(
         controller
             .lock()

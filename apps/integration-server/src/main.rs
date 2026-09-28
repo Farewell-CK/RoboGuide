@@ -27,10 +27,12 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
 
 /// Immediately previous wrapper accepted with no deployment candidate restrictions.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+/// Historical wrapper before deployment candidate restrictions.
+const LEGACY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -64,6 +66,10 @@ struct ControllerState {
     bridge: IntegrationRuntimeBridge<state::SqliteEventLog>,
     /// Complete MissionPlan and explicit Mission lifecycle authority.
     orchestrator: MissionOrchestrator,
+    /// Durable exact verdict/Task receipts preventing replay after restart.
+    verifier_seen: BTreeSet<(String, String, String)>,
+    /// Startup-frozen verifier source identity, fenced across checkpoint restore.
+    verifier_source_digest: Option<String>,
 }
 
 /// Read-only admission adapter from Artifact HTTP into current Controller registration facts.
@@ -270,6 +276,12 @@ struct ServerCheckpoint {
     integration_json: String,
     /// Complete Mission orchestration checkpoint JSON.
     orchestration_json: String,
+    /// Verdict receipts already processed, including negative final verdicts.
+    #[serde(default)]
+    verifier_seen: BTreeSet<(String, String, String)>,
+    /// Source digest used by this database; a restart cannot silently change it.
+    #[serde(default)]
+    verifier_source_digest: Option<String>,
 }
 
 /// Explicit deployment policy for constraining logical actors to physical nodes.
@@ -340,6 +352,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()
         .map_err(|error| format!("deployment feasibility startup failed: {error}"))?
         .map(Arc::new);
+    let verifier_feed = match (
+        std::env::var_os("ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH"),
+        std::env::var_os("ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH"),
+    ) {
+        (Some(source), Some(verdict)) => Some(Arc::new(TaskVerifierFeed::load(
+            Path::new(&source),
+            PathBuf::from(verdict),
+        )?)),
+        (None, None) => None,
+        _ => {
+            return Err(
+                "task verifier source and verdict paths must be configured together".into(),
+            );
+        }
+    };
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
@@ -362,7 +389,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(checkpoint) => {
             if !matches!(
                 checkpoint.schema.as_str(),
-                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                SERVER_CHECKPOINT_SCHEMA
+                    | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
                     "controller database {event_path} uses unsupported checkpoint schema {}",
@@ -380,7 +409,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let saved: ServerCheckpoint = serde_json::from_str(&checkpoint.checkpoint_json)?;
             if !matches!(
                 saved.schema.as_str(),
-                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                SERVER_CHECKPOINT_SCHEMA
+                    | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
                     "controller checkpoint body uses unsupported schema {}",
@@ -388,6 +419,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .into());
             }
+            let configured_verifier_digest = verifier_feed
+                .as_ref()
+                .map(|feed| feed.source_digest().to_string());
+            validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
             ControllerState {
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
                     &saved.integration_json,
@@ -396,6 +431,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     process_clock.now(),
                 )?,
                 orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)?,
+                verifier_seen: saved.verifier_seen,
+                verifier_source_digest: configured_verifier_digest,
             }
         }
         None if latest_sequence > 0 => {
@@ -412,6 +449,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 router,
             ),
             orchestrator: MissionOrchestrator::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: verifier_feed
+                .as_ref()
+                .map(|feed| feed.source_digest().to_string()),
         },
     };
     let mut restored_localization_evidence = false;
@@ -495,12 +536,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();
     let http_deployment_feasibility = deployment_feasibility.clone();
+    let http_verifier_feed = verifier_feed.clone();
     let http_event_write_gate = event_write_gate.clone();
     let http_clock = process_clock.clone();
     let receiver_event_log = event_log.clone();
     let receiver_event_write_gate = event_write_gate.clone();
     let receiver_clock = process_clock.clone();
     let timer_controller = Arc::clone(&controller);
+    let timer_verifier_feed = verifier_feed.clone();
     let timer_event_log = event_log.clone();
     let timer_event_write_gate = event_write_gate.clone();
     let timer_clock = process_clock.clone();
@@ -527,6 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http_event_write_gate,
             http_clock,
             http_deployment_feasibility,
+            http_verifier_feed,
         )
         .await
         {
@@ -556,6 +600,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &timer_event_log,
                 &timer_event_write_gate,
                 timer_clock.now(),
+                timer_verifier_feed.as_deref(),
             ) {
                 let reason = format!("application timer stopped: {error}");
                 let _ = timer_fatal_sender.send(reason);

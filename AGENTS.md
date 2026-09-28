@@ -250,8 +250,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy
-  admission never proves generic verifier evidence will arrive. See ADR-0039; MissionPlan v0.7,
-  Grounding, Control, and Runtime remain unchanged.
+  admission never proves generic verifier evidence will arrive. An optional, deployment-owned
+  terminal verifier source now feeds exact Task/Role/physical-attempt evidence into the existing
+  Orchestration satisfaction boundary; its official Habitat projection lives only in the Local
+  EAIOS adapter, while Controller and B1 provenance validate the neutral source/verdict contract.
+  Missing evidence never becomes local completion or benchmark success. See ADR-0039 and ADR-0048;
+  MissionPlan, Grounding, and Control commitment authority remain unchanged.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace

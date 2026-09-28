@@ -251,6 +251,8 @@ uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility "$RU
     || { FAILURE_REASON=preassignment_feasibility_unavailable; exit 1; }
 
 ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
+ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH="$RUN/evidence/task-verifier-source.json" \
+ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH="$RUN/evidence/task-verifier-verdict.json" \
 "$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
     127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
 PIDS+=($!)
