@@ -117,6 +117,8 @@ class ProvenanceFailure(StrEnum):
     CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
     EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
+    TASK_VERIFIER_EVIDENCE_INVALID = "task_verifier_evidence_invalid"
+    TASK_VERIFIER_EVIDENCE_MISSING = "task_verifier_evidence_missing"
     FAILURE_EVIDENCE_MISMATCH = "failure_evidence_mismatch"
     STATIC_B2_PLAN_EQUALITY = "static_b2_plan_equality"
 
@@ -382,6 +384,191 @@ def _check_submission(
     return failures
 
 
+def _check_task_verifier_evidence(
+    request: dict[str, Any],
+    controller: dict[str, Any],
+    events: Any,
+    attempts: Any,
+    semantic: Any,
+    shared_world_summary: Any,
+    frozen: dict[str, Any],
+    source: Any,
+    verdict: Any,
+    run_id: str | None,
+) -> list[ProvenanceFailure]:
+    """Bind verifier-backed terminal Tasks to actual source, verdict, and Controller events."""
+    if request.get("lifecycle") != "Accepted":
+        return []
+    plan = _object(request.get("plan"))
+    verifier_tasks = {
+        task["id"]: task
+        for task in _array(plan.get("tasks"))
+        if isinstance(task, dict)
+        and isinstance(task.get("id"), str)
+        and _object(task.get("satisfaction")).get("basis") == "verifier-evidence"
+    }
+    if not verifier_tasks:
+        return []
+    mission_id = request.get("mission_id")
+    relevant: list[tuple[int, dict[str, Any], str]] = []
+    satisfied: dict[str, int] = {}
+    for event in _array(_object(events).get("events")):
+        item = _object(event)
+        sequence = item.get("sequence")
+        payload = _object(item.get("payload"))
+        observed = _object(payload.get("TaskVerifierVerdictObserved"))
+        task_ref = _object(observed.get("task_ref"))
+        if task_ref.get("mission_id") == mission_id:
+            task_id = task_ref.get("task_id")
+            if type(sequence) is not int or not isinstance(task_id, str):
+                return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+            relevant.append((sequence, observed, task_id))
+        task_satisfied = _object(payload.get("TaskSatisfied"))
+        satisfied_ref = _object(task_satisfied.get("task_ref"))
+        if (
+            satisfied_ref.get("mission_id") == mission_id
+            and isinstance(satisfied_ref.get("task_id"), str)
+            and type(sequence) is int
+        ):
+            satisfied[satisfied_ref["task_id"]] = sequence
+    if not relevant:
+        if controller.get("mission_status") == "Completed":
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_MISSING]
+        return []
+    src, result, semantic_doc = _object(source), _object(verdict), _object(semantic)
+    summary = _object(shared_world_summary)
+    summary_identity = _object(summary.get("identity"))
+    src_identity = _object(src.get("identity"))
+    src_body = {key: value for key, value in src.items() if key != "digest"}
+    result_body = {key: value for key, value in result.items() if key != "digest"}
+    try:
+        source_digest_valid = src.get("digest") == plan_digest(src_body)
+        verdict_digest_valid = result.get("digest") == plan_digest(result_body)
+    except (TypeError, ValueError):
+        source_digest_valid = False
+        verdict_digest_valid = False
+    if (
+        set(src)
+        != {
+            "schema_version",
+            "source_id",
+            "source_revision",
+            "identity",
+            "verifier",
+            "supported_predicates",
+            "verdict_finality",
+            "digest",
+        }
+        or set(src_identity)
+        != {"run_id", "episode_id", "scene_id", "dataset_revision", "dataset_sha256"}
+        or set(result)
+        != {
+            "schema_version",
+            "source_digest",
+            "source_id",
+            "verifier",
+            "predicate",
+            "source_observed_at_ms",
+            "satisfied",
+            "tasks",
+            "digest",
+        }
+        or src.get("schema_version") != "roboguide.task-verifier-source/v0.1"
+        or result.get("schema_version") != "roboguide.task-verifier-verdict/v0.1"
+        or not source_digest_valid
+        or not verdict_digest_valid
+        or src.get("source_revision") != semantic_doc.get("digest")
+        or src.get("verdict_finality") != "terminal"
+        or src_identity.get("run_id") != run_id
+        or src_identity.get("episode_id") != frozen.get("episode_id")
+        or src_identity.get("scene_id") != frozen.get("scene_id")
+        or src_identity.get("dataset_revision") != frozen.get("dataset_revision")
+        or src_identity.get("dataset_sha256") != frozen.get("dataset_sha256")
+        or summary_identity.get("episode_id") != frozen.get("episode_id")
+        or summary_identity.get("scene_id") != frozen.get("scene_id")
+        or type(summary_identity.get("habitat_seed")) is not int
+        or summary_identity.get("habitat_seed") != frozen.get("seed")
+        or summary.get("authoritative_semantic_evidence_digest") != semantic_doc.get("digest")
+        or result.get("source_digest") != src.get("digest")
+        or result.get("source_id") != src.get("source_id")
+        or result.get("verifier") != src.get("verifier")
+        or result.get("predicate") not in _array(src.get("supported_predicates"))
+        or type(result.get("satisfied")) is not bool
+        or type(result.get("source_observed_at_ms")) is not int
+        or result.get("source_observed_at_ms", 0) <= 0
+        or type(summary.get("official_pddl_success")) is not bool
+        or result.get("satisfied") is not summary.get("official_pddl_success")
+    ):
+        return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+    observed_attempts = {
+        (item["mission_id"], item["task_id"], item["role_id"], item["execution_id"])
+        for item in _array(_object(attempts).get("attempts"))
+        if isinstance(item, dict)
+        and all(
+            isinstance(item.get(field), str)
+            for field in ("mission_id", "task_id", "role_id", "execution_id")
+        )
+    }
+    for sequence, event, task_id in relevant:
+        planned = verifier_tasks.get(task_id)
+        if planned is None:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        specification = _object(_object(planned.get("satisfaction")).get("verifier"))
+        if (
+            event.get("source_id") != src.get("source_id")
+            or event.get("source_revision") != src.get("source_revision")
+            or event.get("verdict_digest") != result.get("digest")
+            or event.get("satisfied") is not result.get("satisfied")
+            or result.get("verifier") != specification.get("contract")
+            or result.get("predicate") != specification.get("predicate")
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        rows = [
+            row
+            for row in _array(result.get("tasks"))
+            if _object(row).get("mission_id") == mission_id
+            and _object(row).get("task_id") == task_id
+        ]
+        roles = {
+            role.get("id")
+            for role in _array(planned.get("roles"))
+            if isinstance(role, dict) and isinstance(role.get("id"), str)
+        }
+        row_attempts = _array(_object(rows[0]).get("attempts")) if len(rows) == 1 else []
+        if any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("role_id"), str)
+            or not isinstance(item.get("attempt_id"), str)
+            for item in row_attempts
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if (
+            len(row_attempts) != len(roles)
+            or {_object(item).get("role_id") for item in row_attempts} != roles
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if any(
+            (
+                mission_id,
+                task_id,
+                _object(item).get("role_id"),
+                _object(item).get("attempt_id"),
+            )
+            not in observed_attempts
+            for item in row_attempts
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if event.get("satisfied") is True and satisfied.get(task_id, -1) <= sequence:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if event.get("satisfied") is False and task_id in satisfied:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+    if controller.get("mission_status") == "Completed" and any(
+        task_id not in satisfied for task_id in verifier_tasks
+    ):
+        return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_MISSING]
+    return []
+
+
 def _semantic_expression_valid(value: Any) -> bool:
     """Validate the neutral expression tree without importing benchmark libraries."""
     item = _object(value)
@@ -645,6 +832,11 @@ def verify_b1_provenance(
     semantic_evidence: Any = None,
     planning_world_evidence: Any = None,
     planning_source: Any = None,
+    controller_events: Any = None,
+    execution_attempts: Any = None,
+    verifier_source: Any = None,
+    verifier_verdict: Any = None,
+    shared_world_summary: Any = None,
 ) -> ProvenanceVerification:
     """Check each reached boundary, allowing only attributable early failures."""
     failures: list[ProvenanceFailure] = []
@@ -784,6 +976,20 @@ def verify_b1_provenance(
         failures.extend(
             _check_submission(
                 request, _object(controller_submission), observed_execution_ids, observed_failure
+            )
+        )
+        failures.extend(
+            _check_task_verifier_evidence(
+                request,
+                _object(controller_submission),
+                controller_events,
+                execution_attempts,
+                semantic_evidence,
+                shared_world_summary,
+                frozen,
+                verifier_source,
+                verifier_verdict,
+                run_id,
             )
         )
     b2 = _object(static_b2_plan)

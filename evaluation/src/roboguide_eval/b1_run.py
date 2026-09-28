@@ -90,6 +90,11 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
 def assess_b1_directory(run: Path) -> dict[str, Any]:
     """Verify archived execution evidence, then apply the one admission authority."""
     documents = {name: load_document(run / name) for name in B1_FILES}
+    verifier_source = load_document(run / "evidence/task-verifier-source.json")
+    verifier_verdict = load_document(run / "evidence/task-verifier-verdict.json")
+    if verifier_source is not None or verifier_verdict is not None:
+        documents["evidence/task-verifier-source.json"] = verifier_source
+        documents["evidence/task-verifier-verdict.json"] = verifier_verdict
     archive_status = load_document(run / ARCHIVE_FILE)
     if (run / ARCHIVE_FILE).exists():
         documents[ARCHIVE_FILE] = archive_status
@@ -129,6 +134,11 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
         planning_world_evidence=planning_world,
         planning_source=documents["planning-world-source.json"],
+        controller_events=documents["events.json"],
+        execution_attempts=documents["execution-attempts.json"],
+        verifier_source=verifier_source,
+        verifier_verdict=verifier_verdict,
+        shared_world_summary=documents["evidence/shared-world-summary.json"],
     )
     failures = [item.value for item in provenance.failures]
     archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)
