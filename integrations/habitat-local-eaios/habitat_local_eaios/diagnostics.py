@@ -141,7 +141,8 @@ def _pddl_reference_position(sim: Any, agent_id: int) -> list[float]:
 def _robot_at_threshold(problem: Any) -> float:
     """Read the active PDDL any-at tolerance without choosing a new threshold."""
     value = problem.sim_info.robot_at_thresh
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    # Habitat's separate Python 3.9 worker cannot evaluate ``int | float`` at runtime.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):  # noqa: UP038
         raise ValueError("PDDL robot-at threshold is not numeric")
     threshold = float(value)
     if not math.isfinite(threshold) or threshold <= 0:
