@@ -12,6 +12,7 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .evidence_io import write_text_atomic
+from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .source_provenance import build_runtime_source_manifest
 from .stage2_contract import (
@@ -215,8 +216,14 @@ class EmosStage2Runtime:
                 build_runtime_source_manifest(
                     (
                         "habitat.tasks.rearrange.actions.habitat_mas_actions",
+                        "habitat_baselines.rl.hrl.hl.llm_policy",
+                        "habitat_baselines.rl.hrl.skills.wait",
                         "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
+                        "habitat_baselines.rl.multi_agent.multi_llm_policy",
+                        "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.emos_stage2",
+                        "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",
                     )
@@ -234,7 +241,7 @@ class EmosStage2Runtime:
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
-        """Run an assigned subtask using the unmodified EMOS Stage2 decision path."""
+        """Run the assigned agent's original Stage2 path and keep peers passive."""
         gym_env, habitat_env, actor, access = self._require_initialized()
         try:
             habitat_env.episodes = [self._episode]
@@ -326,9 +333,13 @@ class EmosStage2Runtime:
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
         module, original_group_discussion = self._install_assignment(assignment)
+        idle_binding: PassiveIdleBinding | None = None
         contract_restore: Callable[[], None] | None = None
         contract_failure: Stage2ContractViolation | None = None
         try:
+            idle_binding = install_passive_idle_agents(
+                actor, assignment, f"agent_{self._config.agent_id}"
+            )
             contract_restore = self._install_execution_contract(
                 self._single_execution_contracts(assignment, invocation),
                 lambda: step_offset + steps,
@@ -443,8 +454,17 @@ class EmosStage2Runtime:
                 if contract_restore is not None:
                     contract_restore()
             finally:
-                module.group_discussion = original_group_discussion
-                self._best_effort_flush_action_trace("Stage2 termination")
+                try:
+                    if idle_binding is not None:
+                        self._best_effort_write_json(
+                            f"idle-endpoint-{invocation.request_key()[:16]}.json",
+                            idle_binding.evidence(),
+                            "Stage2 termination",
+                        )
+                        idle_binding.restore()
+                finally:
+                    module.group_discussion = original_group_discussion
+                    self._best_effort_flush_action_trace("Stage2 termination")
         if contract_failure is not None:
             return self._outcome(
                 "FAILED",
@@ -548,16 +568,11 @@ class EmosStage2Runtime:
         assignment: dict[str, Any],
         invocation: CanonicalMobilityInvocation,
     ) -> dict[str, Stage2ExecutionContract]:
-        """Build contracts for the assigned agent and idle sibling agents."""
+        """Guard the only agent authorized to request a physical Stage2 action."""
         target = f"agent_{self._config.agent_id}"
-        contracts: dict[str, Stage2ExecutionContract] = {}
-        for agent_name in assignment:
-            contracts[agent_name] = (
-                Stage2ExecutionContract.for_invocation(invocation)
-                if agent_name == target
-                else Stage2ExecutionContract.idle()
-            )
-        return contracts
+        if target not in assignment:
+            raise IntegrationError(f"assigned EMOS agent {target!r} is unavailable")
+        return {target: Stage2ExecutionContract.for_invocation(invocation)}
 
     def _install_execution_contract(
         self,
@@ -567,8 +582,17 @@ class EmosStage2Runtime:
         """Install one scoped guard around the original EMOS action boundary."""
         if self._actor is None:
             raise IntegrationError("Stage2 contract requires an initialized actor")
+        all_agents = [
+            policy._high_level_policy.llm_agent for policy in self._actor._active_policies
+        ]
+        agents = [agent for agent in all_agents if not isinstance(agent, PassiveIdleAgent)]
+        if {agent.name for agent in agents} != set(contracts) or any(
+            agent.name in contracts or agent.llm_model is not None
+            for agent in all_agents
+            if isinstance(agent, PassiveIdleAgent)
+        ):
+            raise IntegrationError("active Stage2 models must match committed execution contracts")
         audit = Stage2ActionAudit(self._evidence_dir(), self._previous_action_audit())
-        agents = [policy._high_level_policy.llm_agent for policy in self._actor._active_policies]
 
         def record(document: dict[str, Any]) -> None:
             """Bind the action decision to the last completed simulator step and local time."""

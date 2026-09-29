@@ -21,6 +21,7 @@ from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
 from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
 from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
 from habitat_local_eaios.shared_world import (  # noqa: E402
     InProcessWorldService,
@@ -125,6 +126,10 @@ class RecordingDiagnostics:
         self.pending_steps.clear()
 
 
+class WaitSkillPolicy:
+    """Represent the existing EMOS wait skill in policy-loop doubles."""
+
+
 class PolicyActor:
     """Return a stable action or raise at the requested call."""
 
@@ -137,6 +142,17 @@ class PolicyActor:
         """Configure the one-indexed actor call that raises."""
         self.fail_at = fail_at
         self.calls = 0
+        self._active_policies = [
+            SimpleNamespace(
+                _name_to_idx={"wait": 1},
+                _skills={1: WaitSkillPolicy()},
+                _high_level_policy=SimpleNamespace(
+                    llm_agent=SimpleNamespace(name=f"agent_{agent_id}"),
+                    _skill_name_to_idx={"wait": 1},
+                ),
+            )
+            for agent_id in range(2)
+        ]
 
     def act(self, *args: object, **kwargs: object) -> object:
         """Return minimal action data unless this call is the injected failure."""
@@ -685,13 +701,24 @@ class ContractActor(PolicyActor):
         """Expose the same active-policy agent lookup as the EMOS actor."""
         super().__init__()
         self._active_policies = [
-            SimpleNamespace(_high_level_policy=SimpleNamespace(llm_agent=agent)) for agent in agents
+            SimpleNamespace(
+                _name_to_idx={"wait": 1},
+                _skills={1: WaitSkillPolicy()},
+                _high_level_policy=SimpleNamespace(
+                    llm_agent=agent,
+                    _skill_name_to_idx={"wait": 1},
+                ),
+            )
+            for agent in agents
         ]
 
     def act(self, *args: object, **kwargs: object) -> object:
         """Select actions before permitting the policy loop to step Gym."""
         for policy in self._active_policies:
-            policy._high_level_policy.llm_agent.chat("observation")
+            agent = policy._high_level_policy.llm_agent
+            if isinstance(agent, PassiveIdleAgent) and not agent.initialized:
+                agent.init_agent("FetchRobot", "joint objective", "Nothing to do", [])
+            agent.chat("observation")
         return super().act(*args, **kwargs)
 
 
@@ -703,6 +730,198 @@ class ContractLoopHarness(LoopHarness):
     ) -> Callable[[], None]:
         """Exercise real instance hooks, audit output, and restoration."""
         return EmosStage2Runtime._install_execution_contract(self, contracts, completed_steps)
+
+
+class SingleIdleContractLoopHarness(ContractLoopHarness):
+    """Exercise the real single-assignment loop with one passive endpoint."""
+
+    def _current_skills(self, actor: Any) -> list[str]:
+        """Report wait for the actual passive policy and navigation for its owner."""
+        return [
+            "wait"
+            if isinstance(policy._high_level_policy.llm_agent, PassiveIdleAgent)
+            else "nav_to_obj"
+            for policy in actor._active_policies
+        ]
+
+    def _record_video(self, step: int, observations: Any, info: dict[str, Any]) -> None:
+        """Omit recording while retaining the physical step observation boundary."""
+        del step, observations, info
+
+
+def _single_idle_loop(
+    runtime: SingleIdleContractLoopHarness,
+    actor: ContractActor,
+    invocation: CanonicalMobilityInvocation,
+    gym_env: Any,
+    cancellation_requested: Callable[[], bool],
+) -> LocalExecutionOutcome:
+    """Run one assigned task through the production single-policy boundary."""
+    return runtime._policy_loop(
+        {},
+        {"episode_id": "generic"},
+        {"agent_0": object(), "agent_1": object()},
+        invocation,
+        (0.0, 0.0, 0.0),
+        "scene",
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        gym_env,
+        runtime._habitat_env,
+        cancellation_requested,
+    )
+
+
+def _single_idle_setup(
+    tmp_path: Path, *, assigned_agent_id: int = 0, violation_at: int | None = None
+) -> tuple[SingleIdleContractLoopHarness, ContractActor, list[ContractAgent]]:
+    """Build one fake shared world with exactly one Control-assigned agent."""
+    runtime = SingleIdleContractLoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config = SimpleNamespace(
+        max_steps=3, step_period_ms=0, episode_id="generic", agent_id=assigned_agent_id
+    )
+    runtime._serial_steps = 0
+    runtime._agent_position = lambda: (0.0, 0.0, 0.0)  # type: ignore[method-assign]
+    runtime._habitat_env = SimpleNamespace(
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    agents = [
+        ContractAgent(
+            f"agent_{agent_id}",
+            ContractModel(
+                ("north" if agent_id == 0 else "south")
+                if agent_id == assigned_agent_id
+                else "unassigned-wrong-target",
+                violation_at if agent_id == assigned_agent_id else None,
+            ),
+        )
+        for agent_id in range(2)
+    ]
+    actor = ContractActor(agents)
+    runtime._actor = actor
+    return runtime, actor, agents
+
+
+@pytest.mark.parametrize("assigned_agent_id", [0, 1])
+def test_unassigned_model_is_not_called_while_assigned_task_completes(
+    tmp_path: Path, assigned_agent_id: int
+) -> None:
+    """One Task can finish locally without an idle model veto or fabricated PDDL success."""
+    runtime, actor, agents = _single_idle_setup(tmp_path, assigned_agent_id=assigned_agent_id)
+    gym_calls: list[object] = []
+    destination = "north" if assigned_agent_id == 0 else "south"
+
+    def step(action: object) -> Any:
+        """Return a real local skill finish but an officially false benchmark state."""
+        gym_calls.append(action)
+        return (
+            {f"agent_{assigned_agent_id}_has_finished_oracle_nav": [1]},
+            0.0,
+            False,
+            {"pddl_success": False},
+        )
+
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", destination, "first"))
+    outcome = _single_idle_loop(
+        runtime, actor, invocation, SimpleNamespace(step=step), lambda: False
+    )
+    assert outcome.state == "COMPLETED"
+    assert outcome.local_skill_completed and not outcome.benchmark_task_achieved
+    assert actor.calls == len(gym_calls) == 1
+    assert outcome.skill_sequence == (
+        "nav_to_obj|wait" if assigned_agent_id == 0 else "wait|nav_to_obj",
+    )
+    assert agents[assigned_agent_id].dispatches == 1
+    idle_agent_id = 1 - assigned_agent_id
+    assert agents[idle_agent_id].dispatches == agents[idle_agent_id].llm_model.calls == 0
+    assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == agents
+    idle = json.loads(
+        (tmp_path / "evidence" / f"idle-endpoint-{invocation.request_key()[:16]}.json").read_text()
+    )
+    assert idle["idle_agents"][0]["local_wait_selections"] == 1
+    assert idle["idle_agents"][0]["provider_calls"] == 0
+    assert idle["idle_agents"][0]["agent_name"] == f"agent_{idle_agent_id}"
+    assert (
+        json.loads((tmp_path / "evidence" / "controlled-outcome.json").read_text())[
+            "benchmark_task_achieved"
+        ]
+        is False
+    )
+
+
+def test_assigned_wrong_target_still_fails_before_physical_step(tmp_path: Path) -> None:
+    """Passive siblings do not weaken the assigned agent's canonical target guard."""
+    runtime, actor, agents = _single_idle_setup(tmp_path, violation_at=1)
+    gym_env = StepEnvironment(1)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "north", "wrong"))
+    outcome = _single_idle_loop(runtime, actor, invocation, gym_env, lambda: False)
+    assert outcome.state == "FAILED"
+    assert outcome.terminal_basis == "local-contract-failure"
+    assert gym_env.calls == 0
+    assert agents[0].dispatches == 0
+    assert agents[1].llm_model.calls == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "evidence" / "stage2-actions.jsonl").read_text().splitlines()
+    ]
+    assert rows[-1]["agent_name"] == "agent_0" and rows[-1]["decision"] == "rejected"
+    assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == agents
+
+
+def test_cancellation_before_step_restores_passive_binding(tmp_path: Path) -> None:
+    """Control cancellation performs no model call or Gym step on either endpoint."""
+    runtime, actor, agents = _single_idle_setup(tmp_path)
+    gym_env = StepEnvironment(1)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "north", "cancel"))
+    outcome = _single_idle_loop(runtime, actor, invocation, gym_env, lambda: True)
+    assert outcome.state == "CANCELLED"
+    assert gym_env.calls == 0
+    assert [agent.llm_model.calls for agent in agents] == [0, 0]
+    assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == agents
+
+
+def test_gym_failure_preserves_original_error_and_idle_evidence(tmp_path: Path) -> None:
+    """An execution exception still restores both policies and records prior idle selection."""
+    runtime, actor, agents = _single_idle_setup(tmp_path)
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", "north", "failure"))
+    with pytest.raises(RuntimeError, match="gym step failure sentinel"):
+        _single_idle_loop(runtime, actor, invocation, StepEnvironment(1), lambda: False)
+    assert agents[0].dispatches == 1
+    assert agents[1].llm_model.calls == 0
+    assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == agents
+    idle = json.loads(
+        (tmp_path / "evidence" / f"idle-endpoint-{invocation.request_key()[:16]}.json").read_text()
+    )
+    assert idle["idle_agents"][0]["local_wait_selections"] == 1
+
+
+def test_serial_tasks_rebind_same_actor_without_idle_model_calls(tmp_path: Path) -> None:
+    """Two Control-dispatched segments retain one actor and distinct Task evidence."""
+    runtime, actor, agents = _single_idle_setup(tmp_path)
+    gym_calls = 0
+
+    def step(action: object) -> Any:
+        """Finish the assigned navigation once per Control Task dispatch."""
+        nonlocal gym_calls
+        del action
+        gym_calls += 1
+        return ({"agent_0_has_finished_oracle_nav": [1]}, 0.0, False, {"pddl_success": False})
+
+    for task_id, destination in [("first", "north"), ("second", "south")]:
+        agents[0].llm_model.target = destination
+        invocation = CanonicalMobilityInvocation.from_request(_request("m", destination, task_id))
+        outcome = _single_idle_loop(
+            runtime, actor, invocation, SimpleNamespace(step=step), lambda: False
+        )
+        assert outcome.state == "COMPLETED"
+        assert (
+            tmp_path / "evidence" / f"idle-endpoint-{invocation.request_key()[:16]}.json"
+        ).exists()
+        assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == agents
+    assert gym_calls == runtime._serial_steps == 2
+    assert agents[0].dispatches == 2
+    assert agents[1].llm_model.calls == 0
 
 
 @pytest.mark.parametrize("completed_first", [False, True])
