@@ -9,6 +9,77 @@
 `IntegrationRuntimeBridge`——把正式 Node Protocol 事实翻译为 Runtime/Control/State
 语义的组合门面。它是唯一同时依赖 `control + runtime + integration + state` 的 crate。
 
+## 架构位置
+
+Orchestration 站在所有核心 crate 之上做组合，但每个权威仍留在原属 crate：
+
+```mermaid
+flowchart TB
+    subgraph ORCH["core/orchestration"]
+        MO["MissionOrchestrator<br/>计划接纳/生命周期/满足判定"]
+        MC["mission_contract<br/>wire JSON → MissionPlan"]
+        SP["scheduling_status<br/>类型化 disposition"]
+        BR["IntegrationRuntimeBridge<br/>组合门面"]
+    end
+    CTRL[("core/control<br/>承诺/Group/恢复权威")]
+    RT[("core/runtime<br/>活执行归约")]
+    INT[("core/integration<br/>gRPC 路由")]
+    ST[("core/state<br/>State/事件/证据")]
+    MO --> CTRL
+    BR --> CTRL & RT & INT & ST
+    MC --> MO
+    MO --> SP
+```
+
+## 数据流
+
+从 wire JSON 到 Mission 终态的主干数据流：
+
+```mermaid
+flowchart LR
+    A["wire JSON<br/>mission-plan/v0.2-v0.8"] -->|"decode_mission_plan<br/>校验"| B["MissionPlan（不可变）"]
+    B -->|"submit + create_mission_group"| C["MissionExecution<br/>+ ExecutionGroup"]
+    C -->|"ready_tasks / prepare_task"| D["SchedulingDisposition<br/>Deferred / ReconciliationRequired<br/>/ InvalidContract / InternalFailure"]
+    D -->|"prepare_task_bound<br/>+ allocate_task_attempt_id"| E["DispatchIntent（durable）"]
+    E -->|"flush_dispatch_outbox<br/>checkpoint 先于路由"| F["gRPC Execute"]
+    F --> G["ExecutionEvent 事实流"]
+    G -->|"consume_execution 归约"| H["RemoteExecutionStatus<br/>→ ObservedTaskExecutionResult"]
+    H -->|"satisfy_task_from_*"| I["TaskSatisfied → DAG 前进<br/>→ Mission Completed"]
+```
+
+## 端到端时序
+
+一次已提交 Task 从准备到派发、再到事实回流与满足判定：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant MO as MissionOrchestrator
+    participant C as ControlPlane
+    participant RT as RuntimeExecutionManager
+    participant BR as IntegrationRuntimeBridge
+    participant N as Node (gRPC)
+
+    MO->>MO: ready_tasks → dispatchable_tasks
+    MO->>BR: prepare_task_bound(mission, task)
+    BR->>C: match → schedule → propose → commit → bind
+    C-->>BR: CommittedPlan
+    BR->>RT: allocate_task_attempt_id(slot)
+    BR->>RT: execute(intent) —— durable outbox，无网络副作用
+    BR->>BR: checkpoint（先持久化）
+    BR->>N: flush_dispatch_outbox → Execute(command_id)
+    N-->>BR: CommandReceipt（仅证明 journal 已持久接受）
+    N-->>BR: ExecutionEvent 事实序列
+    BR->>RT: consume_execution(facts)
+    RT-->>BR: ObservedTaskExecutionResult（本地执行完成）
+    BR->>MO: terminal_task_execution_outcomes
+    MO->>C: record_task_execution_completed
+    Note over MO: completed ≠ satisfied
+    MO->>MO: satisfy_task_from_verifier / _execution_report
+    MO->>C: release_task_bindings
+    MO->>MO: 全部满足 → complete_mission
+```
+
 ## 模块地图
 
 | 模块 | 职责 |
@@ -24,30 +95,6 @@
 | `mechanism_profile.rs` | 本 build 支持的执行协同机制闭环预检 |
 | `scheduling_status.rs` | 应用边界处的类型化调度 disposition |
 
-## 主流程 API
-
-**接纳**：`decode_mission_plan(json)` → `MissionOrchestrator::submit(plan, group_id, control, …)`
-——依次执行机制 profile 校验、MissionId 幂等检查、时间锚校验，然后**由 Control**
-`create_mission_group` 创建 Group（Orchestration 不自建资源权威）。
-
-**推进**：`ready_tasks` / `dispatchable_tasks` 返回 DAG 就绪任务；
-`prepare_task`（或带时长估计变体）委托 Control 联合调度并返回
-`SchedulingDisposition`（`Deferred / ReconciliationRequired / InvalidContract / InternalFailure`）。
-
-**派发**：经 bridge 的 `prepare_task_bound` / `prepare_task_bound_with_session`
-（共享世界执行会话，ADR-0045）分配 attempt，`execute` 写 durable outbox intent
-（无网络副作用），`flush_dispatch_outbox` 路由。
-
-**满足与终态**：`record_task_execution_completed` 只记录本地执行完成；
-`satisfy_task_from_execution_report / satisfy_task_from_verifier` 按计划声明的
-basis 判定满足；`task_failed`、`cancel → request_cancel → finalize_cancel`
-（Cancelling 期间保留 Group 所有权直到各 attempt 有终态证据）。
-
-**持久化**：`checkpoint_json / restore_json` + `validate_control_authority`
-（恢复态与 Control 交叉校验）；bridge 级 checkpoint schema 当前为
-`roboguide.controller-checkpoint/v15`（应用层包装在 v17，见
-[Integration 页](integration-node-service.md)）。
-
 ## 关键类型
 
 `MissionOrchestrator`、`MissionExecution`、`MissionExecutionLifecycle`
@@ -56,6 +103,15 @@ basis 判定满足；`task_failed`、`cancel → request_cancel → finalize_can
 `SchedulingDeferral`（12 种持久化原因）与 `SchedulingDisposition`；
 `SupportedMechanismProfile`（当前只放行 `RequiresActive` 与 `SharedSpatialReference`）；
 `GroupSharedViewSnapshot` / `GroupViewFreshness`（选择性组共享视图）。
+
+## 取消与恢复语义
+
+- `cancel → request_cancel → finalize_cancel`：Cancelling 期间保留 Group 所有权，
+  直到各 attempt 有终态证据才释放。
+- 恢复态执行被 `ExecutionRuntimeError::ReconciliationRequired` 栅栏；bridge
+  checkpoint schema 为 `roboguide.controller-checkpoint/v15`（应用层包装 v17）。
+- `SupportedMechanismProfile` 在 Group 创建前拒绝结构合法但无 Runtime 归约器的
+  关系类型（如 `RelativePose`），而非让其无限期 Unknown。
 
 ## 测试覆盖（9 个测试文件主题）
 
@@ -68,8 +124,6 @@ bridge 的 checkpoint 摄入、派发恢复与取消、wire 转换与事实 fenc
 - 全 crate 以 "Phase 1" 限定权威范围（确定性 DAG 编排，单一默认 Group）。
 - `mission_contract/mod.rs` 文档写 "v0.2–v0.7 边界" 而 `decode.rs` 已引用 v0.8
   常量——轻微文档漂移，代码以 v0.8 为准。
-- `SupportedMechanismProfile` 会在 Group 创建前拒绝结构合法但无 Runtime 归约器的
-  关系类型（如 `RelativePose`），而非让其无限期 Unknown。
 
 ## 相关 ADR
 

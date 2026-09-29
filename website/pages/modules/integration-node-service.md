@@ -20,11 +20,64 @@ Runtime/Local-EAIOS 代码——需要这些权威的桥接在 `core/orchestrati
 等待 Controller composition 用既有权威接受并持久化事实（30s 应用接纳超时）
 后才回复节点（ADR-0023）。
 
+## 传输与节点架构
+
+```mermaid
+flowchart TB
+    subgraph SERVER["apps/integration-server"]
+        GRPC["GrpcNodeProtocol v0.4<br/>+ legacy v0.2（拒绝）"]
+        ROUTER["GrpcNodeRouter<br/>NodeId→会话路由 + 租约 fencing"]
+        APP["application/<br/>dispatch·recovery·persistence·timer"]
+        CHTTP["Control HTTP :8080<br/>/v1/missions /v1/events ..."]
+        AHTTP["Artifact HTTP :8090<br/>/v1/maps /v1/artifacts"]
+    end
+    subgraph NODE["每节点一个 roboguide-node"]
+        SVC["NodeService<br/>注册/回放/心跳/派发"]
+        J[("SQLite journal<br/>durable continuity")]
+        ENG["LocalIntegrationEngine<br/>admission·execution·observation"]
+        DRV["http / grpc / mcp<br/>通用 driver"]
+    end
+    GRPC <-->|"双向流<br/>Hello→Register→Execute"| SVC
+    ROUTER --> APP
+    APP --> ORCH[("core/orchestration<br/>IntegrationRuntimeBridge")]
+    SVC --> ENG --> DRV --> LE["Local EAIOS<br/>（厂商/仿真系统）"]
+    SVC --- J
+```
+
+## Node Protocol 生命周期时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant N as roboguide-node
+    participant G as GrpcIntegrationService
+    participant A as Controller application<br/>（权威组合）
+    participant E as Local EAIOS
+
+    N->>G: Hello（协商 wire v0.4）
+    G-->>N: HelloAck（selected_protocol_version）
+    N->>G: NodeRegistration（契约 v0.6：profiles+operations+snapshot）
+    G->>A: 交付事实（等待应用接纳，30s 超时）
+    A->>A: Control 注册 + State 持久化 + checkpoint
+    A-->>G: 接纳完成
+    G-->>N: Registered + Ack（≠传输回执）
+    loop 心跳/租约
+        N->>G: Heartbeat
+        G-->>N: Ack
+    end
+    A->>N: Execute（command_id + ExecutionIntent）
+    N->>N: journal 持久接受（幂等 command_id）
+    N-->>A: CommandReceipt（CommandPersisted）
+    N->>E: canonical intent → 本地 workflow
+    E-->>N: 进度/结果
+    N-->>A: ExecutionEvent 事实序列 → 终态
+```
+
 ## core/node-service —— 通用节点服务
 
 **定位**：配置驱动的通用节点侧服务：生命周期（`NodeService::run`
 "恢复持久执行并在会话丢失后永远重连"）、TOML 配置编译（schema v0.2–v0.7）、
-SQLite 执行日志（durable continuity）、声明式 Local Integration Engine。
+SQLite 执行日志、声明式 Local Integration Engine。
 
 | 子系统 | 职责 |
 | --- | --- |

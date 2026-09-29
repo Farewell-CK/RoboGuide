@@ -10,20 +10,67 @@
 Mission/Task/Context/Role 身份，但**不拥有**节点分配、资源提交、执行组或本地
 设备控制，也不镜像执行生命周期。
 
-## 请求流水线（`MissionRequestEngine`）
+## 架构位置
 
-`create() / add_message() / approve() / retry() / cancel()` 入口，内部
-`_process()` 依次：
+```mermaid
+flowchart TB
+    USER["用户文本指令"] --> API
+    subgraph MI["mission/ · MissionRequestEngine"]
+        API["api.py<br/>HTTP :8070"]
+        GR["grounding_reader<br/>捕获 GroundingContextSnapshot"]
+        INT["Interpreter<br/>→ GroundedIntent"]
+        PLN["Planner<br/>（Responses LLM）"]
+        REV["Reviewer / Repairer"]
+        APPP["ApprovalPolicy"]
+        SUB["HttpMissionController<br/>→ 提交"]
+        STORE[("SQLite request store<br/>全 deliberation 持久化")]
+    end
+    API --- STORE
+    GR --> INT --> PLN --> REV --> APPP --> SUB
+    GR -.->|"只读：批准 schema 的 World 记录<br/>+ Memory 元数据"| ST[("Controller State/Memory 投影")]
+    CATALOG["Canonical Capability Catalog v0.3"] -.->|"词汇约束"| PLN & REV
+    SUB -->|"POST /v1/missions"| CTRL["Controller HTTP :8080"]
+```
 
-```text
-① Grounding     捕获不可变、digest 绑定的 GroundingContextSnapshot（fail-closed 绑定到请求）
-② Interpret     Interpreter 产出 GroundedIntent；阻塞歧义 → NeedsClarification
-③ Plan          Planner 生成计划；被拒草案持久化证据后按预算 regenerate（prevalidation recovery）
-④ Draft 校验    implementation support / 物理实体 grounding / 语义准入 / Catalog 校验
-⑤ Review        Reviewer 结构化问题 → APPROVED / CLARIFICATION / REJECTED / 需修复
-⑥ Repair        有界修复（配置 max_repair_attempts），每个修复草案重新过 ④
-⑦ Approval      ApprovalPolicy 判定；需要时 AwaitingApproval 等 approve() 精确匹配修订+摘要
-⑧ Submit        HttpMissionController.submit_plan → Accepted / Blocked（失败证据持久化）
+## 请求流水线时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant E as MissionRequestEngine
+    participant G as GroundingReader
+    participant I as Interpreter (LLM)
+    participant P as Planner (LLM)
+    participant R as Reviewer (LLM)
+    participant C as Controller
+
+    U->>E: create(instruction)
+    E->>G: capture（fail-closed 绑定请求+对话 digest）
+    G-->>E: GroundingContextSnapshot（不可变）
+    E->>I: interpret(dialogue, context)
+    alt 存在阻塞歧义
+        I-->>E: open_questions
+        E-->>U: NeedsClarification（携带 question_id）
+        U->>E: add_message(answer)
+        E->>I: 重新解释
+    else 无阻塞歧义
+        I-->>E: GroundedIntent
+    end
+    E->>P: plan(intent, catalog, context)
+    P-->>E: MissionPlan 草案
+    E->>E: 确定性校验（support/grounding/admission/catalog）
+    E->>R: review(plan, context)
+    alt 结构化问题可修复
+        R-->>E: issues
+        E->>E: Repairer 有界修复（≤ max_repair_attempts）
+    else 审查通过
+        R-->>E: APPROVED
+    end
+    E->>E: ApprovalPolicy（高风险 → AwaitingApproval）
+    U->>E: approve(draft_revision + digest)
+    E->>C: submit_plan(plan)
+    C-->>E: Accepted | Blocked
 ```
 
 生命周期状态机：`Received → Interpreting → (NeedsClarification ⇄) → Drafted →

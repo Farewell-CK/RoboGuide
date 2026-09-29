@@ -11,6 +11,23 @@
 刻意零传输、零序列化 SDK、零仿真器依赖——它是核心依赖图的叶子节点，
 所有其他 crate 依赖它，它不依赖任何兄弟 crate。
 
+## 架构位置：核心依赖图的根
+
+```mermaid
+flowchart BT
+    DOM["core/domain<br/>（叶子：零兄弟依赖）"]
+    PORTS["core/ports<br/>（传输中立端口目录）"]
+    DOM --> PORTS
+    STATE["core/state"] --> DOM & PORTS
+    CTRL["core/control"] --> DOM & PORTS
+    RT["core/runtime"] --> DOM & PORTS
+    ART["core/artifact-store"] --> DOM & PORTS
+    TK["core/testkit<br/>VirtualClock · FakeNode"] --> DOM & PORTS
+    ORCH["core/orchestration<br/>（组合根：依赖以下全部）"] --> CTRL & RT & STATE
+    NS["core/node-service"] --> DOM
+    INT["core/integration<br/>（零核心依赖）"]
+```
+
 ### 模块地图
 
 | 分组 | 模块 | 职责（取自各文件模块文档） |
@@ -64,6 +81,27 @@
 `SharedEventLog`、实现 `NodeGateway` 的 `FakeNode`（可注入
 `FailureMode::FailNext / FailNextAndReportStatus / SafeStopNext` 故障模式）。
 只依赖 `domain + ports`，因此所有上层测试都是"针对端口 + 替身"的纯离线测试。
+
+### 测试替身时序（一切上层测试的模式）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as 上层测试（control/orchestration/...）
+    participant TK as testkit::FakeNode
+    participant VC as VirtualClock
+    participant EL as SharedEventLog
+
+    T->>TK: 实现 NodeGateway 端口注册进被测系统
+    T->>VC: advance_by(ms) —— 无真实睡眠推进时间
+    T->>TK: execute(ExecutionCommand)
+    alt FailureMode::FailNextAndReportStatus
+        TK-->>T: 错误 + 预设 NodeStatus（驱动恢复路径）
+    else 正常
+        TK-->>T: NodeEvent 事实序列
+    end
+    T->>EL: 断言 contains_payload(...)（事件证据检查）
+```
 
 ## 实现状态
 

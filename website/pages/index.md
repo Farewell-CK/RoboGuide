@@ -28,23 +28,18 @@ RoboGuide 不只是一个 Scheduler：它定义资源抽象、共享状态、任
 
 ## 系统组成
 
-```text
-文本指令 ──▶ Mission Intelligence ──▶ MissionPlan (v0.8)
-                                        │ submit
-                                        ▼
-              ┌───────────── Mission Orchestration ─────────────┐
-              │   DAG readiness · 调度 disposition · 满足判定     │
-              └──────┬───────────────────────────────┬──────────┘
-                     ▼                               ▼
-               Control Plane                  Distributed Runtime
-     Match·Schedule·Commit·Bind·Recovery    执行事实归约·协同关系·checkpoint
-                     ▼                               ▼
-              State & Memory Plane  ◀────────  Node Protocol v0.4 (gRPC)
-        证据·投影·Memory Catalog               ▼
-                                        roboguide-node
-                                  声明式 Local Integration Engine
-                                            ▼
-                                   Local EAIOS / 物理世界
+```mermaid
+flowchart TB
+    INSTR["文本指令"] --> MI["Mission Intelligence<br/>解释·澄清·计划·审查·审批"]
+    MI -->|"MissionPlan v0.8 提交"| ORCH["Mission Orchestration<br/>DAG readiness · 满足判定"]
+    ORCH --> CTRL["Control Plane<br/>Match · Schedule · Commit · Bind"]
+    ORCH --> RT["Distributed Runtime<br/>执行事实归约 · 协同关系"]
+    CTRL <-->|"承诺与绑定"| RT
+    RT <-->|"Node Protocol v0.4 (gRPC)"| NODE["roboguide-node<br/>声明式 Local Integration Engine"]
+    NODE --> LEAIOS["Local EAIOS / 物理世界"]
+    STM["State & Memory Plane<br/>证据·投影·Memory Catalog"] -.->|"只读接地"| MI
+    RT & CTRL -.->|"事实/投影"| STM
+    STM --- ART["Artifact 数据平面<br/>SHA-256 CAS"]
 ```
 
 | 层 | 职责 | 代码 | 文档 |

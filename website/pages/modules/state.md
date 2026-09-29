@@ -9,7 +9,67 @@
 **定位**：State & Memory Plane 的已实现投影门面。核心原则写在代码里：State 不是
 Global Truth——每条记录带来源独立保留，投影可落后于权威，绝不行使承诺/撤销权力。
 
-## core/state
+## 架构位置
+
+```mermaid
+flowchart TB
+    CTRL[("core/control<br/>权威预约")] -->|"单向投影（可滞后）"| ALLOC
+    subgraph ST["core/state"]
+        NODE["InMemorySharedNodeState<br/>注册+最新快照"]
+        ALLOC["InMemoryAllocationState<br/>Allocation View"]
+        REC["StateRecordProjection<br/>源感知记录"]
+        EVLOG[("SqliteEventLog<br/>事件+checkpoint")]
+        MEM["MemoryCatalogProjection<br/>通用 Memory 元数据"]
+        MAP["MapCatalogProjection<br/>地图 manifest/lineage/副本"]
+        SAT["InMemoryTaskSatisfactionState<br/>满足证据"]
+    end
+    ART[("core/artifact-store<br/>SHA-256 CAS（仅字节）")]
+    MAP -->|"引用 digest，不存字节"| ART
+    HTTP["Artifact HTTP /v1/maps /v1/artifacts"] --> ART
+    MI["Mission Intelligence<br/>Grounding Reader"] -.->|"只读 World 记录<br/>+ Memory 元数据"| REC & MEM
+```
+
+## 数据流：地图的发布与导入
+
+Spatial Memory Slice v0.1 的完整数据面——manifest 与字节严格分离：
+
+```mermaid
+flowchart LR
+    P["Producer 节点<br/>build-map"] -->|"分块上传<br/>digest 校验"| CAS[("CAS<br/>ContentDigest")]
+    P -->|"manifest: anchors/lineage<br/>+ replica evidence"| MC["MapCatalog<br/>（State）"]
+    C["Consumer 节点<br/>import-map"] -->|"显式按 revision pull"| CAS
+    MC -->|"逻辑引用 MapRevisionId"| C
+    C -->|"本地 staging + digest 验证<br/>→ Local EAIOS 受控路径"| L["Local EAIOS"]
+    C -->|"localization evidence<br/>（强定位）"| LE[("State 强定位证据<br/>→ Runtime relation")]
+```
+
+## 时序：一次受控地图导入
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant NS as roboguide-node
+    participant AH as Artifact HTTP (/v1/artifacts)
+    participant CAS as ArtifactBlobStore
+    participant MC as MapCatalog (State)
+    participant LE as Local EAIOS
+
+    NS->>MC: 查询 MapRevision 的 manifest
+    MC-->>NS: manifest + ContentDigest
+    NS->>AH: GET /v1/artifacts/{digest}（流式分块）
+    AH->>CAS: 读取 blob
+    AH-->>NS: 字节流
+    NS->>NS: staging 目录 digest 逐块校验
+    alt digest 不匹配
+        NS->>NS: 拒绝并保留暂存直至 abort
+    else 校验通过
+        NS->>LE: 交付受控本地路径
+        NS->>MC: 记录 Staged/Imported 副本证据
+        Note over NS,MC: Node Protocol 从不承载地图字节
+    end
+```
+
+## core/state 模块地图
 
 | 模块 | 实现类型 | 职责 |
 | --- | --- | --- |
@@ -25,13 +85,10 @@ Global Truth——每条记录带来源独立保留，投影可落后于权威�
 原子性、v2–v10 schema 标记迁移矩阵（含 v6 副本无 provider 身份迁移）；空间记忆
 发布/导入/冲突拒绝；满足证据归属。
 
-注意 Allocation 的方向性：Control → State 单向投影。`InMemoryAllocationState`
-替换快照时校验版本，旧快照拒绝——投影滞后是常态而非错误。
-
 ## core/artifact-store（Artifact 数据平面）
 
-**定位**：`ports::ArtifactBlobStore` 的文件系统实现。内容寻址（SHA-256
-`ContentDigest`）、不可变、分块上传；只存不透明字节，不懂地图/任务/所有权策略。
+**定位**：`ports::ArtifactBlobStore` 的文件系统实现。内容寻址（SHA-256）、
+不可变、分块上传；只存不透明字节，不懂地图/任务/所有权策略。
 
 | 模块 | 职责 |
 | --- | --- |
@@ -50,8 +107,7 @@ Global Truth——每条记录带来源独立保留，投影可落后于权威�
   引用只证明 CAS 字节身份，不证明节点本地放置。
 - 副本持久身份是 `(MemorySelector, NodeId, ConsumerProviderId)`；`Imported`
   证据单调，不因后续失败尝试降级。
-- 地图字节永不进入 State、Runtime checkpoint 或 Node Protocol（ADR-0016）；
-  `/v1/memories` 只读暴露地图 revision，发布仍走 `/v1/maps` 强校验。
+- `/v1/memories` 只读暴露地图 revision，发布仍走 `/v1/maps` 强校验。
 
 ## 实现状态
 

@@ -13,30 +13,81 @@
 其内部；RoboGuide 系统运行器只接受真实 Controller/Node/Runtime/Local-EAIOS 生产
 路径产生的持久化证据，绝不绕过 RoboGuide 直调仿真技能。
 
+## 架构位置
+
+```mermaid
+flowchart TB
+    CLI["roboguide-eval CLI<br/>doctor / run / summarize / proxy"]
+    SPEC["ExperimentSpec（版本化）"]
+    subgraph HARNESS["evaluation/ · ProcessSystemRunner"]
+        PROC["process.py<br/>子进程生命周期/清理"]
+        ACCT["accounting.py<br/>LLM 计量代理 :8901"]
+        RES["results.py<br/>RunManifest v0.1"]
+    end
+    EMOS["systems/emos.py"] -->|"官方入口"| EXT["EMOS / Habitat-MAS<br/>（独立 Conda 环境）"]
+    RG["systems/roboguide.py"] -->|"生产路径驱动"| SYS["RoboGuide 全栈<br/>Controller/Node/MI/Local EAIOS"]
+    SYS -->|"verdict.json + 证据文件"| RG
+    RG -->|"只归约持久化证据<br/>绝不直调仿真"| METRICS["metrics.json / trace.jsonl<br/>manifest.json"]
+    B1["b1_* 家族<br/>冻结 workload → 预检 → 等待<br/>→ 证据收集 → 身份验证 → 判定"] -.-> RG
+    CLI --> SPEC --> HARNESS
+```
+
+## Formal B1 时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant H as Harness (b1_*)
+    participant MI as Mission Service
+    participant RG as RoboGuide 生产路径
+    participant EV as 证据文件/事件
+
+    H->>H: b1_workload 冻结输入（episode/seed/dataset）
+    H->>H: b1_planning_source / b1_deployment_feasibility 预检
+    H->>MI: 提交（B1 模式）
+    MI->>RG: 生产链路执行
+    loop b1_runner_wait 状态驱动等待
+        H->>MI: 轮询请求生命周期
+    end
+    H->>RG: 场景 EXIT trap 触发 b1_artifacts
+    RG-->>H: mission/events/attempts/action_trace
+    H->>EV: b1_event_archive 分页归档 /v1/events
+    H->>H: b1_provenance 独立身份验证（不依赖 Habitat）
+    H->>H: b1_admission 总体判定（基准缺席≠无效）
+```
+
+## 模块地图
+
 | 模块组 | 职责 |
 | --- | --- |
 | 核心 | `models.py`（版本化 ExperimentSpec）、`config.py`（local.yaml 机器覆盖）、`process.py`（子进程生命周期/清理）、`runner.py`（`ProcessSystemRunner`）、`results.py`（`RunManifest` v0.1：manifest/metrics/trace/stdout）、`metrics.py`（规范度量契约 + 不可用机制） |
 | 公平性 | `e1_fairness.py`（数据集/任务/基准权威/具身/仿真器/模型配置身份 + 规范摘要）、`benchmark_evidence.py`（基准证据三态权威与运行有效性分类）、`accounting.py`（本地 LLM 计量代理） |
-| Formal B1 | `b1_workload`（冻结输入提取）→ `b1_planning_source` / `b1_deployment_feasibility`（预检）→ `b1_runner_wait`（状态驱动 MI 等待）→ `b1_artifacts` / `b1_event_archive`（有界证据收集 + `/v1/events` 分页归档）→ `b1_provenance`（独立于 Habitat 的语义/执行身份验证）→ `b1_admission` / `b1_run`（总体判定）→ `b1_live_view`（回环运维视图） |
+| Formal B1 | `b1_workload` → `b1_planning_source` / `b1_deployment_feasibility` → `b1_runner_wait` → `b1_artifacts` / `b1_event_archive` → `b1_provenance` → `b1_admission` / `b1_run` → `b1_live_view` |
 | 系统适配 | `systems/emos.py`（官方 EMOS 入口）、`systems/roboguide.py`（`RoboGuideRunner`：只归约运行目录中的持久化 verdict 证据） |
 | MI 探针 | `mission_front/`（真实模型链路的用例/不变量/记录） |
 
-**CLI**（`uv run roboguide-eval`）：`doctor`（环境自检）· `run --system {emos,roboguide}`
-· `summarize` · `proxy`（LLM 计量代理，默认 :8901）· `mission-front`。
-机器相关配置全部在 Git 忽略的 `evaluation/local.yaml` 或 `ROBOGUIDE_EVAL_*` 环境变量。
+**CLI**（`uv run roboguide-eval`）：`doctor` · `run --system {emos,roboguide}` ·
+`summarize` · `proxy` · `mission-front`。机器相关配置全部在 Git 忽略的
+`evaluation/local.yaml` 或 `ROBOGUIDE_EVAL_*` 环境变量。
 
 ## integrations/ —— 部署侧 Local EAIOS 适配器
 
-**habitat-local-eaios**（约 7,500 行，147 个测试）：C1-S0 参考桥，从通用
-`roboguide-node` 引擎进入既有 EMOS/Habitat 环境。关键机制：
+**habitat-local-eaios**（约 7,500 行，147 个测试）：C1-S0 参考桥。关键机制：
 
-- `shared_world.py`：一个 Habitat 世界 + 一条 EMOS Stage2 策略服务两个 agent；
-  唯一一次 reset 在 endpoint 就绪前，冻结 digest 绑定的负向可行性矩阵供 Stage2 复用
-  （ADR-0047）；
-- `emos_stage2.py`：`_install_assignment()` 把 Control 已提交的分配注入 EMOS
-  Stage1→Stage2 边界，替代 Stage1 自由讨论——运行原始 EMOS 策略栈不改写其动作；
-- `stage2_contract.py`：独立契约守卫把导航工具绑定到已提交目标，错目标即
-  `Stage2ContractViolation`（ADR-0046）；
+```mermaid
+flowchart LR
+    subgraph BRIDGE["habitat_local_eaios"]
+        SW["shared_world.py<br/>单世界服务双 agent<br/>reset 冻结可行性矩阵"]
+        S2["emos_stage2.py<br/>注入 Control 分配替代 Stage1"]
+        GUARD["stage2_contract.py<br/>导航工具绑定已提交目标"]
+    end
+    CTRL["Control 已提交分配<br/>（含精确目标）"] --> S2
+    SW --> S2 --> GUARD
+    GUARD -->|"越界目标 →<br/>Stage2ContractViolation"| EMOS["原始 EMOS 策略栈<br/>（不改写动作）"]
+    RESET["唯一一次 Habitat reset<br/>（endpoint 就绪前）"] --> SW
+    SW -->|"负向可行性矩阵<br/>digest 绑定"| ADM["_admit_spatial_feasibility<br/>本地准入检查"]
+```
+
 - 本地技能完成、基准 PDDL 成功、episode 终止、RoboGuide Mission 结果是四个
   独立事实，互不冒充。
 

@@ -32,7 +32,34 @@ RoboGuide 联合调度四类资源——**Capability**（可证明的执行能�
 
 ## 3. 一条指令的完整旅程
 
-以"让机器人把客厅的杯子拿到厨房"为例，跟踪每一步的真实 API：
+以"让机器人把客厅的杯子拿到厨房"为例，先看全链路时序，再逐步展开：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant MI as Mission Intelligence
+    participant OR as Orchestration
+    participant C as Control
+    participant RT as Runtime
+    participant N as roboguide-node / Local EAIOS
+
+    U->>MI: create(instruction)
+    MI-->>U: NeedsClarification? → 用户回答
+    MI->>MI: 计划 → 审查 →（修复）→ 审批
+    MI->>OR: submit(MissionPlan v0.8)
+    OR->>C: create_mission_group（Group + 全部 TaskExecution）
+    loop 每个 DAG 就绪 Task
+        OR->>C: match → schedule → propose → commit → bind
+        OR->>RT: prepare → execute（durable intent）
+        RT->>N: gRPC Execute（checkpoint 先于路由）
+        N-->>RT: CommandReceipt + ExecutionEvent 事实
+        RT-->>OR: 本地执行完成（≠ 满足）
+        OR->>OR: 按声明 basis 判定 TaskSatisfied
+        OR->>C: release_task_bindings → DAG 前进
+    end
+    OR-->>U: Mission Completed
+```
 
 **① 解释与澄清（Mission Intelligence）。**
 `MissionRequestEngine` 捕获一份不可变、digest 绑定的 `GroundingContextSnapshot`
@@ -55,12 +82,12 @@ Orchestration 侧 `MissionOrchestrator::submit` 校验机制 profile 与时间�
 **④ 调度前半程（Control）。**
 就绪 Task 走完整链条，每步是独立 API、独立权威：
 
-```text
-match_capabilities_for_mission   → CandidateSet     （谁能承担？）
-BoundedJointScheduler::schedule  → TaskSchedulingOutcome（谁/哪里/何时？仅选择）
-ControlPlane::propose            → AssignmentProposal（校验选择，不占资源）
-commit_for_group_with_state      → CommittedPlan     （重验资源身份后原子提交）
-bind_task_execution              → ActorBinding      （写入既有 Group）
+```mermaid
+flowchart LR
+    M["match_capabilities_for_mission<br/>→ CandidateSet<br/>（谁能承担？）"] --> S["BoundedJointScheduler<br/>→ TaskSchedulingOutcome<br/>（谁/哪里/何时？仅选择）"]
+    S --> P["propose<br/>→ AssignmentProposal<br/>（校验选择，不占资源）"]
+    P --> CM["commit_for_group_with_state<br/>→ CommittedPlan<br/>（重验资源身份后原子提交）"]
+    CM --> B["bind_task_execution<br/>→ ActorBinding<br/>（写入既有 Group）"]
 ```
 
 调度决策可能是 `SelectedNow / SelectedFuture / Deferred / WindowMissed`；
