@@ -415,6 +415,60 @@ fn current_negative_verifier_verdict_fails_mission() {
     );
 }
 
+/// A late final-world verdict cannot reopen a Group released after physical failure.
+#[test]
+fn late_verifier_after_runtime_failure_keeps_timer_alive() {
+    for satisfied in [false, true] {
+        let mut fixture = ParallelMission::new_with_verifier(true);
+        for index in 0..2 {
+            fixture.fact(index, 1, ExecutionPhase::Accepted);
+        }
+        let verified_index = fixture
+            .attempts
+            .iter()
+            .position(|attempt| attempt.command().task_id().as_str() == "a")
+            .expect("verified Task has an attempt");
+        fixture.fact(verified_index, 2, ExecutionPhase::Completed);
+        fixture.fact(1 - verified_index, 2, ExecutionPhase::Failed);
+        assert_eq!(
+            fixture
+                .controller
+                .bridge
+                .control()
+                .group(&fixture.group_id)
+                .expect("Group remains inspectable")
+                .lifecycle(),
+            control::GroupLifecycle::Released
+        );
+        let feed = verifier_feed_for(&mut fixture, satisfied, false);
+        let sequence_before = fixture.events.latest_sequence().expect("events readable");
+        let controller = Arc::new(Mutex::new(fixture.controller.clone()));
+        let gate = Arc::new(Mutex::new(()));
+        drive_application_timer(
+            &controller,
+            &fixture.events,
+            &gate,
+            TimestampMs::new(12),
+            Some(&feed),
+        )
+        .expect("late verdict is irrelevant to a terminal Mission");
+        let observed = controller.lock().expect("Controller remains live");
+        assert_eq!(
+            observed
+                .orchestrator
+                .execution(fixture.attempts[verified_index].command().mission_id())
+                .expect("Mission remains inspectable")
+                .lifecycle(),
+            orchestration::MissionExecutionLifecycle::Failed
+        );
+        assert!(observed.verifier_seen.is_empty());
+        assert_eq!(
+            fixture.events.latest_sequence().expect("events readable"),
+            sequence_before
+        );
+    }
+}
+
 /// A signed artifact from a superseded physical attempt remains invalid.
 #[test]
 fn stale_physical_attempt_verdict_is_rejected_before_mutation() {

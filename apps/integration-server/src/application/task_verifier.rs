@@ -391,6 +391,18 @@ pub(crate) fn apply_task_verifier(
         let Some(execution) = controller.orchestrator.execution(&mission_id) else {
             continue;
         };
+        if matches!(
+            execution.lifecycle(),
+            orchestration::MissionExecutionLifecycle::Completed
+                | orchestration::MissionExecutionLifecycle::Failed
+                | orchestration::MissionExecutionLifecycle::Cancelling
+                | orchestration::MissionExecutionLifecycle::Cancelled
+        ) {
+            // A terminal Runtime failure may release the Group before the
+            // final-world producer publishes its verdict. That verdict cannot
+            // reopen Mission satisfaction or fail the released Group again.
+            continue;
+        }
         let group_id = execution.group_id().clone();
         let awaiting = controller
             .bridge
