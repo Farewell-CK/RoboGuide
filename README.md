@@ -557,6 +557,13 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。
 
+可选的 `--goal-region-navigation` deployment mode 只替换 Habitat Oracle 的
+目标导航点解析：对于官方合取目标中明示的距离型 `any_at` 实体，优先保留原始导航点；
+若它不在目标区域内或当前机器人专用导航网格无法到达，则在有界候选集中选取区域内
+有路径的点。模型仍选择原实体工具调用，原始控制与官方 PDDL 判定不变。
+模式、原始/选中点与路径查询另行归档；启用时的 Local How 与原生 EMOS 不同，
+对照时须明确记录。见 [`ADR-0051`](docs/decisions/0051-goal-region-local-navigation.md)。
+
 ## 三条核心语义链
 
 ```text

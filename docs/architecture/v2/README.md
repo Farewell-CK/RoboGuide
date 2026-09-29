@@ -515,6 +515,14 @@ Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。
 
+对于部署明示的距离型导航目标，Local EAIOS 可以在不改变 canonical destination、
+Stage2 所选实体工具调用和官方目标的前提下，将该实体解析为目标容差内、当前机器人
+导航网格上有路径的物理导航点。此解析只属于该 deployment 的 Local How，必须记录
+所用官方目标谓词、阈值、候选点、路径查询和适配器版本；无可证路径时明确失败，不能
+把到达局部导航点或静态路径当作官方谓词成立。未经明示的目标类型保持原有执行方式。
+部署启用该行为后与原生 EMOS 的 Local How 不同，对照实验必须记录这一差异。详见
+[`ADR-0051`](../../decisions/0051-goal-region-local-navigation.md)。
+
 ## 7. 对账与恢复
 
 ```text

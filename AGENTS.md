@@ -184,6 +184,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
+- Optional goal-region navigation is a deployment-owned Local How variant for direct
+  conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
+  entity and original Oracle control loop, but may select a different physical target
+  point on the agent-specific navmesh after bounded route checks. It never changes
+  canonical intent or official PDDL truth. The mode is off by default and must be
+  disclosed as a RoboGuide-versus-native-EMOS arm difference when enabled.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

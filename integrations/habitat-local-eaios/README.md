@@ -51,6 +51,23 @@ remain the EMOS Stage2 implementation. Selected model actions pass the local exe
 below before they can reach a skill. The direct-Oracle backend
 remains a separate native protocol path.
 
+The optional `--goal-region-navigation` mode is an explicit deployment-owned
+Local How variant for `shared-emos-stage2`. For exact
+entities in direct conjunctive official `any_at` goals, it retains the model's
+selected `nav_to_obj` entity and the original Oracle control loop, but may
+choose a different physical navigation point inside the official 3D tolerance
+when the original point is not reachable on that agent's own navmesh. It uses
+bounded deterministic vertex and path queries, without simulator stepping or
+random sampling. Unsupported action types fail at initialization; a qualifying
+goal with no proven route fails locally rather than using the original
+straight-line fallback. `evidence/local-how-profile.json` records the selected
+mode, and `evidence/goal-region-navigation-selections.json` records the original
+and selected points at terminal. The official PDDL metric alone decides goal
+success; a static route or local skill completion does not. This mode changes
+RoboGuide's Local How relative to native EMOS and must be disclosed in paired
+comparison. It is off by default, including in B1 unless
+`ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1` is explicitly set.
+
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
 `terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat
