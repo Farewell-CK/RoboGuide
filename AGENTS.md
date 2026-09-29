@@ -211,6 +211,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Commit, Bind, and a real Node workflow precede the original `Get_env_info.step` transition.
   The adapter contains no task route or multi-action macro. Only the official `task_goal` relation
   check establishes benchmark success, and invalid plans or exhausted budgets remain failures.
+- `tools/e2-generic/run_dag.py` is the optional multi-task serial-DAG experiment runner. It submits
+  whole unedited model-generated plans to the unchanged Controller and retains the same per-action
+  adapter boundary. Fresh planning is allowed after a completed observation segment; failed or
+  ambiguous execution terminates the run. It owns experiment budgets and evidence, not Core recovery.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.

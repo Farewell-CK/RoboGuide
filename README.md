@@ -567,6 +567,11 @@ hand-authored controlled plan，不是 PEFA、自主 Mission Intelligence 或物
 Node 和原始 `Get_env_info.step`。adapter 不包含 task17 路线或正确动作宏，最终成功仅由
 官方 `task_goal` 图关系判定。固定随机十任务清单和顺序批运行器也保存在该目录。
 
+同目录的 `run_dag.py` 支持一次生成多步依赖计划，再由现有 Controller 连续调度。
+完成探索段后可用新观测规划后续段；执行失败或状态不明时保留证据并终止。
+该模式使用独立端口，保持原始 adapter、Core 与 Mission Intelligence 源码不变。
+它采用串行依赖链以匹配图级步数口径，暂不衡量并行调度收益。
+
 ## 三条核心语义链
 
 ```text

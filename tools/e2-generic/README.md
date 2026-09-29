@@ -32,3 +32,53 @@ uv run python tools/e2-generic/run_task.py \
 `sample-10-seed-20260929.json` freezes the deterministic ten-task sample. `run_sample.py` runs it
 sequentially because every task owns the same loopback Controller and bridge ports. A failed task is
 preserved and the batch continues; it is never repaired by editing the model's action or plan.
+
+## Multi-task planning mode
+
+`run_dag.py` submits an unedited multi-task MissionPlan to the same Controller and Nodes. Each
+Task still executes one primitive through the existing generic adapter. Tasks form a dependency
+chain, preserving COHERENT's serial graph-step semantics. This profile exercises multi-step
+planning and cross-robot handoffs, not parallel scheduling performance.
+
+Planner and Reviewer run once per plan, with the existing bounded Repairer when needed. A completed
+exploration segment may request a new plan using fresh observations; an execution failure or
+ambiguous Controller state ends the run with evidence. This runner does not implement Core recovery
+or silently revise an accepted Mission. The first action must be available at plan admission;
+subsequent actions are checked by the unchanged adapter immediately before execution. No future
+state is simulated by admission, and the planner receives only shared official partial observations.
+
+Defaults: at most three planning segments and `2*GT+1` total primitives. Every submitted plan must
+fit the remaining primitive budget. The dedicated Sol configuration retains `xhigh` and review,
+but raises the output-token ceiling to 24576 to allow multi-task JSON. This ceiling is an explicit
+experimental difference from the single-step configuration; all raw calls remain recorded.
+
+```bash
+PYTHONPATH=integrations/coherent-local-eaios:mission/src \
+python tools/e2-generic/run_dag.py \
+  --repo . --coherent-root ../COHERENT --binary-root target/debug \
+  --config tools/e2-generic/mission-dag-gpt-6-sol.toml \
+  --env env4 --task 5 --output /absolute/new/dag-evidence
+```
+
+The default ports (25170, 28170, 28191, 28220) differ from the single-step experiment; `--port-offset`
+can select another range. Use an isolated checkout while older batches are running. Binaries are
+reused and hashed, provider requests/responses and submitted plans are retained, and checksums are
+computed after child processes stop. Results distinguish Controller completion from official goal
+success. Core, Mission Intelligence source and built-in system prompts, and contracts are unchanged.
+The experiment objective is different: it asks for multiple tasks and supplies generic graph-action
+semantics. These instructions are not a fixed benchmark solution. Along with the larger output
+ceiling and segment budget, this is a new experimental condition, not an identical-prompt timing trial.
+
+The initial development run on `env4/task5` generated five tasks and failed after three applied
+primitives: the model requested `movetowards` to the floor it was already above. The adapter rejected
+the action and the Controller reported failure. The run was not repaired or overwritten. Generic
+room-entry/ABOVE semantics from COHERENT `get_env_info.py` were then documented in the objective;
+follow-up runs start from the official initial state in separate directories. Development retries
+must not be counted as independent held-out benchmark successes.
+
+On 2026-09-29 the follow-up development run `dev-env4-task5-20260929-b` passed both the official
+goal check and Controller completion: four primitives, one planning segment, two provider calls,
+250.73 seconds wall time (243.38 seconds inside recorded model calls). The prior single-step smoke
+on the same task used four primitives, eight provider calls, and 688.97 seconds. These are single
+development observations under different objective/configuration conditions, not a speedup claim
+for all tasks. The failed first development attempt took 359.34 seconds and remains separate evidence.
