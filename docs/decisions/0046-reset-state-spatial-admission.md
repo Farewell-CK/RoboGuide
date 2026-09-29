@@ -3,6 +3,9 @@
 - Status: Proposed for review
 - Date: 2026-09-27
 
+ADR-0050 narrows the cross-floor rejection rule below for distance-based
+official goals. This record remains the history of the original local gate.
+
 ## Context
 
 The Habitat mobility deployment registers typed capability facts such as

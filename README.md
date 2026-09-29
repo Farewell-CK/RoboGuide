@@ -537,10 +537,13 @@ Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适�
 虚构 Actor、assignment 或 benchmark success。边界见
 [`ADR-0045`](docs/decisions/0045-shared-world-execution-session.md)。
 该部署还在 run-local、digest-bound 的 Node 配置快照中保留跨楼层能力声明，并在 Habitat
-reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。只有明确定位到不同语义楼层且
-注册能力明确不支持跨楼层时才拒绝本地执行；位置未能唯一归属语义区域时记录 `unknown`，
+reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。对于不在官方目标中的精确
+实体目的地，现有部署保留“不同楼层且注册能力明确不支持跨楼层”的拒绝规则；
+官方 `any_at` 这样的三维距离目标即使跨楼层也保留 `unknown`。位置未能唯一归属语义
+区域时也记录 `unknown`，
 不宣称可达，也不代替 Control 重新分配。见
-[`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md)。
+[`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md) 与
+[`ADR-0050`](docs/decisions/0050-distance-goal-spatial-feasibility.md)。
 当前 shared-world B1 部署在 endpoint 就绪前完成唯一一次 reset，冻结实际起点与精确
 operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同一份 observations。
 `integrations/habitat-local-eaios/habitat_local_eaios/preassignment_feasibility.py` 生成
@@ -548,7 +551,8 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 及来源 digest 交叉绑定；`apps/integration-server/src/application/deployment_feasibility.rs`
 在部署可选启用时核对证据并收窄 Control 候选。Control 仍独占实时匹配、调度和 Commit，
 未知空间证据不冒充可达性，官方成败仍由 Habitat 判定。见
-[`ADR-0047`](docs/decisions/0047-reset-state-deployment-candidates.md)。
+[`ADR-0047`](docs/decisions/0047-reset-state-deployment-candidates.md) 与
+[`ADR-0050`](docs/decisions/0050-distance-goal-spatial-feasibility.md)。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。

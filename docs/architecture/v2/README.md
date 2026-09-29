@@ -83,9 +83,11 @@ B1 中与实际适配器文件及冻结 workload identity 交叉校验。Habitat
 在该部署中，唯一一次 Habitat reset 发生在 endpoint ONLINE 和 Mission 提交之前；子进程
 冻结实际起点、候选 endpoint 对精确 mobility intent 的负向可行性证据，并将同一份
 observations 交给后续 Stage2。Control 在应用层将该部署证据与实时注册及资源事实取交集，
-仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。明确的
-跨楼层冲突可在匹配前排除；未知仍保留，原本的本地执行检查继续生效，正向结果不代表
-路线可达。详见 ADR-0044、ADR-0046 与 ADR-0047。
+仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。跨楼层
+位置本身不证明距离型官方目标不可满足：例如 `any_at` 允许机器人在相邻楼层的容差内
+满足目标。当前精确实体目的地的部署负向筛选，对不在官方目标中的目的地保留原有
+楼层规则；距离型目标保留 `unknown`，由实际导航和 Habitat 官方谓词裁决。本地执行检查
+使用相同规则，正向结果不代表路线可达。详见 ADR-0044、ADR-0046、ADR-0047 与 ADR-0050。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability

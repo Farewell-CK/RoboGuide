@@ -116,7 +116,10 @@ It maps both through the loaded semantic-region floor ids and writes
 `evidence/spatial-feasibility.json`.
 
 An explicit different-floor result paired with a registered
-`supports-floor-transition=false` is a deployment incompatibility. The
+`supports-floor-transition=false` retains the existing exact-destination
+incompatibility for an entity absent from the official goal. An official
+distance-based `any_at` goal may be satisfied from an adjacent floor; that
+case stays `unknown` until physical execution and official evaluation. The
 adapter writes `spatial-feasibility-failure.json`, preserves reset and
 terminal diagnostics, and fails the local executions before any action or
 Gym step. It does not reassign the Task, edit the destination, or synthesize

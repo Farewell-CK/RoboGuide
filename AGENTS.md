@@ -192,8 +192,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   matrix against the frozen workload and source digests before Controller startup. The current
   paired endpoint profile requires one exclusive `space:1` slot per Role and one capacity-one
   slot per endpoint; unsupported topology or known candidate shortage fails before submission.
-  Unknown geometry remains unknown, and local post-assignment admission still applies. See
-  ADR-0047.
+  A floor mismatch does not exclude a distance-based `any_at` goal that may be satisfied from an
+  adjacent floor. Such reachability stays unknown until actual execution; the local post-assignment
+  gate uses the same semantics. See ADR-0047 and ADR-0050.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
