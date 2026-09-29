@@ -1,0 +1,24 @@
+/* RoboGuide 文档站中文排版覆盖。
+ *
+ * Material 默认的浅灰细标题在中文（微软雅黑/苹方没有 Light 字重）下显得
+ * 单薄发虚；font: false 后中文回退到系统字体，这里显式给出 CJK 友好的
+ * 字体栈，并把各级标题恢复为全色加粗。 */
+
+:root {
+  --md-text-font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Noto Sans SC", sans-serif;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}
+
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}

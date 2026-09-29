@@ -8,13 +8,14 @@ theme:
   name: material
   language: zh
   font: false
+  custom_dir: custom_theme
   icon:
     repo: fontawesome/brands/github
   features:
     - navigation.instant
-    - navigation.sections
     - navigation.top
     - navigation.footer
+    - navigation.indexes
     - search.highlight
     - search.suggest
     - content.code.copy
@@ -53,3 +54,6 @@ markdown_extensions:
   - pymdownx.highlight
   - pymdownx.inlinehilite
   - pymdownx.superfences
+
+extra_css:
+  - stylesheets/custom.css

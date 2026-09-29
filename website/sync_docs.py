@@ -53,42 +53,63 @@ COPY_PLAN: tuple[tuple[str, str], ...] = (
     ("integrations/robonix-map-service/README.md", "integrations/robonix-map-service/index.md"),
 )
 
-#: Navigation entries placed before the automatically generated ADR block, as
-#: ``(title, site-relative path)`` pairs.
-NAV_BEFORE_ADRS: tuple[tuple[str, str], ...] = (
-    ("首页", "index.md"),
-    ("项目目标与 MVP", "docs/project-goals-and-mvp.md"),
-    ("MVP 定义", "docs/mvp-definition.md"),
-    ("待定决策清单", "docs/implementation-backlog.md"),
-    ("文档索引", "docs/index.md"),
-    ("架构版本布局", "docs/architecture/index.md"),
-    ("V2 架构基线", "docs/architecture/v2/index.md"),
-    ("V1.1 历史架构", "docs/architecture/v1.1/index.md"),
-    ("架构图索引", "docs/images/index.md"),
-)
-
-#: Navigation entries placed after the automatically generated ADR block.
-NAV_AFTER_ADRS: tuple[tuple[str, str], ...] = (
-    ("开发基线", "docs/development/index.md"),
-    ("编码规范", "docs/development/coding-standards.md"),
-    ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
-    ("C1 前生产链准入审计", "docs/development/pre-c1-readiness-audit-2026-09-15.md"),
-    ("MI 协调指导验证", "docs/development/mi-coordination-guidance-validation.md"),
-    ("设备扩展规范 v0.1", "docs/extensions/device-extension-conformance-v0.1.md"),
-    ("设备扩展规范 v0.2", "docs/extensions/device-extension-conformance-v0.2.md"),
-    ("Mission Intelligence", "mission/index.md"),
-    ("Eval Harness", "evaluation/index.md"),
-    ("E1 公平性集成计划", "evaluation/docs/E1_FAIRNESS_INTEGRATION_PLAN.md"),
-    ("E1 测试框架就绪审计", "evaluation/docs/E1_HARNESS_READINESS_AUDIT.md"),
-    ("E1 公平性基础", "evaluation/docs/e1-fairness-foundation.md"),
-    ("E1 公平性评审挑战", "evaluation/docs/e1-fairness-reviewer-challenges.md"),
-    ("评估证据有效性规范", "evaluation/docs/evaluation-evidence-validity.md"),
-    ("F01-F07 集成回归", "evaluation/docs/f01-f07-integration-regression.md"),
-    ("Robonix 地图适配器", "integrations/robonix-map-service/index.md"),
-    ("Habitat Local EAIOS 桥", "integrations/habitat-local-eaios/index.md"),
-)
-
+#: Title of the automatically generated ADR navigation group; the group's
+#: children are produced from the mirrored ``docs/decisions/`` pages at sync time.
 ADR_NAV_TITLE = "架构决策记录（ADR）"
+
+#: Curated hierarchical navigation as ``(title, parent site path, children)``
+#: triples. A group with empty children renders as a plain navigation entry;
+#: children are emitted indented by four spaces because Python-Markdown (and
+#: therefore literate-nav) only nests list items at that indent width.
+NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
+    ("首页", "index.md", ()),
+    ("文档索引", "docs/index.md", ()),
+    (
+        "项目范围",
+        "docs/project-goals-and-mvp.md",
+        (
+            ("MVP 定义", "docs/mvp-definition.md"),
+            ("待定决策清单", "docs/implementation-backlog.md"),
+        ),
+    ),
+    (
+        "架构",
+        "docs/architecture/index.md",
+        (
+            ("V2 架构基线", "docs/architecture/v2/index.md"),
+            ("V1.1 历史架构", "docs/architecture/v1.1/index.md"),
+            ("架构图索引", "docs/images/index.md"),
+        ),
+    ),
+    (ADR_NAV_TITLE, "docs/decisions/index.md", ()),
+    (
+        "开发",
+        "docs/development/index.md",
+        (
+            ("编码规范", "docs/development/coding-standards.md"),
+            ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
+            ("C1 前生产链准入审计", "docs/development/pre-c1-readiness-audit-2026-09-15.md"),
+            ("MI 协调指导验证", "docs/development/mi-coordination-guidance-validation.md"),
+            ("设备扩展规范 v0.1", "docs/extensions/device-extension-conformance-v0.1.md"),
+            ("设备扩展规范 v0.2", "docs/extensions/device-extension-conformance-v0.2.md"),
+        ),
+    ),
+    ("Mission Intelligence", "mission/index.md", ()),
+    (
+        "Eval Harness",
+        "evaluation/index.md",
+        (
+            ("E1 公平性集成计划", "evaluation/docs/E1_FAIRNESS_INTEGRATION_PLAN.md"),
+            ("E1 测试框架就绪审计", "evaluation/docs/E1_HARNESS_READINESS_AUDIT.md"),
+            ("E1 公平性基础", "evaluation/docs/e1-fairness-foundation.md"),
+            ("E1 公平性评审挑战", "evaluation/docs/e1-fairness-reviewer-challenges.md"),
+            ("评估证据有效性规范", "evaluation/docs/evaluation-evidence-validity.md"),
+            ("F01-F07 集成回归", "evaluation/docs/f01-f07-integration-regression.md"),
+        ),
+    ),
+    ("Robonix 地图适配器", "integrations/robonix-map-service/index.md", ()),
+    ("Habitat Local EAIOS 桥", "integrations/habitat-local-eaios/index.md", ()),
+)
 
 LINK_PATTERN = re.compile(r"\]\((?P<target>[^()\s]+)(?P<title>\s+\"[^\"]*\")?\)")
 SKIP_TARGET_PREFIXES = ("#", "http://", "https://", "mailto:", "data:")
@@ -368,17 +389,24 @@ def write_summary(summaries: list[AdrSummary]) -> Path:
     Raises:
         SystemExit: If a curated navigation entry does not exist after syncing.
     """
-    nav_entries = [*NAV_BEFORE_ADRS, (ADR_NAV_TITLE, "docs/decisions/index.md"), *NAV_AFTER_ADRS]
-    for _, site_path in nav_entries:
+    adr_children = tuple((f"ADR-{adr.number} {adr.title}", adr.site_path) for adr in summaries)
+    groups: list[tuple[str, str, tuple[tuple[str, str], ...]]] = []
+    for title, site_path, children in NAV_GROUPS:
+        if title == ADR_NAV_TITLE:
+            groups.append((title, site_path, adr_children))
+        else:
+            groups.append((title, site_path, children))
+    for _, site_path, children in groups:
         if not (SITE_DOCS_DIR / site_path).is_file():
             raise SystemExit(f"navigation entry target is missing after sync: {site_path}")
+        for _, child_path in children:
+            if not (SITE_DOCS_DIR / child_path).is_file():
+                raise SystemExit(f"navigation child target is missing after sync: {child_path}")
     lines: list[str] = []
-    for index, (title, site_path) in enumerate(nav_entries):
+    for title, site_path, children in groups:
         lines.append(f"- [{title}]({site_path})")
-        if index == len(NAV_BEFORE_ADRS):
-            for adr in summaries:
-                filename = Path(adr.site_path).name
-                lines.append(f"  - [ADR-{adr.number} {adr.title}](docs/decisions/{filename})")
+        for child_title, child_path in children:
+            lines.append(f"    - [{child_title}]({child_path})")
     SUMMARY_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return SUMMARY_PATH
 
