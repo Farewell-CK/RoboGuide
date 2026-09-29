@@ -118,6 +118,11 @@ def _arguments() -> argparse.Namespace:
         default=None,
         help="shared backend: digest-bound Node capability snapshot",
     )
+    parser.add_argument(
+        "--goal-region-navigation",
+        action="store_true",
+        help="shared backend: opt in to agent-navmesh target selection for official any_at goals",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +154,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         run_id=arguments.run_id,
         spatial_capabilities=load_spatial_profile_snapshot(arguments.spatial_profile),
         spatial_profile_path=arguments.spatial_profile,
+        goal_region_navigation=arguments.goal_region_navigation,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
     coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
@@ -178,6 +184,8 @@ def main() -> None:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
+    if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if arguments.backend == "shared-emos-stage2":
         _run_shared_world(arguments)
@@ -200,6 +208,7 @@ def main() -> None:
             subtask_mode=arguments.subtask_mode,
             evidence_dir=arguments.evidence_dir,
             run_id=arguments.run_id,
+            goal_region_navigation=arguments.goal_region_navigation,
         )
         backend_class: type = CrabAgentMobilityBackend
     else:

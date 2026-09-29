@@ -24,6 +24,7 @@ PIDS=()
 AUX_PIDS=()
 VIDEO_ARGS=()
 LIVE_VIEW_ARGS=()
+GOAL_REGION_ARGS=()
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -156,6 +157,9 @@ if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
         --live-preview-period-steps "${ROBOGUIDE_HABITAT_LIVE_PREVIEW_PERIOD_STEPS:-5}"
     )
 fi
+if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" == 1 ]]; then
+    GOAL_REGION_ARGS=(--goal-region-navigation)
+fi
 trap finish_run EXIT
 # The workload (episode, seed, dataset identity) comes from the frozen B1
 # input itself — never from a scenario-embedded episode. The extractor
@@ -211,6 +215,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         "$HABITAT_PYTHON" -u -m habitat_local_eaios \
         --port 28100 \
         --backend shared-emos-stage2 \
+        "${GOAL_REGION_ARGS[@]}" \
         --subtask-mode natural-objective \
         --port-b 28102 \
         --state-db "$RUN/bridge-a.sqlite3" \

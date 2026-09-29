@@ -31,6 +31,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     run_id: str = "unbound"
     spatial_capabilities: tuple[FloorTransitionProfile, ...] = ()
     spatial_profile_path: Path | None = None
+    goal_region_navigation: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""

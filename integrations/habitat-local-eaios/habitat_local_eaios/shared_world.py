@@ -779,6 +779,25 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
     def _record_terminal_diagnostics(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Persist best-effort terminal evidence without changing SUT failure semantics."""
         try:
+            actions = habitat_env.task.actions
+            selections = {
+                name: action.navigation_selection_evidence()
+                for name, action in actions.items()
+                if callable(getattr(action, "navigation_selection_evidence", None))
+            }
+            if selections:
+                self._write_json(
+                    "goal-region-navigation-selections.json",
+                    {
+                        "schema_version": "roboguide.habitat-goal-region-selections/v0.1",
+                        "episode_id": self._config.episode_id,
+                        "terminal_reason": reason,
+                        "actions": selections,
+                    },
+                )
+        except Exception:  # noqa: BLE001 - optional evidence cannot mask execution
+            _LOG.exception("goal-region navigation evidence failed at shared-world termination")
+        try:
             self._diagnostics.record_terminal(habitat_env, steps, reason)
         except Exception:  # noqa: BLE001 - optional evidence cannot mask execution
             _LOG.exception("physical diagnostics failed while recording terminal evidence")

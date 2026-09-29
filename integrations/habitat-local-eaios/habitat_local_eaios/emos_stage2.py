@@ -25,6 +25,29 @@ from .stage2_contract import (
 _LOG = logging.getLogger(__name__)
 
 
+def _configure_goal_region_navigation(config: Any, read_write: Callable[[Any], Any]) -> None:
+    """Select the adapter-owned Oracle subclass before constructing Habitat.
+
+    Only the configured original differential-base navigation action is
+    supported. A different vendor action fails closed instead of silently
+    changing an unrelated skill or running an undisclosed Local How profile.
+    """
+    from .goal_region_action import GoalRegionOracleNavDiffBaseAction
+
+    action_name = GoalRegionOracleNavDiffBaseAction.__name__
+    actions = config.habitat.task.actions
+    agent_count = len(config.habitat.simulator.agents_order)
+    keys = [f"agent_{agent_id}_oracle_nav_action" for agent_id in range(agent_count)]
+    for key in keys:
+        if key not in actions or actions[key].type != "OracleNavDiffBaseAction":
+            raise IntegrationError(
+                f"goal-region navigation requires original OracleNavDiffBaseAction at {key}"
+            )
+    with read_write(config):
+        for key in keys:
+            actions[key].type = action_name
+
+
 def format_stage2_subtask(invocation: CanonicalMobilityInvocation, mode: str) -> str:
     """Preserve the objective while binding Stage2's navigation target to the intent.
 
@@ -166,6 +189,9 @@ class EmosStage2Runtime:
                 str(self._config.config_path),
                 overrides=habitat_config_overrides(self._config.seed),
             )
+            goal_region_enabled = bool(getattr(self._config, "goal_region_navigation", False))
+            if goal_region_enabled:
+                _configure_goal_region_navigation(config, read_write)
             if self._config.video_path is not None or self._config.live_preview_path is not None:
                 _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
@@ -212,6 +238,18 @@ class EmosStage2Runtime:
                 "habitat_config": config,
             }
             self._write_json(
+                "local-how-profile.json",
+                {
+                    "schema_version": "roboguide.habitat-local-how-profile/v0.1",
+                    "navigation_point_resolver": (
+                        "official-any-at-agent-navmesh/v0.1"
+                        if goal_region_enabled
+                        else "original-emos-oracle"
+                    ),
+                    "official_success_authority": "habitat-pddl",
+                },
+            )
+            self._write_json(
                 "runtime-source-manifest.json",
                 build_runtime_source_manifest(
                     (
@@ -223,6 +261,8 @@ class EmosStage2Runtime:
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
                         "habitat_local_eaios.emos_stage2",
+                        "habitat_local_eaios.goal_region_action",
+                        "habitat_local_eaios.goal_region_navigation",
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",
