@@ -22,8 +22,11 @@ class GoalRegionSelection:
 
     point: Point3
     source: Literal["original", "agent-navmesh"]
-    original_status: Literal["reachable", "outside_goal_region", "no_agent_path"]
+    original_status: Literal[
+        "reachable", "outside_goal_region", "stop_envelope_exceeds_goal", "no_agent_path"
+    ]
     reference_distance_m: float
+    estimated_stop_envelope_distance_m: float
     path_length_m: float
     vertices_seen: int
     candidates_in_region: int
@@ -37,6 +40,7 @@ class GoalRegionSelection:
             "source": self.source,
             "original_status": self.original_status,
             "estimated_pddl_reference_distance_m": self.reference_distance_m,
+            "estimated_stop_envelope_distance_m": self.estimated_stop_envelope_distance_m,
             "path_length_m": self.path_length_m,
             "vertices_seen": self.vertices_seen,
             "candidates_in_region": self.candidates_in_region,
@@ -92,8 +96,10 @@ def select_goal_region_point(
     goal_center: Sequence[object],
     reference_offset: Sequence[object],
     radius_m: float,
+    stop_radius_m: float,
     navmesh_vertices: Sequence[Sequence[object]] | Callable[[], Sequence[Sequence[object]]],
     path_length: Callable[[Point3], float | None],
+    project_center: Callable[[Point3], Point3 | None] | None = None,
     max_vertices: int = MAX_NAVMESH_VERTICES,
     max_path_queries: int = MAX_PATH_QUERIES,
 ) -> GoalRegionSelection:
@@ -109,23 +115,43 @@ def select_goal_region_point(
     original = point3(original_point)
     if not math.isfinite(radius_m) or radius_m <= 0:
         raise GoalRegionResolutionError("official any_at radius is unavailable")
+    if not math.isfinite(stop_radius_m) or stop_radius_m < 0:
+        raise GoalRegionResolutionError("local Oracle stop radius is unavailable")
     if max_vertices < 1 or max_path_queries < 1:
         raise GoalRegionResolutionError("goal-region search budget is invalid")
-    # Leave a small geometric margin for numeric error. This is not a changed
-    # benchmark threshold and cannot guarantee truth after local skill stopping.
-    bound = radius_m - min(0.1, radius_m * 0.1)
+    # The original Oracle stops within its own distance threshold from the
+    # selected point. A point barely inside the official radius can therefore
+    # still produce a local-complete / official-false outcome.
+    bound = radius_m - min(0.02, radius_m * 0.01)
 
     def estimated_distance(candidate: Point3) -> float:
         """Estimate the official 3D reference distance at a candidate base."""
         reference = tuple(candidate[index] + offset[index] for index in range(3))
         return math.dist(reference, center)
 
+    def stop_envelope(candidate: Point3) -> float:
+        """Rank base points by planar stop tolerance and PDDL reference offset.
+
+        The navmesh projection estimates final height. Dynamic movement and
+        rotation remain unproven, so this value is never official goal truth.
+        """
+        horizontal = math.hypot(candidate[0] - center[0], candidate[2] - center[2])
+        offset_horizontal = math.hypot(offset[0], offset[2])
+        vertical = candidate[1] + offset[1] - center[1]
+        return math.hypot(vertical, horizontal + offset_horizontal + stop_radius_m)
+
+    def admitted(candidate: Point3) -> bool:
+        """Require both the point and its estimated local stop envelope inside."""
+        return estimated_distance(candidate) < bound and stop_envelope(candidate) < bound
+
     queries = 0
     original_distance = estimated_distance(original)
-    original_status: Literal["reachable", "outside_goal_region", "no_agent_path"] = (
-        "outside_goal_region"
-    )
-    if original_distance < bound:
+    original_status: Literal[
+        "reachable", "outside_goal_region", "stop_envelope_exceeds_goal", "no_agent_path"
+    ] = "outside_goal_region"
+    if original_distance < bound and stop_envelope(original) >= bound:
+        original_status = "stop_envelope_exceeds_goal"
+    if admitted(original):
         queries += 1
         original_path = path_length(original)
         if original_path is not None and math.isfinite(original_path) and original_path >= 0:
@@ -134,6 +160,7 @@ def select_goal_region_point(
                 "original",
                 "reachable",
                 original_distance,
+                stop_envelope(original),
                 original_path,
                 0,
                 0,
@@ -141,6 +168,32 @@ def select_goal_region_point(
                 False,
             )
         original_status = "no_agent_path"
+
+    projected: Point3 | None = None
+    if project_center is not None:
+        projected = project_center(center)
+        if projected is not None:
+            projected = point3(projected)
+            if admitted(projected) and projected != original:
+                queries += 1
+                projected_path = path_length(projected)
+                if (
+                    projected_path is not None
+                    and math.isfinite(projected_path)
+                    and projected_path >= 0
+                ):
+                    return GoalRegionSelection(
+                        projected,
+                        "agent-navmesh",
+                        original_status,
+                        estimated_distance(projected),
+                        stop_envelope(projected),
+                        projected_path,
+                        0,
+                        1,
+                        queries,
+                        False,
+                    )
 
     vertices = navmesh_vertices() if callable(navmesh_vertices) else navmesh_vertices
     if len(vertices) > max_vertices:
@@ -151,9 +204,9 @@ def select_goal_region_point(
             vertex = point3(raw_vertex)
         except GoalRegionResolutionError:
             continue
-        if estimated_distance(vertex) < bound and vertex != original:
+        if admitted(vertex) and vertex != original and vertex != projected:
             candidates.add(vertex)
-    ordered = sorted(candidates, key=lambda candidate: (estimated_distance(candidate), candidate))
+    ordered = sorted(candidates, key=lambda candidate: (stop_envelope(candidate), candidate))
     budget = max_path_queries - queries
     if budget <= 0:
         raise GoalRegionResolutionError("goal-region path-query budget exhausted")
@@ -162,20 +215,21 @@ def select_goal_region_point(
         queries += 1
         route = path_length(candidate)
         if route is not None and math.isfinite(route) and route >= 0:
-            successful.append((estimated_distance(candidate), route, candidate))
+            successful.append((stop_envelope(candidate), route, candidate))
     if not successful:
         reason = (
             "goal-region path-query budget exhausted"
             if len(ordered) > budget
-            else "no agent-specific path to official goal region"
+            else "no agent-specific path to stop-compatible official goal region"
         )
         raise GoalRegionResolutionError(reason)
-    distance, route, candidate = min(successful)
+    envelope, route, candidate = min(successful)
     return GoalRegionSelection(
         candidate,
         "agent-navmesh",
         original_status,
-        distance,
+        estimated_distance(candidate),
+        envelope,
         route,
         len(vertices),
         len(ordered),

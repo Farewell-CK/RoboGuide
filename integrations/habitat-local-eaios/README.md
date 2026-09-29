@@ -56,7 +56,9 @@ Local How variant for `shared-emos-stage2`. For exact
 entities in direct conjunctive official `any_at` goals, it retains the model's
 selected `nav_to_obj` entity and the original Oracle control loop, but may
 choose a different physical navigation point inside the official 3D tolerance
-when the original point is not reachable on that agent's own navmesh. It uses
+when the original point is not reachable or leaves too little margin for the
+original Oracle's stopping radius. It first tests the official entity X/Z on
+the agent's own navmesh height, then uses bounded vertex search. It uses
 bounded deterministic vertex and path queries, without simulator stepping or
 random sampling. Unsupported action types fail at initialization; a qualifying
 goal with no proven route fails locally rather than using the original

@@ -61,6 +61,18 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
         distance = float(path.geodesic_distance)
         return distance if math.isfinite(distance) and distance >= 0 else None
 
+    def _project_center(self, center: Point3) -> Point3 | None:
+        """Snap the goal's X/Z on this agent's current navmesh height."""
+        base = point3(self.cur_articulated_agent.base_pos)
+        projected = self.pathfinder.snap_point((center[0], base[1], center[2]))
+        try:
+            point = point3(projected)
+        except GoalRegionResolutionError:
+            return None
+        # A snap to another floor is still checked by the official 3D region
+        # and actual agent-specific route before this point can be selected.
+        return point
+
     def _get_target_for_idx(self, nav_to_target_idx: int) -> Any:
         """Select a reachable point for an exact conjunctive ``any_at`` entity.
 
@@ -108,8 +120,10 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
                 goal_center=object_point,
                 reference_offset=reference - base,
                 radius_m=threshold,
+                stop_radius_m=float(self._config.dist_thresh),
                 navmesh_vertices=self.pathfinder.build_navmesh_vertices,
                 path_length=self._path_length,
+                project_center=self._project_center,
             )
             self._targets[nav_to_target_idx] = (
                 np.asarray(selected.point),

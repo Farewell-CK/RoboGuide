@@ -43,6 +43,7 @@ def test_reachable_original_point_is_preserved() -> None:
         goal_center=(0.5, 0.0, 0.0),
         reference_offset=(0.0, 0.0, 0.0),
         radius_m=2.0,
+        stop_radius_m=0.5,
         navmesh_vertices=vertices,
         path_length=path_length,
     )
@@ -69,6 +70,7 @@ def test_unreachable_original_uses_reachable_agent_navmesh_point() -> None:
         goal_center=(0.0, -0.5, 0.0),
         reference_offset=(0.0, 0.0, 0.0),
         radius_m=1.0,
+        stop_radius_m=0.1,
         navmesh_vertices=((0.5, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 2.0, 0.0)),
         path_length=path_length,
     )
@@ -92,11 +94,41 @@ def test_reference_offset_and_height_prevent_false_candidate() -> None:
         goal_center=(0.0, 1.0, 0.0),
         reference_offset=(0.0, 0.5, 0.0),
         radius_m=1.0,
+        stop_radius_m=0.1,
         navmesh_vertices=((0.0, 0.0, 0.0), (0.0, -3.0, 0.2)),
         path_length=path_length,
     )
     assert selected.point == (0.0, 0.0, 0.0)
     assert queried == [(0.0, 0.0, 0.0)]
+
+
+def test_projected_center_accounts_for_original_skill_stop_radius() -> None:
+    """Reject an edge point that can stop outside the official 3D goal ball."""
+    routed: list[Point3] = []
+
+    def path_length(point: Point3) -> float | None:
+        """Record the projected-center route selected for this agent."""
+        routed.append(point)
+        return 5.0
+
+    def project_center(center: Point3) -> Point3:
+        """Represent the agent navmesh directly below this goal center."""
+        return center[0], 0.12575, center[2]
+
+    selected = select_goal_region_point(
+        original_point=(-3.9907, 0.12575, 2.61777),
+        goal_center=(-3.97234, -1.49818, 3.47991),
+        reference_offset=(0.0, 0.0, 0.0),
+        radius_m=2.0,
+        stop_radius_m=0.5,
+        navmesh_vertices=lambda: (_ for _ in ()).throw(AssertionError("unneeded vertex scan")),
+        path_length=path_length,
+        project_center=project_center,
+    )
+    assert selected.original_status == "stop_envelope_exceeds_goal"
+    assert selected.point == (-3.97234, 0.12575, 3.47991)
+    assert selected.estimated_stop_envelope_distance_m < 2.0
+    assert routed == [selected.point]
 
 
 @pytest.mark.parametrize(
@@ -121,6 +153,7 @@ def test_missing_route_fails_explicitly(
             goal_center=(0.0, 0.0, 0.0),
             reference_offset=(0.0, 0.0, 0.0),
             radius_m=2.0,
+            stop_radius_m=0.0,
             navmesh_vertices=vertices,
             path_length=no_path,
             max_path_queries=budget,
@@ -142,9 +175,9 @@ def test_vertex_and_authoritative_radius_fail_closed() -> None:
         "path_length": path_length,
     }
     with pytest.raises(GoalRegionResolutionError, match="vertex budget"):
-        select_goal_region_point(**common, radius_m=2.0, max_vertices=1)
+        select_goal_region_point(**common, radius_m=2.0, stop_radius_m=0.0, max_vertices=1)
     with pytest.raises(GoalRegionResolutionError, match="radius is unavailable"):
-        select_goal_region_point(**common, radius_m=float("nan"))
+        select_goal_region_point(**common, radius_m=float("nan"), stop_radius_m=0.0)
 
 
 def test_only_direct_conjunctive_any_at_goals_are_admitted() -> None:
