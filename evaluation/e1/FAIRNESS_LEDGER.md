@@ -12,7 +12,7 @@ Habitat benchmark outcome are separate decisions.
 | --- | --- |
 | Held constant | Habitat/EMOS checkout, dataset digest, episode/scene, embodiments, benchmark measures |
 | Intentionally different | Complete systems: EMOS uses Leader plus Stage2; RoboGuide uses MissionPlan/Control plus deployment-selected Local EAIOS |
-| Local policy | Record the actual policy surface on each arm. The current RoboGuide controlled bridge binds `nav_to_obj.target_obj` to the committed destination, rejects other actions through its Contract Guard, and uses the original EMOS wait skill without a model call for an unassigned endpoint. Native EMOS may ask that endpoint's model to choose `wait`. |
+| Local policy | Record the actual policy surface on each arm. The current RoboGuide controlled bridge binds `nav_to_obj.target_obj` to the committed destination, rejects other actions through its Contract Guard, and uses the original EMOS wait skill without a model call for an unassigned endpoint. Native EMOS may ask that endpoint's model to choose `wait`. When `ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1`, RoboGuide also uses the ADR-0051 navigation-point resolver while native EMOS retains its original point resolver. |
 | Claim boundary | End-to-end system comparison, not an organization-only ablation. These local-policy differences must remain visible in each run's evidence and the paired analysis. |
 
 ## Protocol B: Controlled
@@ -35,6 +35,15 @@ even when the original EMOS source files and model endpoint match. Protocol B
 needs a separately specified, validated local-policy equivalence condition
 before it can be used for that claim. Do not relabel a Protocol A result as
 Protocol B after seeing its outcome.
+
+The optional ADR-0051 goal-region resolver is an additional Local How difference.
+For Protocol A, each arm's run evidence must record its effective resolver,
+implementation revision, and whether selection succeeded or failed. The existing
+`stage2_identity` source-file comparison does not establish resolver equivalence.
+Neither a matching dataset/seed nor a `PAIR_COMPARABLE` workload verdict may be
+reported as evidence that an outcome difference came solely from global task
+organization. A comparison that isolates organization requires a separately
+frozen, equivalent Local How condition in both arms before either arm runs.
 
 ## Paired-workload admission
 
