@@ -190,6 +190,21 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   slot per endpoint; unsupported topology or known candidate shortage fails before submission.
   Unknown geometry remains unknown, and local post-assignment admission still applies. See
   ADR-0047.
+- The E2-S0 COHERENT bridge under `integrations/coherent-local-eaios/` is an experimental
+  deployment-owned Local EAIOS adapter. It maps only the startup-approved
+  `coherent.execute-official-task@v1` canonical operation to the existing COHERENT physical runner,
+  persists an idempotent local handle, and reports terminal completion only when both the COHERENT
+  run summary and final goal check pass. The companion fixed-plan scenario lives under
+  `scenarios/e2-coherent-minimal/`. This slice proves the formal Controller-to-Node execution path;
+  it does not yet prove per-robot RoboGuide allocation, autonomous Mission Intelligence, or a
+  generic COHERENT action contract. Unsupported cancellation must remain explicit and must never be
+  reported as successful cancellation.
+- The E2-S1 graph-controlled scenario under `scenarios/e2-coherent-graph/` uses public
+  COHERENT `env4/task17` and three formal nodes. Its four dependency-gated tasks call the original
+  `Get_env_info.step`, keep one SQLite-backed shared graph, and record one evidence artifact per
+  phase. Fixed preconditions fail closed before graph mutation. This controlled 13-step GT-length
+  slice proves per-embodiment matching and ordered execution, but remains a hand-authored plan; it
+  must not be reported as PEFA, autonomous Mission Intelligence, or physical execution.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
@@ -349,6 +364,19 @@ For documentation site changes, run:
 cd website
 uv run python sync_docs.py
 uvx --from mkdocs --with-requirements requirements.txt mkdocs build --strict
+```
+
+For E2-S0 COHERENT adapter changes, run:
+
+```bash
+uv run ruff format --check integrations/coherent-local-eaios
+uv run ruff check integrations/coherent-local-eaios
+uv run mypy --strict integrations/coherent-local-eaios/coherent_local_eaios
+uv run python tools/quality/check_python_function_docs.py integrations/coherent-local-eaios
+bash -n scenarios/e2-coherent-minimal/run-controlled.sh
+bash -n scenarios/e2-coherent-graph/run-controlled.sh
+python -m json.tool scenarios/e2-coherent-graph/mission-plan.json >/dev/null
+git diff --check
 ```
 
 ## Coding Style & Naming Conventions

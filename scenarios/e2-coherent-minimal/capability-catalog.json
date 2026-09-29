@@ -1,0 +1,39 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {
+        "namespace": "coherent",
+        "name": "execute-plan",
+        "version": "v1"
+      },
+      "description": "Execute the startup-approved COHERENT physical validation plan as one integrated Local EAIOS operation.",
+      "attributes": []
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "namespace": "coherent",
+        "name": "execute-plan",
+        "version": "v1"
+      },
+      "description": "Run one startup-approved COHERENT physical validation task while retaining all robot-level steps as Local How.",
+      "parameters": [
+        {
+          "name": "task",
+          "type": "string",
+          "required": true,
+          "description": "Startup-approved COHERENT physical task identifier."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "coherent",
+          "name": "execute-plan",
+          "version": "v1"
+        }
+      ]
+    }
+  ]
+}

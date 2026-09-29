@@ -1,0 +1,126 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-e2-s1-coherent-env4-task17",
+    "objective": "Complete public COHERENT env4 task17 through ordered Arm, Drone, Dog, and Drone phases.",
+    "actors": [
+      { "id": "arm" },
+      { "id": "drone" },
+      { "id": "dog" }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "coherent-env4-task17-context",
+      "roles": [
+        { "id": "arm", "actor": "arm" },
+        { "id": "drone", "actor": "drone" },
+        { "id": "dog", "actor": "dog" }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "arm-load-milk",
+      "description": "The arm loads the high-surface bottle of milk into the drone basket.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "arm-phase-role",
+          "context_role": "arm",
+          "requirements": {
+            "capabilities": [{ "contract": { "namespace": "coherent", "name": "arm-phase", "version": "v1" }, "constraints": [] }],
+            "resources": [{ "kind": "space", "units": 1 }]
+          },
+          "execution_intent": {
+            "operation": { "namespace": "coherent", "name": "arm-phase", "version": "v1" },
+            "objective": "Load bottle of milk 35 into basket 29.",
+            "parameters": { "env": "env4", "task": 17, "phase": "arm-load-milk" }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "coherent-env4-task17-context",
+      "coupling_mode": "independent",
+      "timing": { "earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 60000 },
+      "satisfaction": { "expected_effect": "Bottle of milk 35 is inside basket 29.", "basis": "execution-report", "verifier": null }
+    },
+    {
+      "id": "drone-lower-basket",
+      "description": "The drone lowers the basket from the dining table to the low coffee table.",
+      "depends_on": ["arm-load-milk"],
+      "roles": [
+        {
+          "id": "drone-lower-role",
+          "context_role": "drone",
+          "requirements": {
+            "capabilities": [{ "contract": { "namespace": "coherent", "name": "drone-phase", "version": "v1" }, "constraints": [] }],
+            "resources": [{ "kind": "space", "units": 1 }]
+          },
+          "execution_intent": {
+            "operation": { "namespace": "coherent", "name": "drone-phase", "version": "v1" },
+            "objective": "Land the drone and basket on low coffee table 10.",
+            "parameters": { "env": "env4", "task": 17, "phase": "drone-lower-basket" }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "coherent-env4-task17-context",
+      "coupling_mode": "independent",
+      "timing": { "earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 60000 },
+      "satisfaction": { "expected_effect": "Drone 25 is on coffee table 10 and basket 29 is dog-reachable.", "basis": "execution-report", "verifier": null }
+    },
+    {
+      "id": "dog-load-book",
+      "description": "The dog retrieves the low-surface book and loads it into the lowered basket.",
+      "depends_on": ["drone-lower-basket"],
+      "roles": [
+        {
+          "id": "dog-phase-role",
+          "context_role": "dog",
+          "requirements": {
+            "capabilities": [{ "contract": { "namespace": "coherent", "name": "dog-phase", "version": "v1" }, "constraints": [] }],
+            "resources": [{ "kind": "space", "units": 1 }]
+          },
+          "execution_intent": {
+            "operation": { "namespace": "coherent", "name": "dog-phase", "version": "v1" },
+            "objective": "Load book 34 into basket 29 without losing milk 35.",
+            "parameters": { "env": "env4", "task": 17, "phase": "dog-load-book" }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "coherent-env4-task17-context",
+      "coupling_mode": "independent",
+      "timing": { "earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 60000 },
+      "satisfaction": { "expected_effect": "Book 34 and bottle of milk 35 are inside basket 29.", "basis": "execution-report", "verifier": null }
+    },
+    {
+      "id": "drone-deliver",
+      "description": "The drone carries both objects to the garden and lands on the swing table.",
+      "depends_on": ["dog-load-book"],
+      "roles": [
+        {
+          "id": "drone-deliver-role",
+          "context_role": "drone",
+          "requirements": {
+            "capabilities": [{ "contract": { "namespace": "coherent", "name": "drone-phase", "version": "v1" }, "constraints": [] }],
+            "resources": [{ "kind": "space", "units": 1 }]
+          },
+          "execution_intent": {
+            "operation": { "namespace": "coherent", "name": "drone-phase", "version": "v1" },
+            "objective": "Land drone 25 on swing table 16 with both objects in basket 29.",
+            "parameters": { "env": "env4", "task": 17, "phase": "drone-deliver" }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "coherent-env4-task17-context",
+      "coupling_mode": "independent",
+      "timing": { "earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 60000 },
+      "satisfaction": { "expected_effect": "All three public task17 goal relations pass the original COHERENT checker.", "basis": "execution-report", "verifier": null }
+    }
+  ]
+}

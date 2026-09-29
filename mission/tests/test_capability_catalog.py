@@ -34,6 +34,12 @@ def _first_role(value: JSONObject) -> JSONObject:
     return roles[0]
 
 
+def _scenario_catalog(path: Path) -> Path:
+    """Select a scenario-local deployment catalog when the fixture declares one."""
+    local_catalog = path.parent / "capability-catalog.json"
+    return local_catalog if local_catalog.is_file() else CURRENT_CATALOG
+
+
 def test_catalog_loads_with_stable_contract_and_parameter_order() -> None:
     """Catalog parsing canonicalizes order without consulting registered Nodes."""
     catalog = CanonicalCapabilityCatalog.load(CATALOG)
@@ -50,8 +56,7 @@ def test_catalog_loads_with_stable_contract_and_parameter_order() -> None:
 
 
 def test_catalog_covers_all_checked_in_mission_scenarios() -> None:
-    """Every maintained MissionPlan fixture must use the configured semantic vocabulary."""
-    catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
+    """Every maintained MissionPlan fixture must use its declared semantic vocabulary."""
     validated: list[Path] = []
     supported_versions = {
         "roboguide.mission-plan/v0.3",
@@ -64,6 +69,7 @@ def test_catalog_covers_all_checked_in_mission_scenarios() -> None:
         decoded: object = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(decoded, dict) or decoded.get("schema_version") not in supported_versions:
             continue
+        catalog = CanonicalCapabilityCatalog.load(_scenario_catalog(path))
         catalog.validate_plan(MissionPlan.from_json(cast(JSONObject, decoded)))
         validated.append(path)
 

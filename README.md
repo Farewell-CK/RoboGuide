@@ -539,6 +539,28 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。
 
+[`integrations/coherent-local-eaios/`](integrations/coherent-local-eaios/) 与
+[`scenarios/e2-coherent-minimal/`](scenarios/e2-coherent-minimal/) 构成 E2-S0 受控实验切片。
+固定 MissionPlan 仍经过正式 Controller 的 Match / Schedule / Commit / Bind、Node Protocol 与
+`roboguide-node`，再由部署侧 bridge 把 startup-approved
+`coherent.execute-official-task@v1` 映射到既有 COHERENT physical runner。Bridge 使用 SQLite
+local handle 去重，并且只有 COHERENT 原始进程成功、物理技能全部结束、最终 goal check 通过时
+才上报 `COMPLETED`；命令接收、技能结束与任务目标成立保持为三类不同证据。当前切片把一份已知
+正确的 Trio 文本计划作为单个 canonical operation 执行，用于证明控制链路和证据链，不代表
+Dog / Drone / Arm 已分别由 RoboGuide 调度，也不代表 PEFA 或 Mission Intelligence 对比已经完成。
+取消尚不受支持时，adapter 明确拒绝而不伪报成功。
+
+[`scenarios/e2-coherent-graph/`](scenarios/e2-coherent-graph/) 是后续 E2-S1 图级受控切片：
+它选用论文公开 `env4/task17`，将 13 步正确计划拆为 Arm 装载、Drone 降低、Dog 装载、
+Drone 交付四个依赖任务，并分别由 `coherent-arm-e2-s1`、`coherent-drone-e2-s1` 与
+`coherent-dog-e2-s1` 三个正式 Node Protocol 客户端承接。Adapter 直接调用原始
+`Get_env_info.step` 与原始 goal result，额外在每步前检查 embodiment/action 前置条件，使用
+SQLite 原子保存共享图、阶段游标和本地句柄，并输出逐阶段证据。该切片证明每类机器人可被
+RoboGuide 独立 Match / Schedule / Commit / Bind 且跨机器人依赖由 Controller 释放；它仍是
+hand-authored controlled plan，不是 PEFA、自主 Mission Intelligence 或物理执行结果。
+冻结的任务身份、观测、动作、完成语义、预算、证据和比较边界见
+[`docs/experiments/e2-protocol.md`](docs/experiments/e2-protocol.md)。
+
 ## 三条核心语义链
 
 ```text
@@ -699,7 +721,11 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   └── testkit/
 ├── integrations/
 │   ├── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
-│   └── habitat-local-eaios/ # C1-S0 real Habitat/EMOS local execution bridge
+│   ├── habitat-local-eaios/ # C1-S0 real Habitat/EMOS local execution bridge
+│   └── coherent-local-eaios/# E2-S0 controlled COHERENT physical execution bridge
+├── scenarios/
+│   ├── e2-coherent-minimal/ # fixed-plan E2-S0 launch, node config, and evidence verifier
+│   └── e2-coherent-graph/   # E2-S1 public graph task across Arm, Drone, and Dog nodes
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
