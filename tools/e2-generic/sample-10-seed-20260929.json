@@ -1,0 +1,17 @@
+{
+  "schema": "roboguide.coherent-sample/v0.1",
+  "seed": 20260929,
+  "source": "tools/native-pefa/benchmark-groups-v1.json frozen 100-task set",
+  "tasks": [
+    "env2/task8",
+    "env3/task6",
+    "env4/task14",
+    "env1/task18",
+    "env4/task5",
+    "env2/task19",
+    "env0/task19",
+    "env2/task15",
+    "env1/task11",
+    "env3/task16"
+  ]
+}

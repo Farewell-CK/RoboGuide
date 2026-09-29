@@ -561,6 +561,12 @@ hand-authored controlled plan，不是 PEFA、自主 Mission Intelligence 或物
 冻结的任务身份、观测、动作、完成语义、预算、证据和比较边界见
 [`docs/experiments/e2-protocol.md`](docs/experiments/e2-protocol.md)。
 
+[`tools/e2-generic/`](tools/e2-generic/) 提供任务无关的滚动规划实验。它从任意官方
+`envX/taskY` 当前图中读取各机器人局部观测和可执行动作，由 Mission Intelligence 每轮
+生成一个未经改写的单原子动作 MissionPlan，再经过 Controller、按 agent ID 唯一路由的
+Node 和原始 `Get_env_info.step`。adapter 不包含 task17 路线或正确动作宏，最终成功仅由
+官方 `task_goal` 图关系判定。固定随机十任务清单和顺序批运行器也保存在该目录。
+
 ## 三条核心语义链
 
 ```text

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run RoboGuide Mission Intelligence for COHERENT task17 with raw evidence."""
+"""Run RoboGuide Mission Intelligence once and retain raw provider evidence."""
 
 from __future__ import annotations
 
@@ -105,13 +105,18 @@ def git(repo: Path, *arguments: str) -> str:
 
 
 def main() -> int:
-    """Generate, review, and record one autonomous task17 MissionPlan."""
+    """Generate, review, and record one autonomous MissionPlan."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--objective", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--mission-id", required=True)
+    parser.add_argument("--public-task", default="env4/task17")
+    parser.add_argument(
+        "--adapter-scope",
+        default="COHERENT env4/task17 graph phases through original Get_env_info.step",
+    )
     args = parser.parse_args()
 
     output = args.output.resolve()
@@ -131,7 +136,7 @@ def main() -> int:
         "catalog_sha256": sha256_file(settings.capability_catalog_path),
         "objective_sha256": sha256_file(args.objective),
         "credentials_recorded": False,
-        "adapter_scope": "COHERENT env4/task17 graph phases through original Get_env_info.step",
+        "adapter_scope": args.adapter_scope,
     }
     (output / "provenance.json").write_text(
         json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -194,7 +199,7 @@ def main() -> int:
         manifest = {
             "schema": "roboguide.e2-full-planning-run/v0.1",
             "mission_id": args.mission_id,
-            "public_task": "env4/task17",
+            "public_task": args.public_task,
             "model": settings.llm.model,
             "review_model": settings.llm.review_model,
             "reasoning_effort": settings.llm.reasoning_effort,
@@ -216,7 +221,7 @@ def main() -> int:
         failure = {
             "schema": "roboguide.e2-full-planning-run/v0.1",
             "mission_id": args.mission_id,
-            "public_task": "env4/task17",
+            "public_task": args.public_task,
             "model": settings.llm.model,
             "model_calls": transport.count,
             "wall_time_seconds": time.time() - started,

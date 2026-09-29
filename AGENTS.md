@@ -205,6 +205,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   phase. Fixed preconditions fail closed before graph mutation. This controlled 13-step GT-length
   slice proves per-embodiment matching and ordered execution, but remains a hand-authored plan; it
   must not be reported as PEFA, autonomous Mission Intelligence, or physical execution.
+- The E2 generic rolling-horizon experiment under `tools/e2-generic/` dynamically exposes one
+  agent-identity-specific primitive operation per official task agent. Mission Intelligence selects
+  exactly one action per decision from the current official action list; Controller Matching,
+  Commit, Bind, and a real Node workflow precede the original `Get_env_info.step` transition.
+  The adapter contains no task route or multi-action macro. Only the official `task_goal` relation
+  check establishes benchmark success, and invalid plans or exhausted budgets remain failures.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
