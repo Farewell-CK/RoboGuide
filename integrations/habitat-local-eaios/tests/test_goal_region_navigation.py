@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -131,6 +132,29 @@ def test_projected_center_accounts_for_original_skill_stop_radius() -> None:
     assert routed == [selected.point]
 
 
+def test_projection_on_another_floor_cannot_bypass_official_3d_region() -> None:
+    """Reject a reachable snapped floor when its height misses the official goal."""
+    queried: list[Point3] = []
+
+    def path_length(point: Point3) -> float:
+        """Expose any wrongly admitted candidate to the assertion below."""
+        queried.append(point)
+        return 1.0
+
+    with pytest.raises(GoalRegionResolutionError, match="no agent-specific path"):
+        select_goal_region_point(
+            original_point=(0.0, -4.0, 0.0),
+            goal_center=(0.0, 0.0, 0.0),
+            reference_offset=(0.0, 0.0, 0.0),
+            radius_m=2.0,
+            stop_radius_m=0.5,
+            navmesh_vertices=(),
+            path_length=path_length,
+            project_center=lambda _center: (0.0, 3.0, 0.0),
+        )
+    assert queried == []
+
+
 @pytest.mark.parametrize(
     ("vertices", "budget", "message"),
     [
@@ -235,3 +259,80 @@ def test_config_switches_only_expected_vendor_navigation_actions(
     actions["agent_1_oracle_nav_action"].type = "UnexpectedAction"
     with pytest.raises(IntegrationError, match="agent_1_oracle_nav_action"):
         _configure_goal_region_navigation(config, read_write)
+
+
+def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep repeated target queries fail-closed after the first resolution error."""
+
+    class FakeOracleAction:
+        """Mimic the vendor action's original target cache for one entity."""
+
+        def __init__(self) -> None:
+            """Provide the minimal live action state used by the adapter wrapper."""
+            self._targets: dict[int, tuple[Point3, Point3]] = {}
+            self._task = SimpleNamespace(
+                pddl_problem=SimpleNamespace(
+                    goal=object(), sim_info=SimpleNamespace(robot_at_thresh=2.0)
+                )
+            )
+            self._poss_entities = [SimpleNamespace(name="goal")]
+            self._prev_ep_id = None
+            self._config = SimpleNamespace(dist_thresh=0.5)
+            self.pathfinder = None
+            self.cur_articulated_agent = SimpleNamespace(
+                base_pos=(0.0, 0.0, 0.0),
+                base_transformation=SimpleNamespace(translation=(0.0, 0.0, 0.0)),
+            )
+            self.original_calls = 0
+
+        def _get_target_for_idx(self, index: int) -> tuple[Point3, Point3]:
+            """Cache the vendor point before the adapter attempts resolution."""
+            self.original_calls += 1
+            return self._targets.setdefault(index, ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+
+    def register_task_action(action: type[Any]) -> type[Any]:
+        """Accept the adapter action class without a Habitat registry."""
+        return action
+
+    stubs = {
+        name: ModuleType(name)
+        for name in (
+            "habitat_sim",
+            "numpy",
+            "habitat",
+            "habitat.core",
+            "habitat.core.registry",
+            "habitat.tasks",
+            "habitat.tasks.rearrange",
+            "habitat.tasks.rearrange.actions",
+            "habitat.tasks.rearrange.actions.habitat_mas_actions",
+        )
+    }
+    registry_stub = stubs["habitat.core.registry"]
+    vars(registry_stub)["registry"] = SimpleNamespace(register_task_action=register_task_action)
+    oracle_stub = stubs["habitat.tasks.rearrange.actions.habitat_mas_actions"]
+    vars(oracle_stub)["OracleNavDiffBaseAction"] = FakeOracleAction
+    for name, stub in stubs.items():
+        monkeypatch.setitem(sys.modules, name, stub)
+    module_name = "habitat_local_eaios._goal_region_action_review_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name, INTEGRATION_ROOT / "habitat_local_eaios" / "goal_region_action.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module,
+        "_expression",
+        lambda _goal: {"kind": "predicate", "name": "any_at", "arguments": ["goal"]},
+    )
+
+    action = module.GoalRegionOracleNavDiffBaseAction()
+    with pytest.raises(GoalRegionResolutionError, match="navmesh is unavailable"):
+        action._get_target_for_idx(0)
+    with pytest.raises(GoalRegionResolutionError, match="previous goal-region selection failed"):
+        action._get_target_for_idx(0)
+    assert action.original_calls == 1
+    assert action.navigation_selection_evidence()[0]["status"] == "failed"

@@ -79,9 +79,14 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
         The returned object position and selected entity index remain the
         original Oracle values. All other PDDL entities use original selection.
         """
-        original_point, object_point = super()._get_target_for_idx(nav_to_target_idx)
-        if nav_to_target_idx in self._roboguide_selections:
+        cached = self._roboguide_selections.get(nav_to_target_idx)
+        if cached is not None:
+            if cached.get("status") == "failed":
+                raise GoalRegionResolutionError(
+                    "previous goal-region selection failed for this entity"
+                )
             return self._targets[nav_to_target_idx]
+        original_point, object_point = super()._get_target_for_idx(nav_to_target_idx)
         problem = self._task.pddl_problem
         entity = self._poss_entities[nav_to_target_idx]
         entity_name = getattr(entity, "name", None)
