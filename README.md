@@ -758,10 +758,10 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 └── website/               # MkDocs Material 技术文档站（Cloudflare Pages 部署）
 ```
 
-技术文档站点由 [`website/`](website/) 提供：MkDocs Material 构建，在线地址
-<https://roboguide-docs.pages.dev>。`website/sync_docs.py` 在构建时把仓库文档镜像到站点
-（ADR 自动索引、内链重写、未镜像仓库路径回退到 GitHub），通过 Cloudflare Pages Git
-集成部署，每次推送 `main` 自动更新；本地预览命令见 AGENTS.md。
+技术文档站点由 [`website/`](website/) 提供：MkDocs Material 构建，部署于 Cloudflare
+Workers 静态资产（免费，静态请求量不限）。`website/sync_docs.py` 在构建时把仓库文档镜像到站点
+（ADR 自动索引、内链重写、未镜像仓库路径回退到 GitHub），通过 Cloudflare Workers Builds
+Git 集成部署，每次推送 `main` 自动更新；本地预览命令见 AGENTS.md。
 
 当前 V2 架构是有效基线；开发基线正在通过多个最小工程切片验证。Shared Node State、
 Allocation State v0.1、source-aware State federation、selective Memory catalog、Node terminal

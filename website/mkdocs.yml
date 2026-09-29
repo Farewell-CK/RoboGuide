@@ -1,6 +1,6 @@
 site_name: RoboGuide 技术文档
 site_description: RoboGuide —— 分布式具身智能操作系统（DEAIOS）的架构基线、决策记录与开发文档
-site_url: https://roboguide-docs.pages.dev
+# site_url: 首次部署后填入实际线上地址（用于 canonical 链接与 sitemap）
 repo_url: https://github.com/Farewell-CK/RoboGuide
 repo_name: Farewell-CK/RoboGuide
 

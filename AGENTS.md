@@ -279,9 +279,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   intentionally unmirrored repository paths, and generates the ADR overview page
   and the literate-nav `SUMMARY.md`; it never edits source documents. Site builds
   run `sync_docs.py` and then `mkdocs build --strict`, so broken internal links
-  fail the build. The site deploys through Cloudflare Pages Git integration with
-  root directory `website/` and never becomes a second authority for any runtime
-  contract; it only publishes existing repository documents.
+  fail the build. The site deploys through Cloudflare Workers Builds as free
+  Workers static assets (`website/wrangler.jsonc` points at `website/site/`);
+  it never becomes a second authority for any runtime contract; it only
+  publishes existing repository documents.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
   The Formal B1 RoboGuide scenario runner is workload-generic: it extracts the
