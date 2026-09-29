@@ -59,18 +59,19 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Check formatting
-        run: uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service
+        run: uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service website
 
       - name: Run Ruff
-        run: uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service
+        run: uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service website
 
       - name: Run mypy
         run: >
           uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality
           integrations/robonix-map-service/robonix-map-service.py integrations/robonix-map-service/tests
+          website/sync_docs.py
 
       - name: Check Python function documentation
-        run: uv run python tools/quality/check_python_function_docs.py mission apps/mission-service integrations/robonix-map-service
+        run: uv run python tools/quality/check_python_function_docs.py mission apps/mission-service integrations/robonix-map-service website
 
       - name: Run tests
         run: uv run pytest -q

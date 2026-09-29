@@ -1,0 +1,5 @@
+# Pinned dependencies for the RoboGuide documentation site.
+# Cloudflare Pages installs this file with pip; local preview uses
+# `uvx --from mkdocs --with-requirements requirements.txt mkdocs ...`.
+mkdocs-material==9.7.7
+mkdocs-literate-nav==0.6.3
