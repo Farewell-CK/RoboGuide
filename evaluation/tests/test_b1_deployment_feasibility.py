@@ -32,7 +32,7 @@ def _source(run: Path) -> dict[str, Any]:
     profile = {"digest": "sha256:" + "a" * 64}
     write_json(run / "spatial-profile.json", profile)
     body: dict[str, Any] = {
-        "schema_version": "roboguide.deployment-intent-feasibility/v0.2",
+        "schema_version": "roboguide.deployment-intent-feasibility/v0.3",
         "authority": "deployment-observed-reset-state",
         "identity": {
             "run_id": run.name,
@@ -46,7 +46,15 @@ def _source(run: Path) -> dict[str, Any]:
             "episode_reset_count": 1,
         },
         "initial_agent_positions": {"0": [0.0, 0.0, 0.0]},
-        "records": [{"node_id": "node-a", "status": "unknown"}],
+        "records": [
+            {
+                "node_id": "node-a",
+                "destination": "any_targets|0",
+                "goal_occupancy": "any_at",
+                "goal_tolerance_m": 2.0,
+                "status": "unknown",
+            }
+        ],
     }
     return {**body, "digest": _content_digest(body)}
 
@@ -74,4 +82,30 @@ def test_preassignment_source_rejects_tampering_and_missing_source(tmp_path: Pat
     document["records"][0]["status"] = "compatible"
     write_json(run / "evidence/preassignment-feasibility.json", document)
     with pytest.raises(ValueError, match="digest"):
+        preflight_deployment_feasibility(run)
+
+
+def test_resealed_goal_claim_cannot_override_frozen_semantics(tmp_path: Path) -> None:
+    """A new artifact digest cannot turn an official occupancy goal into a floor exclusion."""
+    run = make_run(tmp_path)
+    document = _source(run)
+    document["records"][0]["goal_occupancy"] = "none"
+    document["records"][0]["goal_tolerance_m"] = None
+    document["records"][0]["status"] = "incompatible"
+    body = {key: value for key, value in document.items() if key != "digest"}
+    document["digest"] = _content_digest(body)
+    write_json(run / "evidence/preassignment-feasibility.json", document)
+    with pytest.raises(ValueError, match="differs from semantic evidence"):
+        preflight_deployment_feasibility(run)
+
+
+def test_prior_matrix_version_cannot_use_new_decision_rule(tmp_path: Path) -> None:
+    """The B1 launcher rejects a resealed artifact under the old matrix schema."""
+    run = make_run(tmp_path)
+    document = _source(run)
+    document["schema_version"] = "roboguide.deployment-intent-feasibility/v0.2"
+    body = {key: value for key, value in document.items() if key != "digest"}
+    document["digest"] = _content_digest(body)
+    write_json(run / "evidence/preassignment-feasibility.json", document)
+    with pytest.raises(ValueError, match="schema"):
         preflight_deployment_feasibility(run)

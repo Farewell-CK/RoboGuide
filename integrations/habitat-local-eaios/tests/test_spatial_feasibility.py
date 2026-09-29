@@ -75,6 +75,8 @@ def _environment(
     destinations: dict[str, tuple[float, float, float]],
     *,
     regions: list[SimpleNamespace] | None = None,
+    goal_destinations: tuple[str, ...] = (),
+    robot_at_thresh: float = 2.0,
 ) -> SimpleNamespace:
     """Expose only read-only Habitat/PDDL accessors and count no simulator calls."""
 
@@ -90,9 +92,21 @@ def _environment(
         """Read one official PDDL entity position without mutation."""
         return destinations[name]
 
+    goal_predicates = [
+        SimpleNamespace(name="any_at", _arg_values=[SimpleNamespace(name=destination)])
+        for destination in goal_destinations
+    ]
+    goal = SimpleNamespace(
+        sub_exprs=goal_predicates
+        or [SimpleNamespace(name="any_at", _arg_values=[SimpleNamespace(name="other")])],
+        expr_type=SimpleNamespace(value="and"),
+        quantifier=None,
+        inputs=(),
+    )
     problem = SimpleNamespace(
         get_entity=get_entity,
-        sim_info=SimpleNamespace(get_entity_pos=get_entity_pos),
+        sim_info=SimpleNamespace(get_entity_pos=get_entity_pos, robot_at_thresh=robot_at_thresh),
+        goal=goal,
     )
     sim = SimpleNamespace(
         get_agent_data=get_agent_data,
@@ -196,6 +210,37 @@ def test_cross_floor_decision_uses_actual_reset_start_and_registered_fact(
     assert record["route_reachability_proven"] is False
 
 
+def test_distance_goal_on_another_floor_is_not_rejected_as_impossible() -> None:
+    """A floor boundary cannot rule out a 3D occupancy goal within its radius."""
+    env = _environment(
+        {0: (-1.748696, -2.474246, 3.506123), 1: (-7.893826, 0.125754, 4.319351)},
+        {"TARGET_any_targets|0": (-3.972340, -1.498180, 3.479910)},
+        regions=[
+            _region("ground", "floor-0", -1.498180),
+            _region("upper", "floor-1", 0.125754),
+        ],
+        goal_destinations=("TARGET_any_targets|0",),
+    )
+    record = assess_spatial_feasibility(
+        env, 1, _invocation("TARGET_any_targets|0"), _profile(1, False)
+    )
+    assert record["status"] == "unknown"
+    assert record["goal_occupancy"] == "any_at"
+    assert record["goal_tolerance_m"] == 2.0
+    assert cast(dict[str, Any], record["start"])["floor_id"] == "floor-1"
+    assert cast(dict[str, Any], record["destination_entity"])["floor_id"] == "floor-0"
+    assert record["route_reachability_proven"] is False
+
+
+def test_unreadable_goal_does_not_authorize_floor_rejection() -> None:
+    """Missing official goal metadata leaves cross-floor evidence unresolved."""
+    env = _environment({1: (0.0, 0.0, 0.0)}, {"goal": (1.0, 5.0, 0.0)})
+    del env.task.pddl_problem.goal
+    record = assess_spatial_feasibility(env, 1, _invocation("goal"), _profile(1, False))
+    assert record["status"] == "unknown"
+    assert record["goal_occupancy"] == "unavailable"
+
+
 def test_preassignment_matrix_uses_one_observed_reset_and_exact_intents() -> None:
     """Preassignment evidence records negative facts without creating a Task or acting."""
     env = _environment(
@@ -235,6 +280,35 @@ def test_preassignment_matrix_uses_one_observed_reset_and_exact_intents() -> Non
         build_preassignment_feasibility(
             env, semantic, (_profile(0, True), _profile(1, False)), _DIGEST, 40, (0, 1)
         )
+
+
+def test_preassignment_keeps_a_cross_floor_distance_goal_unresolved() -> None:
+    """The reset matrix keeps an official occupancy goal available to Control."""
+    env = _environment(
+        {0: (0.0, 0.0, 0.0), 1: (0.0, 5.0, 0.0)},
+        {"goal": (1.0, 0.0, 0.0)},
+        goal_destinations=("goal",),
+    )
+    semantic: dict[str, Any] = {
+        "identity": {
+            "run_id": "run",
+            "episode_id": "episode",
+            "dataset_revision": "dataset-v1",
+            "dataset_sha256": "0" * 64,
+        },
+        "world_context": {"scene_id": "scene", "entity_catalog": ["goal"]},
+        "digest": _DIGEST,
+    }
+    evidence = build_preassignment_feasibility(
+        env, semantic, (_profile(0, True), _profile(1, False)), _DIGEST, 40, (0, 1)
+    )
+    assert [record["status"] for record in evidence["records"]] == [
+        "compatible",
+        "unknown",
+        "compatible",
+        "unknown",
+    ]
+    assert all(record["goal_occupancy"] == "any_at" for record in evidence["records"])
 
 
 def test_shared_world_initialization_freezes_actual_reset_before_readiness(

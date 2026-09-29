@@ -38,7 +38,7 @@ impl DeploymentFeasibility {
                 "initial_agent_positions",
                 "records",
             ])
-            || body["schema_version"] != "roboguide.deployment-intent-feasibility/v0.2"
+            || body["schema_version"] != "roboguide.deployment-intent-feasibility/v0.3"
             || body["authority"] != "deployment-observed-reset-state"
         {
             return Err("deployment feasibility schema or authority is unsupported".into());
@@ -129,13 +129,15 @@ impl DeploymentFeasibility {
                     "operation",
                     "destination",
                     "profile",
+                    "goal_occupancy",
+                    "goal_tolerance_m",
                     "start",
                     "destination_entity",
                     "status",
                     "reason",
                     "route_reachability_proven",
                 ])
-                || item["schema_version"] != "roboguide.habitat-spatial-feasibility/v0.1"
+                || item["schema_version"] != "roboguide.habitat-spatial-feasibility/v0.2"
             {
                 return Err("deployment feasibility record schema is invalid".into());
             }
@@ -208,6 +210,22 @@ impl DeploymentFeasibility {
                 return Err("deployment feasibility operation is unsupported".into());
             }
             let destination = text(item.get("destination").cloned(), "destination")?;
+            let goal_occupancy = text(item.get("goal_occupancy").cloned(), "goal_occupancy")?;
+            if !matches!(
+                goal_occupancy.as_str(),
+                "none" | "any_at" | "other" | "unavailable"
+            ) {
+                return Err("deployment feasibility goal occupancy is invalid".into());
+            }
+            let goal_tolerance = item.get("goal_tolerance_m");
+            if (goal_occupancy == "any_at"
+                && !goal_tolerance
+                    .and_then(serde_json::Value::as_f64)
+                    .is_some_and(|value| value.is_finite() && value > 0.0))
+                || (goal_occupancy != "any_at" && goal_tolerance != Some(&serde_json::Value::Null))
+            {
+                return Err("deployment feasibility goal tolerance is invalid".into());
+            }
             let status = text(item.get("status").cloned(), "status")?;
             text(item.get("reason").cloned(), "reason")?;
             if !matches!(status.as_str(), "compatible" | "incompatible" | "unknown")
@@ -241,7 +259,8 @@ impl DeploymentFeasibility {
                 .and_then(serde_json::Value::as_bool);
             let expected_status = match (start_floor, destination_floor, supports_transition) {
                 (Some(start), Some(destination), _) if start == destination => "compatible",
-                (Some(_), Some(_), Some(false)) => "incompatible",
+                (Some(_), Some(_), Some(false)) if goal_occupancy == "none" => "incompatible",
+                (Some(_), Some(_), Some(false)) => "unknown",
                 (Some(_), Some(_), Some(true)) => "compatible",
                 _ => "unknown",
             };
@@ -426,7 +445,7 @@ fn canonical_digest_value(value: &mut serde_json::Value) {
     }
 }
 
-/// Compute the v0.2 language-neutral content identity of an evidence body.
+/// Compute the v0.3 language-neutral content identity of an evidence body.
 fn content_digest(body: &serde_json::Value) -> Result<String, String> {
     let mut canonical = body.clone();
     canonical_digest_value(&mut canonical);
@@ -502,7 +521,7 @@ mod tests {
                 };
                 let compatible = start_floor == destination_floor || support;
                 records.push(serde_json::json!({
-                    "schema_version": "roboguide.habitat-spatial-feasibility/v0.1",
+                    "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
                     "node_id": node_id,
                     "agent_id": agent_id,
                     "operation": "mobility.navigate@v1",
@@ -516,6 +535,8 @@ mod tests {
                             "mobility.navigate@v1": support
                         }
                     },
+                    "goal_occupancy": "none",
+                    "goal_tolerance_m": null,
                     "start": {
                         "position": [0.0, agent_id as f64, 0.0],
                         "region_id": null,
@@ -533,7 +554,7 @@ mod tests {
             }
         }
         let mut body = serde_json::json!({
-            "schema_version": "roboguide.deployment-intent-feasibility/v0.2",
+            "schema_version": "roboguide.deployment-intent-feasibility/v0.3",
             "authority": "deployment-observed-reset-state",
             "identity": {
                 "run_id": "run",
@@ -602,6 +623,40 @@ mod tests {
                 .restrictions_for_plan(&plan(false, false), &group)
                 .expect_err("a pair without endpoint exclusion can deadlock")
                 .contains("space:1")
+        );
+    }
+
+    /// A distance goal across floors leaves a second endpoint eligible without promising a route.
+    #[test]
+    fn cross_floor_goal_occupancy_keeps_the_pair_candidate() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("reset.json");
+        let mut document = snapshot(&path, false);
+        for record in document["records"].as_array_mut().expect("records") {
+            if record["node_id"] == "node-b" && record["destination"] == "TARGET_any_targets|0" {
+                record["goal_occupancy"] = serde_json::json!("any_at");
+                record["goal_tolerance_m"] = serde_json::json!(2.0);
+                record["status"] = serde_json::json!("unknown");
+            }
+        }
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).expect("snapshot writes");
+        let evidence = DeploymentFeasibility::load(&path).expect("goal evidence is valid");
+        let group = domain::ExecutionGroupId::new("group").expect("group id valid");
+        let pair = evidence
+            .restrictions_for_plan(&plan(false, true), &group)
+            .expect("both logical Actors have candidate endpoints");
+        assert!(
+            pair.iter()
+                .any(|(_, nodes)| nodes.contains(&domain::NodeId::new("node-b").unwrap()))
+        );
+        document["records"][3]["status"] = serde_json::json!("incompatible");
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).expect("contradictory snapshot writes");
+        assert!(
+            DeploymentFeasibility::load(&path)
+                .expect_err("goal occupancy cannot justify an incompatibility")
+                .contains("contradicts")
         );
     }
 

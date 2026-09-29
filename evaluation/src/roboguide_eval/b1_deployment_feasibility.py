@@ -10,10 +10,14 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from roboguide_eval.b1_provenance import load_document
+from roboguide_eval.b1_provenance import (
+    _semantic_expression_valid,
+    _semantic_predicates,
+    load_document,
+)
 from roboguide_eval.b1_workload import extract_b1_workload
 
-_SCHEMA = "roboguide.deployment-intent-feasibility/v0.2"
+_SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
 
 
 def _canonical_digest_value(value: Any) -> Any:
@@ -30,7 +34,7 @@ def _canonical_digest_value(value: Any) -> Any:
 
 
 def _content_digest(body: dict[str, Any]) -> str:
-    """Calculate the v0.2 content identity without float formatting drift."""
+    """Calculate the v0.3 content identity without float formatting drift."""
     encoded = json.dumps(
         _canonical_digest_value(body),
         sort_keys=True,
@@ -39,6 +43,26 @@ def _content_digest(body: dict[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _goal_occupancy(semantic: dict[str, Any], destination: str) -> str:
+    """Classify an exact destination from the frozen neutral goal expression."""
+    goal = semantic.get("goal")
+    if not _semantic_expression_valid(goal):
+        raise ValueError("authoritative semantic goal is unavailable")
+    matches = [
+        predicate
+        for predicate in _semantic_predicates(goal)
+        if destination in predicate["arguments"]
+    ]
+    if not matches:
+        return "none"
+    if all(
+        predicate["name"] == "any_at" and predicate["arguments"] == [destination]
+        for predicate in matches
+    ):
+        return "any_at"
+    return "other"
 
 
 def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
@@ -103,6 +127,28 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
         raise ValueError("preassignment feasibility differs from frozen B1 identity")
     if not isinstance(document["records"], list) or not document["records"]:
         raise ValueError("preassignment feasibility has no candidate records")
+    for record in document["records"]:
+        if not isinstance(record, dict):
+            raise ValueError("preassignment feasibility record is invalid")
+        destination = record.get("destination")
+        claimed = record.get("goal_occupancy")
+        if (
+            not isinstance(destination, str)
+            or not destination.strip()
+            or claimed
+            not in {
+                "none",
+                "any_at",
+                "other",
+                "unavailable",
+            }
+        ):
+            raise ValueError("preassignment feasibility goal occupancy is invalid")
+        expected_goal = _goal_occupancy(semantic, destination)
+        if claimed not in {expected_goal, "unavailable"}:
+            raise ValueError("preassignment feasibility goal differs from semantic evidence")
+        if expected_goal == "any_at" and record.get("status") == "incompatible":
+            raise ValueError("preassignment feasibility excludes an official distance goal")
     return document
 
 
