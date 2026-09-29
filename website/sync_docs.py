@@ -38,13 +38,19 @@ SITE_DOCS_DIR = WEBSITE_DIR / "docs"
 SUMMARY_PATH = SITE_DOCS_DIR / "SUMMARY.md"
 GITHUB_BASE = "https://github.com/Farewell-CK/RoboGuide"
 
+#: Site-authored content pages. Files under this directory are copied verbatim
+#: into the site root (``pages/index.md`` becomes the site homepage); their
+#: links are authored relative to their final site location and validated by
+#: the same link checker as mirrored pages.
+LOCAL_PAGES_DIR = WEBSITE_DIR / "pages"
+
 #: File suffixes that are copied into the site docs tree; everything else is ignored.
 COPY_SUFFIXES: frozenset[str] = frozenset({".md", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".docx"})
 
 #: Curated sync plan as ``(repository path, site path)`` pairs. Directories are
 #: mirrored recursively; single files are copied individually.
 COPY_PLAN: tuple[tuple[str, str], ...] = (
-    ("README.md", "index.md"),
+    ("README.md", "repository-overview.md"),
     ("docs", "docs"),
     ("mission/README.md", "mission/index.md"),
     ("evaluation/README.md", "evaluation/index.md"),
@@ -63,6 +69,21 @@ ADR_NAV_TITLE = "架构决策记录（ADR）"
 #: therefore literate-nav) only nests list items at that indent width.
 NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
     ("首页", "index.md", ()),
+    ("快速开始", "getting-started.md", ()),
+    ("架构导览", "architecture-tour.md", ()),
+    (
+        "模块地图",
+        "modules/domain-ports.md",
+        (
+            ("Control Plane", "modules/control.md"),
+            ("Mission Orchestration", "modules/orchestration.md"),
+            ("Distributed Runtime", "modules/runtime.md"),
+            ("State & Memory", "modules/state.md"),
+            ("Integration 与 Node Service", "modules/integration-node-service.md"),
+            ("Mission Intelligence", "modules/mission.md"),
+            ("Eval Harness 与本地集成", "modules/evaluation.md"),
+        ),
+    ),
     ("文档索引", "docs/index.md", ()),
     (
         "项目范围",
@@ -109,6 +130,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
     ),
     ("Robonix 地图适配器", "integrations/robonix-map-service/index.md", ()),
     ("Habitat Local EAIOS 桥", "integrations/habitat-local-eaios/index.md", ()),
+    ("仓库 README", "repository-overview.md", ()),
 )
 
 LINK_PATTERN = re.compile(r"\]\((?P<target>[^()\s]+)(?P<title>\s+\"[^\"]*\")?\)")
@@ -314,6 +336,29 @@ def rewrite_markdown_file(
         site_file.write_text(rewritten_text, encoding="utf-8", newline="\n")
 
 
+def copy_local_pages() -> list[str]:
+    """Copy site-authored content pages into the site docs root.
+
+    Returns:
+        Site-relative POSIX paths of the copied local pages.
+
+    Raises:
+        SystemExit: If the local pages directory does not exist or is empty.
+    """
+    if not LOCAL_PAGES_DIR.is_dir():
+        raise SystemExit(f"local pages directory is missing: {LOCAL_PAGES_DIR}")
+    copied: list[str] = []
+    for file_path in sorted(LOCAL_PAGES_DIR.rglob("*.md")):
+        relative = file_path.relative_to(LOCAL_PAGES_DIR)
+        destination = SITE_DOCS_DIR / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, destination)
+        copied.append(relative.as_posix())
+    if not copied:
+        raise SystemExit(f"local pages directory contains no markdown files: {LOCAL_PAGES_DIR}")
+    return copied
+
+
 def parse_adr_summaries(mapping: dict[str, str]) -> list[AdrSummary]:
     """Collect display metadata for every mirrored ADR page.
 
@@ -448,6 +493,7 @@ def main() -> int:
     """
     mapping = build_file_mapping()
     copy_sources(mapping)
+    local_pages = copy_local_pages()
     broken_by_file: dict[Path, set[str]] = {}
     rewritten_pages = 0
     for repo_posix, site_posix in sorted(mapping.items()):
@@ -470,8 +516,8 @@ def main() -> int:
             print(f"error: {error}")
         return 1
     print(
-        f"synced {len(mapping)} files ({rewritten_pages} markdown pages rewritten), "
-        f"{len(summaries)} ADRs indexed"
+        f"synced {len(mapping)} mirrored files ({rewritten_pages} rewritten), "
+        f"{len(local_pages)} local pages, {len(summaries)} ADRs indexed"
     )
     return 0
 
