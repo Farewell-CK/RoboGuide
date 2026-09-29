@@ -524,8 +524,11 @@ facade 持续响应 Node workflow，将既有
 action，并通过稳定 local handle 上报 `ACCEPTED → RUNNING → terminal`。Habitat/EMOS 依赖、
 PDDL entity、agent selection、path 与 pose control 均不进入 RoboGuide Core。
 Controlled deployment 只在 EMOS Stage1→Stage2 边界注入 Control 已 Commit 的 assignment，
-之后直接运行原始 `MultiLLMPolicy`、`CrabAgent`、`HierarchicalPolicy` 和 Oracle skill stack；
-它不再维护 RoboGuide-specific 的 prompt、invalid-output retry 或 skill dispatcher 副本。
+运行原始 `MultiLLMPolicy`、`HierarchicalPolicy` 和 Oracle skill stack；已分配 endpoint
+使用原始 `CrabAgent` 及模型决策。单 Actor 执行时，未分配 endpoint 临时使用无模型
+idle policy 选择 EMOS 已有的 `WaitSkillPolicy`，执行段结束后恢复原始 agent；双 Actor
+分配仍各自使用原始 Stage2。适配器不改写模型已选动作，也不维护 prompt、重试或 skill
+dispatcher 副本。单 Actor 的 idle 策略与原生 EMOS 的模型决策路径不同，配对比较须归档。
 Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
 作为四类独立证据记录，彼此不得推导。
 当前 shared-world deployment 根据 Controller 已接受计划的版本化 Execution Session 选择

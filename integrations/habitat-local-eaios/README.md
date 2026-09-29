@@ -116,8 +116,9 @@ operation profile; broad robot capability alone does not authorize it.
 The `natural-objective` Stage2 assignment preserves the canonical objective and states the exact
 committed `parameters.destination` as the target for this execution's `nav_to_obj`. A joint
 Mission objective can mention other entities without making them alternate destinations for this
-one invocation. The original EMOS Stage2 model, tool implementations, skills and selected action
-remain untouched. The adapter changes assignment text and one execution-scoped tool argument
+one invocation. The assigned endpoint's original EMOS Stage2 model, tool implementations, skills
+and selected action remain untouched. The adapter changes assignment text and one execution-scoped
+tool argument
 schema as described below. The guard still
 rejects a wrong target instead of silently correcting it.
 
@@ -137,6 +138,20 @@ retry or substitute action. The shared episode stops before the next Gym step;
 unfinished sibling work reports `sibling-local-contract-failure`, and already
 observed local completions remain intact. Existing official Habitat metrics are
 read unchanged. Guard rejection is not an assertion about PDDL truth.
+
+In a one-Actor shared-world segment, the unassigned endpoint has no task-level
+model authority. The adapter temporarily supplies a model-free idle agent to
+EMOS' original `MultiLLMPolicy`/`HierarchicalPolicy`, which selects the existing
+`WaitSkillPolicy`; it restores the original `CrabAgent` instance on every exit.
+Admission requires the exact agent assignment and original wait skill mapping.
+The assigned endpoint keeps its original model and canonical action guard; a
+wrong assigned destination still fails before `gym_env.step()`. Paired
+two-Actor execution still uses both original model agents. Per-Task
+`idle-endpoint-<invocation-digest-prefix>.json` records this deployment policy,
+idle agent names, local wait selections, and zero Provider calls. These local
+wait decisions are separate from model-selected `stage2-actions.jsonl` records.
+This is a RoboGuide arm strategy difference from native EMOS, where an idle
+agent may ask its model to select `wait`; comparative evidence must retain it.
 
 `evidence/stage2-actions.jsonl` contains `roboguide.stage2-action/v0.1` decisions
 for every **selected** execution tool returned by EMOS: raw action, immutable

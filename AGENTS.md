@@ -75,7 +75,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   resource authority. The Habitat shared-world deployment admits either two independent
   Actors on two endpoints or one independent Actor whose Tasks reuse one endpoint and one
   reset world after each Control-owned Task release. Other topologies fail closed; benchmark
-  success still comes only from Habitat's official metric. See ADR-0045.
+  success still comes only from Habitat's official metric. In a one-Actor segment, only the
+  assigned endpoint calls its original Stage2 model. Unassigned endpoints use a scoped,
+  model-free policy selecting the original EMOS wait skill and restore their CrabAgent after
+  the segment; two-Actor assignments retain both original model paths. See ADR-0045.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.
@@ -172,8 +175,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   exhaustion remains explicit physical ambiguity. The Controlled backend injects the
   Control-owned assignment at the EMOS Stage1-to-Stage2 boundary and binds its one navigation
   target in the execution-scoped Provider tool schema. It runs the original EMOS
-  `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack without rewriting a
-  model-selected action; the independent Contract Guard still rejects wrong targets. Local skill
+  `MultiLLMPolicy`, `HierarchicalPolicy`, and skill stack, with original `CrabAgent` for assigned
+  endpoints, without rewriting a model-selected action; the independent Contract Guard still
+  rejects wrong targets. Local skill
   completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound

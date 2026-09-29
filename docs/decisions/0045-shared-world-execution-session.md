@@ -55,6 +55,17 @@ registration, or the next assignment's absence.
    terminal fact; only Habitat's official `pddl_success` supplies benchmark
    truth. Missing next assignment reaches an explicit bounded INCOMPLETE
    start-admission state, never synthetic Task success.
+5. The joint EMOS actor advances every configured endpoint. During a one-Actor
+   segment, only the Control-assigned endpoint may make model-selected physical
+   tool calls; the existing canonical action guard still checks that endpoint.
+   An endpoint with no assignment uses a scoped, model-free adapter policy that
+   selects the original EMOS `WaitSkillPolicy`. Admission first checks the exact
+   agent map and wait skill implementation; unsupported mappings fail closed.
+   The adapter restores the original agent instances at every segment exit and
+   records this policy choice separately from model-selected tool calls. It
+   does not rewrite a model response, issue a navigation action for an idle
+   endpoint, or alter official success. Two-Actor committed assignments keep
+   the original model-selected Stage2 path for both endpoints.
 
 ## Consequences and limits
 
@@ -66,5 +77,9 @@ two-endpoint barrier. The shared-world rollout requires updated Node
 configuration and binaries; a registered owner that advertises the session
 schema cannot silently downgrade on a stale route, because the Router rejects
 the nonempty descriptor before sending it. An unadvertised legacy deployment
-retains its existing behavior and cannot claim serial support. A local skill completion remains separate from
-Task satisfaction, Mission outcome, and official Habitat success.
+retains its existing behavior and cannot claim serial support. A local skill
+completion remains separate from Task satisfaction, Mission outcome, and
+official Habitat success. The passive endpoint policy is specific to the
+RoboGuide deployment arm. A native EMOS arm may instead ask its idle agent
+model to select `wait`, so a paired comparison must retain this strategy
+difference in its evidence.

@@ -501,6 +501,14 @@ Controller 与 Node，避免拓扑证据被
 静默丢弃。详见
 [`ADR-0045`](../../decisions/0045-shared-world-execution-session.md)。
 
+单 Actor 执行段中，只有 Control 已分配的 endpoint 调用原始 EMOS `CrabAgent` 模型并受
+canonical action guard 约束。共用 Habitat world 的其他 endpoint 仍由原始
+`MultiLLMPolicy`/`HierarchicalPolicy` 推进，但以部署层临时的无模型 idle policy 选择
+EMOS 已有的 `WaitSkillPolicy`；执行段结束后恢复原始 agent 实例。它不创建 Task、修改
+模型所选动作、下发导航命令或改写官方 PDDL 判定。双 Actor 双 assignment 路径仍各自调用
+原始 Stage2；idle policy 的激活和调用次数必须独立归档。该策略与原生 EMOS 允许未分配
+agent 自行调用模型选择 `wait` 的路径不同，比较实验应显式记录这一 arm 差异。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。
