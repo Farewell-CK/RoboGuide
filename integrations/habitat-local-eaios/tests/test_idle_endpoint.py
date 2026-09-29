@@ -13,6 +13,7 @@ INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
+from habitat_local_eaios import idle_endpoint  # noqa: E402
 from habitat_local_eaios.idle_endpoint import (  # noqa: E402
     PassiveIdleAgent,
     install_passive_idle_agents,
@@ -26,6 +27,12 @@ class WaitSkillPolicy:
 
 class WrongSkillPolicy:
     """Stand in for an incompatible mapping under the same skill name."""
+
+
+@pytest.fixture(autouse=True)
+def installed_wait_skill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the vendor wait class to the deterministic test double."""
+    monkeypatch.setattr(idle_endpoint, "_original_wait_skill_type", lambda: WaitSkillPolicy)
 
 
 class FakeAgent:
@@ -94,7 +101,9 @@ def test_only_unassigned_endpoint_uses_original_wait_skill_without_model() -> No
     assert [policy._high_level_policy.llm_agent for policy in actor._active_policies] == originals
 
 
-@pytest.mark.parametrize("bad_field", ["skill", "high-level-index", "missing-skill"])
+@pytest.mark.parametrize(
+    "bad_field", ["skill", "high-level-index", "missing-skill", "same-name-impostor"]
+)
 def test_unsupported_wait_mapping_fails_before_any_policy_swap(bad_field: str) -> None:
     """An EMOS skill-map change cannot silently turn idle into another action."""
     actor, originals = _actor()
@@ -103,6 +112,8 @@ def test_unsupported_wait_mapping_fails_before_any_policy_swap(bad_field: str) -
         policy._skills[2] = WrongSkillPolicy()
     elif bad_field == "high-level-index":
         policy._high_level_policy._skill_name_to_idx["wait"] = 3
+    elif bad_field == "same-name-impostor":
+        policy._skills[2] = type("WaitSkillPolicy", (), {})()
     else:
         policy._skills.clear()
     with pytest.raises(IntegrationError, match="original wait skill"):

@@ -17,6 +17,7 @@ INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
+from habitat_local_eaios import idle_endpoint  # noqa: E402
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
@@ -128,6 +129,12 @@ class RecordingDiagnostics:
 
 class WaitSkillPolicy:
     """Represent the existing EMOS wait skill in policy-loop doubles."""
+
+
+@pytest.fixture(autouse=True)
+def installed_wait_skill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the original skill identity to this vendor-shaped fake."""
+    monkeypatch.setattr(idle_endpoint, "_original_wait_skill_type", lambda: WaitSkillPolicy)
 
 
 class PolicyActor:

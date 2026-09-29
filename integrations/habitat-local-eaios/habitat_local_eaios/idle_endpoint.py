@@ -10,9 +10,25 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .model import IntegrationError
+
+
+def _original_wait_skill_type() -> type[Any]:
+    """Resolve the installed EMOS wait implementation in the Habitat process.
+
+    Raises:
+        IntegrationError: If the original skill cannot be imported. An
+            unassigned endpoint must never fall back to an arbitrary action.
+    """
+    try:
+        from habitat_baselines.rl.hrl.skills.wait import (  # type: ignore[import-not-found]
+            WaitSkillPolicy,
+        )
+    except ImportError as error:
+        raise IntegrationError("original EMOS wait skill is unavailable") from error
+    return cast(type[Any], WaitSkillPolicy)
 
 
 class PassiveIdleAgent:
@@ -119,6 +135,7 @@ def install_passive_idle_agents(
         raise IntegrationError("shared-world agent policies must match the exact assignment")
 
     pending: list[tuple[Any, Any, PassiveIdleAgent]] = []
+    wait_skill_type = _original_wait_skill_type()
     for policy in policies:
         high_level = policy._high_level_policy
         original = high_level.llm_agent
@@ -130,7 +147,7 @@ def install_passive_idle_agents(
         if (
             not isinstance(wait_index, int)
             or high_level_wait_index != wait_index
-            or type(wait_skill).__name__ != "WaitSkillPolicy"
+            or type(wait_skill) is not wait_skill_type
         ):
             raise IntegrationError("unassigned EMOS endpoint lacks its original wait skill")
         pending.append((high_level, original, PassiveIdleAgent(original.name)))
