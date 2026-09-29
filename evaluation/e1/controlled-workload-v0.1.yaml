@@ -4,10 +4,13 @@ admission:
   status: ready
   evidence: evaluation/e1/shared_world/summary.json
   reason: >-
-    RoboGuide now covers both official goal predicates of episode 51 through
-    two independently committed Nodes executing in one shared Habitat world
-    with the original EMOS Stage2 stack over the production Control/Node
-    path; official pddl_success remains the only benchmark authority.
+    The production RoboGuide path can preserve both official goal predicates
+    of episode 51 through Control/Node and a shared Habitat world; the
+    historical evidence anchor used two committed Nodes. This workload
+    coverage state does not certify a particular physical Actor topology,
+    pair comparability, Protocol B local-policy equivalence, Formal population
+    admission, or benchmark success. Official pddl_success remains the only
+    benchmark authority.
 dataset:
   name: habitat-mas-mp3d-mobility
   revision: mobility_episodes_1
@@ -29,6 +32,9 @@ semantic_task:
     - any_at(TARGET_any_targets|0)
   benchmark_success: habitat.pddl_success
 controlled_local_policy:
+# This identifies the original EMOS source stack, not equal decision surfaces.
+# The RoboGuide adapter's scoped idle policy, navigation argument binding, and
+# Contract Guard are Protocol A system differences; see FAIRNESS_LEDGER.md.
   stage2: original-emos-multi-llm-policy
   local_agent: original-emos-crabagent
   skill_dispatcher: original-emos-hierarchical-policy

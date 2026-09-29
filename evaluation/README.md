@@ -139,8 +139,9 @@ RoboGuide 执行。因此 manifest 的 `episode_selection` 区分两层：
 **不伪造**：解析不到就 unresolved/partial 并记录原因。
 
 相同 episode 仍不足以形成 paired workload。两侧还必须覆盖同一 semantic goal
-predicates。当前 episode 51 的官方任务要求两个 agent 分别满足两个 `any_at`
-谓词；Habitat adapter 会把完整的 joint terminal-state goal 冻结进 Mission
+predicates。当前 episode 51 的官方任务要求两个 `any_at` 谓词在联合终态
+成立；每个谓词都允许任意机器人满足，不要求两个不同机器人分别执行。
+Habitat adapter 会把完整的 joint terminal-state goal 冻结进 Mission
 Grounding Context。最终 MissionPlan 是否覆盖全部谓词由 MI Reviewer/Repairer 和
 provenance diagnostic 记录；遗漏谓词属于 RoboGuide/model outcome，不会伪造成
 provenance invalid，也不会把该次观察从 Formal population 中静默排除。只有官方
