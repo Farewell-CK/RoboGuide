@@ -10,7 +10,15 @@ pub(crate) struct DeploymentFeasibility {
     /// Content identity persisted with each Control candidate restriction.
     digest: String,
     /// Exact canonical operation and destination to observed Node status.
-    entries: BTreeMap<(String, String), BTreeMap<domain::NodeId, String>>,
+    pub(super) entries: BTreeMap<(String, String), BTreeMap<domain::NodeId, String>>,
+    /// Reset identity retained only for validating the optional cost source.
+    pub(super) identity: serde_json::Value,
+    /// Exact starts retained for cross-source snapshot validation.
+    pub(super) initial_positions: serde_json::Value,
+    /// Deployment endpoint ownership used to reject mismatched witness records.
+    pub(super) node_agents: BTreeMap<domain::NodeId, i64>,
+    /// Optional startup ordering, separate from durable negative restrictions.
+    initial_preferences: Option<super::initial_operation_preferences::InitialOperationPreferences>,
 }
 
 impl DeploymentFeasibility {
@@ -291,7 +299,54 @@ impl DeploymentFeasibility {
         {
             return Err("deployment feasibility lacks complete endpoint coverage".into());
         }
-        Ok(Self { digest, entries })
+        Ok(Self {
+            digest,
+            entries,
+            identity: body["identity"].clone(),
+            initial_positions: body["initial_agent_positions"].clone(),
+            node_agents,
+            initial_preferences: None,
+        })
+    }
+
+    /// Adds a separately configured initial source without renewing it on restore.
+    pub(crate) fn configure_initial_preferences(
+        &mut self,
+        path: &Path,
+        source_path: &Path,
+        received_at: domain::TimestampMs,
+        fresh_controller: bool,
+    ) -> Result<(), String> {
+        self.initial_preferences = Some(
+            super::initial_operation_preferences::InitialOperationPreferences::load(
+                path,
+                source_path,
+                self,
+                received_at,
+                fresh_controller,
+            )?,
+        );
+        Ok(())
+    }
+
+    /// Computes optional initial ordering within the current Control candidates.
+    pub(crate) fn initial_preferences_for_plan<
+        S: ports::SharedNodeStateReader,
+        E: ports::EventSink,
+    >(
+        &self,
+        plan: &domain::MissionPlan,
+        control: &control::ControlPlane,
+        state: &S,
+        now: domain::TimestampMs,
+        correlation: &domain::CorrelationId,
+        events: &mut E,
+    ) -> Result<Option<control::InitialCandidatePreferences>, String> {
+        self.initial_preferences
+            .as_ref()
+            .map(|source| source.for_plan(plan, control, state, now, correlation, events))
+            .transpose()
+            .map(Option::flatten)
     }
 
     /// Derives candidate sets from exact accepted intents without choosing an assignment.
@@ -410,7 +465,7 @@ fn valid_sha256(value: &str) -> bool {
 }
 
 /// Check the digest syntax used for source artifacts and Control attribution.
-fn valid_prefixed_sha256(value: &str) -> bool {
+pub(super) fn valid_prefixed_sha256(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(valid_sha256)
 }
 
@@ -446,7 +501,7 @@ fn canonical_digest_value(value: &mut serde_json::Value) {
 }
 
 /// Compute the v0.3 language-neutral content identity of an evidence body.
-fn content_digest(body: &serde_json::Value) -> Result<String, String> {
+pub(super) fn content_digest(body: &serde_json::Value) -> Result<String, String> {
     let mut canonical = body.clone();
     canonical_digest_value(&mut canonical);
     let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
@@ -456,6 +511,382 @@ fn content_digest(body: &serde_json::Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Freeze the original observation separately from its neutral cost projection.
+    fn initial_route_document(
+        matrix: &serde_json::Value,
+        costs: [Option<u64>; 4],
+    ) -> serde_json::Value {
+        let mut identity = matrix["identity"].clone();
+        identity["preassignment_digest"] = matrix["digest"].clone();
+        let records = matrix["records"].as_array().unwrap().iter().zip(costs).map(|(record, cost)| serde_json::json!({
+            "node_id": record["node_id"], "agent_id": record["agent_id"], "destination": record["destination"],
+            "status": if cost.is_some() { "supported" } else { "not_found" },
+            "selection": cost.map(|cost| serde_json::json!({"path_length_m": cost as f64 / 1_000_000.0})),
+        })).collect::<Vec<_>>();
+        let mut source = serde_json::json!({
+            "schema_version": "roboguide.deployment-reset-route-support/v0.1", "authority": "deployment-observed-reset-state",
+            "purpose": "diagnostic_only", "scope_status": "available", "identity": identity,
+            "initial_agent_positions": matrix["initial_agent_positions"], "records": records,
+        });
+        seal(&mut source);
+        source
+    }
+
+    /// Write exact operation costs without adding Mission or Actor selectors.
+    fn initial_cost_document(
+        matrix: &serde_json::Value,
+        costs: [Option<u64>; 4],
+    ) -> serde_json::Value {
+        let records = matrix["records"].as_array().unwrap().iter().zip(costs).map(|(record, cost)| serde_json::json!({
+            "operation": record["operation"], "parameters": {"destination": record["destination"]},
+            "node_id": record["node_id"], "cost_micrometers": cost,
+        })).collect::<Vec<_>>();
+        let mut body = serde_json::json!({
+            "schema_version": "roboguide.deployment-initial-operation-preferences/v0.1",
+            "authority": "deployment-observed-reset-state", "scope": "initial_world_before_first_dispatch",
+            "source_digest": initial_route_document(matrix, costs)["digest"], "feasibility_digest": matrix["digest"], "records": records,
+        });
+        seal(&mut body);
+        body
+    }
+
+    /// Register current capability and resource facts for initial policy tests.
+    fn initial_cost_nodes(
+        control: &mut control::ControlPlane,
+        plan: &domain::MissionPlan,
+        events: &mut state::SqliteEventLog,
+    ) -> state::InMemorySharedNodeState {
+        let mut state = state::InMemorySharedNodeState::new();
+        let contracts: Vec<domain::CapabilityContractRef> = plan
+            .task_graph()
+            .tasks()
+            .iter()
+            .flat_map(|task| task.requirement().roles())
+            .flat_map(|role| {
+                role.capability_requirements()
+                    .iter()
+                    .map(|capability| capability.contract().clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (node, resource) in [("node-a", "space-a"), ("node-b", "space-b")] {
+            let registration = domain::NodeRegistration::new_with_contracts(
+                domain::NodeId::new(node).unwrap(),
+                domain::LocalRuntime::new("policy-test", "1").unwrap(),
+                domain::NodeContractVersion::v0_1(),
+                vec![domain::Capability::new(
+                    domain::CapabilityKind::Mobility,
+                    true,
+                )],
+                contracts.clone(),
+                vec![
+                    domain::Resource::new(
+                        domain::ResourceId::new(resource).unwrap(),
+                        domain::ResourceKind::Space,
+                        1,
+                    )
+                    .unwrap(),
+                ],
+            );
+            control
+                .register_node(
+                    &mut state,
+                    registration,
+                    domain::NodeStatus::new(
+                        domain::NodeHealth::Online,
+                        domain::TimestampMs::new(0),
+                    ),
+                    domain::TimestampMs::new(0),
+                    &domain::CorrelationId::new("initial-policy").unwrap(),
+                    events,
+                )
+                .unwrap();
+        }
+        state
+    }
+
+    /// Coverage precedes distance for parallel roots; reversing Task order stays safe.
+    #[test]
+    fn initial_costs_support_joint_coverage_without_binding_or_exclusion() {
+        for (costs, reverse, expected_first) in [
+            (
+                [Some(17_884_000), Some(13_191_000), Some(5_577_000), None],
+                false,
+                "node-b",
+            ),
+            (
+                [Some(23_780_000), None, Some(2_224_000), Some(5_144_000)],
+                false,
+                "node-a",
+            ),
+            (
+                [Some(23_780_000), None, Some(2_224_000), Some(5_144_000)],
+                true,
+                "node-b",
+            ),
+            ([None; 4], false, "node-a"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("reset.json");
+            let matrix = snapshot(&path, true);
+            let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+            let costs_path = directory.path().join("costs.json");
+            let source_path = directory.path().join("routes.json");
+            std::fs::write(
+                &source_path,
+                initial_route_document(&matrix, costs).to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                &costs_path,
+                initial_cost_document(&matrix, costs).to_string(),
+            )
+            .unwrap();
+            deployment
+                .configure_initial_preferences(
+                    &costs_path,
+                    &source_path,
+                    domain::TimestampMs::new(0),
+                    true,
+                )
+                .unwrap();
+            let mut document = plan_document(false, true);
+            if reverse {
+                document["tasks"].as_array_mut().unwrap().reverse();
+            }
+            let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+            let mut events =
+                state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+            let mut control = control::ControlPlane::new();
+            let state = initial_cost_nodes(&mut control, &plan, &mut events);
+            let now = domain::TimestampMs::new(0);
+            let correlation = domain::CorrelationId::new("initial-policy").unwrap();
+            let mut orchestrator = orchestration::MissionOrchestrator::new();
+            orchestrator
+                .submit(
+                    plan.clone(),
+                    domain::ExecutionGroupId::new("initial-group").unwrap(),
+                    &mut control,
+                    now,
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap();
+            let preference = deployment
+                .initial_preferences_for_plan(
+                    &plan,
+                    &control,
+                    &state,
+                    now,
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap()
+                .unwrap();
+            control
+                .set_initial_candidate_preferences(&plan, preference)
+                .unwrap();
+            assert!(plan.actors().iter().all(|actor| {
+                control
+                    .actor_binding(plan.goal().mission_id(), actor.id())
+                    .is_none()
+            }));
+            for (index, task) in plan.task_graph().tasks().iter().enumerate() {
+                let disposition = orchestrator
+                    .prepare_task(
+                        plan.goal().mission_id(),
+                        task.requirement().task_ref(),
+                        &state,
+                        &mut control,
+                        now,
+                        &correlation,
+                        &mut events,
+                    )
+                    .unwrap();
+                assert_eq!(disposition.task_ref(), task.requirement().task_ref());
+                let node = control
+                    .actor_binding(
+                        plan.goal().mission_id(),
+                        task.requirement().roles()[0].actor_id().unwrap(),
+                    )
+                    .unwrap()
+                    .node_id();
+                assert_eq!(
+                    node.as_str(),
+                    if index == 0 {
+                        expected_first
+                    } else if expected_first == "node-a" {
+                        "node-b"
+                    } else {
+                        "node-a"
+                    }
+                );
+            }
+        }
+    }
+
+    /// Restart, expiry and missing current providers leave the default policy intact.
+    #[test]
+    fn initial_costs_are_not_renewed_or_used_for_later_serial_tasks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reset.json");
+        let matrix = snapshot(&path, true);
+        let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+        let costs_path = directory.path().join("costs.json");
+        let source_path = directory.path().join("routes.json");
+        std::fs::write(
+            &source_path,
+            initial_route_document(&matrix, [None, Some(1), Some(1), None]).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &costs_path,
+            initial_cost_document(&matrix, [None, Some(1), Some(1), None]).to_string(),
+        )
+        .unwrap();
+        let plan = plan(true, true);
+        let mut events =
+            state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let state = initial_cost_nodes(&mut control, &plan, &mut events);
+        let now = domain::TimestampMs::new(0);
+        let correlation = domain::CorrelationId::new("initial-policy").unwrap();
+        for (fresh, time) in [(false, 0), (true, control::MAX_INITIAL_PREFERENCE_AGE_MS)] {
+            deployment
+                .configure_initial_preferences(&costs_path, &source_path, now, fresh)
+                .unwrap();
+            assert!(
+                deployment
+                    .initial_preferences_for_plan(
+                        &plan,
+                        &control,
+                        &state,
+                        domain::TimestampMs::new(time),
+                        &correlation,
+                        &mut events
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        deployment
+            .configure_initial_preferences(&costs_path, &source_path, now, true)
+            .unwrap();
+        let preference = deployment
+            .initial_preferences_for_plan(&plan, &control, &state, now, &correlation, &mut events)
+            .unwrap()
+            .unwrap();
+        control
+            .set_initial_candidate_preferences(&plan, preference)
+            .unwrap();
+        let later = &plan.task_graph().tasks()[1];
+        let candidates = control
+            .match_capabilities_for_mission(
+                &state,
+                &plan,
+                later.requirement(),
+                now,
+                &correlation,
+                &mut events,
+            )
+            .unwrap();
+        let decision = control::BoundedJointScheduler::new()
+            .schedule_task(
+                &state,
+                later.requirement(),
+                &candidates,
+                now,
+                &correlation,
+                &mut events,
+            )
+            .unwrap();
+        assert_eq!(decision.selections()[0].node_id().as_str(), "node-a");
+        assert!(
+            deployment
+                .initial_preferences_for_plan(
+                    &plan,
+                    &control,
+                    &state::InMemorySharedNodeState::new(),
+                    now,
+                    &correlation,
+                    &mut events
+                )
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// Recomputed projection digests cannot hide source, parameter or coverage mistakes.
+    #[test]
+    fn initial_cost_source_rejects_invalid_scope_coverage_and_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reset.json");
+        let matrix = snapshot(&path, true);
+        let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+        let costs_path = directory.path().join("costs.json");
+        let source_path = directory.path().join("routes.json");
+        std::fs::write(
+            &source_path,
+            initial_route_document(&matrix, [Some(1); 4]).to_string(),
+        )
+        .unwrap();
+        for fault in [
+            "source",
+            "parameters",
+            "duplicate",
+            "missing",
+            "negative",
+            "overflow",
+            "schema",
+            "digest",
+            "laundered_cost",
+        ] {
+            let mut document = initial_cost_document(&matrix, [Some(1); 4]);
+            match fault {
+                "source" => {
+                    document["feasibility_digest"] =
+                        serde_json::json!(format!("sha256:{}", "0".repeat(64)))
+                }
+                "parameters" => {
+                    document["records"][0]["parameters"]["extra"] = serde_json::json!("injected")
+                }
+                "duplicate" => {
+                    let record = document["records"][0].clone();
+                    document["records"].as_array_mut().unwrap().push(record);
+                }
+                "missing" => {
+                    document["records"].as_array_mut().unwrap().pop();
+                }
+                "negative" => document["records"][0]["cost_micrometers"] = serde_json::json!(-1),
+                "overflow" => {
+                    document["records"][0]["cost_micrometers"] =
+                        serde_json::json!(1_000_000_000_001u64)
+                }
+                "laundered_cost" => {
+                    document["records"][0]["cost_micrometers"] = serde_json::json!(2)
+                }
+                "schema" => document["schema_version"] = serde_json::json!("wrong"),
+                _ => {}
+            }
+            seal(&mut document);
+            if fault == "digest" {
+                document["digest"] = serde_json::json!("wrong");
+            }
+            std::fs::write(&costs_path, document.to_string()).unwrap();
+            assert!(
+                deployment
+                    .configure_initial_preferences(
+                        &costs_path,
+                        &source_path,
+                        domain::TimestampMs::new(0),
+                        true
+                    )
+                    .is_err(),
+                "{fault}"
+            );
+        }
+    }
 
     /// Python and Rust hash the same floats even when exponent syntax differs.
     #[test]

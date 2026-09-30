@@ -528,10 +528,18 @@ Stage2 所选实体工具调用和官方目标的前提下，将该实体解析�
 `not_found` 或 `unavailable`，并绑定 workload、起点、Local How 与实际模块/原生库摘要。
 该预检不运行顶点扫描，不提前填充原始 action cache，不调用随机采样或物理 step。
 `not_found` 只表示这两个候选未提供静态路径证据，不能作为 Actor 后续 Task 的永久
-Node 排除。当前证据仅用于归档与独立诊断，不进入 MI 输入或 Control 候选规则。
+Node 排除。观测本身用于归档与独立诊断，不进入 MI 输入或 Control 硬候选规则。
 B1 明确启用时，归档缺失/身份不一致作为 harness 失败在提交前暴露；正常的未知证据
 不改变 Formal admission。详见
 [`ADR-0052`](../../decisions/0052-reset-route-support-observations.md)。
+
+独立的默认关闭初次调度 consumer（[ADR-0053](../../decisions/0053-initial-candidate-preferences.md)）
+可将正向静态路径证据投影为 canonical operation/parameters 对应的候选成本。
+Controller 在当前双 endpoint 容量约束下比较初次并发任务的候选组合，Control/Scheduler
+只调整已有 CandidateSet 的搜索顺序，不扩大候选、不创建 binding 或资源承诺。
+未知和有限搜索未找到仍可参与调度；资源不足保留现有可恢复 deferral。
+偏好有 receive-time 时限，首次成功 Bind 后失效，恢复不重新激活；MI、任务语义、
+Local How、官方 benchmark authority 和 Formal admission 均保持各自权威。
 
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
@@ -541,8 +549,15 @@ one Habitat reset -> original prepared observations -> assigned Stage2 execution
                                   B1 identity/source/geometry check
                                                   |
                                       diagnostic archive only
+                                                  |
+                               optional neutral cost projection
+                                                  |
+                              initial eligible-candidate ordering
+                              (first Bind / expiry / restore fence)
 
-existing floor matrix -> Control Match -> Proposal -> Commit -> Bind (unchanged)
+existing floor matrix -> Control Match -> Scheduler -> Proposal -> Commit -> Bind
+                                             ^
+                                  optional initial search order
 ```
 
 ## 7. 对账与恢复

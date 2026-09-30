@@ -346,12 +346,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?;
     let deployment_feasibility_path =
         std::env::var_os("ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH").map(PathBuf::from);
-    let deployment_feasibility = deployment_feasibility_path
+    let mut deployment_feasibility = deployment_feasibility_path
         .as_deref()
         .map(DeploymentFeasibility::load)
         .transpose()
-        .map_err(|error| format!("deployment feasibility startup failed: {error}"))?
-        .map(Arc::new);
+        .map_err(|error| format!("deployment feasibility startup failed: {error}"))?;
     let verifier_feed = match (
         std::env::var_os("ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH"),
         std::env::var_os("ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH"),
@@ -381,6 +380,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
     let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
+    let initial_preference_path = std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH")
+        .filter(|path| !path.is_empty());
+    let initial_preference_source =
+        std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_SOURCE_PATH")
+            .filter(|path| !path.is_empty());
+    if initial_preference_path.is_some() != initial_preference_source.is_some() {
+        return Err(
+            "initial operation preferences require both projection and original source paths"
+                .into(),
+        );
+    }
+    if let (Some(path), Some(source)) = (initial_preference_path, initial_preference_source) {
+        deployment_feasibility
+            .as_mut()
+            .ok_or("initial operation preferences require deployment feasibility")?
+            .configure_initial_preferences(
+                Path::new(&path),
+                Path::new(&source),
+                process_clock.now(),
+                initialize_checkpoint,
+            )
+            .map_err(|error| format!("initial operation preference startup failed: {error}"))?;
+        if !initialize_checkpoint {
+            eprintln!("initial operation preferences disabled after Controller restore");
+        }
+    }
+    let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new(events);
     let receiver_router = router.clone();

@@ -572,6 +572,15 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 `evaluation/src/roboguide_eval/b1_reset_route_support.py` 校验证据一致性。
 实现与限制见 [`ADR-0052`](docs/decisions/0052-reset-route-support-observations.md)。
 
+可另行启用 `ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES=1`（要求上述 route observer 已启用），
+将正向静态路径证据转为 `evidence/initial-operation-preferences.json`。
+Controller 对当前可行的初次并发候选组合优先比较正向证据覆盖，再比较成本；
+Scheduler 仅调整搜索顺序，未知候选、资源约束和 Actor 绑定规则保持不变。
+偏好只用于新 Controller 的首个 Mission，启动后十分钟或首次 Bind 即失效，
+不进入 checkpoint、不用于后续顺序任务或恢复。它是显式的部署调度策略，
+不是可达性或 benchmark 成功证明；对照实验应记录开关与源摘要。
+见 [`ADR-0053`](docs/decisions/0053-initial-candidate-preferences.md)。
+
 ## 三条核心语义链
 
 ```text

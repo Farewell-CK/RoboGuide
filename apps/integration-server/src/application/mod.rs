@@ -3,6 +3,7 @@
 mod actor_placement;
 mod deployment_feasibility;
 mod dispatch;
+mod initial_operation_preferences;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;

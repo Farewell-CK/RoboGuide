@@ -198,6 +198,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   unavailable evidence. It is diagnostic-only: no MI input, Actor-wide exclusion,
   Control authority, Formal admission, or benchmark change. Opted-in B1 preflight
   checks identity/source/geometry and attributes archival failures to the harness.
+- An independently enabled initial-operation preference consumer (ADR-0053)
+  projects positive reset witnesses into exact-intent costs. The Controller
+  compares bounded initial endpoint combinations; Control admits transient
+  Task/Role ordinals and Scheduler only reorders current eligible candidates.
+  Unknown costs never exclude a Node. The first successful Bind discards the
+  Mission's preferences, expiry restores stable order, and recovery/restore
+  never renew reset evidence. This is an opt-in initial policy, not MI input,
+  resource authority, route feasibility proof or automatic terminal replanning.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

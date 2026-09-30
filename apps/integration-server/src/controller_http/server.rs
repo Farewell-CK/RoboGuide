@@ -199,6 +199,7 @@ pub(crate) async fn handle_http_connection(
                         orchestrator,
                         ..
                     } = &mut candidate;
+                    let first_mission = orchestrator.mission_ids().is_empty();
                     let eligibility = deployment_feasibility
                         .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))
                         .transpose();
@@ -236,6 +237,16 @@ pub(crate) async fn handle_http_connection(
                                     &mut events,
                                 )
                                 .map_err(|error| error.to_string())?;
+                            if first_mission && let Some(snapshot) = deployment_feasibility
+                                && let Some(preferences) = snapshot.initial_preferences_for_plan(
+                                    &plan, bridge.control(), bridge.state(), now, &submit_correlation, &mut events,
+                                )?
+                            {
+                                let source = preferences.source_digest().to_string();
+                                bridge.control_mut().set_initial_candidate_preferences(&plan, preferences)
+                                    .map_err(|error| error.to_string())?;
+                                eprintln!("initial candidate preferences admitted for {mission_id}: {source}; commitment remains pending");
+                            }
                             bridge
                                 .register_execution_relations(
                                     &plan,

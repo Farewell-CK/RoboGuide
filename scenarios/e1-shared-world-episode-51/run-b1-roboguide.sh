@@ -170,6 +170,13 @@ if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" == 1 ]]; then
     ROUTE_SUPPORT_CHECK_ARGS=(--require-route-support)
 fi
 trap finish_run EXIT
+INITIAL_PREFERENCES_PATH=""
+INITIAL_PREFERENCES_SOURCE=""
+if [[ "${ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES:-0}" == 1 \
+    && "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" != 1 ]]; then
+    echo "initial candidate preferences require ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1" >&2
+    exit 1
+fi
 # The workload (episode, seed, dataset identity) comes from the frozen B1
 # input itself — never from a scenario-embedded episode. The extractor
 # fails with a stable field-level reason before any component launches.
@@ -270,6 +277,20 @@ if [[ "${#ROUTE_SUPPORT_CHECK_ARGS[@]}" != 0 ]]; then
              FAILURE_REASON=reset_route_support_archive_invalid; exit 1; }
 fi
 
+if [[ "${ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES:-0}" == 1 ]]; then
+    INITIAL_PREFERENCES_PATH="$RUN/evidence/initial-operation-preferences.json"
+    INITIAL_PREFERENCES_SOURCE="$RUN/evidence/reset-route-support.json"
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+        habitat_local_eaios.initial_operation_preferences \
+        --route-support "$RUN/evidence/reset-route-support.json" \
+        --feasibility "$RUN/evidence/preassignment-feasibility.json" \
+        --output "$INITIAL_PREFERENCES_PATH" \
+        || { FAILURE_OWNER=EXTERNAL_INFRA; FAILURE_COMPONENT=harness; \
+             FAILURE_REASON=initial_operation_preferences_invalid; exit 1; }
+fi
+
+ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH="$INITIAL_PREFERENCES_PATH" \
+ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_SOURCE_PATH="$INITIAL_PREFERENCES_SOURCE" \
 ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
 ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH="$RUN/evidence/task-verifier-source.json" \
 ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH="$RUN/evidence/task-verifier-verdict.json" \
