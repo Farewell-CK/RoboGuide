@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import signal
@@ -402,6 +403,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trace-interval", type=float, default=1.0,
                     help="轨迹采样间隔, 按**仿真时间**计 (默认 1.0 s, "
                          "与 --speed 无关: 倍速不会让轨迹变稀)")
+    ap.add_argument("--runtime-name", default=None,
+                    help="把所有角色上报的 Local EAIOS 名字**统一**成一个值 "
+                         "(同构对照实验用: 四个槽位都报 robonix-os, 只留本体与能力差异); "
+                         "不传则各角色沿用自己的 runtime_name")
+    ap.add_argument("--slam", choices=("on", "off"), default="on",
+                    help="地面平台是否用自带的深度相机 + 雷达建三维地图并自己定位 "
+                         "(on: 导航闭环与感知只用估计量; off: 退回读世界真值)")
+    ap.add_argument("--slam-seed", type=int, default=0,
+                    help="传感器噪声/开机定位误差的随机种子 (对照实验用)")
+    ap.add_argument("--slam-dump", metavar="DIR", default=None,
+                    help="退出时把每个本体自建的三维地图导成 PLY 点云到该目录")
     args = ap.parse_args(argv)
 
     if len(args.ports) != len(args.roles):
@@ -422,7 +434,14 @@ def main(argv: list[str] | None = None) -> int:
             tracers[r] = ExecutionTracer(
                 os.path.join(args.trace_dir, f"trajectory-{r}.jsonl"), r,
                 args.trace_interval)
-    runtimes = [RoleRuntime(world, ROLE_SPECS[r], shots, tracers[r])
+    # 同构对照开关: 只改"上报的 OS 名字", 本体/运动学/能力集一个不动 —— 用来验证
+    # 控制面的调度不依赖各节点 OS 名字不同。
+    specs = dict(ROLE_SPECS)
+    if args.runtime_name:
+        for r, s in specs.items():
+            specs[r] = dataclasses.replace(s, runtime_name=args.runtime_name)
+    runtimes = [RoleRuntime(world, specs[r], shots, tracers[r],
+                            slam=(args.slam == "on"), slam_seed=args.slam_seed)
                 for r in args.roles]
 
     recorder = None
@@ -449,10 +468,10 @@ def main(argv: list[str] | None = None) -> int:
     for role, port in zip(args.roles, args.ports):
         rt = runtimes[args.roles.index(role)]
         srv = ThreadingHTTPServer(("127.0.0.1", port),
-                                  _make_handler(rt, ROLE_SPECS[role], recorder))
+                                  _make_handler(rt, specs[role], recorder))
         servers.append(srv)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        print(f"[facade] {role:9s} runtime={ROLE_SPECS[role].runtime_name:20s} "
+        print(f"[facade] {role:9s} runtime={specs[role].runtime_name:20s} "
               f"-> http://127.0.0.1:{port}")
 
     if recorder:
@@ -470,6 +489,13 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # 先等物理线程收尾 (它负责 close writer), 再关 HTTP。
         phys.join(timeout=180.0)
+        # 本体自建的三维地图只存在于内存里, 进程一退就没了 —— 退出前落盘。
+        if args.slam_dump:
+            for rt in runtimes:
+                if rt.slam is not None:
+                    out = os.path.join(args.slam_dump, f"map-{rt.spec.role}.ply")
+                    n = rt.slam.dump_ply(out)
+                    print(f"[slam  ] {rt.spec.role}: {n} 个占据体素 -> {out}")
         for srv in servers:
             srv.shutdown()
         for tr in tracers.values():

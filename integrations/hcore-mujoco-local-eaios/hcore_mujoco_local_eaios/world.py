@@ -55,9 +55,22 @@ if _HCORE_DIR not in sys.path:
 
 from hcore_nav import OccupancyGrid, Occluders  # noqa: E402  依赖 H-CoRE 侧导航设施
 
+from .slam import (  # noqa: E402  本体自带的三维感知 (深度相机 + 雷达 + 建图 + 定位)
+    DepthCamSpec,
+    LidarSpec,
+    SensorRig,
+    SlamNode,
+)
+
 # ------------------------------ 常量 ------------------------------
 
 DETECTION_RANGE_M: dict[str, float] = {"aruco": 2.5, "object": 1.6, "qr": 8.0}
+# 用自建地图定位时的到点判定: 比真值判据 (WAYPOINT_TOL_M) 宽松, 因为"自己认为到了"
+# 与"真的到了"之间隔着定位误差 (实测 0.05~0.20 m), 判定太紧会永远到不了。
+SLAM_WAYPOINT_TOL_M = 0.28
+# 卡住恢复: 这么久没有实质位移就用当前估计位姿重规划, 最多重规划这么多次
+STUCK_REPLAN_S = 4.0
+MAX_REPLANS = 3
 GROUND_FOV_HALF_RAD = math.radians(35.0)   # 地面平台相机水平半视场角
 PTZ_AIM_TOL_RAD = 0.10                     # PTZ 精对准阈值 (rad)
 WAYPOINT_TOL_M = 0.15                      # 路径点到达判定
@@ -169,6 +182,9 @@ class RoleSpec:
     legs: tuple[str, ...] = ()        # 四足腿关节 (仅 quadruped)
     arm_joints: tuple[str, ...] = ()  # 机械臂 (肩, 肘) 关节, 非空即为机械臂本体
     fingers: tuple[str, str] = ()     # 夹爪滑移关节
+    # 自带三维感知 (深度相机 + 雷达)。None = 该本体不建图, 感知退回几何判定。
+    rig: SensorRig | None = None
+    base_z: float = 0.0               # 基座离地高度 (传感器安装高度的基准, 本体自己知道)
 
 
 ROLE_SPECS: dict[str, RoleSpec] = {
@@ -187,6 +203,10 @@ ROLE_SPECS: dict[str, RoleSpec] = {
         inflate=0.24,
         legs=("fl_upper", "fl_lower", "fr_upper", "fr_lower",
               "rl_upper", "rl_lower", "rr_upper", "rr_lower"),
+        # 犬背上的雷达 + 头部的深度相机 (MJCF: dog_cam pos="0.62 0 0.20")
+        rig=SensorRig(lidar=LidarSpec(pos=(0.0, 0.0, 0.20)),
+                      cam=DepthCamSpec(pos=(0.62, 0.0, 0.20))),
+        base_z=0.62,
     ),
     "rover": RoleSpec(
         role="rover",
@@ -202,6 +222,10 @@ ROLE_SPECS: dict[str, RoleSpec] = {
         max_yaw_rate=1.0,
         inflate=0.22,
         legs=(),
+        # 车顶雷达 (MJCF: rover_lidar 在 z=+0.12) + 前部深度相机 (rover_cam)
+        rig=SensorRig(lidar=LidarSpec(pos=(0.0, 0.0, 0.12)),
+                      cam=DepthCamSpec(pos=(0.20, 0.0, 0.05))),
+        base_z=0.12,
     ),
     "ptz": RoleSpec(
         role="ptz",
@@ -569,12 +593,26 @@ class RoleRuntime:
 
     def __init__(self, world: ArenaWorld, spec: RoleSpec,
                  shots: Snapshotter | None = None,
-                 tracer: ExecutionTracer | None = None) -> None:
-        """绑定世界与角色规格; shots 为相机的拍照设施, tracer 为轨迹日志。"""
+                 tracer: ExecutionTracer | None = None,
+                 slam: bool = True, slam_seed: int = 0) -> None:
+        """绑定世界与角色规格; shots 为相机的拍照设施, tracer 为轨迹日志。
+
+        slam=True 时本体用自带的深度相机 + 雷达建三维地图并**自己估计位姿**:
+        导航的闭环控制、到点判定与"看见了没有"都只用估计量, 不再直接读世界真值
+        (真值只用于产生观测与事后评估误差)。
+        """
         self.world = world
         self.spec = spec
         self._shots = shots
         self._tracer = tracer
+        self.slam: SlamNode | None = None
+        # 导航卡住检测的状态 (每个 navigate execution 开始时重置)
+        self._nav_stuck_t = 0.0
+        self._nav_replans = 0
+        self._nav_last_xy = np.zeros(2)
+        if slam and spec.rig is not None and spec.slide is not None:
+            self.slam = SlamNode(world, spec.body, spec.yaw_joint, spec.slide,
+                                 spec.rig, seed=slam_seed, base_z=spec.base_z)
         self.executions: dict[str, Execution] = {}
         self.active: str | None = None
         self.pending: list[str] = []
@@ -608,6 +646,24 @@ class RoleRuntime:
             return 0.0
         return self.world.qpos(self.spec.yaw_joint)
 
+    # ---------------- 自己估计的位姿 (SLAM) ----------------
+
+    def xy_est(self) -> np.ndarray:
+        """本体**自己认为的**平面位置; 没有 SLAM 时退化为真值。"""
+        if self.slam is not None:
+            return self.slam.xy_est()
+        return self.xy()
+
+    def yaw_est(self) -> float:
+        """本体**自己认为的**朝向; 没有 SLAM 时退化为真值。"""
+        if self.slam is not None:
+            return self.slam.yaw_est()
+        return self.yaw()
+
+    def tol(self) -> float:
+        """到点判定: 用自建地图定位时放宽, 否则"自己认为到了"永远不成立。"""
+        return SLAM_WAYPOINT_TOL_M if self.slam is not None else WAYPOINT_TOL_M
+
     def eye(self) -> np.ndarray:
         """感知参考点 (相机) 的世界坐标。"""
         return self.world.site_xyz(self.spec.site)
@@ -618,8 +674,15 @@ class RoleRuntime:
         w = self.world
         if self.spec.slide is not None:
             xy = self.xy()
-            return {"pos": [round(float(xy[0]), 3), round(float(xy[1]), 3)],
-                    "yaw": round(self.yaw(), 3)}
+            pose: dict[str, Any] = {
+                "pos": [round(float(xy[0]), 3), round(float(xy[1]), 3)],
+                "yaw": round(self.yaw(), 3)}
+            if self.slam is not None:
+                e = self.slam.xy_est()
+                pose["pos_est"] = [round(float(e[0]), 3), round(float(e[1]), 3)]
+                pose["yaw_est"] = round(self.slam.yaw_est(), 3)
+                pose["pose_err_m"] = round(self.slam.error(), 3)
+            return pose
         if self.spec.pan_joint is not None:
             return {"pan": round(w.qpos(self.spec.pan_joint), 3),
                     "tilt": round(w.qpos(self.spec.tilt_joint), 3)}
@@ -656,10 +719,27 @@ class RoleRuntime:
         return kind in self.spec.capability
 
     def detect(self, kind: str, target: str) -> bool:
-        """判定目标此刻是否真的被本本体观测到 (量程 + 视场 + 视线遮挡)。"""
+        """判定目标此刻是否真的被本本体观测到 (量程 + 视场 + 视线遮挡)。
+
+        带自带传感器的地面平台不使用几何真值判定, 而是**问自己的传感器**: 识别
+        层给出目标的方位与距离, 再沿该方位打一条射线, 回波距离与之吻合才算"看见
+        了" —— 被挡住、超出量程、不在相机视场里都拿不到读数。目标的世界坐标因此
+        是本体**量出来的**, 而不是查出来的。
+        """
         if not self.can_serve(kind):
             return False
         w = self.world
+        if self.slam is not None:
+            try:
+                tgt3 = w.body_xyz(target)[:3]
+            except KeyError:
+                return False
+            # `tgt3` 只用于让仿真器把这条射线**真实地打在它身上**; 本体到手的是自己
+            # 的识别方位 + 测距, 目标位置由 perceive_target 合成。**看不到时它什么都
+            # 拿不到**, 而不是像直接读坐标那样永远知道。
+            pos, _dist, _why = self.slam.perceive_target(
+                tgt3, DETECTION_RANGE_M.get(kind, 2.0), GROUND_FOV_HALF_RAD)
+            return pos is not None
         eye = self.eye()
         try:
             tgt = w.body_xyz(target)
@@ -733,6 +813,22 @@ class RoleRuntime:
                 return
         self.active = None
 
+    def _plan_to(self, start: np.ndarray, goal: np.ndarray) -> list[np.ndarray] | None:
+        """从 start 规划到 goal: 优先用**自己建的三维地图**的二维投影。
+
+        自己的地图还没覆盖到目标 (或缝隙太多) 时才回退到仿真栅格, 用了哪张图记进
+        `plan_source`, 让"这次导航是照自己的地图走的"成为可核对的事实。
+        """
+        path: list[np.ndarray] | None = None
+        if self.slam is not None:
+            path = self.slam.planner.plan(start, goal)
+            self.slam.plan_source = "self-map" if path else "world-fallback"
+        if not path:
+            path = self.world.grid(self.spec.inflate).plan(start, goal)
+            if path and self.slam is not None:
+                self.slam.plan_source = "world-fallback"
+        return path
+
     def _begin(self, ex: Execution) -> None:
         """根据 operation 解析语义参数, 失败则立刻写入本地 FAILED。"""
         if ex.operation == "mobility.navigate":
@@ -743,13 +839,18 @@ class RoleRuntime:
                              "local-resolution-failed")
                 return
             ex.goal = goal
-            path = self.world.grid(self.spec.inflate).plan(self.xy(), goal)
+            self._nav_stuck_t = 0.0
+            self._nav_replans = 0
+            self._nav_last_xy = self.xy_est()
+            path = self._plan_to(self.xy_est(), goal)
             if not path:
                 self._finish(ex, STATE_FAILED, f"no path to {dest}",
                              "local-planner-no-path")
                 return
             ex.path = list(path)
-            ex.detail = f"navigate -> {dest} ({len(ex.path)} waypoints)"
+            src = self.slam.plan_source if self.slam is not None else "world-grid"
+            ex.detail = (f"navigate -> {dest} ({len(ex.path)} waypoints, "
+                         f"planned on {src})")
         elif ex.operation == "observation.verify":
             expected = str(ex.parameters.get("expected", ""))
             kind, target = self._parse_expected(expected)
@@ -892,6 +993,10 @@ class RoleRuntime:
         }
         if dest in spots:
             return spots[dest]
+        # body 名目的地: 这是**任务层给出的先验** (语义地图上的地标), 不是本体此刻
+        # 的识别结果 —— "去 obs2 那儿"等价于人在地图上指了一个点。它与"看见它没有"
+        # 是两件事, 后者由 perceive_target 负责。若要更严格, 这里应换成"上次观测到
+        # 它的位置 + 地图传播的不确定性", 而不是取精确坐标。
         try:
             return w.body_xyz(dest)[:2]
         except KeyError:
@@ -910,6 +1015,8 @@ class RoleRuntime:
                 extra["shots"] = list(ex.shots)
             if ex.shot_seen:
                 extra["shot_seen"] = list(ex.shot_seen)
+            if self.slam is not None:   # 终态时刻的"我自己认为我在哪"
+                extra["slam"] = self.slam.as_dict()
             self._tracer.emit("terminal", ex, self.world, **extra)
 
     # ---------------- 每步推进 ----------------
@@ -917,6 +1024,10 @@ class RoleRuntime:
     def tick(self, dt: float) -> None:
         """推进本角色一个物理步: 运动控制、感知判定、超时与取消处理。"""
         with self.lock:
+            # 自带传感器: 采样 -> 建图 -> 定位, 必须在控制之前, 否则这一步的控制
+            # 用的是上一步的位姿估计。
+            if self.slam is not None:
+                self.slam.step(dt)
             # 被夹爪带走的物体必须每步跟随 —— 包括**已经写入终态**的 execution。
             # "拿起即成功"之后物体仍挂在末端, 若只在 active 时搬运, 终态一写入它
             # 就会凭空掉下去 (crate1 有 freejoint, 会自由落体)。
@@ -977,11 +1088,44 @@ class RoleRuntime:
             self._arm_hold()
 
     def _tick_navigate(self, ex: Execution, dt: float) -> None:
-        """沿 A* 路径逐点推进; 到位即写入本地 COMPLETED。"""
-        cur = self.xy()
-        while ex.path and float(np.linalg.norm(ex.path[0] - cur)) < WAYPOINT_TOL_M:
+        """沿 A* 路径逐点推进; 到位即写入本地 COMPLETED。
+
+        有 SLAM 时, 反馈量全部取自**自己估计的位姿** (`xy_est` / `yaw_est`), 因此
+        闭环里流的是"我认为我在哪", 而不是世界真值。
+        """
+        cur = self.xy_est()
+        tol = self.tol()
+        while ex.path and float(np.linalg.norm(ex.path[0] - cur)) < tol:
             ex.path.pop(0)
-            cur = self.xy()
+            cur = self.xy_est()
+        # 卡住检测。用**估计位姿**闭环时, 定位偏差会让本体"以为"自己在推进, 实则顶在
+        # 墙上或障碍上 (实测: 单独派 rover 直冲顶出点时, 0.13 m 的偏差就让它把路点判成
+        # 已到达, 然后原地耗到 300 s 超时)。真实平台同样靠"没有实质位移"触发恢复:
+        # 这里先用当前估计位姿重规划, 多次仍无进展才判失败。
+        moved = float(np.linalg.norm(cur - self._nav_last_xy))
+        if moved > 0.05:
+            self._nav_stuck_t = 0.0
+            self._nav_last_xy = cur.copy()
+        else:
+            self._nav_stuck_t += dt
+        if self._nav_stuck_t > STUCK_REPLAN_S:
+            self._nav_stuck_t = 0.0
+            self._nav_replans += 1
+            if self._nav_replans > MAX_REPLANS:
+                self._hold()
+                self._finish(ex, STATE_FAILED,
+                             f"no progress after {MAX_REPLANS} replans "
+                             f"(stuck {STUCK_REPLAN_S}s each)",
+                             "local-stuck-no-progress")
+                return
+            replanned = self._plan_to(cur, ex.goal)
+            if not replanned:
+                self._hold()
+                self._finish(ex, STATE_FAILED, "no path on replan",
+                             "local-planner-no-path")
+                return
+            ex.path = list(replanned)
+            ex.detail += f" [replan #{self._nav_replans}]"
         if not ex.path:
             self._hold()
             self._finish(ex, STATE_COMPLETED, "destination reached",
@@ -990,15 +1134,19 @@ class RoleRuntime:
         wp = ex.path[0]
         d = wp - cur
         dist = float(np.linalg.norm(d))
-        yaw_err = _wrap(math.atan2(d[1], d[0]) - self.yaw())
+        yaw_err = _wrap(math.atan2(d[1], d[0]) - self.yaw_est())
         yaw_cmd = max(-self.spec.max_yaw_rate,
                       min(self.spec.max_yaw_rate, 3.0 * yaw_err))
         # 朝向偏差过大时先转向, 避免横移; 但已经贴近路点时方位角会剧烈抖动,
         # 若仍要求"先转向"会永久停死在离目标 ~0.2 m 处 (到点判定 0.15 m 永远
         # 不成立)。故近距离直接放行。
         speed = self.spec.max_speed if (abs(yaw_err) < 0.45 or dist < 0.40) else 0.0
-        self.world.set_ctrl(f"{self.spec.slide[0]}_act", speed * math.cos(self.yaw()))
-        self.world.set_ctrl(f"{self.spec.slide[1]}_act", speed * math.sin(self.yaw()))
+        # 世界系执行器必须按**本体自己认为的朝向**分解速度: 用 yaw_est 而不是 yaw。
+        # 真实全向底盘接受的是**本体系**指令, 由底盘控制器按它自己认为的朝向换算成
+        # 轮速 —— 本体不可能按真值朝向发指令。此处用估计朝向, 朝向误差才会真的进入
+        # 闭环 (表现为轨迹侧的偏移), 而不是被悄悄抹掉。
+        self.world.set_ctrl(f"{self.spec.slide[0]}_act", speed * math.cos(self.yaw_est()))
+        self.world.set_ctrl(f"{self.spec.slide[1]}_act", speed * math.sin(self.yaw_est()))
         self.world.set_ctrl(f"{self.spec.yaw_joint}_act", yaw_cmd)
         self._gait(speed, dt)
         ex.detail = f"navigate: {dist:.2f} m to next waypoint"
@@ -1613,6 +1761,16 @@ class RoleRuntime:
         return "ONLINE" if math.isfinite(self.world.sim_time) else "OFFLINE"
 
     def health_detail(self) -> str:
-        """health 明细: Local EAIOS 名、角色与当前仿真时刻, 便于观测推进速率。"""
-        return (f"{self.spec.runtime_name}/{self.spec.role} "
+        """health 明细: Local EAIOS 名、角色与当前仿真时刻, 便于观测推进速率。
+
+        带自带感知的地面平台额外报出: 定位误差、自建地图的规模与覆盖率、以及
+        在线标定出的里程计尺度 —— 这些是"它到底靠不靠谱"的唯一外部可观测量。
+        """
+        base = (f"{self.spec.runtime_name}/{self.spec.role} "
                 f"sim_t={self.world.sim_time:.2f}s")
+        if self.slam is not None:
+            s = self.slam
+            base += (f" | slam err={s.error():.2f}m cells={int(s.map.grid2d().sum())} "
+                     f"cov={s.map.coverage() * 100:.0f}% "
+                     f"scale={s.scale_factor:.3f} icp={s.icp_runs}")
+        return base

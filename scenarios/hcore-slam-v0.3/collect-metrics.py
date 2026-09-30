@@ -32,6 +32,9 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 SCEN = HERE
+# 对照实验标签: 本目录 = 四个节点全部声明 robonix-os 的同构版;
+# scenarios/hcore-heterogeneous-v0.1 = 四套不同 OS 的异构版。两张 CSV 按此列对比。
+VARIANT = "homogeneous-robonix"
 OUT = os.path.join(SCEN, "results")
 RUN = "/var/tmp/rg-run/metrics"
 PY = "/home/sunweihao/miniconda3/envs/py310/bin/python"
@@ -115,6 +118,7 @@ def wait_up(round_no, base):
     os.makedirs(trace_dir, exist_ok=True)
     os.makedirs(art, exist_ok=True)
     spawn([PY, "-m", "hcore_mujoco_local_eaios", "--speed", "8",
+           "--runtime-name", "robonix-os",     # 同构: 四个槽位都报 Robonix OS
            "--shot-dir", os.path.join(art, "ptz-survey"),
            "--trace-dir", trace_dir, "--trace-interval", "1.0"],
           cwd=os.path.join(ROOT, "integrations/hcore-mujoco-local-eaios"),
@@ -286,7 +290,7 @@ def run_round(round_no, scenario):
         last_ts = max((t[1] for t in terminal_ts), default=0)
         for role, ts, handle, basis, detail, elapsed in terminal_ts:
             raw_rows.append({
-                "round": round_no, "scenario": scenario,
+                "round": round_no, "scenario": scenario, "variant": VARIANT,
                 "mission": mname, "role": role, "mission_status": status,
                 "local_handle": handle,
                 "dispatch_latency_ms": round(min(a[1] for a in accepted_ts) - t_send, 1)
@@ -299,7 +303,8 @@ def run_round(round_no, scenario):
             })
         if not terminal_ts:      # 没有本地终态 = 控制面没能把任务落到任何本地系统
             raw_rows.append({
-                "round": round_no, "scenario": scenario, "mission": mname,
+                "round": round_no, "scenario": scenario, "variant": VARIANT,
+                "mission": mname,
                 "role": MISSION_ROLE[mname], "mission_status": status,
                 "local_handle": "", "dispatch_latency_ms": "",
                 "feedback_latency_ms": "", "exec_duration_s": "",
@@ -492,6 +497,18 @@ def build_summary(rounds_total, closed_loop, overhead, stat, fault):
          "实测值": fault.get("desc", ""),
          "计算值": "", "理想值": "故障局部化, 其它 Mission 不受影响",
          "结论": fault.get("verdict", "")})
+    # 同构版独有: 四个节点报**同一个** OS 名字 (本体与能力集不变), 看控制面还能不能
+    # 把每条任务派到 capability 约束期望的那个本体上。
+    routed = sum(1 for r in base if r["role"] == MISSION_ROLE[r["mission"]])
+    add({"metric_id": "M12", "人话问题": "OS 名字都相同了, 还能不能把任务派给对的本体",
+         "指标": "同 OS 下的路由正确率",
+         "测量方法": "四个节点 runtime_name 全部设为 robonix-os, 统计每次 execution "
+                     "实际落到的本体是否等于 capability 约束期望的本体",
+         "口径": "次", "实测值": f"{routed}/{len(base)}",
+         "计算值": f"{100.0*routed/len(base):.1f}%" if base else "",
+         "理想值": "100% (应与异构版一致)",
+         "结论": "调度只依赖 capability/region, 不依赖 OS 名字"
+                 if base and routed == len(base) else "有任务落到了非期望本体"})
     return S
 
 
@@ -527,14 +544,16 @@ def main():
     print("   ", fault["desc"], flush=True)
 
     stat = static_metrics()
-    header = ["round", "scenario", "mission", "role", "mission_status", "local_handle",
-              "dispatch_latency_ms", "feedback_latency_ms", "exec_duration_s",
-              "terminal_basis", "note", "detail"]
+    header = ["round", "scenario", "variant", "mission", "role", "mission_status",
+              "local_handle", "dispatch_latency_ms", "feedback_latency_ms",
+              "exec_duration_s", "terminal_basis", "note", "detail"]
     write_csv(os.path.join(OUT, "metrics-raw.csv"), header, raw_rows)
     summary = build_summary(rounds, closed_loop, overhead_all, stat, fault)
+    for row in summary:
+        row["variant"] = VARIANT
     write_csv(os.path.join(OUT, "metrics-summary.csv"),
-              ["metric_id", "人话问题", "指标", "测量方法", "口径", "实测值",
-               "计算值", "理想值", "结论"], summary)
+              ["variant", "metric_id", "人话问题", "指标", "测量方法", "口径",
+               "实测值", "计算值", "理想值", "结论"], summary)
     print("### 产出:", os.path.join(OUT, "metrics-raw.csv"),
           os.path.join(OUT, "metrics-summary.csv"))
 

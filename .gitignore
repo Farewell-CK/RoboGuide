@@ -25,6 +25,9 @@ logs/
 /config/artifact-cache/
 /roboguide-artifacts/
 /roboguide-controller.sqlite3.writer.lock
+# 场景运行时产物: run-*.sh 每次运行都会 rm -rf 重建这些目录, 里面只有
+# roboguide-node 的 execution journal (sqlite3 + WAL/journal), 不是场景定义。
+/scenarios/*/node-state-*/
 
 # RoboGuide runtime state (Controller evidence DB, Artifact CAS root)
 /var/

@@ -1,0 +1,205 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-rover-removes-obstacle",
+    "objective": "狗已让出长弧; 仍挡住短弧的是可移动障碍 obs2 (+45°, r=0.90, 回转环带内)。地面平台把它一次性顶出扇区: 先绕到西北外侧站位, 再一路顶到 arm_push_out_clear (障碍初始位置之外约 1.5 m), 最后自己也撤离扇区。",
+    "actors": [
+      {
+        "id": "actor-pusher"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-arm-sweep",
+      "roles": [
+        {
+          "id": "ctx-role-pusher",
+          "actor": "actor-pusher"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "sequential-handoff"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-push-out-stage",
+      "description": "地面平台绕到可移动障碍的**西北外侧**站位 arm_push_out_stage (-1.90, 1.20; 相对基座方位 +114°、r=1.75)。必须从西北朝东南顶: 朝南顶会把障碍推向基座 (r 反而变小), 从东侧绕则会先把自己送进回转环带。站位取远一点, 是为了让随后的单次冲撞有足够行程。",
+      "context_id": "ctx-arm-sweep",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-push-out-stage",
+          "context_role": "ctx-role-pusher",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "push-capable",
+                    "operator": "equals",
+                    "value": true
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "绕到可移动障碍的西北外侧。",
+            "parameters": {
+              "destination": "arm_push_out_stage"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "地面平台已在可移动障碍的西北外侧, 朝东南正对它。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "task-push-out-once",
+      "description": "一次性顶出: 终点取 arm_push_out_clear (-0.19, 0.10) 而不是障碍自身的位置。推进量 = 行程 - 接触间隙 0.51 m, 若终点只写到障碍原位, rover 顶到那里就停、推进量被钳死在半个身位; 终点设在障碍初始位置之外, 一次冲撞才能把它真正推出回转环带 (中心 r 需 > 扫掠半径 0.63 + 障碍外接圆 0.36 m, 否则机械臂持物回转时仍会被它挡住)。带 freejoint 的可动体不进静态栅格, 因此 A* 直接规划一条穿过它的路径, 接触真实发生。",
+      "context_id": "ctx-arm-sweep",
+      "depends_on": [
+        "task-push-out-stage"
+      ],
+      "roles": [
+        {
+          "id": "role-push-out-once",
+          "context_role": "ctx-role-pusher",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "push-capable",
+                    "operator": "equals",
+                    "value": true
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "一次冲撞把可移动障碍顶出机械臂回转扇区。",
+            "parameters": {
+              "destination": "arm_push_out_clear"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "可移动障碍已离开机械臂回转扇区。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    },
+    {
+      "id": "task-push-out-retreat",
+      "description": "把障碍顶出后地面平台自己也退出回转扇区: 顶完它停在与障碍初始位的连线附近, 不清场就体现不出'短弧恢复'—— 撤离到 arm_clear_spot。",
+      "context_id": "ctx-arm-sweep",
+      "depends_on": [
+        "task-push-out-once"
+      ],
+      "roles": [
+        {
+          "id": "role-push-out-retreat",
+          "context_role": "ctx-role-pusher",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "push-capable",
+                    "operator": "equals",
+                    "value": true
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "驶离机械臂回转扇区。",
+            "parameters": {
+              "destination": "arm_clear_spot"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "回转扇区内已无阻挡实体, 两侧皆空。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

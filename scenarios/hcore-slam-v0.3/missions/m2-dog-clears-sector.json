@@ -1,0 +1,85 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-dog-clears-sector",
+    "objective": "上一 Mission 里机械臂双向皆挡; 挡住长弧的是狗自己 (它停在 -45° 的回转环带内)。狗发现挡路后自行走开: 沿 -45° 射线退到 arm_dog_out_spot (r=2.12, 环带外), 长弧让出来。",
+    "actors": [
+      {
+        "id": "actor-dog"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-arm-sweep",
+      "roles": [
+        {
+          "id": "ctx-role-dog",
+          "actor": "actor-dog"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "sequential-handoff"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-leave-sector",
+      "description": "狗自行走出机械臂回转扇区, 沿 -45° 射线退到 arm_dog_out_spot (r=2.12, 环带外)。进出都走这条射线, 因此不会横穿可移动障碍所在的一侧。",
+      "context_id": "ctx-arm-sweep",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-leave",
+          "context_role": "ctx-role-dog",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "push-capable",
+                    "operator": "equals",
+                    "value": false
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "撤离机械臂回转扇区。",
+            "parameters": {
+              "destination": "arm_dog_out_spot"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "狗已离开机械臂回转扇区, 长弧不再被占。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}
