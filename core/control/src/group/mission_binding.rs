@@ -361,6 +361,8 @@ impl ControlPlane {
                 },
             );
         }
+        self.initial_candidate_preferences
+            .retain(|task_ref, _| task_ref.mission_id() != plan.task_ref().mission_id());
         Ok(execution)
     }
 

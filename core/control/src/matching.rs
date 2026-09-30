@@ -49,6 +49,8 @@ pub struct CandidateSet {
     distinct_actor_groups: Vec<std::collections::BTreeSet<domain::ActorId>>,
     /// Current physical entity routed by each candidate Node.
     candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId>,
+    /// Optional transient search ordering; never a candidate exclusion or binding.
+    initial_preferences: Option<crate::InitialCandidatePreferences>,
 }
 
 impl CandidateSet {
@@ -61,6 +63,7 @@ impl CandidateSet {
             role_actors: BTreeMap::new(),
             distinct_actor_groups: Vec::new(),
             candidate_entities: BTreeMap::new(),
+            initial_preferences: None,
         }
     }
 
@@ -68,6 +71,23 @@ impl CandidateSet {
     fn with_role_operations(mut self, role_operations: BTreeMap<RoleId, OperationRef>) -> Self {
         self.role_operations = role_operations;
         self
+    }
+
+    /// Carries Control-admitted initial ordering without changing eligible Nodes.
+    pub(crate) fn with_initial_preferences(
+        mut self,
+        preferences: Option<crate::InitialCandidatePreferences>,
+    ) -> Self {
+        self.initial_preferences = preferences;
+        self
+    }
+
+    /// Returns a soft ordinal only for this exact Task at a valid decision time.
+    pub(crate) fn initial_priority(&self, role: &RoleId, node: &NodeId, at: TimestampMs) -> u32 {
+        self.initial_preferences
+            .as_ref()
+            .filter(|preferences| &self.task_ref == preferences.task_ref())
+            .map_or(u32::MAX, |preferences| preferences.priority(role, node, at))
     }
 
     /// Attaches mission actor binding metadata for scheduler cardinality.
@@ -374,7 +394,12 @@ impl ControlPlane {
         }
         Ok(candidates
             .with_role_operations(role_operations)
-            .with_actor_binding_metadata(role_actors, distinct_actor_groups, candidate_entities))
+            .with_actor_binding_metadata(role_actors, distinct_actor_groups, candidate_entities)
+            .with_initial_preferences(
+                self.initial_candidate_preferences
+                    .get(requirement.task_ref())
+                    .cloned(),
+            ))
     }
 
     /// Matches every task role against currently eligible node facts.

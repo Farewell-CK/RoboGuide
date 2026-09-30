@@ -360,7 +360,12 @@ fn search_roles<S: SharedNodeStateReader>(
         .for_role(role.role_id())
         .expect("validated above");
     let mut nodes = role_candidates.node_ids().to_vec();
-    nodes.sort();
+    nodes.sort_by_key(|node| {
+        (
+            candidates.initial_priority(role.role_id(), node, starts_at),
+            node.clone(),
+        )
+    });
     nodes.dedup();
     for node_id in nodes {
         let constraint = snapshot.role_constraint(role.role_id());
