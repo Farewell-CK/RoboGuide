@@ -86,10 +86,18 @@ def build_initial_operation_preferences(
             "cost_micrometers": cost,
         }
     expected = {(key[2], key[1]) for key in entries}
+    endpoints = {key[2] for key in entries}
+    probed_destinations = {destination for _, destination in observed}
+    expected_probe = {
+        (node, destination) for node in endpoints for destination in probed_destinations
+    }
     if (
         not 0 < len(entries) <= MAX_RECORDS
         or not set(observed) <= expected
-        or (routes["scope_status"] == "available" and set(observed) != expected)
+        or (
+            routes["scope_status"] == "available"
+            and (not observed or set(observed) != expected_probe)
+        )
         or (routes["scope_status"] == "unavailable" and observed)
     ):
         raise ValueError("initial preferences source coverage is incomplete or exceeds budget")

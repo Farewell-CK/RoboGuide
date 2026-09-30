@@ -100,6 +100,29 @@ def test_unavailable_scope_is_neutral() -> None:
     assert all(item["cost_micrometers"] is None for item in output["records"])
 
 
+def test_full_entity_catalog_and_operation_aliases_keep_unprobed_costs_unknown() -> None:
+    """The matrix covers all entities/operations; the probe covers only official goals."""
+    routes, matrix = _sources()
+    catalog = [{**record, "destination": "unprobed-entity"} for record in matrix["records"][:2]]
+    matrix["records"].extend(catalog)
+    matrix["records"].extend(
+        {**record, "operation": "mobility.move@v1"} for record in copy.deepcopy(matrix["records"])
+    )
+    _seal(matrix)
+    routes["identity"]["preassignment_digest"] = matrix["digest"]
+    _seal(routes)
+    output = preferences.build_initial_operation_preferences(routes, matrix)
+    assert len(output["records"]) == 12
+    assert all(
+        record["cost_micrometers"] is None
+        for record in output["records"]
+        if record["parameters"]["destination"] == "unprobed-entity"
+    )
+    known = [record for record in output["records"] if record["cost_micrometers"] is not None]
+    assert len(known) == 4
+    assert {record["operation"] for record in known} == {"mobility.move@v1", "mobility.navigate@v1"}
+
+
 @pytest.mark.parametrize(
     "fault", ["identity", "endpoint", "missing", "duplicate", "schema", "digest"]
 )

@@ -104,8 +104,21 @@ fn check_route_source(
             nodes.keys().map(|node| (node.clone(), destination.clone()))
         })
         .collect();
+    let destinations: BTreeSet<_> = observed
+        .keys()
+        .map(|(_, destination)| destination)
+        .collect();
+    let expected_probe: BTreeSet<_> = feasibility
+        .node_agents
+        .keys()
+        .flat_map(|node| {
+            destinations
+                .iter()
+                .map(|destination| (node.clone(), (*destination).clone()))
+        })
+        .collect();
     if observed.keys().any(|key| !expected.contains(key))
-        || (available && observed.len() != expected.len())
+        || (available && (observed.is_empty() || observed.keys().ne(expected_probe.iter())))
         || costs.iter().any(|((_, destination), nodes)| {
             nodes.iter().any(|(node, cost)| {
                 observed

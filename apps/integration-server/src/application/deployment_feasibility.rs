@@ -888,6 +888,64 @@ mod tests {
         }
     }
 
+    /// Full catalogs may include entities outside the probe scope; their cost stays null.
+    #[test]
+    fn initial_costs_keep_unprobed_catalog_entities_unknown() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reset.json");
+        let mut matrix = snapshot(&path, true);
+        let extra: Vec<_> = matrix["records"].as_array().unwrap()[..2]
+            .iter()
+            .map(|record| {
+                let mut record = record.clone();
+                record["destination"] = serde_json::json!("unprobed-entity");
+                record
+            })
+            .collect();
+        matrix["records"]
+            .as_array_mut()
+            .unwrap()
+            .extend(extra.clone());
+        seal(&mut matrix);
+        std::fs::write(&path, matrix.to_string()).unwrap();
+        let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+        let source_path = directory.path().join("routes.json");
+        std::fs::write(
+            &source_path,
+            initial_route_document(&matrix, [Some(1); 4]).to_string(),
+        )
+        .unwrap();
+        let mut document = initial_cost_document(&matrix, [Some(1); 4]);
+        document["records"].as_array_mut().unwrap().extend(extra.iter().map(|record| serde_json::json!({
+            "operation": record["operation"], "parameters": {"destination": record["destination"]},
+            "node_id": record["node_id"], "cost_micrometers": null,
+        })));
+        seal(&mut document);
+        let costs_path = directory.path().join("costs.json");
+        std::fs::write(&costs_path, document.to_string()).unwrap();
+        deployment
+            .configure_initial_preferences(
+                &costs_path,
+                &source_path,
+                domain::TimestampMs::new(0),
+                true,
+            )
+            .unwrap();
+        document["records"][4]["cost_micrometers"] = serde_json::json!(1);
+        seal(&mut document);
+        std::fs::write(&costs_path, document.to_string()).unwrap();
+        assert!(
+            deployment
+                .configure_initial_preferences(
+                    &costs_path,
+                    &source_path,
+                    domain::TimestampMs::new(0),
+                    true
+                )
+                .is_err()
+        );
+    }
+
     /// Python and Rust hash the same floats even when exponent syntax differs.
     #[test]
     fn python_float_digest_golden_is_stable() {

@@ -21,6 +21,12 @@ The Local EAIOS converts observations to data; it never accepts a MissionPlan,
 chooses an Actor binding, or changes a model action. A missing witness is a null
 cost, never a negative eligibility claim.
 
+The feasibility catalog covers all declared entities and operation aliases; the
+route observer covers only the direct official goal entities. The projection
+retains full catalog coverage with null costs outside that probe scope. Every
+probed entity must still cover every endpoint. Alias records may reuse that exact
+entity/endpoint witness because the deployment declares the same navigation How.
+
 The Controller composition validates this bounded projection against its
 feasibility source and original reset route artifact. Recomputed projection
 digests cannot hide changed costs, coverage, source ownership or reset identity.
