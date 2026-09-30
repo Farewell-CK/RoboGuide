@@ -56,3 +56,7 @@ The bounded vertex search can report no supported point despite another
 unexamined reachable point; that is an explicit Local How failure, not evidence
 that the mission is semantically impossible. An official distance predicate may
 still be false after the local skill declares completion.
+
+Selection record v0.2 adds structured counters on bounded misses and checks
+the remaining query budget before a projected-center query. Exception messages
+and fail-closed propagation remain intact.

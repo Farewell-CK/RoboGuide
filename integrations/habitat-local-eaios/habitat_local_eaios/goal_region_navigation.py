@@ -16,6 +16,15 @@ class GoalRegionResolutionError(RuntimeError):
     """Report missing or exhausted evidence for a navigable goal-region point."""
 
 
+class GoalRegionSearchMiss(GoalRegionResolutionError):
+    """Retain bounded search progress without claiming physical impossibility."""
+
+    def __init__(self, message: str, search: dict[str, object]) -> None:
+        """Preserve the original failure message and JSON-safe search counters."""
+        super().__init__(message)
+        self.search = search.copy()
+
+
 @dataclass(frozen=True)
 class GoalRegionSelection:
     """Retain the selected Local How point and its bounded search provenance."""
@@ -145,6 +154,22 @@ def select_goal_region_point(
         return estimated_distance(candidate) < bound and stop_envelope(candidate) < bound
 
     queries = 0
+    vertices_seen = 0
+    candidates_seen = 0
+
+    def search_miss(message: str, reason: str, truncated: bool) -> GoalRegionSearchMiss:
+        """Attach actual query counts to a miss, never infer exhaustive reachability."""
+        return GoalRegionSearchMiss(
+            message,
+            {
+                "reason_code": reason,
+                "vertices_seen": vertices_seen,
+                "candidates_in_region": candidates_seen,
+                "path_queries": queries,
+                "search_truncated": truncated,
+            },
+        )
+
     original_distance = estimated_distance(original)
     original_status: Literal[
         "reachable", "outside_goal_region", "stop_envelope_exceeds_goal", "no_agent_path"
@@ -175,6 +200,11 @@ def select_goal_region_point(
         if projected is not None:
             projected = point3(projected)
             if admitted(projected) and projected != original:
+                candidates_seen += 1
+                if queries >= max_path_queries:
+                    raise search_miss(
+                        "goal-region path-query budget exhausted", "path_query_budget", True
+                    )
                 queries += 1
                 projected_path = path_length(projected)
                 if (
@@ -197,7 +227,8 @@ def select_goal_region_point(
 
     vertices = navmesh_vertices() if callable(navmesh_vertices) else navmesh_vertices
     if len(vertices) > max_vertices:
-        raise GoalRegionResolutionError("agent navmesh vertex budget exhausted")
+        raise search_miss("agent navmesh vertex budget exhausted", "vertex_budget", True)
+    vertices_seen = len(vertices)
     candidates: set[Point3] = set()
     for raw_vertex in vertices:
         try:
@@ -207,9 +238,10 @@ def select_goal_region_point(
         if admitted(vertex) and vertex != original and vertex != projected:
             candidates.add(vertex)
     ordered = sorted(candidates, key=lambda candidate: (stop_envelope(candidate), candidate))
+    candidates_seen += len(ordered)
     budget = max_path_queries - queries
     if budget <= 0:
-        raise GoalRegionResolutionError("goal-region path-query budget exhausted")
+        raise search_miss("goal-region path-query budget exhausted", "path_query_budget", True)
     successful: list[tuple[float, float, Point3]] = []
     for candidate in ordered[:budget]:
         queries += 1
@@ -222,7 +254,11 @@ def select_goal_region_point(
             if len(ordered) > budget
             else "no agent-specific path to stop-compatible official goal region"
         )
-        raise GoalRegionResolutionError(reason)
+        raise search_miss(
+            reason,
+            "path_query_budget" if len(ordered) > budget else "candidates_exhausted",
+            len(ordered) > budget,
+        )
     envelope, route, candidate = min(successful)
     return GoalRegionSelection(
         candidate,

@@ -19,6 +19,7 @@ if str(INTEGRATION_ROOT) not in sys.path:
 from habitat_local_eaios.emos_stage2 import _configure_goal_region_navigation  # noqa: E402
 from habitat_local_eaios.goal_region_navigation import (  # noqa: E402
     GoalRegionResolutionError,
+    GoalRegionSearchMiss,
     Point3,
     any_at_conjunct_names,
     select_goal_region_point,
@@ -202,6 +203,31 @@ def test_vertex_and_authoritative_radius_fail_closed() -> None:
         select_goal_region_point(**common, radius_m=2.0, stop_radius_m=0.0, max_vertices=1)
     with pytest.raises(GoalRegionResolutionError, match="radius is unavailable"):
         select_goal_region_point(**common, radius_m=float("nan"), stop_radius_m=0.0)
+
+
+def test_projection_cannot_exceed_remaining_query_budget() -> None:
+    """A failed original route consumes the last query before projection is tested."""
+    queried: list[Point3] = []
+
+    def no_path(point: Point3) -> None:
+        """Record an original route miss without hiding a second query."""
+        queried.append(point)
+
+    with pytest.raises(GoalRegionSearchMiss) as caught:
+        select_goal_region_point(
+            original_point=(0.5, 0.0, 0.0),
+            goal_center=(0.0, 0.0, 0.0),
+            reference_offset=(0.0, 0.0, 0.0),
+            radius_m=2.0,
+            stop_radius_m=0.5,
+            navmesh_vertices=(),
+            path_length=no_path,
+            project_center=lambda center: center,
+            max_path_queries=1,
+        )
+    assert queried == [(0.5, 0.0, 0.0)]
+    assert caught.value.search["path_queries"] == 1
+    assert caught.value.search["reason_code"] == "path_query_budget"
 
 
 def test_only_direct_conjunctive_any_at_goals_are_admitted() -> None:

@@ -21,6 +21,7 @@ from .goal_region_navigation import (
     MAX_NAVMESH_VERTICES,
     MAX_PATH_QUERIES,
     GoalRegionResolutionError,
+    GoalRegionSearchMiss,
     Point3,
     any_at_conjunct_names,
     point3,
@@ -28,7 +29,7 @@ from .goal_region_navigation import (
 )
 from .semantic_evidence import _expression
 
-_SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.1"
+_SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.2"
 
 
 @registry.register_task_action
@@ -151,6 +152,8 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
                     "selection_elapsed_ms": (time.perf_counter() - started) * 1_000,
                 }
             )
+            if isinstance(error, GoalRegionSearchMiss):
+                record["search"] = error.search.copy()
             raise
 
     def navigation_selection_evidence(self) -> list[dict[str, Any]]:
