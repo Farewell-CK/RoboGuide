@@ -70,6 +70,28 @@ RoboGuide's Local How relative to native EMOS and must be disclosed in paired
 comparison. It is off by default, including in B1 unless
 `ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1` is explicitly set.
 
+The separate `--reset-route-support` option is also off by default and requires
+that Local How mode plus the shared-world spatial profile. It writes
+`evidence/reset-route-support.json` once after the existing reset. An isolated
+agent PathFinder uses copied settings; neither the live action cache nor the
+simulator's active mesh is changed. Only deterministic original/projected-center
+candidates are tested, without the random safe-snap fallback or vertex scans.
+At most 128 records and 256 path queries are allowed. `supported` is a static
+witness; `not_found` covers only those initial candidates, and `unavailable`
+retains observation faults. The runtime's full vertex search can still find a
+route that this probe missed. Total probe elapsed time and source/native-library
+digests are recorded; vendor navmesh build cost is not a hard time/memory cap.
+
+For B1, explicitly set both `ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1` and
+`ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1`. The launcher checks the diagnostic archive
+before Controller startup. A missing/invalid archive is a harness failure;
+honest unavailable/miss records do not change Formal admission or Node
+candidates. These records currently do not enter MI or Control decisions.
+They must not become permanent Actor exclusions across later navigation Tasks.
+The Local How profile is v0.2; per-action selection records are v0.2 and add
+actual progress on bounded runtime misses. See
+[ADR-0052](../../docs/decisions/0052-reset-route-support-observations.md).
+
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
 `terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat

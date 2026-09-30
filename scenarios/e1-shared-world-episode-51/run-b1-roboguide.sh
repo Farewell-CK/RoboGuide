@@ -25,6 +25,7 @@ AUX_PIDS=()
 VIDEO_ARGS=()
 LIVE_VIEW_ARGS=()
 GOAL_REGION_ARGS=()
+ROUTE_SUPPORT_CHECK_ARGS=()
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -160,6 +161,14 @@ fi
 if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" == 1 ]]; then
     GOAL_REGION_ARGS=(--goal-region-navigation)
 fi
+if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" == 1 ]]; then
+    if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" != 1 ]]; then
+        echo "reset route support requires ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1" >&2
+        exit 1
+    fi
+    GOAL_REGION_ARGS+=(--reset-route-support)
+    ROUTE_SUPPORT_CHECK_ARGS=(--require-route-support)
+fi
 trap finish_run EXIT
 # The workload (episode, seed, dataset identity) comes from the frozen B1
 # input itself — never from a scenario-embedded episode. The extractor
@@ -254,6 +263,12 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
     || { FAILURE_REASON=spatial_profile_source_mismatch; exit 1; }
 uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility "$RUN" \
     || { FAILURE_REASON=preassignment_feasibility_unavailable; exit 1; }
+if [[ "${#ROUTE_SUPPORT_CHECK_ARGS[@]}" != 0 ]]; then
+    uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility \
+        "$RUN" "${ROUTE_SUPPORT_CHECK_ARGS[@]}" \
+        || { FAILURE_OWNER=EXTERNAL_INFRA; FAILURE_COMPONENT=harness; \
+             FAILURE_REASON=reset_route_support_archive_invalid; exit 1; }
+fi
 
 ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
 ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH="$RUN/evidence/task-verifier-source.json" \

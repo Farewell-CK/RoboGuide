@@ -564,6 +564,14 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 模式、原始/选中点与路径查询另行归档；启用时的 Local How 与原生 EMOS 不同，
 对照时须明确记录。见 [`ADR-0051`](docs/decisions/0051-goal-region-local-navigation.md)。
 
+另有默认关闭的 `--reset-route-support` 观测（B1 环境变量
+`ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1`，需同时启用 goal-region navigation）。它在同一次
+实际 reset 后，用隔离导航网格查询两个轻量候选，输出带源码/Local How/起点绑定的
+`evidence/reset-route-support.json`。找到静态路径、有限搜索未找到、证据不可用分别记录，
+不会更改 MI 输入、Control 候选、物理执行或 benchmark 判定。启动前由
+`evaluation/src/roboguide_eval/b1_reset_route_support.py` 校验证据一致性。
+实现与限制见 [`ADR-0052`](docs/decisions/0052-reset-route-support-observations.md)。
+
 ## 三条核心语义链
 
 ```text

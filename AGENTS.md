@@ -190,6 +190,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   point on the agent-specific navmesh after bounded route checks. It never changes
   canonical intent or official PDDL truth. The mode is off by default and must be
   disclosed as a RoboGuide-versus-native-EMOS arm difference when enabled.
+- A separate default-off reset-route-support observer (ADR-0052) uses copied
+  NavMeshSettings and a detached PathFinder after the existing reset. It queries
+  only original/projected-center candidates, with at most 128 records and 256
+  path queries, and never primes action caches, samples RNG, or scans mesh vertices.
+  The digest-bound artifact distinguishes static witnesses, bounded misses, and
+  unavailable evidence. It is diagnostic-only: no MI input, Actor-wide exclusion,
+  Control authority, Formal admission, or benchmark change. Opted-in B1 preflight
+  checks identity/source/geometry and attributes archival failures to the harness.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

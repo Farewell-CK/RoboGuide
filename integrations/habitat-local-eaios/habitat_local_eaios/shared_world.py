@@ -37,7 +37,9 @@ from .evidence_io import write_text_atomic
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
+from .reset_route_support import build_reset_route_support
 from .semantic_evidence import build_authoritative_semantic_evidence
+from .source_provenance import build_runtime_source_manifest
 from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
 from .stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
@@ -141,6 +143,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     self._agent_ids,
                 )
                 self._write_json("preassignment-feasibility.json", snapshot)
+                if config.reset_route_support:
+                    self._record_reset_route_support(habitat_env, document, snapshot)
         except Exception as error:
             if getattr(self, "_reset_started", False):
                 self._record_terminal_diagnostics(
@@ -151,6 +155,32 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             except Exception:  # noqa: BLE001 - preserve the original initialization failure
                 _LOG.exception("shared-world cleanup failed after initialization")
             raise IntegrationError(f"shared-world initialization failed: {error}") from error
+
+    def _record_reset_route_support(
+        self, habitat_env: Any, semantic: dict[str, Any], preassignment: dict[str, Any]
+    ) -> None:
+        """Archive optional reset observations without turning diagnostics into SUT failure.
+
+        Probe failures are explicit unavailable records. A write/identity fault
+        leaves a log and no complete artifact; an opted-in B1 launcher detects
+        that archival gap before starting Controller or creating a Request.
+        """
+        try:
+            local_how = json.loads(
+                (self._evidence_dir() / "local-how-profile.json").read_text(encoding="utf-8")
+            )
+            runtime_sources = json.loads(
+                (self._evidence_dir() / "runtime-source-manifest.json").read_text(encoding="utf-8")
+            )
+            native = build_runtime_source_manifest(("habitat_sim._ext.habitat_sim_bindings",))
+            runtime_sources["modules"].update(native["modules"])
+            self._write_json("runtime-source-manifest.json", runtime_sources)
+            snapshot = build_reset_route_support(
+                habitat_env, semantic, preassignment, local_how, runtime_sources
+            )
+            self._write_json("reset-route-support.json", snapshot)
+        except Exception:
+            _LOG.exception("reset route support archival unavailable; physical execution unchanged")
 
     def _prepare_reset(self) -> None:
         """Reset once before matching and retain exactly those observations for Stage2."""

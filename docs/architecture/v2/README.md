@@ -523,6 +523,28 @@ Stage2 所选实体工具调用和官方目标的前提下，将该实体解析�
 部署启用该行为后与原生 EMOS 的 Local How 不同，对照实验必须记录这一差异。详见
 [`ADR-0051`](../../decisions/0051-goal-region-local-navigation.md)。
 
+部署还可独立启用默认关闭的 reset route-support 观测。它在同一次实际 reset 后，用
+复制后的导航参数与隔离的 PathFinder 查询原始点和投影中心点，记录 `supported`、
+`not_found` 或 `unavailable`，并绑定 workload、起点、Local How 与实际模块/原生库摘要。
+该预检不运行顶点扫描，不提前填充原始 action cache，不调用随机采样或物理 step。
+`not_found` 只表示这两个候选未提供静态路径证据，不能作为 Actor 后续 Task 的永久
+Node 排除。当前证据仅用于归档与独立诊断，不进入 MI 输入或 Control 候选规则。
+B1 明确启用时，归档缺失/身份不一致作为 harness 失败在提交前暴露；正常的未知证据
+不改变 Formal admission。详见
+[`ADR-0052`](../../decisions/0052-reset-route-support-observations.md)。
+
+```text
+one Habitat reset -> original prepared observations -> assigned Stage2 execution
+        |
+        +-> isolated bounded route queries -> reset-route-support.json
+                                                  |
+                                  B1 identity/source/geometry check
+                                                  |
+                                      diagnostic archive only
+
+existing floor matrix -> Control Match -> Proposal -> Commit -> Bind (unchanged)
+```
+
 ## 7. 对账与恢复
 
 ```text

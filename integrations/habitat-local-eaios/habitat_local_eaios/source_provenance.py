@@ -13,7 +13,7 @@ class SourceProvenanceError(RuntimeError):
 
 
 def build_runtime_source_manifest(module_names: tuple[str, ...]) -> dict[str, object]:
-    """Resolve and digest the exact Python sources selected by the child process.
+    """Digest exact loaded module files, including explicitly requested extensions.
 
     Raises:
         SourceProvenanceError: If a requested module has no readable filesystem

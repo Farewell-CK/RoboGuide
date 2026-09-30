@@ -32,6 +32,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     spatial_capabilities: tuple[FloorTransitionProfile, ...] = ()
     spatial_profile_path: Path | None = None
     goal_region_navigation: bool = False
+    reset_route_support: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
@@ -42,6 +43,12 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
         agent_ids = [profile.agent_id for profile in self.spatial_capabilities]
         if len(agent_ids) != len(set(agent_ids)):
             raise IntegrationError("spatial capability profiles must use distinct agent ids")
+        if self.reset_route_support and (
+            not self.goal_region_navigation or self.spatial_profile_path is None
+        ):
+            raise IntegrationError(
+                "reset route support requires goal-region navigation and a spatial profile"
+            )
 
     def spatial_capability_for(self, agent_id: int) -> FloorTransitionProfile | None:
         """Return the startup-frozen spatial profile for one Habitat agent."""

@@ -311,8 +311,9 @@ def test_preassignment_keeps_a_cross_floor_distance_goal_unresolved() -> None:
     assert all(record["goal_occupancy"] == "any_at" for record in evidence["records"])
 
 
+@pytest.mark.parametrize("route_support", [False, True])
 def test_shared_world_initialization_freezes_actual_reset_before_readiness(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route_support: bool
 ) -> None:
     """The advertised artifact and later execution share exactly one reset world."""
     source = _ROOT / "scenarios/e1-shared-world-episode-51"
@@ -330,6 +331,7 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
         {"goal": (1.0, 0.0, 0.0)},
     )
     resets: list[int] = []
+    route_observations: list[dict[str, Any]] = []
 
     def reset() -> dict[str, int]:
         """Record the one real lifecycle reset in the fake simulator."""
@@ -343,6 +345,9 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
         self._episode = env.current_episode
         self._actor = object()
         self._agent_access = object()
+        if route_support:
+            self._write_json("local-how-profile.json", {"reset_route_support_enabled": True})
+            self._write_json("runtime-source-manifest.json", {"modules": {}})
 
     def semantic(*args: Any, **kwargs: Any) -> dict[str, Any]:
         """Supply an already frozen authoritative semantic identity."""
@@ -370,10 +375,38 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
         assert resets == [1]
         return {"schema_version": "offline-planning"}
 
+    def route_probe(
+        world: Any,
+        semantic: dict[str, Any],
+        matrix: dict[str, Any],
+        local_how: dict[str, Any],
+        sources: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Observe the same prepared reset exactly once when explicitly enabled."""
+        assert world is env and resets == [1]
+        assert matrix["identity"]["semantic_evidence_digest"] == semantic["digest"]
+        assert local_how["reset_route_support_enabled"] is True
+        assert "habitat_sim._ext.habitat_sim_bindings" in sources["modules"]
+        route_observations.append(matrix)
+        return {"reset_count": 1, "diagnostic_only": True}
+
     monkeypatch.setattr(EmosStage2Runtime, "initialize", initialize_vendor)
     monkeypatch.setattr(shared_world_module, "build_authoritative_semantic_evidence", semantic)
     monkeypatch.setattr(
         shared_world_module, "build_authoritative_planning_world_evidence", planning
+    )
+    monkeypatch.setattr(shared_world_module, "build_reset_route_support", route_probe)
+    monkeypatch.setattr(
+        shared_world_module,
+        "build_runtime_source_manifest",
+        lambda modules: {
+            "modules": {
+                "habitat_sim._ext.habitat_sim_bindings": {
+                    "path": "/offline/bindings.so",
+                    "sha256": "a" * 64,
+                }
+            },
+        },
     )
     runtime = SharedEmosStage2Runtime(
         CrabAgentBackendConfig(
@@ -387,12 +420,16 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
             run_id="run",
             spatial_capabilities=profiles,
             spatial_profile_path=profile_path,
+            goal_region_navigation=route_support,
+            reset_route_support=route_support,
         ),
         (0, 1),
     )
     runtime.initialize()
     evidence = json.loads((tmp_path / "preassignment-feasibility.json").read_text())
     assert resets == [1]
+    assert len(route_observations) == int(route_support)
+    assert (tmp_path / "reset-route-support.json").exists() is route_support
     assert runtime._prepared_observations == {"reset": 1}
     assert evidence["identity"]["episode_reset_count"] == 1
     assert evidence["initial_agent_positions"] == {
@@ -402,6 +439,8 @@ def test_shared_world_initialization_freezes_actual_reset_before_readiness(
     with pytest.raises(IntegrationError, match="already been reset"):
         runtime._prepare_reset()
     assert resets == [1]
+    runtime.initialize()
+    assert resets == [1] and len(route_observations) == int(route_support)
 
 
 def test_habitat_vector_object_is_read_as_three_coordinates() -> None:

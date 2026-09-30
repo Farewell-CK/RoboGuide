@@ -156,8 +156,13 @@ def main() -> None:
     """Check one run-local artifact without invoking Habitat or a Provider."""
     parser = argparse.ArgumentParser()
     parser.add_argument("run", type=Path)
+    parser.add_argument("--require-route-support", action="store_true")
     args = parser.parse_args()
     preflight_deployment_feasibility(args.run)
+    if args.require_route_support:
+        from roboguide_eval.b1_reset_route_support import preflight_reset_route_support
+
+        preflight_reset_route_support(args.run)
 
 
 if __name__ == "__main__":

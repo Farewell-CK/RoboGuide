@@ -240,13 +240,16 @@ class EmosStage2Runtime:
             self._write_json(
                 "local-how-profile.json",
                 {
-                    "schema_version": "roboguide.habitat-local-how-profile/v0.1",
+                    "schema_version": "roboguide.habitat-local-how-profile/v0.2",
                     "navigation_point_resolver": (
                         "official-any-at-agent-navmesh/v0.1"
                         if goal_region_enabled
                         else "original-emos-oracle"
                     ),
                     "official_success_authority": "habitat-pddl",
+                    "reset_route_support_enabled": bool(
+                        getattr(self._config, "reset_route_support", False)
+                    ),
                 },
             )
             self._write_json(
@@ -254,6 +257,8 @@ class EmosStage2Runtime:
                 build_runtime_source_manifest(
                     (
                         "habitat.tasks.rearrange.actions.habitat_mas_actions",
+                        "habitat.tasks.rearrange.actions.oracle_nav_action",
+                        "habitat_sim",
                         "habitat_baselines.rl.hrl.hl.llm_policy",
                         "habitat_baselines.rl.hrl.skills.wait",
                         "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
@@ -263,6 +268,7 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.emos_stage2",
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",
+                        "habitat_local_eaios.reset_route_support",
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",
