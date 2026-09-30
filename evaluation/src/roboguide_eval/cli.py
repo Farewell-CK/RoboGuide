@@ -117,6 +117,8 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="NDJSON accounting log path (one record per LLM call)",
     )
+    proxy.add_argument("--run-id", help="public run identity bound to every observed call")
+    proxy.add_argument("--max-records", type=int, default=10000, help="bounded observation budget")
 
     mission_front = subparsers.add_parser(
         "mission-front",
@@ -484,14 +486,16 @@ def _proxy(arguments: argparse.Namespace) -> int:
     """
     from roboguide_eval.accounting import AccountingProxyConfig, AccountingProxyServer
 
-    config = AccountingProxyConfig(
-        upstream_base_url=arguments.upstream,
-        log_path=arguments.log,
-    )
     try:
+        config = AccountingProxyConfig(
+            upstream_base_url=arguments.upstream,
+            log_path=arguments.log,
+            run_id=arguments.run_id,
+            max_records=arguments.max_records,
+        )
         server = AccountingProxyServer(("127.0.0.1", arguments.port), config)
-    except OSError as error:
-        print(f"error: cannot bind accounting proxy: {error}", file=sys.stderr)
+    except (OSError, ValueError) as error:
+        print(f"error: cannot start accounting proxy: {error}", file=sys.stderr)
         return 1
     bound_host, bound_port = server.server_address[:2]
     print(

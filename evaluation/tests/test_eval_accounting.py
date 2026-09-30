@@ -31,7 +31,11 @@ CANNED_USAGE: dict[str, object] = {
     "prompt_tokens_details": {"cached_tokens": 64},
     "completion_tokens_details": {"reasoning_tokens": 5},
 }
-CANNED_RESPONSE: dict[str, object] = {"id": "chatcmpl-1", "usage": CANNED_USAGE}
+CANNED_RESPONSE: dict[str, object] = {
+    "id": "chatcmpl-1",
+    "model": "gpt-6.1-sol",
+    "usage": CANNED_USAGE,
+}
 
 type FakeHandlerFactory = Callable[[type[BaseHTTPRequestHandler]], ThreadingHTTPServer]
 
@@ -195,6 +199,9 @@ def test_proxy_forwards_body_and_captures_full_usage(
         assert record["prompt_messages"] == 2
         assert record["stream"] is False
         assert record["error"] is None
+        assert record["requested_model"] == "gpt-5.6-luna"
+        assert record["response_model"] == "gpt-6.1-sol"
+        assert record["model_observation_status"] == "available"
         assert isinstance(record["latency_ms"], float) and record["latency_ms"] >= 0.0
         # Credentials pass through to the upstream but never reach the log.
         upstream_requests: list[dict[str, object]] = upstream.requests  # type: ignore[attr-defined]

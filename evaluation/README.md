@@ -198,6 +198,16 @@ episode id 在 dataset 内唯一时给出 `resolved_scene_id` / `dataset_index` 
 > 本地记账代理（`roboguide-eval proxy`）保留为**诊断工具**：不改 baseline
 > 的透明转发 + 落盘，用于排查中转问题或交叉核对——`--upstream` 必须是不带
 > `/v1` 的根地址，`OPENAI_BASE_URL` 指向 `http://127.0.0.1:<port>/v1`。
+> MI Responses 可通过同一个代理的 `/responses`；两臂须固定是否经过代理。
+> `--run-id <public-id>` 要求新的 log path，并分别记录 `requested_model` 与真实
+> `response_model` / `response_id` / `system_fingerprint` 及非敏感推理参数。
+> 返回身份缺失、非 JSON、流式或超过 4 MiB 的 metadata parsing budget 时保持 unavailable，
+> 不能从请求模型名补造。只记录已知 numeric usage 字段，不记录 Prompt、输出文本、
+> headers、URL query 或凭据。默认最多 10000 条、每条 64 KiB；预算或落盘失败
+> 不改变转发的响应。旁路 `<log>.status.json` 区分记录丢失和 in-flight 请求，只有
+> graceful close 且所有已进入代理的请求已归档，才会给出 `complete=true`。
+> 消费者必须校验 run_id、顺序、记录数、sidecar 和每次返回身份；此状态不证明
+> 绕过代理的请求不存在，也不证明 relay 内部实际模型权重身份。
 > TTFT 在 baseline 非流式调用下不可观测，如实不记录（插桩记录的是每次调用
 > 的请求/响应时间戳与总延迟）。
 >
