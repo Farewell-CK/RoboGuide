@@ -314,6 +314,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   They never issue a second path query, choose a route, or alter official success;
   ambiguous or unsupported observations remain unavailable. Evaluation accepts
   archived v0.4 and current v0.5 terminal geometry evidence.
+- The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
+  EMOS environment factory inside its workers, preserving the first returned reset with the
+  existing bounded diagnostic reader. It never edits the external source, invokes another
+  reset/action/step, changes multiprocessing mode or fabricates simulator RNG state. Evaluation
+  still reaches vendor code only across the external-process boundary. The harness accounting
+  proxy observes returned model identity independently of the requested model; a missing identity,
+  dropped log or unclosed/in-flight observer cannot prove complete pairing evidence.
 - `console/` contains the experimental read-only Mission Journey visualizer
   (early development; layout and features are still evolving): a zero-dependency
   static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static

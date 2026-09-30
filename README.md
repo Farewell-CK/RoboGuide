@@ -531,6 +531,13 @@ idle policy 选择 EMOS 已有的 `WaitSkillPolicy`，执行段结束后恢复�
 dispatcher 副本。单 Actor 的 idle 策略与原生 EMOS 的模型决策路径不同，配对比较须归档。
 Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
 作为四类独立证据记录，彼此不得推导。
+独立原生 EMOS 对照可显式使用
+`python -m habitat_local_eaios.native_reset_observer --evidence-dir <new-dir>
+--run-id <id> --episode-id <id> -- <原生 evaluator 参数>`，从原厂 environment factory
+进入 worker 后观察其第一个真实 `Env.reset` 返回状态。它复用只读的 physical diagnostics
+初态 reader，不修改原生源码、seed、动作或 multiprocessing mode；后续自动 reset
+不能覆盖首次快照。缺失字段与未暴露的 simulator RNG 状态仍为 unavailable，不能因此
+声称完整世界状态或 RNG 相同。默认原生入口不加载此观察器。
 当前 shared-world deployment 根据 Controller 已接受计划的版本化 Execution Session 选择
 双 Actor 双 endpoint 并发执行，或单 Actor 在同一 endpoint 上逐 Task 复用一次 Habitat reset。
 Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适配器不按官方目标数量
