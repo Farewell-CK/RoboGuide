@@ -184,7 +184,7 @@ class ExecutionStore:
             )
 
     def request_cancel(self, execution_id: str) -> dict[str, Any] | None:
-        """Mark a not-yet-terminal execution for cooperative cancellation."""
+        """Persist cancellation intent without claiming that in-flight local work stopped."""
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM executions WHERE execution_id = ?", (execution_id,)
@@ -195,8 +195,8 @@ class ExecutionStore:
                 connection.execute(
                     """
                     UPDATE executions
-                       SET cancel_requested = 1, state = 'CANCELLED',
-                           detail = 'cancellation requested before local completion',
+                       SET cancel_requested = 1,
+                           detail = 'cancellation requested; awaiting actual local outcome',
                            updated_at = ?
                      WHERE execution_id = ?
                     """,
@@ -409,6 +409,9 @@ class LocalAdapter:
         self._store.update(execution_id, "RUNNING", f"running {operation}")
         try:
             if self._is_cancelled(execution_id):
+                self._store.update(
+                    execution_id, "CANCELLED", "cancelled before invoking local work"
+                )
                 return
             if operation == "build-map":
                 detail = self._build_map(artifact_path, invocation)
