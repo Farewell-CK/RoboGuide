@@ -27,6 +27,12 @@ LIVE_VIEW_ARGS=()
 GOAL_REGION_ARGS=()
 ROUTE_SUPPORT_CHECK_ARGS=()
 PROGRESS_ARGS=()
+RETENTION_ARGS=()
+case "${ROBOGUIDE_B1_RETAIN_STOPPED_SESSION:-0}" in
+    0) ;;
+    1) RETENTION_ARGS=(--retain-stopped-session) ;;
+    *) echo "ROBOGUIDE_B1_RETAIN_STOPPED_SESSION must be 0 or 1" >&2; exit 1 ;;
+esac
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -201,6 +207,15 @@ fi
 for n in a b; do
     sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
 done
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+    habitat_local_eaios.recovery_deployment \
+    --node "$RUN/node-a.toml" --node "$RUN/node-b.toml" \
+    --snapshot "$RUN/recovery-deployment.json" "${RETENTION_ARGS[@]}" \
+    || { FAILURE_REASON=recovery_deployment_configuration_invalid; exit 1; }
+for n in a b; do
+    "$NODE" --validate "$RUN/node-$n.toml" > "$RUN/node-conformance-$n.json" \
+        || { FAILURE_REASON=node_configuration_invalid; exit 1; }
+done
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
     habitat_local_eaios.spatial_feasibility \
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
@@ -237,6 +252,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --backend shared-emos-stage2 \
         "${PROGRESS_ARGS[@]}" \
         "${GOAL_REGION_ARGS[@]}" \
+        "${RETENTION_ARGS[@]}" \
         --subtask-mode natural-objective \
         --port-b 28102 \
         --state-db "$RUN/bridge-a.sqlite3" \
@@ -265,6 +281,11 @@ FAILURE_REASON=local_eaios_startup_failed
 # Wait before MI freezes its one immutable grounding snapshot.
 wait_http http://127.0.0.1:28100/v1/health 240 ONLINE
 wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+    habitat_local_eaios.recovery_deployment \
+    --snapshot "$RUN/recovery-deployment.json" --verify-live \
+    || { FAILURE_OWNER=EXTERNAL_INFRA; FAILURE_COMPONENT=environment; \
+         FAILURE_REASON=recovery_deployment_support_mismatch; exit 1; }
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
     "$RUN" --check-artifact \
     || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
