@@ -20,6 +20,11 @@ admission，Harness 消费并核对已持久化 verdict。自定义 B1 启动 wr
 继续分页并重新确认尾部。采集前后必须读到身份一致、状态不变的终态 Mission
 （Completed / Failed / Cancelled）。
 
+Controller HTTP 读取复用应用的 event write gate，等待当前 SQLite batch 提交或回滚后
+读取已持久化页；等待在 blocking worker 中进行，不持有 gate 执行 HTTP 写出。
+日志或 gate 不可用时返回带 JSON 错误的 HTTP 503，不返回伪造空页或未提交事件。
+采集器对 503 仍按归档失败保存原始响应并 fail closed；此机制不提供跨页 snapshot token。
+
 现有 API 没有 snapshot token 或全局高水位。这里确认的是 **终态 Mission 的已持久化
 事件前缀**（`terminal_durable_prefix`），不保证未来无心跳或迟到事件，也不宣称全局一致
 快照。Running、终态无法确认、持续写入导致预算耗尽，都显式归档为 incomplete。

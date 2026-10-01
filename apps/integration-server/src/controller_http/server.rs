@@ -133,24 +133,44 @@ pub(crate) async fn handle_http_connection(
                 .get("limit")
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(100);
-            let events = event_log.events_page(after_sequence, limit)?;
-            let records = events
-                .iter()
-                .map(|event| {
-                    let payload = serde_json::from_str(&event.payload_json)
-                        .unwrap_or_else(|_| serde_json::json!(event.payload_json));
-                    serde_json::json!({
-                        "sequence": event.sequence,
-                        "event_id": event.event_id,
-                        "timestamp_ms": event.timestamp_ms,
-                        "correlation_id": event.correlation_id,
-                        "causation_id": event.causation_id,
-                        "payload_schema": event.payload_schema,
-                        "payload": payload,
-                    })
-                })
-                .collect::<Vec<_>>();
-            ("200 OK", serde_json::json!({"events": records}))
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            // The shared connection must never expose an application's uncommitted batch.
+            // Wait off the async executor, then hold the existing write gate only for the read.
+            let events = tokio::task::spawn_blocking(move || {
+                let _guard = gate
+                    .lock()
+                    .map_err(|_| "event-log write gate is poisoned".to_string())?;
+                log.events_page(after_sequence, limit)
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .unwrap_or_else(|_| Err("event-log reader failed".to_string()));
+            match events {
+                Ok(events) => {
+                    let records = events
+                        .iter()
+                        .map(|event| {
+                            let payload = serde_json::from_str(&event.payload_json)
+                                .unwrap_or_else(|_| serde_json::json!(event.payload_json));
+                            serde_json::json!({
+                                "sequence": event.sequence,
+                                "event_id": event.event_id,
+                                "timestamp_ms": event.timestamp_ms,
+                                "correlation_id": event.correlation_id,
+                                "causation_id": event.causation_id,
+                                "payload_schema": event.payload_schema,
+                                "payload": payload,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    ("200 OK", serde_json::json!({"events": records}))
+                }
+                Err(error) => (
+                    "503 Service Unavailable",
+                    serde_json::json!({"error": error}),
+                ),
+            }
         }
         ("POST", "/v1/missions") => {
             let plan = match decode_mission_plan(request_body) {
