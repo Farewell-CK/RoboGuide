@@ -1,6 +1,6 @@
 # ADR-0059: 部署停止范围与原上下文重执行契约
 
-- Status: Implemented — 声明与恢复安全检查；shared-world 独立停止/续跑仍不支持
+- Status: Implemented — 声明与恢复安全检查；shared-world 独立 Role 恢复仍不支持
 - Date: 2026-10-01
 
 ## 问题与事实
@@ -73,6 +73,10 @@ Habitat Node 模板与只读 `GET /v1/executions/recovery-support` 一致声明
 下一阶段若要恢复该部署，应先明确原 Stage2/local skill 的停止协议、所有受影响 execution
 的真实终态，以及 retained world/session 的 continuation admission，再设计对应 Group
 恢复；不能假报 `execution`、重建 reset 世界或把新的 Task 当作旧 attempt 续跑。
+
+后续 [ADR-0060](0060-retained-shared-world-continuation.md) 已实现默认关闭的本地联合
+停止续跑 primitive，保留相同世界与预算。它不是 Controller Group recovery；默认配置
+仍声明不支持 continuation，单 Role 恢复仍拒绝任何 `execution-group` 声明。
 
 离线验收覆盖：缺失/耦合声明、错 owner/operation、旧 checkpoint、注册变化、Cancel与
 partial release 隔离、Matching/Commit/Rebind/outbox 再检查、既有正常顺序执行、真实

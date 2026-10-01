@@ -213,11 +213,12 @@ Habitat 的可选导航 observer 已接入同一 State export（
 单 Role 恢复还要求部署明确声明独立停止和原上下文重执行能力，dispatch 冻结且当前
 注册不变，见 [ADR-0059](docs/decisions/0059-deployment-stop-continuation-contract.md)。缺失或
 耦合声明会在 Cancel 前拒绝；Control 和 outbox 继续检查后续动作。当前 Habitat 如实声明
-联合停止、不支持中断后重试；正常双 endpoint 和单 Actor 顺序 Task 不受此限制。
+默认联合停止、不支持中断后重试；正常双 endpoint 和单 Actor 顺序 Task 不受此限制。
 
-部署侧 retained-world continuation 正在依
-[ADR-0060](docs/decisions/0060-retained-shared-world-continuation.md) 实现：有界的精确
-session/intent/new-attempt 检查与重启 fencing 属于 Local EAIOS。Controller Group recovery
+部署侧 retained-world continuation 已依
+[ADR-0060](docs/decisions/0060-retained-shared-world-continuation.md) 实现默认关闭的本地路径：
+联合取消后的新 attempts 复用原世界、观察与剩余步数，已完成端不再次调用模型。
+有界的精确 session/intent/new-attempt 检查与重启 fencing 属于 Local EAIOS。Controller Group recovery
 尚未实现，现有单 Role 恢复继续拒绝联合停止；不能把本地可续跑当作自动恢复授权。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。

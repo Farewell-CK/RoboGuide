@@ -604,11 +604,11 @@ pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort�
 沿用 operation-owner LocalSystem 注册 metadata，在 dispatch 冻结。独立 Role 恢复必须
 同时声明 isolated execution stop 与 context-preserving repeat，当前注册仍相同；否则在
 发出 recovery Cancel 之前拒绝。replacement Matching/Commit/stateful Rebind 与 Execute
-outbox delivery 再检查能力。当前 Habitat shared-world 声明联合停止和不支持中断续跑；
+outbox delivery 再检查能力。默认 Habitat shared-world 声明联合停止和不支持中断续跑；
 其正常顺序 Task 能力独立。部署支持不是停止证明或重复授权，不进入 MI 任务语义。
 
 部署侧 retained-world continuation 依 [ADR-0060](../../decisions/0060-retained-shared-world-continuation.md)
-实现中：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
+已实现本地路径：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
 attempt；已 Completed 端不重执行，步数不重置，重启不重建旧世界。Controller Group
 recovery 尚未实现；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
 不修改 MI、任务语义或官方成功判断。
@@ -627,6 +627,12 @@ flowchart LR
   M --> V[Recheck replacement support before Execute delivery]
   V --> N[New physical attempt]
   X[Unknown / Cancel receipt] --> F[Retain ownership and reconcile]
+  subgraph H[Local shared-world continuation - default off]
+    HS[Actual joint Cancelled / retained Completed] --> HG{Same world / intent / fresh attempts / budget?}
+    HG -->|all stopped slots assigned| HR[Original Stage2 in same Habitat world]
+    HG -->|changed / expired / restart / missing slot| HF[Close or reject without reset]
+    HR --> HE[Retain segment history and official final metrics]
+  end
 ```
 
 自动进度触发取消、自动重写计划与执行期 MI replacement revision 尚未实现。

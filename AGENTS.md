@@ -307,12 +307,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   The bounded, closed LocalSystem metadata contract `roboguide.local-execution-recovery/v0.1`
   uses existing Node Protocol/Contract transport; legacy absence never grants support. Recovery Cancel,
   partial release, replacement Matching/Commit/stateful Rebind and Execute delivery recheck support.
-  Current Habitat shared-world declares `execution-group` / `unsupported` and fails Role recovery
+  Default Habitat shared-world declares `execution-group` / `unsupported` and fails Role recovery
   before Cancel; normal dual endpoints and single-Actor next-Task execution remain supported.
   Recovery support is neither repeat permission nor physical-stop/resource authority. See ADR-0059.
-  The deployment-owned retained-session admission module bounds exact stopped-world attempts
-  and fences restart before reset (ADR-0060). Group continuation is separate from the existing
-  isolated Role recovery API; neither local admission nor a continuation declaration authorizes
+  Optional default-off shared-world continuation retains the same world after actual joint
+  cancellation (ADR-0060). Exact session/intent/new-attempt admission, unchanged simulator budget,
+  a world-wide 16-continuation ceiling, completed-peer passive wait and restart-before-reset fencing
+  belong to the Local EAIOS. Stop snapshots remain separate from final official benchmark evidence.
+  Group continuation is separate from the existing isolated Role recovery API;
+  neither local admission nor a continuation declaration authorizes
   repetition, resource release, reassignment or a new simulator world.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy

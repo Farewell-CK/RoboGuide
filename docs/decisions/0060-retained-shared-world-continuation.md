@@ -1,6 +1,6 @@
 # ADR-0060: 联合停止后的本地原世界续跑
 
-- Status: Accepted — 本地实现与离线验证进行中；Controller Group recovery 尚未实现
+- Status: Implemented — 本地 opt-in 与离线验证；Controller Group recovery 尚未实现
 - Date: 2026-10-01
 
 ## 已确认的边界
@@ -22,7 +22,8 @@ Execute 路径的新 attempt，不会由适配器自行创建。
 
 - 同一 Mission/Group/session digest、同一逻辑 Task/Role、同一物理 endpoint；
 - exact operation、objective、parameters 不变；资源选择仍来自外部 Commit；
-- 新 attempt identity 非空、未使用，最多 16 次续跑；
+- 新 attempt identity 非空、未使用，每个世界最多 16 次续跑，不因正常下一 Task 续预算；
+- retained profile 最多 32 个 accepted-plan slots，segment history 最多 48 条；
 - 每个被取消的端都需新 assignment 才能继续；缺一端有界等待后关闭 session；
 - 已 Completed 端保留历史结果，使用原始 wait skill 的 model-free passive policy，不
   重新执行完成的 invocation；仍需执行的端使用原始 CrabAgent、策略与技能；
@@ -37,10 +38,14 @@ attempt 续跑，不能跳到下一 Task。正常 Completed 之后的 Task 释�
 
 ## 证据与声明
 
-每段保存真实 outcomes、attempt identity、累计步数与停止/结束原因。暂停快照与最终
-terminal snapshot 分离；暂停只 flush，不关闭连续视频。旧 Cancelled/Completed 不改写；
+每段保存真实 outcomes、attempt identity、实际 Stage2 assignment、累计步数与停止/结束原因。
+已完成端的 Stage2 输入明确记录 passive / Nothing to do，不能误读旧目标文本为再次执行。
+暂停快照与最终 terminal snapshot 分离；暂停只 flush，不关闭连续视频。
+旧 Cancelled/Completed 不改写；
 未结束的停止快照不发布成最终 benchmark summary 或终态 verifier verdict。
 最终 summary 使用当前物理终态与官方指标，保留 segment history。
+segment/state 归档失败记录日志和有界 failure counts；可用的最终 summary 标记归档不完整，
+不会将归档故障改为物理执行失败。官方 benchmark 与 local Completed 始终独立。
 
 默认声明仍为 `execution-group` / `unsupported`；显式开启且配套注册一致时，部署可声明
 `execution-group` / `repeat-after-stop`。任何一个版本都不能通过单 Role 恢复检查。
