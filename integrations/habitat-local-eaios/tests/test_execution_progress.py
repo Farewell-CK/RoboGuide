@@ -274,6 +274,7 @@ def test_source_freshness_is_not_renewed_by_http_reads(tmp_path: Path) -> None:
     [
         ("schema_version", "wrong"),
         ("agent_id", 1),
+        ("agent_id", False),
         ("destination", "other"),
         ("observed_at_monotonic_ns", True),
         ("sample", []),

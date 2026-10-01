@@ -184,7 +184,8 @@ def read_execution_progress(
             return empty
         sample = document.get("sample")
         if (
-            document.get("agent_id") != agent_id
+            type(document.get("agent_id")) is not int
+            or document.get("agent_id") != agent_id
             or document.get("destination") != invocation.destination
             or not isinstance(sample, dict)
             or set(sample)
