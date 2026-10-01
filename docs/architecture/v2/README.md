@@ -641,7 +641,10 @@ flowchart LR
 实现并离线验证：显式冻结全部 current attempts 与重复授权，取得完整停止证明后由 Control 重新
 验证原资源承诺，再准备完整的新 attempts。暂停保留 ownership；不能逐 Role 释放、
 迁移 endpoint 或续时间/步数预算。完整新 outbox checkpoint Commit 后重新读取时钟，
-再次核对原 owner/注册、当前完整集合及资源。默认仍关闭，真实 Habitat 续跑尚未验证。
+再次核对原 owner/注册、当前完整集合及资源。默认仍关闭；已有单 Actor 原世界物理续跑
+验证与实际 Controller/Node 进程验收，多 Actor 的物理联合停机与续跑仍未验证。
+部署 opt-in 在注册前冻结运行目录 Node 配置摘要，并核对两个 Adapter 的固定只读能力声明；
+此检查不发送恢复命令，也不改变资源、任务或官方判定。
 现有单 Role 恢复与本地续跑边界保持独立。
 
 ```mermaid
