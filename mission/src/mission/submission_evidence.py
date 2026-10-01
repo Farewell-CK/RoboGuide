@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, cast
@@ -15,10 +16,57 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only dependency keeps the modules
     from mission.rejected_draft import RejectedDraftEvidence
 
 SUBMISSION_EVIDENCE_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
-OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.2"
+OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.3"
 COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
-    {"roboguide.mission-request-observations/v0.1", OBSERVATIONS_SCHEMA}
+    {
+        "roboguide.mission-request-observations/v0.1",
+        "roboguide.mission-request-observations/v0.2",
+        OBSERVATIONS_SCHEMA,
+    }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerAdmissionEvidence:
+    """Read the Controller's atomic admission receipt without overwriting original POST evidence."""
+
+    mission_id: str
+    group_id: str
+    accepted_request_body_sha256: str
+    admitted_at_ms: int
+    schema_version: str = "roboguide.controller-mission-admission/v0.1"
+
+    def __post_init__(self) -> None:
+        """Refuse partial identities, malformed digests and invented admission times."""
+        if (
+            self.schema_version != "roboguide.controller-mission-admission/v0.1"
+            or any(
+                not isinstance(value, str) or not value.strip() or len(value) > 256
+                for value in (self.mission_id, self.group_id)
+            )
+            or not isinstance(self.accepted_request_body_sha256, str)
+            or re.fullmatch(r"sha256:[a-f0-9]{64}", self.accepted_request_body_sha256) is None
+            or type(self.admitted_at_ms) is not int
+            or self.admitted_at_ms < 0
+        ):
+            raise ValueError("invalid Controller admission receipt")
+
+    def to_json(self) -> JSONObject:
+        """Serialize the actual authority receipt independently of transport observations."""
+        return cast(JSONObject, asdict(self))
+
+    @classmethod
+    def from_json(cls, value: object) -> ControllerAdmissionEvidence:
+        """Restore the exact neutral schema, failing closed on extra or missing fields."""
+        if not isinstance(value, dict) or set(value) != {
+            "schema_version",
+            "mission_id",
+            "group_id",
+            "accepted_request_body_sha256",
+            "admitted_at_ms",
+        }:
+            raise ValueError("malformed Controller admission receipt")
+        return cls(**value)
 
 
 def canonical_plan_digest(document: Mapping[str, object]) -> str:
@@ -78,6 +126,7 @@ class MissionRequestObservations:
     failure_evidence: JSONObject | None
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
     recovery_evidence: RequestRecoveryEvidence | None = None
+    admission_evidence: ControllerAdmissionEvidence | None = None
     schema_version: str = OBSERVATIONS_SCHEMA
 
     def to_json(self) -> JSONObject:

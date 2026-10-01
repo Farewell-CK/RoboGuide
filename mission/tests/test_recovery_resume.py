@@ -137,7 +137,7 @@ def test_new_post_cannot_reuse_the_previous_rejection_after_a_crash(
             """Interrupt the new POST boundary without supplying a response."""
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(controller, "submit_plan", crash)
+        monkeypatch.setattr(controller, "submit_plan_observed", crash)
         with pytest.raises(KeyboardInterrupt):
             engine.retry(blocked.request_id)
         restored = _engine(tmp_path, FakeInterpreter([]), FakePlanner(), controller).get(

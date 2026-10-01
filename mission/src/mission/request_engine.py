@@ -55,7 +55,11 @@ from mission.review import (
     route_mission_review,
 )
 from mission.semantic_admission import validate_authoritative_executor_constraints
-from mission.submission_evidence import ControllerSubmissionEvidence, canonical_plan_digest
+from mission.submission_evidence import (
+    ControllerAdmissionEvidence,
+    ControllerSubmissionEvidence,
+    canonical_plan_digest,
+)
 
 
 class IdGenerator(Protocol):
@@ -285,33 +289,7 @@ class MissionRequestEngine:
             if recovery.action is RecoveryAction.RESUBMIT_UNCHANGED:
                 return self._submit(record)
             if recovery.action is RecoveryAction.RECONCILE_SUBMISSION:
-                observer = getattr(self._controller, "observe_mission", None)
-                if not callable(observer):
-                    raise MissionRequestError(
-                        "submission is unresolved; a read-only Controller observer is required"
-                    )
-                try:
-                    observation = observer(record.mission_id)
-                    if not isinstance(observation, dict):
-                        raise MissionControllerError(
-                            "Controller observer returned invalid evidence"
-                        )
-                    recovery = recovery.observe_controller(cast(JSONObject, observation))
-                except Exception as error:
-                    recovery = recovery.observe_controller(
-                        {
-                            "schema_version": "roboguide.controller-mission-observation/v0.1",
-                            "mission_id": record.mission_id,
-                            "lookup_result": "unavailable",
-                            "status_code": None,
-                            "group_id": None,
-                            "mission_status": None,
-                            "error_type": type(error).__name__[:128],
-                        }
-                    )
-                # Keep the original error and POST evidence. The status API has
-                # no accepted-plan digest, so a lookup cannot complete admission.
-                return self._update(record, recovery_evidence=recovery)
+                return self._reconcile_submission(record, recovery)
             if recovery.action is RecoveryAction.REVIEW_INPUT:
                 raise MissionRequestError(
                     f"retry requires {recovery.action.value} before deliberation"
@@ -351,6 +329,71 @@ class MissionRequestEngine:
                 approval_required=False,
             )
 
+    def _reconcile_submission(
+        self, record: MissionRequestRecord, recovery: RequestRecoveryEvidence
+    ) -> MissionRequestRecord:
+        """Read one authority receipt or legacy identity observation without replaying a POST."""
+        authority = getattr(self._controller, "observe_admission", None)
+        observer = getattr(self._controller, "observe_mission", None)
+        sent = record.submission_evidence
+        if not callable(observer) and not callable(authority):
+            raise MissionRequestError("submission is unresolved; a Controller observer is required")
+        try:
+            if callable(authority) and sent is not None:
+                admission = authority(record.mission_id)
+                if admission is not None:
+                    if not isinstance(admission, ControllerAdmissionEvidence) or (
+                        admission.mission_id != record.mission_id
+                        or sent.submitted_mission_id != record.mission_id
+                        or sent.submitted_plan_digest != record.draft_digest
+                        or admission.accepted_request_body_sha256 != sent.raw_request_body_sha256
+                        or record.plan is None
+                        or _plan_digest(record.plan) != record.draft_digest
+                    ):
+                        raise MissionControllerError(
+                            "Controller admission does not match original POST"
+                        )
+                    return self._update(
+                        record,
+                        lifecycle=MissionRequestLifecycle.ACCEPTED,
+                        issues=(),
+                        approval_required=False,
+                        admission_evidence=admission,
+                        recovery_evidence=self._recovery_evidence(
+                            record,
+                            FailureStage.CONTROLLER_SUBMISSION,
+                            FailureReason.SUBMISSION_RECONCILED,
+                        ),
+                    )
+                observation: JSONObject = {
+                    "schema_version": "roboguide.controller-mission-observation/v0.1",
+                    "mission_id": record.mission_id,
+                    "lookup_result": "not_found",
+                    "status_code": 404,
+                    "group_id": None,
+                    "mission_status": None,
+                }
+            elif callable(observer):
+                observation = observer(record.mission_id)
+                if not isinstance(observation, dict):
+                    raise MissionControllerError("Controller observer returned invalid evidence")
+            else:
+                raise MissionControllerError("original prepared POST fingerprint is unavailable")
+            recovery = recovery.observe_controller(observation)
+        except Exception as error:
+            recovery = recovery.observe_controller(
+                {
+                    "schema_version": "roboguide.controller-mission-observation/v0.1",
+                    "mission_id": record.mission_id,
+                    "lookup_result": "unavailable",
+                    "status_code": None,
+                    "group_id": None,
+                    "mission_status": None,
+                    "error_type": type(error).__name__[:128],
+                }
+            )
+        return self._update(record, recovery_evidence=recovery)
+
     def _process(self, record: MissionRequestRecord) -> MissionRequestRecord:
         """Interpret and plan until clarification, approval, or submission is required."""
         stage = "grounding"
@@ -359,6 +402,7 @@ class MissionRequestEngine:
                 record,
                 lifecycle=MissionRequestLifecycle.INTERPRETING,
                 submission_evidence=None,
+                admission_evidence=None,
                 failure_evidence=None,
                 recovery_evidence=None,
             )
@@ -802,12 +846,26 @@ class MissionRequestEngine:
             lifecycle=MissionRequestLifecycle.SUBMITTING,
             approval_required=False,
             submission_evidence=None,
+            admission_evidence=None,
             recovery_evidence=self._recovery_evidence(
                 record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_IN_FLIGHT
             ),
         )
         try:
-            receipt = self._controller.submit_plan(plan)
+            observed_submit = getattr(self._controller, "submit_plan_observed", None)
+
+            def before_send(evidence: ControllerSubmissionEvidence) -> None:
+                """Durably bind actual prepared bytes before the sole external POST effect."""
+                nonlocal record
+                record = self._update(
+                    record, submission_evidence=replace(evidence, request_id=record.request_id)
+                )
+
+            receipt = (
+                observed_submit(plan, before_send)
+                if callable(observed_submit)
+                else self._controller.submit_plan(plan)
+            )
             self._validate_submission_receipt(record, receipt)
         except Exception as error:
             observed = (
@@ -926,6 +984,7 @@ class MissionRequestEngine:
         failure_evidence: JSONObject | None | _Unset = _UNSET,
         rejected_drafts: tuple[RejectedDraftEvidence, ...] | None = None,
         recovery_evidence: RequestRecoveryEvidence | None | _Unset = _UNSET,
+        admission_evidence: ControllerAdmissionEvidence | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
@@ -972,6 +1031,11 @@ class MissionRequestEngine:
                 record.recovery_evidence
                 if isinstance(recovery_evidence, _Unset)
                 else recovery_evidence
+            ),
+            admission_evidence=(
+                record.admission_evidence
+                if isinstance(admission_evidence, _Unset)
+                else admission_evidence
             ),
         )
         self._store.save(updated)

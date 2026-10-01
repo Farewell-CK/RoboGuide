@@ -352,8 +352,10 @@ pub(crate) fn validate_restored_verifier_source(
     checkpoint: &ServerCheckpoint,
     configured_digest: Option<&str>,
 ) -> Result<(), String> {
-    if checkpoint.schema == SERVER_CHECKPOINT_SCHEMA
-        && checkpoint.verifier_source_digest.as_deref() != configured_digest
+    if matches!(
+        checkpoint.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+    ) && checkpoint.verifier_source_digest.as_deref() != configured_digest
     {
         return Err("controller verifier source changed across checkpoint restore".into());
     }
@@ -733,6 +735,7 @@ mod tests {
             schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
             integration_json: String::new(),
             orchestration_json: String::new(),
+            mission_admissions: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: Some("sha256:source-a".to_string()),
         };

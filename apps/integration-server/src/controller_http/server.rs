@@ -266,6 +266,17 @@ pub(crate) async fn handle_http_connection(
                             .map_err(|error| error.to_string())
                     })
                     .and_then(|_| {
+                        candidate
+                            .mission_admissions
+                            .entry(mission_id.as_str().to_string())
+                            .or_insert_with(|| {
+                                controller_http::MissionAdmission::new(
+                                    mission_id.clone(),
+                                    group_id.clone(),
+                                    request_body.as_bytes(),
+                                    now,
+                                )
+                            });
                         server_checkpoint_json(&candidate).map_err(|error| error.to_string())
                     })
                     .inspect(|_| pending_controller = Some(candidate))
@@ -315,6 +326,25 @@ pub(crate) async fn handle_http_connection(
                     drop(_write_guard);
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
+            }
+        }
+        ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/admission") => {
+            let mission_text = path
+                .trim_start_matches("/v1/missions/")
+                .trim_end_matches("/admission");
+            let mission_id = domain::MissionId::new(mission_text)?;
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match controller.mission_admissions.get(mission_id.as_str()) {
+                Some(admission) => {
+                    admission.validate(&controller, mission_id.as_str())?;
+                    ("200 OK", admission.to_json())
+                }
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "admission receipt unavailable"}),
+                ),
             }
         }
         ("GET", path) if path.starts_with("/v1/missions/") => {

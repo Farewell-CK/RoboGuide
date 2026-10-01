@@ -121,7 +121,7 @@ def lost_receipt_http(
 @pytest.mark.parametrize(
     "status,wrong_identity,result",
     [
-        (200, False, "found"),
+        (200, False, "unavailable"),
         (404, False, "not_found"),
         (503, False, "unavailable"),
         (200, True, "unavailable"),
@@ -137,7 +137,7 @@ def test_ambiguous_http_submission_reads_original_identity_only(
         failed = engine.create("deliver the declared payload")
         original = failed.observations().to_json()
         observed = engine.retry(failed.request_id)
-    assert calls == ["POST /v1/missions", f"GET /v1/missions/{failed.mission_id}"]
+    assert calls == ["POST /v1/missions", f"GET /v1/missions/{failed.mission_id}/admission"]
     assert observed.lifecycle is MissionRequestLifecycle.FAILED
     assert replace(observed, updated_at_ms=failed.updated_at_ms).to_json() == failed.to_json()
     assert observed.submission_evidence == failed.submission_evidence

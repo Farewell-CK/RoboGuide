@@ -50,6 +50,7 @@ class FailureReason(StrEnum):
     SUBMISSION_AMBIGUOUS = "submission_ambiguous"
     SUBMISSION_REJECTED = "submission_rejected"
     SUBMISSION_ACCEPTED = "submission_accepted"
+    SUBMISSION_RECONCILED = "submission_reconciled"
 
 
 class RecoveryAction(StrEnum):
@@ -91,7 +92,7 @@ def recovery_action(stage: FailureStage, reason: FailureReason) -> RecoveryActio
     if stage is FailureStage.CONTROLLER_SUBMISSION:
         if reason is FailureReason.SUBMISSION_REJECTED:
             return RecoveryAction.RESUBMIT_UNCHANGED
-        if reason is FailureReason.SUBMISSION_ACCEPTED:
+        if reason in {FailureReason.SUBMISSION_ACCEPTED, FailureReason.SUBMISSION_RECONCILED}:
             return RecoveryAction.OBSERVE_MISSION
         return RecoveryAction.RECONCILE_SUBMISSION
     if reason in {
@@ -218,6 +219,7 @@ class RequestRecoveryEvidence:
                 FailureReason.SUBMISSION_AMBIGUOUS,
                 FailureReason.SUBMISSION_REJECTED,
                 FailureReason.SUBMISSION_ACCEPTED,
+                FailureReason.SUBMISSION_RECONCILED,
             }
             and self.stage is not FailureStage.CONTROLLER_SUBMISSION
         ):

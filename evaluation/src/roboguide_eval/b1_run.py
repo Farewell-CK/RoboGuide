@@ -12,6 +12,7 @@ from roboguide_eval.b1_provenance import (
     PROVENANCE_SCHEMA_VERSION,
     RUN_FAILURE_SCHEMA,
     B1ProvenanceRecord,
+    controller_submission_group,
     digest,
     load_document,
     observed_request,
@@ -74,14 +75,13 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
             )
             else {}
         )
-    sent = _object(request.get("submission_evidence"))
     if (
         owner not in {FailureOwner.SUT_SYSTEM.value, FailureOwner.MODEL.value}
         or doc.get("component")
         not in {"controller", "node", "mission_service", "local_eaios", "model"}
         or doc.get("request_id") != request.get("request_id")
         or doc.get("mission_id") != request.get("mission_id")
-        or doc.get("group_id") != sent.get("controller_group_id")
+        or doc.get("group_id") != (controller_submission_group(request) or None)
     ):
         return {}
     return doc
@@ -111,10 +111,9 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
     ):
         planning_world = load_document(run / planning_world_key)
         documents[planning_world_key] = planning_world
-    sent = _object(request.get("submission_evidence"))
     scoped = scoped_execution_evidence(
         str(request.get("mission_id") or ""),
-        str(sent.get("controller_group_id") or ""),
+        controller_submission_group(request),
         documents["mission.json"],
         documents["events.json"],
         documents["execution-attempts.json"],

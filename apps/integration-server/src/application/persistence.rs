@@ -67,6 +67,7 @@ pub(crate) fn server_checkpoint_json(
         .checkpoint_json()
         .map_err(|error| format!("orchestration checkpoint failure: {error}"))?;
     serde_json::to_string(&ServerCheckpoint {
+        mission_admissions: controller.mission_admissions.clone(),
         schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
         integration_json,
         orchestration_json,

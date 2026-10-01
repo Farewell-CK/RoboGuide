@@ -1235,6 +1235,7 @@ mod tests {
                 integration::GrpcNodeRouter::default(),
             ),
             orchestrator: MissionOrchestrator::new(),
+            mission_admissions: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         }));

@@ -37,7 +37,9 @@ exactly-once physical action 或通用 recovery optimizer。
 当前 `mission.recovery` 和 Request Engine 已实现该分类切片。恢复 evidence 在独立
 observations v0.2 中随 Request 原子保存；公共 Request v0.4、MissionPlan 与 Core contracts
 不变。提交结果不明时只查询原 Mission，不能用恢复诊断补造完整接纳 receipt。
-当前查询 API 缺少 accepted-plan digest，完整自动接纳核对仍是明确的后续缺口。
+独立 observations v0.3 和完整 HTTP body 绑定的权威接纳查询已补齐，见
+[ADR-0055](../decisions/0055-controller-admission-reconciliation.md)。原始 POST evidence
+保持不变；只有完整匹配的权威 receipt 才能恢复 Accepted。旧 identity 查询仍不证明接纳。
 
 先补充跨 MI、Controller admission 与 dispatch 边界的失败矩阵及可复核测试，复用现有预算，
 不统一把错误发送给模型。需要统一记录：失败 stage、稳定 reason、request/draft/context digest、

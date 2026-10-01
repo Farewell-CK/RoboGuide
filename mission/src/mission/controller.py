@@ -6,7 +6,7 @@ import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from http.client import HTTPException, HTTPMessage
 from math import isfinite
@@ -14,7 +14,7 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote, urlparse
 
 from mission.models import JSONObject, MissionPlan
-from mission.submission_evidence import ControllerSubmissionEvidence
+from mission.submission_evidence import ControllerAdmissionEvidence, ControllerSubmissionEvidence
 
 MAX_CONTROLLER_RESPONSE_BYTES = 2 * 1024 * 1024
 INVENTORY_SCHEMA = "roboguide.inventory/v0.1"
@@ -325,7 +325,17 @@ class HttpMissionController:
 
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit a strict MissionPlan and classify accepted versus rejected responses."""
-        status, decoded, evidence = self._request("POST", "/v1/missions", plan.to_json())
+        return self.submit_plan_observed(plan, None)
+
+    def submit_plan_observed(
+        self,
+        plan: MissionPlan,
+        before_send: Callable[[ControllerSubmissionEvidence], None] | None,
+    ) -> SubmissionReceipt:
+        """Persist the exact prepared body before the transport can cause admission or dispatch."""
+        status, decoded, evidence = self._request(
+            "POST", "/v1/missions", plan.to_json(), before_send
+        )
         if status in {200, 202} and (
             decoded.get("mission_id") != plan.mission.mission_id
             or not isinstance(decoded.get("group_id"), str)
@@ -342,6 +352,23 @@ class HttpMissionController:
             detail=detail,
             evidence=evidence,
         )
+
+    def observe_admission(self, mission_id: str) -> ControllerAdmissionEvidence | None:
+        """Read one digest-bound authority receipt; absent legacy receipts remain unavailable."""
+        status, decoded, _ = self._request(
+            "GET", f"/v1/missions/{quote(mission_id, safe='')}/admission", None
+        )
+        if status == 404:
+            return None
+        try:
+            evidence = ControllerAdmissionEvidence.from_json(decoded)
+        except (TypeError, ValueError) as error:
+            raise MissionControllerError("Controller admission receipt is invalid") from error
+        if status != 200 or evidence.mission_id != mission_id:
+            raise MissionControllerError(
+                "Controller admission receipt is unavailable or mismatched"
+            )
+        return evidence
 
     def observe_mission(self, mission_id: str) -> JSONObject:
         """Read the original Mission identity once without resubmitting or proving plan content.
@@ -385,7 +412,11 @@ class HttpMissionController:
         }
 
     def _request(
-        self, method: str, path: str, body: Mapping[str, object] | None
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, object] | None,
+        before_send: Callable[[ControllerSubmissionEvidence], None] | None = None,
     ) -> tuple[int, JSONObject, ControllerSubmissionEvidence | None]:
         """Issue one bounded JSON request and return error responses without retrying."""
         payload = None
@@ -401,6 +432,8 @@ class HttpMissionController:
             if method == "POST" and path == "/v1/missions" and isinstance(request.data, bytes)
             else None
         )
+        if evidence is not None and before_send is not None:
+            before_send(evidence)
         try:
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 status = response.status

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from roboguide_eval.b1_provenance import plan_digest, request_failure
+from roboguide_eval.b1_provenance import controller_submission_group, plan_digest, request_failure
 
 ARCHIVE_FILE = "controller-event-archive.json"
 ARCHIVE_SCHEMA = "roboguide.e1.controller-event-archive/v0.1"
@@ -201,7 +201,7 @@ def terminal_anchor(document: Any, request: dict[str, Any]) -> dict[str, Any]:
         isinstance(document, dict)
         and isinstance(sent, dict)
         and document.get("mission_id") == request.get("mission_id")
-        and document.get("group_id") == sent.get("controller_group_id")
+        and document.get("group_id") == controller_submission_group(request)
         and bool(document.get("group_id"))
         and isinstance(document.get("status"), str)
         and document["status"] in TERMINAL

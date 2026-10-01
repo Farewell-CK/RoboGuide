@@ -112,6 +112,7 @@ impl ParallelMission {
                 integration::GrpcNodeRouter::default(),
             ),
             orchestrator,
+            mission_admissions: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };

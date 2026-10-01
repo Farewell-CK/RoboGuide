@@ -20,6 +20,7 @@ from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
 )
+from mission.submission_evidence import ControllerAdmissionEvidence
 
 from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
 
@@ -33,7 +34,11 @@ REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
 RUN_FAILURE_SCHEMA = "roboguide.e1.run-failure/v0.1"
 OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.1"
 COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
-    {OBSERVATIONS_SCHEMA, "roboguide.mission-request-observations/v0.2"}
+    {
+        OBSERVATIONS_SCHEMA,
+        "roboguide.mission-request-observations/v0.2",
+        "roboguide.mission-request-observations/v0.3",
+    }
 )
 _DIGEST = re.compile(r"sha256:[a-f0-9]{64}$")
 
@@ -231,12 +236,15 @@ def observed_request(request: Any, observations: Any) -> dict[str, Any]:
         return {
             key: value
             for key, value in doc.items()
-            if key not in {"submission_evidence", "failure_evidence"}
+            if key not in {"submission_evidence", "failure_evidence", "admission_evidence"}
         }
     return {
         **doc,
         "submission_evidence": obs.get("submission_evidence"),
         "failure_evidence": obs.get("failure_evidence"),
+        "admission_evidence": obs.get("admission_evidence")
+        if obs.get("schema_version") == "roboguide.mission-request-observations/v0.3"
+        else None,
     }
 
 
@@ -332,6 +340,28 @@ def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure
     return failures
 
 
+def controller_submission_group(request: dict[str, Any]) -> str:
+    """Scope evidence by a real POST receipt or a matching complete-body authority receipt."""
+    sent = _object(request.get("submission_evidence"))
+    proof = request.get("admission_evidence")
+    if proof is not None and request.get("lifecycle") == "Accepted":
+        try:
+            admission = ControllerAdmissionEvidence.from_json(proof)
+        except (TypeError, ValueError):
+            return ""
+        plan = _object(request.get("plan"))
+        if (
+            admission.mission_id == request.get("mission_id") == sent.get("submitted_mission_id")
+            and admission.accepted_request_body_sha256 == sent.get("raw_request_body_sha256")
+            and plan
+            and sent.get("submitted_plan_digest") == plan_digest(plan)
+            and request.get("draft_digest") == plan_digest(plan)
+        ):
+            return str(admission.group_id)
+        return ""
+    return str(sent.get("controller_group_id") or "")
+
+
 def _check_submission(
     request: dict[str, Any],
     controller: dict[str, Any],
@@ -354,6 +384,20 @@ def _check_submission(
     if sent.get("submitted_mission_id") != request.get("mission_id"):
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
     failure = request_failure(request)
+    admission = None
+    raw_admission = request.get("admission_evidence")
+    if raw_admission is not None:
+        try:
+            admission = ControllerAdmissionEvidence.from_json(raw_admission)
+        except (TypeError, ValueError):
+            failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
+        if admission is not None and (
+            admission.mission_id != request.get("mission_id")
+            or admission.accepted_request_body_sha256 != sent.get("raw_request_body_sha256")
+            or admission.group_id != controller.get("group_id")
+        ):
+            failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
+            admission = None
     if (
         failure
         and failure["stage"] == "controller_submission"
@@ -362,13 +406,18 @@ def _check_submission(
         return failures
     if (
         request.get("lifecycle") != "Accepted"
-        or type(sent.get("controller_status_code")) is not int
-        or sent.get("controller_status_code") not in {200, 202}
-        or sent.get("controller_mission_id") != request.get("mission_id")
+        or (
+            admission is None
+            and (
+                type(sent.get("controller_status_code")) is not int
+                or sent.get("controller_status_code") not in {200, 202}
+                or sent.get("controller_mission_id") != request.get("mission_id")
+            )
+        )
         or controller.get("mission_id") != request.get("mission_id")
     ):
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
-    group = sent.get("controller_group_id")
+    group = admission.group_id if admission is not None else sent.get("controller_group_id")
     if not group or controller.get("group_id") != group:
         failures.append(ProvenanceFailure.CONTROLLER_GROUP_ID_MISSING)
     task_ids = {
@@ -972,7 +1021,7 @@ def verify_b1_provenance(
             failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
         if record.failure_evidence_digest != (digest(observed_failure) if observed_failure else ""):
             failures.append(ProvenanceFailure.FAILURE_EVIDENCE_MISMATCH)
-        if record.controller_submission_identity != (sent.get("controller_group_id") or ""):
+        if record.controller_submission_identity != controller_submission_group(request):
             failures.append(ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH)
         if record.execution_identity != ",".join(sorted(set(observed_execution_ids))):
             failures.append(ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH)
@@ -1043,7 +1092,7 @@ def build_b1_provenance_record(
     request = observed_request(public_request, observations)
     sent = _object(request.get("submission_evidence"))
     mission_id = str(request.get("mission_id", ""))
-    group_id = str(sent.get("controller_group_id") or "")
+    group_id = controller_submission_group(request)
     scoped = scoped_execution_evidence(
         mission_id,
         group_id,

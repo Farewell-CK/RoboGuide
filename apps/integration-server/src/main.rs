@@ -18,7 +18,7 @@ use orchestration::{
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::{Clock, SharedNodeStateReader, StateRecordReader};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -27,10 +27,12 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
 
 /// Immediately previous wrapper accepted with no deployment candidate restrictions.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
+/// Historical wrapper with verifier source identity but no HTTP admission digests.
+const VERIFIER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
 /// Historical wrapper before deployment candidate restrictions.
 const LEGACY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
 
@@ -62,6 +64,8 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
+    mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Integration, Runtime, Control, and horizontal State projections.
     bridge: IntegrationRuntimeBridge<state::SqliteEventLog>,
     /// Complete MissionPlan and explicit Mission lifecycle authority.
@@ -270,6 +274,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Actual accepted body digests; old checkpoints retain unavailable receipt evidence.
+    #[serde(default)]
+    mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Exact wrapper schema marker.
     schema: String,
     /// Existing Integration/Control/State/Runtime checkpoint JSON.
@@ -417,6 +424,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | VERIFIER_SERVER_CHECKPOINT_SCHEMA
                     | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
@@ -437,6 +445,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | VERIFIER_SERVER_CHECKPOINT_SCHEMA
                     | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
@@ -450,6 +459,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|feed| feed.source_digest().to_string());
             validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
             ControllerState {
+                mission_admissions: saved.mission_admissions,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
                     &saved.integration_json,
                     event_log.clone(),
@@ -468,6 +478,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into());
         }
         None => ControllerState {
+            mission_admissions: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),
                 state::InMemorySharedNodeState::new(),
@@ -481,6 +492,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|feed| feed.source_digest().to_string()),
         },
     };
+    for (mission_id, admission) in &controller.mission_admissions {
+        admission.validate(&controller, mission_id)?;
+    }
     let mut restored_localization_evidence = false;
     for (evidence, received_at) in artifact_catalog
         .localization_evidence()

@@ -18,6 +18,7 @@ from roboguide_eval.b1_provenance import (
     PLANNING_SOURCE_REQUIREMENT_ARTIFACT,
     RUN_FAILURE_SCHEMA,
     build_b1_provenance_record,
+    controller_submission_group,
     load_document,
     observed_request,
     plan_digest,
@@ -83,7 +84,6 @@ def collect_b1_artifacts(
     _write(run / "execution-attempts.json", _fetch(f"{controller_endpoint}/v1/execution-attempts"))
     if owner is not FailureOwner.NONE:
         observations = load_document(run / "b1-request-observations.json") or {}
-        sent = observations.get("submission_evidence") or {}
         _write(
             run / "run-failure.json",
             {
@@ -94,7 +94,8 @@ def collect_b1_artifacts(
                 "reason": reason,
                 "request_id": request.get("request_id"),
                 "mission_id": mission_id,
-                "group_id": sent.get("controller_group_id"),
+                "group_id": controller_submission_group(observed_request(request, observations))
+                or None,
                 "input_digest": plan_digest(load_document(run / "b1-input-used.json")),
                 "observation_source": "scenario_process_boundary",
             },

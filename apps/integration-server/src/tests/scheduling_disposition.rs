@@ -155,6 +155,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator,
+        mission_admissions: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     };

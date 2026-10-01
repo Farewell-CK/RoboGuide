@@ -1,5 +1,6 @@
 use super::*;
 
+mod admission;
 mod runtime_replay;
 mod scheduling_disposition;
 
@@ -18,6 +19,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     }));
@@ -90,6 +92,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     }));
@@ -814,6 +817,7 @@ fn recovery_driver_rebinds_existing_commitment_first() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator,
+        mission_admissions: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     };

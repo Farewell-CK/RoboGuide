@@ -9,10 +9,11 @@ from typing import Protocol, cast
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.recovery import RequestRecoveryEvidence
+from mission.recovery import FailureReason, RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 from mission.submission_evidence import (
+    ControllerAdmissionEvidence,
     ControllerSubmissionEvidence,
     MissionRequestObservations,
     canonical_plan_digest,
@@ -215,10 +216,30 @@ class MissionRequestRecord:
     failure_evidence: JSONObject | None = None
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
     recovery_evidence: RequestRecoveryEvidence | None = None
+    admission_evidence: ControllerAdmissionEvidence | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
         recovery = self.recovery_evidence
+        if (
+            recovery is not None
+            and recovery.reason is FailureReason.SUBMISSION_RECONCILED
+            and self.admission_evidence is None
+        ):
+            raise MissionRequestError("reconciled admission requires an authority receipt")
+        admission, sent = self.admission_evidence, self.submission_evidence
+        if admission is not None and (
+            sent is None
+            or admission.mission_id != self.mission_id
+            or sent.submitted_mission_id != self.mission_id
+            or admission.accepted_request_body_sha256 != sent.raw_request_body_sha256
+            or sent.submitted_plan_digest != self.draft_digest
+            or self.plan is None
+            or canonical_plan_digest(self.plan.to_json()) != self.draft_digest
+        ):
+            raise MissionRequestError(
+                "Controller admission receipt is detached from the submitted plan"
+            )
         if recovery is not None and (
             recovery.request_id != self.request_id
             or recovery.mission_id != self.mission_id
@@ -279,6 +300,7 @@ class MissionRequestRecord:
             self.failure_evidence,
             self.rejected_drafts,
             self.recovery_evidence,
+            self.admission_evidence,
         )
 
     @classmethod

@@ -37,7 +37,7 @@ def test_actual_controller_post_digest_matches_captured_bytes(tmp_path: Path) ->
     assert assess_b1_directory(run)["checks"]["provenance_chain_passed"] is True
 
 
-@pytest.mark.parametrize("version", ["v0.1", "v0.2"])
+@pytest.mark.parametrize("version", ["v0.1", "v0.2", "v0.3"])
 def test_recovery_observation_versions_preserve_existing_b1_admission(
     tmp_path: Path, version: str
 ) -> None:
@@ -75,6 +75,50 @@ def test_controller_lookup_cannot_replace_an_actual_acceptance_receipt(tmp_path:
     verdict = assess_b1_directory(run)
     assert verdict["admission"]["provenance_valid"] is False
     assert "controller_mission_missing" in verdict["context"]["provenance_failures"]
+
+
+@pytest.mark.parametrize("damage", [None, "digest", "mission", "group", "schema", "registration"])
+def test_reconciled_admission_preserves_original_post_and_all_b1_gates(
+    tmp_path: Path, damage: str | None
+) -> None:
+    """Authority evidence repairs response loss while preserving every B1 identity gate."""
+    run = make_run(tmp_path)
+    observations = json.loads((run / "b1-request-observations.json").read_text())
+    sent = observations["submission_evidence"]
+    proof = {
+        "schema_version": "roboguide.controller-mission-admission/v0.1",
+        "mission_id": sent["submitted_mission_id"],
+        "group_id": sent["controller_group_id"],
+        "accepted_request_body_sha256": sent["raw_request_body_sha256"],
+        "admitted_at_ms": 100,
+    }
+    sent.update(
+        controller_status_code=None,
+        controller_mission_id=None,
+        controller_group_id=None,
+        transport_error="TimeoutError",
+    )
+    if damage in {"mission", "group", "schema"}:
+        proof[
+            {"mission": "mission_id", "group": "group_id", "schema": "schema_version"}[damage]
+        ] = "wrong"
+    elif damage == "digest":
+        proof["accepted_request_body_sha256"] = "sha256:" + "0" * 64
+    elif damage == "registration":
+        events = json.loads((run / "events.json").read_text())
+        events["events"] = [
+            e for e in events["events"] if "TaskExecutionRegistered" not in e["payload"]
+        ]
+        write_json(run / "events.json", events)
+    observations.update(
+        schema_version="roboguide.mission-request-observations/v0.3", admission_evidence=proof
+    )
+    write_json(run / "b1-request-observations.json", observations)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert verdict["admission"]["provenance_valid"] is (damage is None)
+    archived = json.loads((run / "b1-request-observations.json").read_text())
+    assert archived["submission_evidence"]["controller_status_code"] is None
 
 
 @pytest.mark.parametrize("mutation", ["destination", "actor", "constraint", "execution_intent"])
