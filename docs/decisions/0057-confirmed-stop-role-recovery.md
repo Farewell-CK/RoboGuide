@@ -3,6 +3,10 @@
 - Status: Implemented — 显式授权的停止与 Role 重试；自动策略与 MI 重规划未实现
 - Date: 2026-10-01
 
+部署支持安全条件由 [ADR-0059](0059-deployment-stop-continuation-contract.md) 补齐：下发时
+冻结的 exact operation/LocalSystem 必须支持独立停止和保留上下文重执行，当前声明相同。
+缺失/耦合/变化的声明不能授权恢复。只读 view 当前为 v0.2；本文的 v0.1 是初始版本。
+
 Runtime Unknown 是物理歧义，不证明旧 execution 停止。Controller 原有 ambiguity driver
 直接调用 Control partial release，可能在旧动作仍运行时授权冲突替代。因此恢复先记录
 明确的停止请求，沿用 durable Cancel command，等待原 Node 当前 physical attempt 的真实

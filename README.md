@@ -210,6 +210,10 @@ submission fence。提交结果不明时只核对原 Mission，不重复提交�
 Habitat 的可选导航 observer 已接入同一 State export（
 [ADR-0058](docs/decisions/0058-local-navigation-progress-observer.md)），区分真实 wait 和
 既定目标的几何进展。观测不授权停止或重试；shared-world 取消仍影响整个联合执行。
+单 Role 恢复还要求部署明确声明独立停止和原上下文重执行能力，dispatch 冻结且当前
+注册不变，见 [ADR-0059](docs/decisions/0059-deployment-stop-continuation-contract.md)。缺失或
+耦合声明会在 Cancel 前拒绝；Control 和 outbox 继续检查后续动作。当前 Habitat 如实声明
+联合停止、不支持中断后重试；正常双 endpoint 和单 Actor 顺序 Task 不受此限制。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 

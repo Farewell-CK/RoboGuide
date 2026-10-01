@@ -600,15 +600,26 @@ Propose -> Commit -> Rebind。确认停止的原 owner 可以作为独立 opt-in
 获得新 identity，旧 release 不会再执行一次。Stop timeout 保留旧资源，候选不足保持
 pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort。未受影响任务不释放。
 
+部署停止/continuation 契约（[ADR-0059](../../decisions/0059-deployment-stop-continuation-contract.md)）
+沿用 operation-owner LocalSystem 注册 metadata，在 dispatch 冻结。独立 Role 恢复必须
+同时声明 isolated execution stop 与 context-preserving repeat，当前注册仍相同；否则在
+发出 recovery Cancel 之前拒绝。replacement Matching/Commit/stateful Rebind 与 Execute
+outbox delivery 再检查能力。当前 Habitat shared-world 声明联合停止和不支持中断续跑；
+其正常顺序 Task 能力独立。部署支持不是停止证明或重复授权，不进入 MI 任务语义。
+
 ```mermaid
 flowchart LR
   L[Local EAIOS operation-specific progress] --> S[Registered State export]
   S --> O[Runtime readonly observation]
-  U[Explicit bounded recovery command] --> C[Durable Cancel]
+  D[Exact operation-owner deployment declaration] --> G{Frozen/current support matches?}
+  U[Explicit bounded recovery command] --> G
+  G -->|isolated stop + context-preserving repeat| C[Durable Cancel]
+  G -->|missing / coupled / changed / unsupported| B[Reject Role recovery before Cancel]
   C --> P[Current owner reports Cancelled]
   P --> R[Control partial release]
   R --> M[Match / Schedule / Propose / Commit / Rebind]
-  M --> N[New physical attempt]
+  M --> V[Recheck replacement support before Execute delivery]
+  V --> N[New physical attempt]
   X[Unknown / Cancel receipt] --> F[Retain ownership and reconcile]
 ```
 

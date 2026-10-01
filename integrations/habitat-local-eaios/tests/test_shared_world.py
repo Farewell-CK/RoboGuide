@@ -405,6 +405,60 @@ def test_actor_exception_flushes_terminal_diagnostics_without_masking_error(
     assert runtime.action_trace_flushes == 1
 
 
+@pytest.mark.parametrize("completed_first", [False, True])
+def test_joint_policy_cancel_stops_both_without_erasing_completed_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed_first: bool
+) -> None:
+    """One cancellation breaks the real joint loop; no extra step or sibling retry is invented."""
+    diagnostics = RecordingDiagnostics()
+    runtime = LoopHarness(tmp_path, diagnostics)
+    runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="generic")
+    actor = PolicyActor()
+    gym = StepEnvironment(fail_at=3)
+    original_step = gym.step
+
+    def step(action: object) -> tuple[dict[str, list[int]], float, bool, dict[str, bool]]:
+        """Return one real-loop observation with optional existing sibling local completion."""
+        observations, reward, done, info = original_step(action)
+        observations["agent_0_has_finished_oracle_nav"] = [int(completed_first)]
+        return observations, reward, done, info
+
+    monkeypatch.setattr(gym, "step", step)
+    habitat_env = SimpleNamespace(
+        current_episode=SimpleNamespace(scene_id="scene"),
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    runtime._habitat_env = habitat_env
+    runtime._actor = actor
+    invocations = {
+        agent: CanonicalMobilityInvocation.from_request(
+            _request("m", f"target-{agent}", f"t-{agent}")
+        )
+        for agent in (0, 1)
+    }
+    outcomes, steps, done, info = runtime._pair_loop(
+        {},
+        {"episode_id": "generic"},
+        {},
+        invocations,
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        gym,
+        habitat_env,
+        lambda: gym.calls >= 1,
+        lambda agent_id, detail: None,
+    )
+    assert steps == gym.calls == actor.calls == 1
+    assert not done and info["pddl_success"] is False
+    assert outcomes[1].state == "CANCELLED"
+    assert outcomes[1].terminal_basis == "cancellation"
+    assert outcomes[0].state == ("COMPLETED" if completed_first else "CANCELLED")
+    assert outcomes[0].terminal_basis == ("oracle-nav-skill" if completed_first else "cancellation")
+    assert all(not outcome.benchmark_task_achieved for outcome in outcomes.values())
+    assert diagnostics.terminals == [(1, "cancellation")]
+
+
 def test_gym_exception_flushes_prior_steps_and_reads_terminal_state(tmp_path: Path) -> None:
     """A Gym failure retains all successful pre-failure rows and its exact phase."""
     diagnostics = RecordingDiagnostics()
@@ -1317,6 +1371,44 @@ def test_one_actor_reuses_one_endpoint_without_another_reset(tmp_path: Path) -> 
     assert summary["official_pddl_success"] is True
 
 
+@pytest.mark.parametrize("state", ["CANCELLED", "FAILED"])
+def test_interrupted_serial_session_rejects_next_task_and_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    """Serial topology cannot grant continuation after an interrupted consumed world."""
+    runtime, _, endpoint, _, _ = _world(tmp_path)
+    original = runtime.execute_serial
+
+    def interrupted(
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, object]]:
+        """Return a real-shaped backend interruption, without changing coordinator policy."""
+        outcome, summary = original(
+            invocation, agent_id, cancellation_requested, running, final_slot
+        )
+        return replace(outcome, state=state, local_skill_completed=False), summary
+
+    monkeypatch.setattr(runtime, "execute_serial", interrupted)
+    slots = [_slot("first", "participant"), _slot("next", "participant")]
+    first = endpoint.submit(_session_request("m", "first-target", "first", slots))
+    for _ in range(1000):
+        record = _execution(endpoint.store(), str(first["execution_id"]))
+        if record["state"] in TERMINAL:
+            break
+        time.sleep(0.001)
+    assert record["state"] == state
+    for task in ("first", "next"):
+        request = _session_request("m", "next-target", task, slots)
+        cast(dict[str, object], request["invocation"])["attempt_id"] = "replacement"
+        with pytest.raises(IntegrationError, match="consumed"):
+            endpoint.accept(request)
+    assert runtime.serial_calls == [(0, "first")]
+
+
 def test_serial_runtime_retains_reset_observations_and_global_step_count(tmp_path: Path) -> None:
     """Original shared runtime continues one world across Task boundaries."""
     runtime = SerialRuntimeHarness(tmp_path)
@@ -1466,6 +1558,12 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
     assert handle_a["execution_id"] != handle_b["execution_id"]
     assert runtime.calls == 1
     assert summary is not None, "benchmark summary was not published within the test budget"
+    assert (
+        endpoint_a.recovery_support()["operations"] == endpoint_b.recovery_support()["operations"]
+    )
+    with pytest.raises(IntegrationError, match="consumed"):
+        endpoint_a.submit(_request("m", "new-target", "replacement-task"))
+    assert runtime.calls == 1
     assert summary["identity"]["episode_reset_count"] == 1
     assert summary["identity"]["simulator_worlds"] == 1
     assert summary["official_pddl_success"] is True
@@ -1477,6 +1575,45 @@ def test_pair_runs_one_episode_with_two_handles(tmp_path: Path) -> None:
         "node-a",
         "node-b",
     }
+
+
+@pytest.mark.parametrize("cancelled_agent", [0, 1])
+def test_coordinator_aggregates_either_endpoint_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled_agent: int
+) -> None:
+    """Only one durable cancel intent is enough to stop the shared execution of both endpoints."""
+    runtime, coordinator, endpoint_a, endpoint_b, _ = _world(tmp_path)
+    original = runtime.execute_pair
+
+    def cancelled(
+        invocations: dict[int, CanonicalMobilityInvocation],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, object]]:
+        """Inspect the production coordinator callback and emit its joint stop result."""
+        assert cancellation_requested()
+        outcomes, summary = original(invocations, cancellation_requested, running)
+        stopped = {
+            agent_id: replace(outcome, state="CANCELLED", local_skill_completed=False)
+            for agent_id, outcome in outcomes.items()
+        }
+        return stopped, summary
+
+    monkeypatch.setattr(runtime, "execute_pair", cancelled)
+    endpoints = (endpoint_a, endpoint_b)
+    handles = [
+        str(
+            endpoint.accept(_request("m", f"target-{agent_id}", f"task-{agent_id}"))["execution_id"]
+        )
+        for agent_id, endpoint in enumerate(endpoints)
+    ]
+    endpoints[cancelled_agent].cancel({"execution_id": handles[cancelled_agent]})
+    coordinator._execute_pair(list(zip(endpoints, handles, strict=True)))
+    for agent_id, (endpoint, handle) in enumerate(zip(endpoints, handles, strict=True)):
+        record = _execution(endpoint.store(), handle)
+        assert record["state"] == "CANCELLED"
+        assert endpoint.store().cancellation_requested(handle) == (agent_id == cancelled_agent)
+    assert runtime.calls == 1
 
 
 def test_two_actor_metadata_keeps_distinct_endpoint_start_barrier(tmp_path: Path) -> None:

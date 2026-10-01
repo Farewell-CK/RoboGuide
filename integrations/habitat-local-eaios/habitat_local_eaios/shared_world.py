@@ -35,6 +35,7 @@ from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher, read_execution_progress
+from .execution_recovery import execution_recovery_profile
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
@@ -1157,6 +1158,10 @@ class NodeEndpoint:
         return read_execution_progress(
             self._progress_directory, self.agent_id, self._store.active_execution()
         )
+
+    def recovery_support(self) -> dict[str, object]:
+        """Declare joint-segment cancellation and no stopped-session retry, without mutation."""
+        return execution_recovery_profile(shared_world=True)
 
     @staticmethod
     def _execution_response(execution: StoredExecution) -> dict[str, object]:

@@ -302,6 +302,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   ordinary replacement matching still excludes it. Same-owner Rebind creates a new attempt once.
   Expired pending recovery Commit is aborted by Control; unavailable candidates remain observable
   pending. No automatic stall cancellation or execution-time MI plan rewrite is provided. See ADR-0057.
+- Individual Role recovery additionally requires dispatch-frozen exact operation/LocalSystem support
+  for isolated execution stopping and context-preserving repetition, unchanged in current registration.
+  The bounded, closed LocalSystem metadata contract `roboguide.local-execution-recovery/v0.1`
+  uses existing Node Protocol/Contract transport; legacy absence never grants support. Recovery Cancel,
+  partial release, replacement Matching/Commit/stateful Rebind and Execute delivery recheck support.
+  Current Habitat shared-world declares `execution-group` / `unsupported` and fails Role recovery
+  before Cancel; normal dual endpoints and single-Actor next-Task execution remain supported.
+  Recovery support is neither repeat permission nor physical-stop/resource authority. See ADR-0059.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy

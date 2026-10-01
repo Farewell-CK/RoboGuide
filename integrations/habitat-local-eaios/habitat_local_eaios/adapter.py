@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .backend import MobilityBackend
 from .execution_progress import read_execution_progress
+from .execution_recovery import execution_recovery_profile
 from .model import SUPPORTED_OPERATION, CanonicalMobilityInvocation, IntegrationError
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
@@ -145,6 +146,10 @@ class HabitatLocalAdapter:
         return read_execution_progress(
             self._progress_directory, self._agent_id, self._store.active_execution()
         )
+
+    def recovery_support(self) -> dict[str, object]:
+        """Expose actual stop scope; a reset-on-new-invocation backend cannot resume its world."""
+        return execution_recovery_profile(shared_world=False)
 
     def _run_worker(self) -> None:
         """Own all Habitat initialization, stepping, cancellation, and shutdown on one thread."""

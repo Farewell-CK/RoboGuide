@@ -50,6 +50,8 @@ shared-world 两 endpoint 共用一个物理步进循环，任一取消会结束
 保留此前真实本地完成结果，其余 endpoint 报告取消。它不是可独立停止、互不影响的
 Role recovery deployment。其 consumed episode/session 也没有提供通用中断后重试契约。
 不得根据新增 observer 自动调用单 Role recovery 或假定可以在旧世界续跑。
+该限制现在通过 [ADR-0059](0059-deployment-stop-continuation-contract.md) 的部署声明和
+通用检查执行：当前模板如实声明联合停止与不支持重试，`/recover` 在发出 Cancel 前拒绝。
 
 离线回归分别验证量度与 freshness、真实 HTTP payload、原始动作/终态等价性及
 failure isolation。Provider-free direct-Oracle 组件预检可验证实际 reset、进度沿

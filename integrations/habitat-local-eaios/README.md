@@ -20,6 +20,7 @@ The loopback-only HTTP facade implements the existing declarative Node workflow 
 - `GET /v1/health`
 - `GET /v1/capabilities/mobility.navigate`
 - `GET /v1/executions/progress` (empty unless explicitly configured)
+- `GET /v1/executions/recovery-support` (read-only deployment declaration)
 - `POST /v1/executions`
 - `POST /v1/executions/status`
 - `POST /v1/executions/cancel`
@@ -62,6 +63,15 @@ return proves it has exited the stepping loop. In the shared deployment, cancell
 one endpoint ends the **whole** joint segment; it does not provide independent
 Role stopping, and consumed sessions cannot generally be retried. This observer
 does not enable automatic recovery. See [ADR-0058](../../docs/decisions/0058-local-navigation-progress-observer.md).
+
+The existing Node LocalSystem metadata and read-only support route both declare
+`roboguide.local-execution-recovery/v0.1`. Shared endpoints report
+`stop_scope=execution-group`, `continuation=unsupported`; standalone reset-based
+backends report `execution` / `unsupported`. A normal next Task after completion
+does not imply retained-context retry after cancellation. Support reads never
+query the simulator, model, RNG or execution lifecycle. Controller individual
+Role recovery is rejected before Cancel for these deployments; ordinary joint
+cancel remains available. See [ADR-0059](../../docs/decisions/0059-deployment-stop-continuation-contract.md).
 
 Run the bridge from the independently managed EMOS checkout and Habitat Conda environment:
 

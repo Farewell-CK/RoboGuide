@@ -2,6 +2,7 @@
 
 > typed MI 恢复、完整 HTTP body 绑定的接纳对账、只读操作进度，以及明确授权的停止后
 > Role 恢复已实现，见 ADR-0054..0057。Habitat 可选导航进度 observer 见 ADR-0058。
+> ADR-0059 已补齐 deployment-owned 停止范围与原上下文重执行声明、冻结与逐阶段检查。
 > 自动停滞策略、shared-world 独立 Role 停止/重试与执行期新版本 MI 计划仍待验证/设计。
 > 调查基线为 `dev@4dd8063219c3fb09def3aa698b2fceb6075454e1`。
 
@@ -122,7 +123,13 @@ benchmark outcome；没有获得官方真值时保持 unavailable。
    保持 Actor 身份、eligibility 和所有 Commit/Rebind 检查；重试仍有新的 attempt ID。
    未停止保留旧资源，候选不足保留 pending，预算过期 Abort 未 Rebind 的 replacement
    Commit。普通 Cancel、实际 Failed 与 Completed 各保留原路径。
+5. 独立 Role 恢复要求原 operation owner 的 dispatch-frozen `execution` /
+   `repeat-after-stop` 声明与当前注册一致。replacement 在 Matching、Commit、stateful
+   Rebind 和 Execute delivery 再检查；legacy 缺失不升级，变化不继续。Habitat shared-world
+   当前声明 `execution-group` / `unsupported`，在 Cancel 前拒绝 Role 恢复。
 
 完成 deterministic fake-node/实际 HTTP handler 检查不证明所有 vendor 正确提供进度或
 真正停止。下一阶段先在明确操作契约下验证一个真实 progress observer 和 Cancelled
 履约，再决定自动触发策略。执行期 MI 新计划不能覆盖原 accepted plan 或历史 snapshot。
+shared-world 若要继续运行，必须先实现并验证真实的 local stop 与 retained-session
+continuation 协议；本轮声明不等于该能力已实现，也不允许以新 reset 取代原世界。
