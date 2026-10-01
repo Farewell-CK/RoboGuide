@@ -200,8 +200,13 @@ Control Plane 负责全局决策与协调：
 submission fence。提交结果不明时只核对原 Mission，不重复提交或改写计划；Controller
 明确拒绝后可显式重交原稿。独立 observations v0.3 保持 Request v0.4 和 MissionPlan
 不变；新增完整 HTTP body 绑定的权威接纳对账见 [ADR-0055](docs/decisions/0055-controller-admission-reconciliation.md)。
-旧 status 查询或缺少原请求指纹时继续保留不确定性。通用执行停滞与执行期重新
-规划尚未实现，见 [ADR-0054](docs/decisions/0054-mission-recovery-boundary.md)。
+旧 status 查询或缺少原请求指纹时继续保留不确定性。操作进度通过已注册的只读 State export
+区分工作、正常等待、阻塞及未知，只有明确提供的量度与策略才报告停滞，见
+[ADR-0056](docs/decisions/0056-execution-progress-observation.md)。显式执行恢复先确认当前
+实例真实停止，再由 Control 部分释放、重新匹配和 Commit/Rebind，生成新的执行实例。
+次数与时间预算不因重启或重复命令重置；Actor 保持原权威绑定。见
+[ADR-0057](docs/decisions/0057-confirmed-stop-role-recovery.md)。自动停滞恢复和执行期 MI
+重规划仍未实现；没有 progress observer 的部署明确返回 Unknown。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 

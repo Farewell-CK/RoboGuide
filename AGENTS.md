@@ -278,13 +278,26 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   local identity validation remains authoritative. A violating raw/normalized draft is
   persisted as bounded rejected-draft v0.3 evidence and fails without regeneration or
   Controller submission; transport/authentication faults have no invented draft evidence.
-- MI recovery observations v0.2 preserve typed, digest-bound recovery decisions outside the
+- MI recovery observations v0.3 preserve typed, digest-bound recovery decisions outside the
   unchanged Mission Request v0.4. The Request Engine durably fences Controller submission before
   POST; ambiguous results allow only one read-only lookup per explicit retry, never another POST
-  or dialogue replacement. Current identity/status lookup lacks an accepted-plan digest and never
-  fabricates acceptance. Only definitive 400/409/422 rejection permits unchanged resubmission.
+  or dialogue replacement. Exact transmitted-body fingerprints and the durable Controller
+  admission endpoint may reconcile acceptance; identity/status alone never proves it. The original
+  POST fault stays intact. Only definitive 400/409/422 rejection permits unchanged resubmission.
+  Unchanged-dialogue retries retain one frozen context; new dialogues archive the old review cycle.
   These observations do not grant physical-stop, resource, Runtime or execution-replanning authority.
-  See ADR-0054; generic progress/stall recovery remains a separate proposed contract.
+  See ADR-0054 and ADR-0055.
+- Optional operation progress uses the existing registered, operation-owned Node State export
+  (`roboguide.execution-progress/v0.1`). Runtime retains bounded attribution/counters, original
+  receive times and TTL; working, intentional waiting, blocked and unknown remain separate.
+  A supplied stall interval interprets measured work only and never initiates recovery. See ADR-0056.
+- Execution recovery is explicitly repeat-authorized with exact current owner and durable time/count
+  bounds. Actual current-attempt Cancelled evidence precedes Control partial release and the normal
+  Match -> Schedule -> Propose -> Commit -> Rebind path; Unknown and Cancel receipts retain ownership.
+  Stopped-owner matching may retry the original eligible Node while preserving Actor authority;
+  ordinary replacement matching still excludes it. Same-owner Rebind creates a new attempt once.
+  Expired pending recovery Commit is aborted by Control; unavailable candidates remain observable
+  pending. No automatic stall cancellation or execution-time MI plan rewrite is provided. See ADR-0057.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy

@@ -108,8 +108,10 @@ Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Plan
 Request Engine 使用 digest-bound typed recovery evidence 区分未提交草案和已发出的
 Controller submission。POST 前原子保存 submission fence；缺失回执、进程中断或不明
 响应只能只读查询原 Mission，不重新 POST，不用 Dialogue 覆盖可能已接纳的计划。
-明确拒绝后的显式 retry 重交同一原稿。当前 status 查询没有 accepted-plan digest，不能
-据此补造 Accepted receipt；原始失败证据和 B1 的严格要求继续保留。见 ADR-0054。
+明确拒绝后的显式 retry 重交同一原稿。新版 Controller `/admission` 在同一接纳事务中
+保存完整 HTTP body 摘要、Mission/Group 和接纳时间；只在与原发送指纹及当前原稿一致时
+恢复 Accepted。旧 status 查询不足以证明接纳；原 POST 错误、immutable review history
+和 B1 的注册/验证要求保留。见 ADR-0054、ADR-0055。
 
 Mission Actor、ContextRole 和 TaskRole 表达三个不同层级：Actor 是 Mission 范围的逻辑参与者，
 ContextRole 将 Actor 放入持续协作上下文，TaskRole 只引用 ContextRole 并声明该 Task 的执行槽。
@@ -488,7 +490,8 @@ completion envelope 等待 Controller composition 使用既有 authority 接受�
 Controller dispatch 采用 durable intent/outbox：Runtime 保存 logical slot 与每次 physical
 attempt，应用先提交 checkpoint 再路由命令。Node Protocol v0.4 的 identified command receipt
 只证明 Node journal 已持久接受 Execute/Cancel；生命周期仍由 execution facts 证明。restart 或
-route loss 后非终态 attempt 进入 `Unknown` 与既有 Control recovery pipeline，绝不依据消息发送
+route loss 后非终态 attempt 进入 `Unknown` 对账 fence；显式替代须等待 ADR-0057 的真实停止。
+绝不依据消息发送
 结果盲目重放物理动作。Mission cancellation 先进入 durable `Cancelling` 并保留 Group ownership，
 直到各 attempt 有 terminal evidence 才释放。完整边界见
 [`ADR-0028`](../../decisions/0028-durable-command-recovery-and-attempts.md)。
@@ -584,8 +587,32 @@ Detect → Reconcile → Adapt
 
 该分级是长期职责模型。当前实现的下发前流程见
 [ADR-0054](../../decisions/0054-mission-recovery-boundary.md)：类型分类、草案有界修复、
-提交 fence 和只读接纳核对。通用停滞 progress contract、可信停止后的自动替代执行及
-执行期新版本 MI 计划仍需独立实现；不能把 `Unknown`、Cancel receipt 或心跳当作已停止。
+提交 fence 和权威接纳核对（ADR-0055）。当前 operation-progress v0.1（ADR-0056）通过
+注册 State export 记录操作量度和源身份，使用原 receive time/TTL，区分 Working、Waiting、
+Blocked、Unknown。仅明确给出的量度与 stall interval 参与 Stalled 判断，观测不改变执行。
+
+显式执行恢复（ADR-0057）记录当前 attempt/owner、重复操作授权及持久化时间/次数预算。
+真实 Cancelled 终态到达后才允许 Control partial release，随后复用 Match -> Schedule ->
+Propose -> Commit -> Rebind。确认停止的原 owner 可以作为独立 opt-in policy 参与匹配，
+以保留 Actor 物理绑定；普通替代 Matching 仍排除原节点。新 attempt 在原节点上重试也
+获得新 identity，旧 release 不会再执行一次。Stop timeout 保留旧资源，候选不足保持
+pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort。未受影响任务不释放。
+
+```mermaid
+flowchart LR
+  L[Local EAIOS progress] --> S[Registered State export]
+  S --> O[Runtime readonly observation]
+  U[Explicit bounded recovery command] --> C[Durable Cancel]
+  C --> P[Current owner reports Cancelled]
+  P --> R[Control partial release]
+  R --> M[Match / Schedule / Propose / Commit / Rebind]
+  M --> N[New physical attempt]
+  X[Unknown / Cancel receipt] --> F[Retain ownership and reconcile]
+```
+
+自动进度触发取消、自动重写计划与执行期 MI replacement revision 尚未实现。
+`Unknown`、Cancel receipt 或心跳都不是物理停止证明。没有配置 progress observer 的部署
+返回 Unknown；operation-specific 误报率及真实硬件停止保证须另行受控验证。
 
 ## 8. 已冻结不变量
 

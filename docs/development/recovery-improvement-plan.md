@@ -1,8 +1,8 @@
 # RoboGuide 恢复能力完善计划
 
-> 第一阶段的 typed MI 恢复分类、提交 fence 与只读核对已实现，见
-> [ADR-0054](../decisions/0054-mission-recovery-boundary.md)。后续执行期阶段仍为 Proposed，
-> 不代表已实现自动停滞恢复或执行期重新规划。
+> typed MI 恢复、完整 HTTP body 绑定的接纳对账、只读操作进度，以及明确授权的停止后
+> Role 恢复已实现，见 ADR-0054..0057。自动停滞策略、vendor-specific progress observer
+> 与执行期新版本 MI 计划仍待独立验证/设计，不代表已实现。
 > 调查基线为 `dev@4dd8063219c3fb09def3aa698b2fceb6075454e1`。
 
 ## 1. 先区分失败位置与执行权威
@@ -18,7 +18,7 @@
 | Provider 认证或传输失败 | 不进入草案恢复 | 按基础设施错误处理；只有有依据的传输重试可重试 |
 | 暂时无资源或候选节点 | Control durable scheduling deferral | 等待新的真实可用性，不能删约束以通过 |
 | Execute 已发出，是否启动不明 | Runtime `Unknown`、durable command identity、Control reconciliation | 先对账，不能把超时当作“机器没收到” |
-| 本地执行卡住、明确失败 | 现有本地技能状态、终态与诊断证据 | 通用进度判定和分类恢复策略尚需设计 |
+| 本地执行卡住、明确失败 | 现有本地技能状态、终态与诊断证据 | ADR-0056 提供只读量度；显式停止后 Role 恢复见 ADR-0057，自动策略尚未实现 |
 
 证据入口：[`request_engine.py`](../../mission/src/mission/request_engine.py)
 `_plan_with_recovery`、`_review_and_advance`；
@@ -106,3 +106,23 @@ benchmark outcome；没有获得官方真值时保持 unavailable。
 恢复预算记录所有 Planner/Repairer 调用、本地重试和物理 attempts，分别有次数与总时间
 上限。预算耗尽保存真实失败，不能生成新 Request 规避限制。配对公平性和 Formal population
 继续按现有规则独立判定，不能因为恢复未成功而删除样本。
+
+## 当前已验证的通用切片（2026-10-01）
+
+1. 同 Dialogue 重试复用冻结 grounding；新 Dialogue 完整旧周期进入 SQLite immutable
+   history。认证/配置由显式 retry 恢复，408/429/5xx 留在基础设施分支。
+2. 发送前保存实际 HTTP bytes 指纹。`GET /v1/missions/{id}/admission` 使用 Controller
+   原事务内保存的 SHA256/identity；只在与原稿和原发送一致时恢复 Accepted。失败 POST
+   原证据保留，legacy/缺失/不符 proof 不解开提交 fence。
+3. Node 配置 operation-owned State progress export 后，Runtime 使用原 receive time/TTL
+   记录单条 counter/activity 与 attribution；心跳不是进展，Waiting 不是 Stalled。未配置
+   observer、信息不足或过期为 Unknown。观测不自动 Cancel 或改写任务。
+4. 显式 `/recover` 授权在原 attempt/owner 上发 durable Cancel，真实 Cancelled 才允许
+   Control partial release。原 owner 可经单独 stopped-owner Matching 再次成为候选，
+   保持 Actor 身份、eligibility 和所有 Commit/Rebind 检查；重试仍有新的 attempt ID。
+   未停止保留旧资源，候选不足保留 pending，预算过期 Abort 未 Rebind 的 replacement
+   Commit。普通 Cancel、实际 Failed 与 Completed 各保留原路径。
+
+完成 deterministic fake-node/实际 HTTP handler 检查不证明所有 vendor 正确提供进度或
+真正停止。下一阶段先在明确操作契约下验证一个真实 progress observer 和 Cancelled
+履约，再决定自动触发策略。执行期 MI 新计划不能覆盖原 accepted plan 或历史 snapshot。

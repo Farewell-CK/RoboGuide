@@ -1,6 +1,6 @@
 # ADR-0054: Mission 恢复分类与提交结果不确定性
 
-- Status: Implemented — 下发前切片；执行期进度与重规划仍为 Proposed
+- Status: Implemented — 下发前切片；后续接纳、进度与显式停止恢复见 ADR-0055..0057
 - Date: 2026-10-01
 
 ## 背景
@@ -20,10 +20,10 @@ revision/digest、Grounding digest 和观测时间。阶段、原因和 action �
 Action 由阶段和原因推导，restore 拒绝矛盾 action、错 Request、错 draft/context。
 它不获得 Node Inventory、资源 reservation、物理停止或执行恢复 authority。
 
-原有 `roboguide.mission-request/v0.4` HTTP 投影不变。独立 observations 升级为 v0.2，新增
-nullable recovery evidence。SQLite 同一事务保存 request/observations；历史 v0.1 observations
+原有 `roboguide.mission-request/v0.4` HTTP 投影不变。最初 observations v0.2 新增 recovery
+evidence；ADR-0055 的 v0.3 另存权威 admission evidence。SQLite 同一事务保存两种证据；历史 v0.1/v0.2 observations
 和 bare request 继续可读，缺失恢复证据时保守对账，不解析旧错误文本猜测可以再次提交。
-B1 读取两版 observations；恢复元数据不替代实际 POST、task registration、verifier 和
+B1 读取兼容版本 observations；恢复元数据不替代实际 POST、task registration、verifier 和
 官方 benchmark 证据。旧 failure/submission schema 保持不变。
 
 Controller POST 前先持久化 `submission_in_flight` fence。正常异常与进程中断均保留
@@ -64,11 +64,12 @@ Controller response、实时 Node facts 或任意错误文本。
 
 ## 严格边界与缺口
 
-当前 Controller GET 只提供 Mission identity/status，没有 accepted-plan content digest。
-所以 `found` 不补造 receipt、不修改原 HTTP evidence，也不将 Request 变成 Accepted。
+普通 Controller GET 只提供 Mission identity/status，`found` 不补造 receipt或恢复 Accepted。
+ADR-0055 增加独立 `/admission` 权威 endpoint；匹配完整发送 body、Mission 和当前原稿
+才恢复 Accepted，且不修改原 POST HTTP evidence。
 查询 `404` 是某一时刻的缺席观察，不能证明尚未完成的旧 POST 以后不会被接纳。
-完整自动接纳恢复需要另一个经过版本化设计的权威、digest-bound 接纳查询；不能直接放宽
-B1 provenance 来达到自动通过。
+接纳 proof 不代替真实 Task 注册、执行/Verifier 与 benchmark authority，缺任一既有要求
+仍 fail closed；legacy acceptance 没有权威 receipt 时不能补造。
 
 typed state 与哈希防止矛盾和跨 snapshot 使用，不是可信 SQLite 或全部源证据遭替换时的
 密码学认证。原始失败记录在对账中保持不变；lookup 只保留最近一次，只读调用不累计无界历史。
@@ -84,13 +85,14 @@ POST 前清空当前回执；旧拒绝留在历史中，不能在新 POST 崩溃
 
 ## 后续通用执行恢复
 
-下一切片先设计 operation-specific、attempt/owner/freshness-bound 的只读进度证据，区分
+ADR-0056 实现 operation-specific、attempt/owner/freshness-bound 的只读进度证据，区分
 正常等待与停滞。之后按 Local How -> Runtime/Control -> MI 升级：局部重试保持原 canonical
 目标；新 attempt 需要可信停止或真实动作 fencing；新的组织方案需要新 revision/snapshot、
 完整审查与 Control 接纳。Cancel receipt、忽略迟到事实或心跳均不证明物理停止。
-当前 Task terminal failure 仍按原规则处理，未实现通用停滞恢复或执行期 MI replanning。
+ADR-0057 实现显式、预算有界的停止后 Control Role 恢复。当前 Task terminal failure 仍按
+原规则处理，未实现自动停滞策略或执行期 MI replanning。
 
-公共 Node progress、停止证明与计划替换机制须先更新相应 ADR/版本，不能把 Habitat 日志
+进度/停止的版本与权威见两份 ADR；后续计划替换须先设计独立契约，不能把 Habitat 日志
 或 adapter JSON 直接提升为 Core 的重试协议。计划见
 [`recovery-improvement-plan.md`](../development/recovery-improvement-plan.md)。
 

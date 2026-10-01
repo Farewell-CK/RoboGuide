@@ -20,7 +20,8 @@ Mission Service 在 HTTP transport 发出 POST 前保存实际 prepared `Request
 semantic identity、review snapshot、execution identity 和 verifier 检查仍独立执行，
 Formal admission 与 benchmark success 规则不变。普通 identity lookup 仍不能替代接纳。
 
-Controller wrapper checkpoint 升为 v19，兼容 v16-v18，但这些旧数据没有原始 HTTP
+本功能引入 Controller wrapper checkpoint v19；后续 ADR-0056/0057 使用 v20。兼容
+历史 v16-v19，但旧数据没有原始 HTTP
 receipt 时查询返回 unavailable，不从归一化计划反推请求体。恢复核验记录的 Group 和
 Orchestration 当前身份。该证据依赖可信 Controller endpoint/数据库，不是外部签名认证。
 
