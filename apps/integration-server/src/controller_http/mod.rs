@@ -2,6 +2,7 @@
 
 mod admission;
 mod protocol;
+mod recovery;
 mod server;
 mod view;
 

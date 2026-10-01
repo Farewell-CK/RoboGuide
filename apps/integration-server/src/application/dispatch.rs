@@ -147,11 +147,11 @@ pub(crate) fn drive_rebound_attempts(
                 continue;
             };
             for assignment in task_execution.assignments() {
-                if controller.bridge.current_attempt_matches_binding(
+                if !controller.bridge.recovery_attempt_permitted(
                     group.group_id(),
                     task_execution.task_ref(),
                     assignment.role_id(),
-                    assignment.node_id(),
+                    timestamp,
                 ) {
                     continue;
                 }

@@ -4,7 +4,7 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 /// Sends one framed request through the production HTTP handler on a loopback socket.
-async fn request(
+pub(super) async fn request(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
     method: &str,

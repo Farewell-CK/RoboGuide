@@ -5,6 +5,10 @@ use domain::{
     CapabilityContractRef, CorrelationId, ExecutionIntent, ExecutionRelationId,
     ExecutionRelationKind, ExecutionRelationSpec, MissionId, PlannedExecutionRef, TaskId,
 };
+#[path = "tests/progress.rs"]
+mod progress;
+#[path = "tests/recovery_stop.rs"]
+mod recovery_stop;
 
 /// Builds one deterministic command for Runtime registry tests.
 fn command() -> ExecutionCommand {

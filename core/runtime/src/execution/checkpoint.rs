@@ -6,6 +6,9 @@ impl RuntimeExecutionManager {
     /// Creates an empty live execution authority.
     pub const fn new() -> Self {
         Self {
+            recovery_stops: BTreeMap::new(),
+            recovery_budgets: BTreeMap::new(),
+            progress: BTreeMap::new(),
             executions: BTreeMap::new(),
             execution_status: BTreeMap::new(),
             execution_sequences: BTreeMap::new(),
@@ -30,6 +33,9 @@ impl RuntimeExecutionManager {
     /// Returns a durable transport-neutral Runtime projection.
     pub fn checkpoint(&self) -> RuntimeExecutionCheckpoint {
         RuntimeExecutionCheckpoint {
+            recovery_stops: self.recovery_stops.clone(),
+            recovery_budgets: self.recovery_budgets.values().cloned().collect(),
+            progress: self.progress.clone(),
             cancellation_intents: self.cancellation_intents.clone(),
             executions: self.executions.clone(),
             execution_status: self.execution_status.clone(),
@@ -180,7 +186,21 @@ impl RuntimeExecutionManager {
                 ));
             }
         }
+        let mut recovery_budgets = BTreeMap::new();
+        for budget in checkpoint.recovery_budgets {
+            if recovery_budgets
+                .insert(budget.slot.clone(), budget)
+                .is_some()
+            {
+                return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                    "checkpoint contains duplicate recovery budget slots".into(),
+                ));
+            }
+        }
         let mut restored = Self {
+            recovery_stops: checkpoint.recovery_stops,
+            recovery_budgets,
+            progress: checkpoint.progress,
             cancellation_intents: checkpoint.cancellation_intents,
             executions: checkpoint.executions,
             execution_status,
@@ -231,6 +251,8 @@ impl RuntimeExecutionManager {
                 .or_insert(1);
         }
         restored.refresh_all_relations_after_restore();
+        restored.validate_progress()?;
+        restored.validate_recovery_stops()?;
         Ok(restored)
     }
 }

@@ -403,7 +403,8 @@ impl ControlPlane {
         let previous_node = unbound_role.previous_node_id.clone();
         let assignment_index = unbound_role.assignment_index;
         if previous_node != *committed.previous_node_id()
-            || committed.replacement_node_id() == committed.previous_node_id()
+            || (committed.replacement_node_id() == committed.previous_node_id()
+                && !committed.stopped_owner_allowed())
         {
             return Err(ControlError::InvalidProposal(
                 "committed recovery does not match the released role binding".to_string(),

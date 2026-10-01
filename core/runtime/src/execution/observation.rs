@@ -225,6 +225,18 @@ impl RuntimeExecutionManager {
                 .copied();
             match status {
                 Some(ExecutionStatus::Completed) => {}
+                Some(ExecutionStatus::Cancelled)
+                    if self
+                        .active_executions
+                        .get(&(group_id.clone(), task_ref.clone(), role_id.clone()))
+                        .is_some_and(|id| {
+                            self.recovery_stops
+                                .get(id)
+                                .is_some_and(|intent| !intent.aborted)
+                        }) =>
+                {
+                    all_terminal = false
+                }
                 Some(ExecutionStatus::Failed | ExecutionStatus::Cancelled) => {
                     saw_failed = true;
                 }

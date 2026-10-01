@@ -74,6 +74,8 @@ pub enum ReconciliationAssessment {
 /// Eligible nodes for replacing one unbound role without rematching unaffected roles.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryCandidateSet {
+    /// Only the stopped-owner matching entry point may retain the original eligible Node.
+    pub(super) stopped_owner_allowed: bool,
     /// Blocked Group whose role is being rematched.
     group_id: ExecutionGroupId,
     /// Mission-scoped task retained by the Group.
@@ -104,6 +106,7 @@ impl RecoveryCandidateSet {
             previous_node_id,
             candidate_node_ids,
             operation: None,
+            stopped_owner_allowed: false,
         }
     }
 
@@ -123,6 +126,7 @@ impl RecoveryCandidateSet {
             previous_node_id,
             candidate_node_ids,
             operation: Some(operation),
+            stopped_owner_allowed: false,
         }
     }
 
@@ -165,6 +169,8 @@ impl RecoveryCandidateSet {
 /// Replacement assignment supplied by an external scheduler/coordination boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryAssignmentProposal {
+    /// Provenance of an explicit stopped-owner candidate set, not inferred from Node identity.
+    pub(super) stopped_owner_allowed: bool,
     /// Group whose unbound role should receive the replacement.
     group_id: ExecutionGroupId,
     /// Mission-scoped task expected to own the Group.
@@ -200,6 +206,7 @@ impl RecoveryAssignmentProposal {
             replacement_node_id,
             replacement_resource_ids,
             operation,
+            stopped_owner_allowed: false,
         }
     }
 
@@ -242,6 +249,9 @@ impl RecoveryAssignmentProposal {
 /// Replacement assignment whose resources are committed to the existing Group.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommittedRecoveryAssignment {
+    /// Preserves stopped-owner policy across Commit/restore/Rebind; legacy handles default false.
+    #[serde(default)]
+    pub(super) stopped_owner_allowed: bool,
     /// Existing Group that owns the replacement commitment.
     group_id: ExecutionGroupId,
     /// Mission-scoped task that owns the commitment.
@@ -278,6 +288,7 @@ impl CommittedRecoveryAssignment {
             replacement_node_id,
             committed_resource_ids,
             operation: None,
+            stopped_owner_allowed: false,
         }
     }
 
@@ -300,7 +311,13 @@ impl CommittedRecoveryAssignment {
             replacement_node_id,
             committed_resource_ids,
             operation,
+            stopped_owner_allowed: false,
         }
+    }
+
+    /// Returns whether explicit stopped-owner Matching permitted reuse of the original Node.
+    pub(crate) const fn stopped_owner_allowed(&self) -> bool {
+        self.stopped_owner_allowed
     }
 
     /// Returns the existing Group that owns this commitment.

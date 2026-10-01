@@ -328,10 +328,11 @@ impl ControlPlane {
         })
     }
 
-    /// Validates Runtime physical ambiguity and begins recovery for its exact current binding.
+    /// Partially releases the exact binding after the composition proves physical stop or fencing.
     ///
     /// Unlike [`Self::assess_group`], this transition does not infer ambiguity from Node health.
-    /// The caller supplies Runtime evidence; Control still verifies current ownership and performs
+    /// Runtime Unknown or a Cancel receipt is insufficient. The caller must prove actual stop or
+    /// physical fencing; Control still verifies current ownership and performs
     /// the only authoritative partial release before returning the durable pending need.
     #[allow(clippy::too_many_arguments)]
     pub fn begin_execution_recovery<E: EventSink>(
@@ -380,6 +381,7 @@ impl ControlPlane {
             need,
             requirement,
             None,
+            false,
             timestamp,
             correlation_id,
             events,
@@ -403,6 +405,38 @@ impl ControlPlane {
             need,
             requirement,
             Some(operation),
+            false,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Retains an eligible stopped owner without migrating an Actor or weakening resource checks.
+    ///
+    /// The application must validate current-attempt physical-stop proof and explicit repeat/time
+    /// authorization before calling this API and again before Rebind or dispatch. This method only
+    /// computes candidates; it grants neither execution authorization nor a resource commitment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn match_stopped_recovery_candidates_for_operation<
+        S: SharedNodeStateReader,
+        E: EventSink,
+    >(
+        &self,
+        state: &S,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        operation: &OperationRef,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryCandidateSet, ControlError> {
+        self.match_recovery_candidates_with_operation(
+            state,
+            need,
+            requirement,
+            Some(operation),
+            true,
             timestamp,
             correlation_id,
             events,
@@ -417,6 +451,7 @@ impl ControlPlane {
         need: &RoleRecoveryNeed,
         requirement: &TaskRequirement,
         operation: Option<&OperationRef>,
+        stopped_owner_allowed: bool,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
@@ -458,7 +493,9 @@ impl ControlPlane {
         let candidate_node_ids = state
             .nodes()
             .into_iter()
-            .filter(|snapshot| snapshot.node_id() != need.current_node_id())
+            .filter(|snapshot| {
+                stopped_owner_allowed || snapshot.node_id() != need.current_node_id()
+            })
             .filter(|snapshot| {
                 actor_authority_node
                     .as_ref()
@@ -485,7 +522,7 @@ impl ControlPlane {
             })
             .map(|snapshot| snapshot.node_id().clone())
             .collect::<Vec<_>>();
-        let candidates = operation.map_or_else(
+        let mut candidates = operation.map_or_else(
             || {
                 RecoveryCandidateSet::new(
                     need.group_id().clone(),
@@ -506,6 +543,7 @@ impl ControlPlane {
                 )
             },
         );
+        candidates.stopped_owner_allowed = stopped_owner_allowed;
         events.append(
             timestamp,
             correlation_id,
@@ -555,7 +593,7 @@ impl ControlPlane {
                 "recovery candidates do not match the blocked group role".to_string(),
             ));
         }
-        if selected_node_id == *candidates.previous_node_id()
+        if (selected_node_id == *candidates.previous_node_id() && !candidates.stopped_owner_allowed)
             || !candidates.candidate_node_ids().contains(&selected_node_id)
         {
             return Err(ControlError::InvalidProposal(format!(
@@ -574,7 +612,7 @@ impl ControlPlane {
         }
         validate_recovery_resources(node, &role, &replacement_resource_ids)?;
 
-        let proposal = RecoveryAssignmentProposal::new(
+        let mut proposal = RecoveryAssignmentProposal::new(
             candidates.group_id().clone(),
             candidates.task_ref().clone(),
             candidates.role_id().clone(),
@@ -583,6 +621,7 @@ impl ControlPlane {
             replacement_resource_ids.clone(),
             candidates.operation().cloned(),
         );
+        proposal.stopped_owner_allowed = candidates.stopped_owner_allowed;
         events.append(
             timestamp,
             correlation_id,
@@ -633,7 +672,8 @@ impl ControlPlane {
             || !group.is_role_unbound(proposal.role_id())
                 && !group.is_task_role_unbound(proposal.task_ref(), proposal.role_id())
             || previous_node != *proposal.previous_node_id()
-            || proposal.replacement_node_id() == proposal.previous_node_id()
+            || (proposal.replacement_node_id() == proposal.previous_node_id()
+                && !proposal.stopped_owner_allowed)
         {
             return Err(ControlError::InvalidProposal(
                 "recovery proposal no longer matches the blocked group role".to_string(),
@@ -699,7 +739,7 @@ impl ControlPlane {
             }
         }
 
-        let committed = CommittedRecoveryAssignment::new_with_operation(
+        let mut committed = CommittedRecoveryAssignment::new_with_operation(
             proposal.group_id().clone(),
             proposal.task_ref().clone(),
             proposal.role_id().clone(),
@@ -708,6 +748,7 @@ impl ControlPlane {
             proposal.replacement_resource_ids().to_vec(),
             proposal.operation().cloned(),
         );
+        committed.stopped_owner_allowed = proposal.stopped_owner_allowed;
         for resource_id in proposal.replacement_resource_ids() {
             self.reservations.insert(
                 resource_id.clone(),

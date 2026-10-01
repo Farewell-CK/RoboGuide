@@ -354,7 +354,9 @@ pub(crate) fn validate_restored_verifier_source(
 ) -> Result<(), String> {
     if matches!(
         checkpoint.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | ADMISSION_SERVER_CHECKPOINT_SCHEMA
+            | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
     ) && checkpoint.verifier_source_digest.as_deref() != configured_digest
     {
         return Err("controller verifier source changed across checkpoint restore".into());

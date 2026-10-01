@@ -27,7 +27,9 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v20";
+/// Wrapper with exact HTTP admission records but no operation progress monitor.
+const ADMISSION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
 
 /// Immediately previous wrapper accepted with no deployment candidate restrictions.
 const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
@@ -423,6 +425,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | ADMISSION_SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
                     | VERIFIER_SERVER_CHECKPOINT_SCHEMA
                     | LEGACY_SERVER_CHECKPOINT_SCHEMA
@@ -444,6 +447,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | ADMISSION_SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
                     | VERIFIER_SERVER_CHECKPOINT_SCHEMA
                     | LEGACY_SERVER_CHECKPOINT_SCHEMA

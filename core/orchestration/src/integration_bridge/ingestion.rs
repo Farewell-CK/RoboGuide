@@ -49,7 +49,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         if !matches!(
             checkpoint.schema.as_str(),
-            CONTROLLER_CHECKPOINT_SCHEMA | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
+            CONTROLLER_CHECKPOINT_SCHEMA
+                | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
+                | LEGACY_CONTROLLER_CHECKPOINT_SCHEMA
         ) {
             return Err(IntegrationRuntimeError::Checkpoint(format!(
                 "unsupported controller checkpoint schema {}",
@@ -107,6 +109,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     &mut self.events,
                 )?;
                 self.runtime.fence_peer_channels_for_node(&node_id);
+                self.runtime.fence_progress_for_node(&node_id);
             }
             GrpcNodeEvent::NodeMessage {
                 node_id,
@@ -185,6 +188,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         // snapshot instead of retaining readiness admitted under the old one.
                         let node_id = NodeId::new(&node_id)?;
                         self.runtime.fence_peer_channels_for_node(&node_id);
+                        self.runtime.fence_progress_for_node(&node_id);
                     }
                     Some(NodePayload::StateObservationBatch(batch)) => {
                         self.consume_state_observations(

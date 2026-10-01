@@ -337,7 +337,9 @@ class MissionRequestEngine:
         observer = getattr(self._controller, "observe_mission", None)
         sent = record.submission_evidence
         if not callable(observer) and not callable(authority):
-            raise MissionRequestError("submission is unresolved; a Controller observer is required")
+            raise MissionRequestError(
+                "submission is unresolved; a read-only Controller observer is required"
+            )
         try:
             if callable(authority) and sent is not None:
                 admission = authority(record.mission_id)

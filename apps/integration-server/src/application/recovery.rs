@@ -88,6 +88,10 @@ pub(crate) fn apply_recovery_required(
     {
         return Ok(());
     }
+    if !controller.bridge.recovery_release_ready(command, timestamp) {
+        // Unknown, heartbeat loss and Cancel receipts do not prove physical stop.
+        return Ok(());
+    }
     let Some(group) = controller.bridge.control().group(command.group_id()) else {
         return Ok(());
     };
@@ -118,6 +122,7 @@ pub(crate) fn apply_recovery_required(
         correlation_id,
         events,
     )?;
+    controller.bridge.mark_recovery_release(command);
     Ok(())
 }
 
@@ -129,6 +134,9 @@ pub(crate) fn begin_current_ambiguity_recoveries(
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for command in controller.bridge.current_unknown_attempts() {
+        apply_recovery_required(controller, &command, timestamp, correlation_id, events)?;
+    }
+    for command in controller.bridge.stopped_recovery_commands(timestamp) {
         apply_recovery_required(controller, &command, timestamp, correlation_id, events)?;
     }
     Ok(())
@@ -165,6 +173,26 @@ pub(crate) fn resume_role_recovery(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if controller.bridge.recovery_release_expired(need, timestamp) {
+        if let Some(committed) = controller
+            .bridge
+            .control()
+            .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
+            .cloned()
+        {
+            controller
+                .bridge
+                .control_mut()
+                .abort_role_recovery_commitment(&committed, timestamp, correlation_id, events)?;
+        }
+        return Ok(());
+    }
+    if !controller
+        .bridge
+        .recovery_release_permitted(need, timestamp)
+    {
+        return Ok(());
+    }
     let committed = controller
         .bridge
         .control()
@@ -199,7 +227,7 @@ pub(crate) fn resume_role_recovery(
     let candidates = controller
         .bridge
         .control()
-        .match_recovery_candidates_for_operation(
+        .match_stopped_recovery_candidates_for_operation(
             &state,
             need,
             &requirement,

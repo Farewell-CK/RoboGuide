@@ -85,7 +85,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     ) -> Result<usize, IntegrationRuntimeError> {
         let attempts = self.runtime.attempts_for_group(group_id);
         for (execution_id, status) in &attempts {
-            if !status.is_terminal() {
+            if !status.is_terminal() || self.runtime.recovery_stop(execution_id).is_some() {
                 self.runtime
                     .request_cancellation(execution_id)
                     .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
@@ -333,6 +333,156 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime
             .request_cancellation(execution_id)
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
+    /// Authorizes an exact current Role stop; physical and resource ownership remain unchanged.
+    pub fn request_execution_recovery(
+        &mut self,
+        execution_id: &str,
+        expected_node: &NodeId,
+        now: TimestampMs,
+        timeout_ms: u64,
+        max_replacements: u32,
+    ) -> Result<(), IntegrationRuntimeError> {
+        let command = self
+            .runtime
+            .attempt_history()
+            .into_iter()
+            .find(|attempt| attempt.execution_id() == execution_id)
+            .map(|attempt| attempt.command().clone())
+            .ok_or_else(|| {
+                IntegrationRuntimeError::Protocol("unknown recovery execution".into())
+            })?;
+        let bound = self
+            .control
+            .group(command.group_id())
+            .and_then(|group| group.task_execution(command.task_ref()))
+            .is_some_and(|task| {
+                task.assignments().iter().any(|assignment| {
+                    assignment.role_id() == command.role_id()
+                        && assignment.node_id() == expected_node
+                })
+            });
+        if !bound {
+            return Err(IntegrationRuntimeError::Protocol(
+                "recovery owner is not the current Control binding".into(),
+            ));
+        }
+        self.runtime
+            .request_recovery_stop(
+                execution_id,
+                expected_node,
+                now,
+                timeout_ms,
+                max_replacements,
+            )
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
+    /// Returns the original stop authorization, never synthetic physical-stop evidence.
+    pub fn execution_recovery_stop(
+        &self,
+        execution_id: &str,
+    ) -> Option<&runtime::RecoveryStopIntent> {
+        self.runtime.recovery_stop(execution_id)
+    }
+
+    /// Reads recovery phase without changing a budget, ownership or command delivery.
+    pub fn execution_recovery_disposition(
+        &self,
+        execution_id: &str,
+        now: TimestampMs,
+    ) -> runtime::RecoveryStopDisposition {
+        self.runtime.recovery_stop_disposition(execution_id, now)
+    }
+
+    /// Lists only current attempts with timely real stop evidence awaiting Control release.
+    pub fn stopped_recovery_commands(&self, now: TimestampMs) -> Vec<ExecutionCommand> {
+        self.runtime.stopped_recovery_commands(now)
+    }
+
+    /// Verifies the current exact stopped command before Control can partially release it.
+    pub fn recovery_stop_ready(&self, command: &ExecutionCommand, now: TimestampMs) -> bool {
+        self.runtime.recovery_stop_ready(command, now)
+    }
+
+    /// Allows the initial partial release once; a same-owner Rebind must not release it again.
+    pub fn recovery_release_ready(&self, command: &ExecutionCommand, now: TimestampMs) -> bool {
+        self.runtime.recovery_stop_ready(command, now)
+            && self
+                .runtime
+                .current_attempt_id(command.group_id(), command.task_ref(), command.role_id())
+                .and_then(|id| self.runtime.recovery_stop(id))
+                .is_some_and(|intent| !intent.release_authorized)
+    }
+
+    /// Records that the sole Control authority released this stopped binding once.
+    pub fn mark_recovery_release(&mut self, command: &ExecutionCommand) {
+        self.runtime.mark_recovery_release(command);
+    }
+
+    /// Requires the same timely stopped attempt before pending recovery can Commit or Rebind.
+    pub fn recovery_release_permitted(
+        &self,
+        need: &control::RoleRecoveryNeed,
+        now: TimestampMs,
+    ) -> bool {
+        self.runtime
+            .current_attempt_id(need.group_id(), need.task_ref(), need.role_id())
+            .and_then(|id| self.runtime.recovery_stop(id))
+            .is_some_and(|intent| {
+                intent.release_authorized
+                    && self
+                        .runtime
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| {
+                            attempt.execution_id() == intent.execution_id
+                                && attempt.command().node_id() == need.current_node_id()
+                        })
+                        .is_some_and(|attempt| {
+                            self.runtime.recovery_stop_ready(attempt.command(), now)
+                        })
+            })
+    }
+
+    /// Identifies expired or aborted released recovery so Control may abort only its pending Commit.
+    pub fn recovery_release_expired(
+        &self,
+        need: &control::RoleRecoveryNeed,
+        now: TimestampMs,
+    ) -> bool {
+        self.runtime
+            .current_attempt_id(need.group_id(), need.task_ref(), need.role_id())
+            .and_then(|id| self.runtime.recovery_stop(id))
+            .is_some_and(|intent| {
+                intent.release_authorized
+                    && (intent.aborted || now.as_millis() >= intent.deadline_ms)
+            })
+    }
+
+    /// Requires the same stopped attempt and valid explicit budget before preparing a replacement.
+    pub fn recovery_attempt_permitted(
+        &self,
+        group_id: &domain::ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+        now: TimestampMs,
+    ) -> bool {
+        self.runtime
+            .current_attempt_id(group_id, task_ref, role_id)
+            .and_then(|id| self.runtime.recovery_stop(id))
+            .is_some_and(|intent| {
+                intent.release_authorized
+                    && self
+                        .runtime
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == intent.execution_id)
+                        .is_some_and(|attempt| {
+                            self.runtime.recovery_stop_ready(attempt.command(), now)
+                        })
+            })
     }
 
     /// Returns current Control authority.

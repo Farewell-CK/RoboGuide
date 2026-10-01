@@ -635,6 +635,78 @@ pub(crate) async fn handle_http_connection(
                 }),
             )
         }
+        ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/progress") => {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/progress");
+            let parameters = parse_query(query);
+            let stall_after_ms = parameters
+                .get("stall_after_ms")
+                .map(|value| value.parse::<u64>())
+                .transpose();
+            let Ok(stall_after_ms) = stall_after_ms else {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error": "invalid progress policy interval"}),
+                )
+                .await;
+            };
+            if stall_after_ms.is_some_and(|value| value == 0 || value > 86_400_000) {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error": "invalid progress policy interval"}),
+                )
+                .await;
+            }
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            if controller.bridge.execution_status(execution_id).is_none() {
+                (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown execution"}),
+                )
+            } else {
+                (
+                    "200 OK",
+                    serde_json::json!({
+                            "schema_version": "roboguide.execution-progress-view/v0.1",
+                            "execution_id": execution_id,
+                        "disposition": controller.bridge.execution_progress(execution_id, clock.now(), stall_after_ms),
+                    "sample": controller.bridge.execution_progress_sample(execution_id),
+                    "evidence": controller.bridge.execution_progress_evidence(execution_id),
+                            "stall_after_ms": stall_after_ms,
+                            "observation_only": true,
+                        }),
+                )
+            }
+        }
+        ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/recovery") => {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/recovery");
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match controller.bridge.execution_status(execution_id) {
+                Some(status) => (
+                    "200 OK",
+                    serde_json::json!({
+                        "schema_version": "roboguide.execution-recovery-view/v0.1",
+                        "execution_id": execution_id,
+                        "execution_status": format!("{status:?}"),
+                        "disposition": controller.bridge.execution_recovery_disposition(execution_id, clock.now()),
+                        "stop_intent": controller.bridge.execution_recovery_stop(execution_id),
+                    }),
+                ),
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown execution"}),
+                ),
+            }
+        }
         ("GET", path) if path.starts_with("/v1/executions/") => {
             let execution_id = path.trim_start_matches("/v1/executions/");
             let execution_id = execution_id.trim_end_matches("/");
@@ -652,10 +724,29 @@ pub(crate) async fn handle_http_connection(
                 ),
             }
         }
-        ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/cancel") => {
+        ("POST", path)
+            if path.starts_with("/v1/executions/")
+                && (path.ends_with("/cancel") || path.ends_with("/recover")) =>
+        {
+            let recovery = if path.ends_with("/recover") {
+                match super::recovery::RecoveryCommand::parse(request_body) {
+                    Ok(command) => Some(command),
+                    Err(error) => {
+                        return write_http_response(
+                            stream,
+                            "400 Bad Request",
+                            serde_json::json!({"error": error}),
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                None
+            };
             let execution_id = path
                 .trim_start_matches("/v1/executions/")
                 .trim_end_matches("/cancel")
+                .trim_end_matches("/recover")
                 .trim_end_matches('/')
                 .to_string();
             let _write_guard = event_write_gate
@@ -667,10 +758,41 @@ pub(crate) async fn handle_http_connection(
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
                 let mut candidate = live.clone();
-                candidate
-                    .bridge
-                    .cancel(&execution_id)
-                    .map_err(|error| error.to_string())?;
+                if let Some(command) = &recovery {
+                    let mission_id = candidate
+                        .bridge
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == execution_id)
+                        .map(|attempt| attempt.command().mission_id().clone())
+                        .ok_or_else(|| "unknown recovery attempt".to_string())?;
+                    if !candidate
+                        .orchestrator
+                        .execution(&mission_id)
+                        .is_some_and(|mission| {
+                            mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                        })
+                    {
+                        return Err("only a running Mission can authorize recovery".into());
+                    }
+                    let node = domain::NodeId::new(&command.expected_node_id)
+                        .map_err(|error| error.to_string())?;
+                    candidate
+                        .bridge
+                        .request_execution_recovery(
+                            &execution_id,
+                            &node,
+                            clock.now(),
+                            command.timeout_ms,
+                            command.max_replacements,
+                        )
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    candidate
+                        .bridge
+                        .cancel(&execution_id)
+                        .map_err(|error| error.to_string())?;
+                }
                 let checkpoint =
                     server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
                 Ok((candidate, checkpoint))
@@ -696,7 +818,16 @@ pub(crate) async fn handle_http_connection(
                     }
                     (
                         "202 Accepted",
-                        serde_json::json!({"status": "cancel_requested"}),
+                        if recovery.is_some() {
+                            serde_json::json!({
+                                "status": "recovery_stop_requested",
+                                "execution_id": execution_id,
+                                "stop_intent": live.bridge.execution_recovery_stop(&execution_id),
+                                "command_receipt_is_stop_proof": false,
+                            })
+                        } else {
+                            serde_json::json!({"status": "cancel_requested"})
+                        },
                     )
                 }
                 Err(error) => {

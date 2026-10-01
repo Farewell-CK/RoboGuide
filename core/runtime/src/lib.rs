@@ -14,9 +14,11 @@ pub use coordination::{
     CoordinationReadiness, PeerChannelLifecycle, PeerChannelReadinessEvidence, RuntimePeerChannel,
 };
 pub use execution::{
-    DispatchDecision, DispatchIntent, ExecutionAttemptSnapshot, ExecutionContext, ExecutionEvent,
-    ExecutionRuntimeError, ExecutionSlot, ExecutionStatus, ObservedTaskExecutionResult,
-    RuntimeExecutionCheckpoint, RuntimeExecutionManager,
+    DispatchDecision, DispatchIntent, EXECUTION_PROGRESS_SCHEMA, ExecutionAttemptSnapshot,
+    ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionSlot, ExecutionStatus,
+    ObservedTaskExecutionResult, OperationActivity, OperationProgressBatch,
+    OperationProgressSample, ProgressDisposition, ProgressObservation, RecoveryStopDisposition,
+    RecoveryStopIntent, RuntimeExecutionCheckpoint, RuntimeExecutionManager,
 };
 pub use relation::{RuntimeExecutionRelation, RuntimeRelationSnapshot, SharedSpatialEvidence};
 

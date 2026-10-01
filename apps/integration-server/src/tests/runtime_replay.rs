@@ -201,6 +201,27 @@ impl ParallelMission {
             .expect("outcome transaction commits");
     }
 
+    /// Constructs a legacy unbound recovery checkpoint to test retained outcome fences.
+    ///
+    /// Production no longer releases on Unknown; this deliberately invokes the low-level Control
+    /// transition to retain regression coverage for historical already-unbound checkpoints.
+    fn legacy_unbound(&mut self, index: usize) {
+        let command = self.attempts[index].command();
+        self.controller
+            .bridge
+            .control_mut()
+            .begin_execution_recovery(
+                command.group_id(),
+                command.task_ref(),
+                command.role_id(),
+                command.node_id(),
+                TimestampMs::new(10),
+                &self.correlation,
+                &mut self.events.clone(),
+            )
+            .expect("legacy Control transition");
+    }
+
     /// Returns the authoritative Task lifecycle for one original logical slot.
     fn task_lifecycle(&self, index: usize) -> TaskExecutionLifecycle {
         self.controller
@@ -532,6 +553,7 @@ fn blocked_parallel_group_retains_late_completion_without_fatal_transition() {
     fixture.fact(0, 1, ExecutionPhase::Accepted);
     fixture.fact(1, 1, ExecutionPhase::Accepted);
     fixture.fact(0, 2, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     let control_before =
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint");
     fixture.fact(0, 3, ExecutionPhase::Completed);
@@ -574,6 +596,7 @@ fn blocked_parallel_group_retains_late_completion_without_fatal_transition() {
 fn late_first_terminal_fact_does_not_activate_unbound_task() {
     let mut fixture = ParallelMission::new();
     fixture.fact(0, 1, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     let control_before =
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint");
     drive_ready_tasks(
@@ -602,6 +625,72 @@ fn late_first_terminal_fact_does_not_activate_unbound_task() {
     );
 }
 
+/// Recovery releases only the stopped Task while an independent sibling keeps its binding.
+#[test]
+fn stopped_task_recovery_preserves_sibling_and_actor_ownership() {
+    let mut fixture = ParallelMission::new();
+    fixture.fact(0, 1, ExecutionPhase::Started);
+    fixture.fact(1, 1, ExecutionPhase::Started);
+    let command = fixture.attempts[0].command().clone();
+    let other = fixture.attempts[1].command().clone();
+    fixture
+        .controller
+        .bridge
+        .request_execution_recovery(
+            fixture.attempts[0].execution_id(),
+            command.node_id(),
+            TimestampMs::new(10),
+            100,
+            2,
+        )
+        .expect("explicit authorization");
+    fixture.fact(0, 2, ExecutionPhase::Cancelled);
+    begin_current_ambiguity_recoveries(
+        &mut fixture.controller,
+        TimestampMs::new(11),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("safe partial release");
+    let task = fixture
+        .controller
+        .bridge
+        .control()
+        .group(&fixture.group_id)
+        .expect("Group")
+        .task_execution(other.task_ref())
+        .expect("unaffected Task");
+    assert_eq!(task.assignments()[0].node_id(), other.node_id());
+    assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempts[1].execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Running)
+    );
+    resume_pending_recoveries(
+        &mut fixture.controller,
+        TimestampMs::new(12),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("owner retry does not migrate an Actor");
+    drive_rebound_attempts(
+        &mut fixture.controller,
+        TimestampMs::new(12),
+        &fixture.correlation,
+    )
+    .expect("new attempt");
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 3);
+    assert!(fixture.controller.bridge.attempt_history().iter().any(
+        |attempt| attempt.execution_id() != fixture.attempts[0].execution_id()
+            && attempt.command().task_ref() == command.task_ref()
+            && attempt.command().node_id() == command.node_id()
+    ));
+    assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
+}
+
 /// A failed sibling fact is retained without converting a Blocked Group through an illegal path.
 #[test]
 fn blocked_parallel_group_defers_sibling_failure() {
@@ -609,6 +698,7 @@ fn blocked_parallel_group_defers_sibling_failure() {
     fixture.fact(0, 1, ExecutionPhase::Accepted);
     fixture.fact(1, 1, ExecutionPhase::Accepted);
     fixture.fact(0, 2, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     fixture.fact(1, 2, ExecutionPhase::Failed);
     assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
     assert_eq!(

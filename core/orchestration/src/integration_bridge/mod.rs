@@ -36,10 +36,12 @@ use conversion::*;
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
 /// Version 15 adds registry anti-rollback provenance without restoring deployment routing.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
 
 /// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
+/// Historical checkpoint with no registry watermark or operation progress.
+const LEGACY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

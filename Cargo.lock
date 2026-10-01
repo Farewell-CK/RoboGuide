@@ -1493,6 +1493,7 @@ dependencies = [
  "domain",
  "ports",
  "serde",
+ "serde_json",
  "state",
  "testkit",
 ]

@@ -396,6 +396,9 @@ impl RuntimeExecutionManager {
                 "unknown cancellation attempt".to_string(),
             ));
         }
+        if let Some(intent) = self.recovery_stops.get_mut(execution_id) {
+            intent.aborted = true;
+        }
         self.cancellation_intents.insert(execution_id.to_string());
         Ok(())
     }

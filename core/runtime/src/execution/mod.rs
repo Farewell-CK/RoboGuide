@@ -14,6 +14,14 @@ use std::fmt::{Display, Formatter};
 mod checkpoint;
 mod dispatch;
 mod observation;
+mod progress;
+mod recovery_stop;
+pub use progress::{
+    EXECUTION_PROGRESS_SCHEMA, OperationActivity, OperationProgressBatch, OperationProgressSample,
+    ProgressDisposition, ProgressObservation,
+};
+use recovery_stop::RecoveryBudget;
+pub use recovery_stop::{RecoveryStopDisposition, RecoveryStopIntent};
 
 use observation::{normalized_resources, validate_checkpoint};
 
@@ -241,6 +249,15 @@ struct ActiveExecutionCheckpoint {
 /// Transport-neutral durable Runtime projection embedded in the controller checkpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeExecutionCheckpoint {
+    /// Explicit recovery cancellation purposes and original deadlines.
+    #[serde(default)]
+    recovery_stops: BTreeMap<String, RecoveryStopIntent>,
+    /// Logical-slot counts serialized without composite JSON map keys.
+    #[serde(default)]
+    recovery_budgets: Vec<RecoveryBudget>,
+    /// Read-only progress; old checkpoints contain no invented observations.
+    #[serde(default)]
+    progress: BTreeMap<String, ProgressObservation>,
     /// Runtime contexts retained for reconciliation and terminal fact conversion.
     executions: BTreeMap<String, ExecutionContext>,
     /// Latest accepted status by execution identity.
@@ -326,6 +343,12 @@ impl std::error::Error for ExecutionRuntimeError {}
 /// Live Runtime authority for stable distributed execution identities and facts.
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExecutionManager {
+    /// Stop-and-replace is opt-in; ordinary cancellation has no recovery purpose.
+    recovery_stops: BTreeMap<String, RecoveryStopIntent>,
+    /// Logical-slot budgets cannot be reset by allocating a new physical attempt.
+    recovery_budgets: BTreeMap<ExecutionSlot, RecoveryBudget>,
+    /// Latest progress independent of execution lifecycle and health.
+    progress: BTreeMap<String, ProgressObservation>,
     /// Dispatched committed execution contexts.
     pub(crate) executions: BTreeMap<String, ExecutionContext>,
     /// Latest execution lifecycle facts.
