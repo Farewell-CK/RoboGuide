@@ -607,5 +607,6 @@ DEAIOS 与本地运行时的边界记录在
 [`../decisions/0002-deaios-node-contract.md`](../decisions/0002-deaios-node-contract.md)。
 
 下发前计划修复与执行期分层恢复的后续方案见
-[`recovery-improvement-plan.md`](recovery-improvement-plan.md)。该文件标记为
-Proposed for review，不能据此声称通用停滞检测或执行期 MI 重新规划已经实现。
+[`recovery-improvement-plan.md`](recovery-improvement-plan.md)。下发前 typed 分类、durable
+submission fence 和只读核对已实现，见 [ADR-0054](../decisions/0054-mission-recovery-boundary.md)。
+后续执行期阶段仍为 Proposed，不能据此声称通用停滞检测或执行期 MI 重新规划已经实现。

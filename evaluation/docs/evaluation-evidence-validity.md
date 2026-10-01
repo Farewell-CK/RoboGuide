@@ -105,11 +105,14 @@ against an actor able to replace every source artifact and all hashes.
 ## Read-only Mission Service observations
 
 `GET /v1/mission-requests/{request_id}/observations` returns
-`roboguide.mission-request-observations/v0.1`. It binds to the exact
+`roboguide.mission-request-observations/v0.2` (v0.1 remains readable). It binds to the exact
 public request projection using `request_record_digest` and contains:
 
 - `roboguide.controller-submission-evidence/v0.1`, when HTTP submission was attempted.
 - `roboguide.mission-request-failure/v0.1`, when a known MI/submission boundary failed.
+- Nullable `roboguide.mission-request-recovery/v0.1`, which classifies the permitted
+  recovery boundary and may retain an immutable Controller identity lookup. This
+  never replaces actual POST/acceptance evidence, registered tasks or official outcomes.
 
 The public Mission Request v0.4 and all MissionPlan contracts are unchanged.
 Private SQLite rows now use a versioned request/observations envelope in

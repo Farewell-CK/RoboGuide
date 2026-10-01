@@ -196,6 +196,12 @@ Control Plane 负责全局决策与协调：
 4. `Execution Group Manager` 管理 Create、Bind、Activate、Adapt、Complete、Release 生命周期；
 5. `Reconciliation & Recovery` 检测现实与计划偏差，并选择最小必要恢复层级。
 
+当前下发前恢复流程使用 typed reason/action 与 digest-bound evidence，POST 前持久化
+submission fence。提交结果不明时只核对原 Mission，不重复提交或改写计划；Controller
+明确拒绝后可显式重交原稿。独立 observations v0.2 保持 Request v0.4 和 MissionPlan
+不变。查询缺少 accepted-plan digest 时继续保留不确定性。通用执行停滞与执行期重新
+规划尚未实现，见 [ADR-0054](docs/decisions/0054-mission-recovery-boundary.md)。
+
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
 当前实现 **Control Plane — Embodied Scheduler v0.2: Bounded Joint Scheduling & Future

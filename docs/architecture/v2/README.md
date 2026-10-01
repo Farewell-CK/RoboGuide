@@ -105,6 +105,12 @@ Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Plan
 `NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
 或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
 
+Request Engine 使用 digest-bound typed recovery evidence 区分未提交草案和已发出的
+Controller submission。POST 前原子保存 submission fence；缺失回执、进程中断或不明
+响应只能只读查询原 Mission，不重新 POST，不用 Dialogue 覆盖可能已接纳的计划。
+明确拒绝后的显式 retry 重交同一原稿。当前 status 查询没有 accepted-plan digest，不能
+据此补造 Accepted receipt；原始失败证据和 B1 的严格要求继续保留。见 ADR-0054。
+
 Mission Actor、ContextRole 和 TaskRole 表达三个不同层级：Actor 是 Mission 范围的逻辑参与者，
 ContextRole 将 Actor 放入持续协作上下文，TaskRole 只引用 ContextRole 并声明该 Task 的执行槽。
 TaskRole 不重复 Actor。用户 Dialogue 使用有 speaker/kind/identity/reply/time 的持久化 turn；
@@ -575,6 +581,11 @@ Detect → Reconcile → Adapt
 | L2 | Execution Group | 替换成员、重新绑定或调整 Group |
 | L3 | Scheduler / Coordination | 重新 Propose、Coordinate 和 Commit |
 | L4 | Mission Intelligence | Task Graph 已无法满足 Mission 时重新规划 |
+
+该分级是长期职责模型。当前实现的下发前流程见
+[ADR-0054](../../decisions/0054-mission-recovery-boundary.md)：类型分类、草案有界修复、
+提交 fence 和只读接纳核对。通用停滞 progress contract、可信停止后的自动替代执行及
+执行期新版本 MI 计划仍需独立实现；不能把 `Unknown`、Cancel receipt 或心跳当作已停止。
 
 ## 8. 已冻结不变量
 

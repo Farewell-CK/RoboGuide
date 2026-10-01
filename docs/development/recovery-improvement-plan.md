@@ -1,6 +1,8 @@
 # RoboGuide 恢复能力完善计划
 
-> Proposed for review。本文是工程计划，不代表已实现自动停滞恢复或执行期重新规划。
+> 第一阶段的 typed MI 恢复分类、提交 fence 与只读核对已实现，见
+> [ADR-0054](../decisions/0054-mission-recovery-boundary.md)。后续执行期阶段仍为 Proposed，
+> 不代表已实现自动停滞恢复或执行期重新规划。
 > 调查基线为 `dev@4dd8063219c3fb09def3aa698b2fceb6075454e1`。
 
 ## 1. 先区分失败位置与执行权威
@@ -31,6 +33,11 @@
 exactly-once physical action 或通用 recovery optimizer。
 
 ## 2. 第一阶段：下发前形成明确的恢复分类
+
+当前 `mission.recovery` 和 Request Engine 已实现该分类切片。恢复 evidence 在独立
+observations v0.2 中随 Request 原子保存；公共 Request v0.4、MissionPlan 与 Core contracts
+不变。提交结果不明时只查询原 Mission，不能用恢复诊断补造完整接纳 receipt。
+当前查询 API 缺少 accepted-plan digest，完整自动接纳核对仍是明确的后续缺口。
 
 先补充跨 MI、Controller admission 与 dispatch 边界的失败矩阵及可复核测试，复用现有预算，
 不统一把错误发送给模型。需要统一记录：失败 stage、稳定 reason、request/draft/context digest、

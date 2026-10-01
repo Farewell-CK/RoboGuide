@@ -278,6 +278,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   local identity validation remains authoritative. A violating raw/normalized draft is
   persisted as bounded rejected-draft v0.3 evidence and fails without regeneration or
   Controller submission; transport/authentication faults have no invented draft evidence.
+- MI recovery observations v0.2 preserve typed, digest-bound recovery decisions outside the
+  unchanged Mission Request v0.4. The Request Engine durably fences Controller submission before
+  POST; ambiguous results allow only one read-only lookup per explicit retry, never another POST
+  or dialogue replacement. Current identity/status lookup lacks an accepted-plan digest and never
+  fabricates acceptance. Only definitive 400/409/422 rejection permits unchanged resubmission.
+  These observations do not grant physical-stop, resource, Runtime or execution-replanning authority.
+  See ADR-0054; generic progress/stall recovery remains a separate proposed contract.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy
