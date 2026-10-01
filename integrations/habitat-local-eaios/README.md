@@ -109,8 +109,9 @@ optional segment/state storage failures are explicit `continuation_archival` gap
 rewrite local outcomes. No terminal verifier verdict is published for a resumable pause.
 `stage2-assignment-segment-N.json` identifies active and retained/passive agents directly.
 
-This implementation has deterministic policy-loop, Pipe and loopback HTTP coverage; it has
-not been validated with a new real Habitat/Provider run. The separate Controller Group
+This implementation has deterministic policy-loop, Pipe and loopback HTTP coverage, actual
+Controller/Node process conformance, and a real single-Actor retained-world continuation check.
+Multi-Actor physical continuation remains unproven. The separate Controller Group
 recovery API is implemented in [ADR-0061](../../docs/decisions/0061-confirmed-stop-group-continuation.md).
 It requires the exact complete original set, explicit repeat permissions, actual terminal facts
 and current Control revalidation of retained resources. It prepares complete new attempts before

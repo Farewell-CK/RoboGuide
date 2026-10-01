@@ -223,7 +223,8 @@ Habitat 的可选导航 observer 已接入同一 State export（
 冻结全部 current attempts 与逐操作重复授权，取得完整实际停止证明后，由 Control 重新
 验证原绑定、物理身份和资源承诺；暂停不释放资源，完整新 attempts 持久化后才下发。
 初版只支持同一 Execution Session 的 independent 原绑定续跑，默认部署仍关闭。
-真实 Habitat 整组续跑尚未验证；现有单 Role 恢复仍拒绝联合停止，不存在自动停滞重试。
+原世界续跑已有单 Actor 的真实物理验证；多 Actor 联合物理停机与续跑仍未验证。
+现有单 Role 恢复仍拒绝联合停止，不存在自动停滞重试。
 生产 B1 启动脚本通过 `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION=1` 显式启用，默认关闭。
 仅派生运行目录中的恢复声明，冻结 Node 配置摘要，并在注册前核对 Adapter 实际只读
 能力。实际 Controller/Node 进程的零 Provider/Simulator 检查入口为

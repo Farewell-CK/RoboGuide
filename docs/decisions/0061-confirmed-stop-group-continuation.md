@@ -1,6 +1,6 @@
 # ADR-0061: 全集合停止证明后的整组原绑定续跑
 
-- Status: Implemented — 确定性离线、实际 loopback HTTP/gRPC 验证；真实物理续跑未验证
+- Status: Implemented — 确定性、实际 Controller/Node 进程与单 Actor 原世界物理续跑验证；多 Actor 物理续跑未验证
 - Date: 2026-10-01
 
 ## 问题
@@ -87,5 +87,7 @@ Control checkpoint、日志和二进制摘要，不覆盖历史文件，也不�
 注册与资源变化、持久化失败、restart、Mission cancel、完整新 outbox 和实际 HTTP 路由。
 单 Role coupled-stop 拒绝测试继续通过。Local adapter 的世界/预算 fencing 保持独立。
 
-本轮不运行真实 Provider/Habitat；确定性 Node doubles 不能证明真实物理 continuation。
+补充验收已通过真实 MI/Node/原始 Stage2/Habitat 的单 Actor 原世界续跑检查。
+多 Actor 物理联合停机与续跑仍未验证；确定性 Node doubles 或实际 daemon 的合成 Local
+EAIOS 结果不能替代该物理证明。运行记录位于 Git-ignored 分析目录，不提交真实实验结果。
 新的执行计划、迁移、自动 stall recovery、真实紧密协作及 world 重建不在本决策范围。

@@ -445,6 +445,10 @@ def main() -> None:
             "code_sha": subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
             ).strip(),
+            "tool_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "tracked_source_changes": subprocess.check_output(
+                ["git", "diff", "--name-only", "HEAD"], cwd=ROOT, text=True
+            ).splitlines(),
             "binaries": {
                 str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in binaries
             },
@@ -454,13 +458,14 @@ def main() -> None:
     try:
         for name, peer in (("all-live", False), ("completed-peer", True)):
             results.append(run_case(output / name, peer))
-            save(output / "summary.json", {"passed": True, "cases": results})
+            save(output / "summary.json", {"status": "running", "cases": results})
     except Exception as failure:
         save(
             output / "summary.json",
             {"passed": False, "cases": results, "error": f"{type(failure).__name__}: {failure}"},
         )
         raise
+    save(output / "summary.json", {"status": "complete", "passed": True, "cases": results})
     print(json.dumps({"passed": True, "cases": results}, ensure_ascii=False))
 
 

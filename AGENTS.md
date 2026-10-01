@@ -325,7 +325,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   remain Completed. The first profile requires one immutable independent Execution Session;
   migration and coupled semantic recovery remain unsupported. Ordinary Mission cancellation
   overrides the recovery round. Controller checkpoint v18 preserves the purpose and accepts
-  older checkpoints with no hidden Group permission. No real Habitat continuation is yet proven.
+  older checkpoints with no hidden Group permission. Single-Actor retained-world continuation has
+  real physical coverage; multi-Actor physical continuation remains unproven. Actual Controller/
+  Node process conformance covers both all-live members and preservation of a Completed peer.
   The B1 launcher default-off `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION` derives only run-local recovery
   metadata, validates actual Node configs, and freezes/compares byte identities against both
   adapters' bounded read-only support before registration. It never requests recovery by itself.
