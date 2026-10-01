@@ -291,6 +291,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   (`roboguide.execution-progress/v0.1`). Runtime retains bounded attribution/counters, original
   receive times and TTL; working, intentional waiting, blocked and unknown remain separate.
   A supplied stall interval interprets measured work only and never initiates recovery. See ADR-0056.
+  The default-off Habitat navigation observer (ADR-0058) publishes bounded exact-attempt,
+  operation-specific best-distance improvement via a fixed read-only HTTP workflow. Producer
+  freshness is checked before State projection; wait has no counter, geometry gaps stay unknown.
+  No progress observation proves arrival, official PDDL truth or safe independent Role stopping.
 - Execution recovery is explicitly repeat-authorized with exact current owner and durable time/count
   bounds. Actual current-attempt Cancelled evidence precedes Control partial release and the normal
   Match -> Schedule -> Propose -> Commit -> Rebind path; Unknown and Cancel receipts retain ownership.

@@ -1,8 +1,8 @@
 # RoboGuide 恢复能力完善计划
 
 > typed MI 恢复、完整 HTTP body 绑定的接纳对账、只读操作进度，以及明确授权的停止后
-> Role 恢复已实现，见 ADR-0054..0057。自动停滞策略、vendor-specific progress observer
-> 与执行期新版本 MI 计划仍待独立验证/设计，不代表已实现。
+> Role 恢复已实现，见 ADR-0054..0057。Habitat 可选导航进度 observer 见 ADR-0058。
+> 自动停滞策略、shared-world 独立 Role 停止/重试与执行期新版本 MI 计划仍待验证/设计。
 > 调查基线为 `dev@4dd8063219c3fb09def3aa698b2fceb6075454e1`。
 
 ## 1. 先区分失败位置与执行权威

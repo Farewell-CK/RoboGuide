@@ -590,6 +590,8 @@ Detect → Reconcile → Adapt
 提交 fence 和权威接纳核对（ADR-0055）。当前 operation-progress v0.1（ADR-0056）通过
 注册 State export 记录操作量度和源身份，使用原 receive time/TTL，区分 Working、Waiting、
 Blocked、Unknown。仅明确给出的量度与 stall interval 参与 Stalled 判断，观测不改变执行。
+Habitat 可选 observer（ADR-0058）把既定目标的几何改善量投影为该通用 State payload，
+保留原始技能、producer freshness 与准确 attempt identity；wait 没有工作 counter。
 
 显式执行恢复（ADR-0057）记录当前 attempt/owner、重复操作授权及持久化时间/次数预算。
 真实 Cancelled 终态到达后才允许 Control partial release，随后复用 Match -> Schedule ->
@@ -600,7 +602,7 @@ pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort�
 
 ```mermaid
 flowchart LR
-  L[Local EAIOS progress] --> S[Registered State export]
+  L[Local EAIOS operation-specific progress] --> S[Registered State export]
   S --> O[Runtime readonly observation]
   U[Explicit bounded recovery command] --> C[Durable Cancel]
   C --> P[Current owner reports Cancelled]

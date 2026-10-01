@@ -19,6 +19,7 @@ The loopback-only HTTP facade implements the existing declarative Node workflow 
 
 - `GET /v1/health`
 - `GET /v1/capabilities/mobility.navigate`
+- `GET /v1/executions/progress` (empty unless explicitly configured)
 - `POST /v1/executions`
 - `POST /v1/executions/status`
 - `POST /v1/executions/cancel`
@@ -29,6 +30,38 @@ HTTP facade. Status reports `ACCEPTED`, then `RUNNING`, then only a backend-obse
 `COMPLETED`, `FAILED`, or `CANCELLED`. Cancel acknowledgement only persists a request; it does not
 change the local state to `CANCELLED`. The simulator process reports that terminal state only after
 it has actually stopped stepping the local execution.
+
+## Optional operation progress
+
+`--progress-directory <run-local-path>` enables a read-only navigation observer;
+the default does not sample or write files. B1 exposes the same opt-in as
+`ROBOGUIDE_B1_EXECUTION_PROGRESS=1`. Current B1 Node templates register a fixed
+`habitat-local-eaios`-owned `roboguide.execution-progress/v0.1` State export
+polling `GET /v1/executions/progress` every 500 ms with a 1500 ms TTL.
+
+The existing reset/step boundary samples at most four times a second. Navigation
+units are whole centimetres of best observed 3D distance improvement to the
+committed entity, within one skill/target-position stage. They are not simulator
+steps, path feasibility, arrival or official success. A detour can have no
+improvement; an operator-supplied stall interval is an observation, not an
+automatic cancellation policy. Wait has no counter. Unknown skills or unavailable
+geometry do not produce measured work. Files use
+`roboguide.habitat-navigation-progress/v0.1`; each endpoint retains only its latest
+snapshot, at most 4096 bytes. Observation, encoding and storage faults leave
+physical execution unchanged.
+
+Projection requires the exact invocation `attempt_id`, operation, agent and
+destination; a local `habitat-*` handle is never a Runtime attempt. Missing,
+malformed, oversized, future or 2-second-old producer snapshots return an empty
+batch. Polling cannot renew that source age; existing State TTL remains separate.
+No action, extra reset/step, predicate computation, path query or RNG call is
+performed by the observer. Terminal execution has no active progress sample.
+
+Cancel acknowledgement remains an intent. Only the original backend's actual
+return proves it has exited the stepping loop. In the shared deployment, cancelling
+one endpoint ends the **whole** joint segment; it does not provide independent
+Role stopping, and consumed sessions cannot generally be retried. This observer
+does not enable automatic recovery. See [ADR-0058](../../docs/decisions/0058-local-navigation-progress-observer.md).
 
 Run the bridge from the independently managed EMOS checkout and Habitat Conda environment:
 

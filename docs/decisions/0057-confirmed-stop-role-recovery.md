@@ -49,6 +49,10 @@ ReplacementPending、BudgetExpired、Aborted、Superseded、OriginalTerminal。�
 取消替代授权但保留其历史。时间/count 不因重复命令、恢复 checkpoint 或新 attempt 重置。
 停止证明来自可信 Node 对本地执行真正结束的报告；恶意/错误 Node 或实际未停止却报告
 Cancelled 不由该 schema 自动解决，必须由 Local EAIOS 正确履约。
+参考 Robonix adapter 的取消回执现在只保存意图；worker 尚未调用 vendor 时才确认
+Cancelled。已经进入 vendor 的同步调用没有 abort/停止确认接口，保留其实际 Completed
+或 Failed。旧的提前 Cancelled 历史不重写，不能据此补造可信停止证明。Habitat shared-world
+的停止范围限制及其可选进度 observer 见 ADR-0058。
 
 该切片提供有界、显式授权的执行恢复；没有自动模型重规划。新的 MI 计划仍需独立
 deliberation identity、snapshot/history、审查与重新接纳契约，不能覆盖原 plan。

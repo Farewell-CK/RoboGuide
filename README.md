@@ -207,6 +207,9 @@ submission fence。提交结果不明时只核对原 Mission，不重复提交�
 次数与时间预算不因重启或重复命令重置；Actor 保持原权威绑定。见
 [ADR-0057](docs/decisions/0057-confirmed-stop-role-recovery.md)。自动停滞恢复和执行期 MI
 重规划仍未实现；没有 progress observer 的部署明确返回 Unknown。
+Habitat 的可选导航 observer 已接入同一 State export（
+[ADR-0058](docs/decisions/0058-local-navigation-progress-observer.md)），区分真实 wait 和
+既定目标的几何进展。观测不授权停止或重试；shared-world 取消仍影响整个联合执行。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 

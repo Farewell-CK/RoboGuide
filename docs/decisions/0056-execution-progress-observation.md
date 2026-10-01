@@ -24,8 +24,9 @@ Runtime 只保存单条 sample 与源 key/epoch/sequence/时间/TTL，不为每�
 只读 `GET /v1/executions/{id}/progress` 返回观测分类。只有明确指定合法
 `stall_after_ms` 且有 operation-specific counter 的 working observation 才能标记 Stalled。
 waiting 从不因 counter 不变变成 Stalled，Unavailable/过期返回 Unknown。
-接口不修改 Node health、Task/Mission、资源、技能或 cancellation。当前 adapter 没有
-显式配置本契约的节点仍为 Unknown；该模块不宣称已有全部 vendor 的进度支持。
+接口不修改 Node health、Task/Mission、资源、技能或 cancellation。没有显式配置
+本契约的节点仍为 Unknown。Habitat 的可选本地导航 observer 已实现，见
+[ADR-0058](0058-local-navigation-progress-observer.md)；这不宣称所有 vendor 已支持进度。
 
 inner checkpoint v16、Controller wrapper v20 显式保存该事实，旧数据兼容为空。旧 binary
 拒绝新 checkpoint，不会忽略新的证据字段继续恢复执行。
