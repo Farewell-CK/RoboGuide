@@ -2248,6 +2248,11 @@ class SharedWorldCoordinator:
                     "task_id": invocation.task_id,
                     "role_id": invocation.role_id,
                     "outcome": outcome.as_dict(),
+                    **(
+                        {"attempt_id": invocation.attempt_id, "execution_id": execution_id}
+                        if self._retain_stopped_session
+                        else {}
+                    ),
                 }
             )
             terminal = not paused and (
@@ -2273,8 +2278,8 @@ class SharedWorldCoordinator:
                     latest[(value.task_id, value.role_id)] = value
                 if latest:
                     self._publish_verifier_verdict_best_effort(summary, list(latest.values()))
-            store.mark_terminal(execution_id, outcome)
             self._serial_waited_from = self._monotonic()
+            store.mark_terminal(execution_id, outcome)
         except Exception as error:  # noqa: BLE001 - local failure cannot become success
             current = store.get(execution_id)
             if current is not None and current["state"] not in TERMINAL_STATES:

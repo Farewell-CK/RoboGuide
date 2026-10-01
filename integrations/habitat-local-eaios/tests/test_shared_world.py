@@ -1588,6 +1588,87 @@ def test_retained_configuration_mismatch_is_rejected_before_world_start(tmp_path
     assert not (tmp_path / "evidence/retained-world-owner.json").exists()
 
 
+def test_serial_coordinator_resumes_cancelled_task_before_releasing_next_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parent/child admission agrees on serial continuation and preserves exact attempts."""
+    runtime = RetainedRuntimeHarness(tmp_path, final_step=100, max_steps=5)
+    coordinator = SharedWorldCoordinator(
+        InProcessWorldService(runtime),
+        2.0,
+        tmp_path / "evidence",
+        retain_stopped_session=True,
+        max_steps=5,
+        wait_poll_s=0.001,
+    )
+    endpoint = NodeEndpoint(
+        "node",
+        0,
+        ExecutionStore(tmp_path / "serial.sqlite3"),
+        coordinator,
+        retain_stopped_session=True,
+    )
+    slots = [_slot("first", "actor"), _slot("next", "actor", ["first"])]
+    first = replace(
+        CanonicalMobilityInvocation.from_request(_session_request("m", "north", "first", slots)),
+        attempt_id="original",
+    )
+    following = replace(
+        CanonicalMobilityInvocation.from_request(_session_request("m", "north", "next", slots)),
+        attempt_id="following",
+    )
+    original = runtime.execute_serial
+
+    def cancelled_first(
+        invocation: CanonicalMobilityInvocation,
+        agent_id: int,
+        cancellation: Callable[[], bool],
+        running: Callable[[int, str], None],
+        final_slot: bool,
+    ) -> tuple[LocalExecutionOutcome, dict[str, Any]]:
+        """Accept durable cancellation after RUNNING, before the first physical action."""
+
+        def cancel_on_running(agent: int, detail: str) -> None:
+            """Record the actual accepted cancel while preserving normal terminal reduction."""
+            running(agent, detail)
+            active = endpoint.store().active_execution()
+            assert active is not None
+            endpoint.cancel({"execution_id": active["execution_id"]})
+
+        return original(invocation, agent_id, cancellation, cancel_on_running, final_slot)
+
+    monkeypatch.setattr(runtime, "execute_serial", cancelled_first)
+    try:
+        old = str(endpoint.submit({"invocation": first.as_dict()})["execution_id"])
+        original_record = _wait_terminal(endpoint, old)
+        assert original_record["state"] == "CANCELLED"
+        assert runtime.gym.steps == 0
+        with pytest.raises(IntegrationError, match="consumed"):
+            endpoint.accept({"invocation": following.as_dict()})
+        monkeypatch.setattr(runtime, "execute_serial", original)
+        fresh = str(
+            endpoint.submit({"invocation": replace(first, attempt_id="fresh").as_dict()})[
+                "execution_id"
+            ]
+        )
+        assert _wait_terminal(endpoint, fresh)["state"] == "COMPLETED"
+        last = str(endpoint.submit({"invocation": following.as_dict()})["execution_id"])
+        assert _wait_terminal(endpoint, last)["state"] == "COMPLETED"
+        assert _execution(endpoint.store(), old) == original_record
+        summary = json.loads((tmp_path / "evidence/shared-world-summary.json").read_text())
+        assert [segment["attempt_id"] for segment in summary["serial_task_outcomes"]] == [
+            "original",
+            "fresh",
+            "following",
+        ]
+        assert summary["identity"]["episode_reset_count"] == 1
+        assert summary["identity"]["simulator_steps"] == 2
+        assert summary["official_pddl_success"] is False
+        assert len(summary["execution_segments"]) == 3
+    finally:
+        coordinator.shutdown()
+
+
 def _single_idle_loop(
     runtime: SingleIdleContractLoopHarness,
     actor: ContractActor,
