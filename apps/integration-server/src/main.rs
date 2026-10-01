@@ -643,11 +643,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            if let Err(error) = drive_application_timer(
+            if let Err(error) = drive_application_timer_with_clock(
                 &timer_controller,
                 &timer_event_log,
                 &timer_event_write_gate,
-                timer_clock.now(),
+                timer_clock.as_ref(),
                 timer_verifier_feed.as_deref(),
             ) {
                 let reason = format!("application timer stopped: {error}");
@@ -870,7 +870,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Cancel receipts are nonterminal: retrying Cancel in response to its
                             // own receipt/snapshot would form an unbounded feedback loop. The
                             // application timer owns those retries until terminal evidence.
-                            if let Err(error) = live.bridge.flush_dispatch_outbox() {
+                            if let Err(error) = live
+                                .bridge
+                                .flush_dispatch_outbox_with_clock(receiver_clock.as_ref())
+                            {
                                 eprintln!("durable command outbox delivery deferred: {error}");
                             }
                         }

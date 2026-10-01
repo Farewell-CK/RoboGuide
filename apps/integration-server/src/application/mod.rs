@@ -33,4 +33,6 @@ pub(crate) use task_verifier::{
     TaskVerifierFeed, apply_task_verifier, validate_restored_verifier_source,
     validate_task_verifier,
 };
+#[cfg(test)]
 pub(crate) use timer::drive_application_timer;
+pub(crate) use timer::drive_application_timer_with_clock;

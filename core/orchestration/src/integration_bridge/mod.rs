@@ -27,6 +27,7 @@ use std::fmt::{Display, Formatter};
 mod conversion;
 mod dispatch;
 mod execution_facts;
+mod group_recovery;
 mod ingestion;
 mod liveness;
 mod relation_view;
@@ -36,8 +37,11 @@ pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 17 freezes operation-owner stop/continuation facts for each physical attempt.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+/// Version 18 preserves exact-set Group recovery purposes without renewing original budgets.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
+
+/// Pre-Group recovery checkpoints have isolated Role declarations but no Group permission.
+const PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
 
 /// Pre-declaration attempts restore without independent-stop or repetition support.
 const PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";

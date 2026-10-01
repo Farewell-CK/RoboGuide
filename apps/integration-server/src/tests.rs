@@ -1,6 +1,7 @@
 use super::*;
 
 mod admission;
+mod group_recovery;
 mod runtime_replay;
 mod scheduling_disposition;
 mod stop_recovery;

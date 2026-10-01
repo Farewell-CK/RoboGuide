@@ -91,10 +91,41 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Delivers every persisted Execute intent that is still waiting for a route.
     pub fn flush_dispatch_outbox(&mut self) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_dispatch_outbox_using_clock(None)
+    }
+
+    /// Rechecks current Group deadlines immediately before persisted Execute delivery.
+    pub fn flush_dispatch_outbox_at(
+        &mut self,
+        now: TimestampMs,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_dispatch_outbox_using_clock(Some(&runtime::FixedClock::new(now)))
+    }
+
+    /// Reads the live receive clock for each pending Execute rather than sharing a stale batch time.
+    pub fn flush_dispatch_outbox_with_clock(
+        &mut self,
+        clock: &impl ports::Clock,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_dispatch_outbox_using_clock(Some(clock))
+    }
+
+    /// Applies an optional receive clock; absent time cannot deliver Group recovery.
+    fn flush_dispatch_outbox_using_clock(
+        &mut self,
+        clock: Option<&dyn ports::Clock>,
+    ) -> Result<usize, IntegrationRuntimeError> {
         let intents = self.runtime.pending_dispatch_intents();
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
+            if !self.group_recovery_delivery_permitted(
+                &intent.execution_id,
+                clock.map(ports::Clock::now),
+                false,
+            ) {
+                continue;
+            }
             if self
                 .runtime
                 .is_stopped_recovery_replacement(&intent.execution_id)
@@ -134,10 +165,25 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Delivers every durable cancellation whose physical attempt remains nonterminal.
     pub fn flush_cancellation_outbox(&self) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_cancellation_outbox_using_clock(None)
+    }
+
+    /// Rechecks whole-set cancellation purpose with the supplied current Controller clock.
+    fn flush_cancellation_outbox_using_clock(
+        &self,
+        clock: Option<&dyn ports::Clock>,
+    ) -> Result<usize, IntegrationRuntimeError> {
         let pending = self.runtime.pending_cancellations();
         let mut delivered = 0;
         let mut first_error = None;
         for (execution_id, node_id) in &pending {
+            if !self.group_recovery_delivery_permitted(
+                execution_id,
+                clock.map(ports::Clock::now),
+                true,
+            ) {
+                continue;
+            }
             if self
                 .runtime
                 .recovery_stop(execution_id)
@@ -166,8 +212,32 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Delivers durable execution and cancellation intents after their checkpoint commits.
     pub fn flush_command_outboxes(&mut self) -> Result<usize, IntegrationRuntimeError> {
-        let dispatches = self.flush_dispatch_outbox();
-        let cancellations = self.flush_cancellation_outbox();
+        self.flush_command_outboxes_using_clock(None)
+    }
+
+    /// Delivers checkpointed commands after Group deadline and unchanged-owner revalidation.
+    pub fn flush_command_outboxes_at(
+        &mut self,
+        now: TimestampMs,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_command_outboxes_using_clock(Some(&runtime::FixedClock::new(now)))
+    }
+
+    /// Checks live receive time independently before every persisted command in a bounded batch.
+    pub fn flush_command_outboxes_with_clock(
+        &mut self,
+        clock: &impl ports::Clock,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_command_outboxes_using_clock(Some(clock))
+    }
+
+    /// Shares existing outbox reduction while requiring explicit current time for Group recovery.
+    fn flush_command_outboxes_using_clock(
+        &mut self,
+        clock: Option<&dyn ports::Clock>,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        let dispatches = self.flush_dispatch_outbox_using_clock(clock);
+        let cancellations = self.flush_cancellation_outbox_using_clock(clock);
         match (dispatches, cancellations) {
             (Ok(dispatches), Ok(cancellations)) => Ok(dispatches.saturating_add(cancellations)),
             (Err(error), _) | (_, Err(error)) => Err(error),

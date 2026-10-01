@@ -46,6 +46,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             ExecutionPhase::Cancelled => ExecutionStatus::Cancelled,
             ExecutionPhase::Unknown | ExecutionPhase::Unspecified => ExecutionStatus::Unknown,
         };
+        let previous_status = self.runtime.execution_status(fact.execution_id);
         let runtime_events = self
             .runtime
             .observe_execution(
@@ -59,6 +60,18 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if phase == ExecutionPhase::Cancelled && !runtime_events.is_empty() {
             self.runtime
                 .confirm_recovery_stop(fact.execution_id, received_at);
+        }
+        if matches!(phase, ExecutionPhase::Cancelled | ExecutionPhase::Completed)
+            && !runtime_events.is_empty()
+        {
+            self.runtime
+                .confirm_group_recovery_stop(fact.execution_id, received_at);
+        }
+        if previous_status != Some(runtime_status)
+            && self.runtime.execution_status(fact.execution_id) == Some(runtime_status)
+        {
+            self.runtime
+                .confirm_group_continuation_admission(fact.execution_id, received_at);
         }
         for event in runtime_events {
             append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);

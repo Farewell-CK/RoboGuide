@@ -31,7 +31,7 @@ pub(crate) async fn serve_http(
                 &shared_controller,
                 &log,
                 &write_gate,
-                &shared_clock,
+                shared_clock.as_ref(),
                 shared_feasibility.as_deref(),
                 shared_verifier_feed.as_deref(),
             )
@@ -50,7 +50,7 @@ pub(crate) async fn handle_http_connection(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
-    clock: &runtime::SystemMonotonicClock,
+    clock: &(impl Clock + Sync),
     deployment_feasibility: Option<&DeploymentFeasibility>,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -308,7 +308,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -544,7 +544,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -683,6 +683,145 @@ pub(crate) async fn handle_http_connection(
                 )
             }
         }
+        ("GET", path) if path.starts_with("/v1/groups/") && path.ends_with("/recovery") => {
+            let group_id = match domain::ExecutionGroupId::new(
+                path.trim_start_matches("/v1/groups/")
+                    .trim_end_matches("/recovery")
+                    .trim_end_matches('/'),
+            ) {
+                Ok(group_id) => group_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            if live.bridge.control().group(&group_id).is_none() {
+                (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown Group"}),
+                )
+            } else {
+                (
+                    "200 OK",
+                    serde_json::json!({
+                        "schema_version": "roboguide.group-recovery-view/v0.1",
+                        "group_id": group_id,
+                        "disposition": live.bridge.group_recovery_disposition(&group_id, clock.now()),
+                        "stop_intent": live.bridge.group_recovery(&group_id),
+                        "deployment_support_unchanged": live.bridge.group_recovery_support_unchanged(&group_id),
+                        "continuation_admission_error": live.bridge.group_continuation_blocker(&group_id, clock.now()),
+                        "resources_released_by_recovery": false,
+                        "command_receipt_is_stop_proof": false,
+                    }),
+                )
+            }
+        }
+        ("POST", path) if path.starts_with("/v1/groups/") && path.ends_with("/recover") => {
+            let command = match super::recovery::GroupRecoveryCommand::parse(request_body) {
+                Ok(command) => command,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error}),
+                    )
+                    .await;
+                }
+            };
+            let group_id = match domain::ExecutionGroupId::new(
+                path.trim_start_matches("/v1/groups/")
+                    .trim_end_matches("/recover")
+                    .trim_end_matches('/'),
+            ) {
+                Ok(group_id) => group_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let _write_guard = event_write_gate
+                .lock()
+                .map_err(|_| "event-log write gate is poisoned")?;
+            event_log.begin_batch()?;
+            let result: Result<(ControllerState, String), String> = (|| {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                let mut candidate = live.clone();
+                let mission_id = candidate
+                    .bridge
+                    .control()
+                    .group(&group_id)
+                    .ok_or_else(|| "unknown recovery Group".to_string())?
+                    .mission_id()
+                    .clone();
+                if !candidate
+                    .orchestrator
+                    .execution(&mission_id)
+                    .is_some_and(|mission| {
+                        mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                    })
+                {
+                    return Err("only a running Mission can authorize Group recovery".into());
+                }
+                candidate
+                    .bridge
+                    .request_group_recovery(
+                        &group_id,
+                        &command.recovery_id,
+                        command.members,
+                        clock.now(),
+                        command.timeout_ms,
+                        command.max_replacements,
+                    )
+                    .map_err(|error| error.to_string())?;
+                let checkpoint =
+                    server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+                Ok((candidate, checkpoint))
+            })();
+            match result {
+                Ok((candidate, checkpoint)) => {
+                    if let Err(error) =
+                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+                    {
+                        event_log.rollback_batch()?;
+                        return Err(error.into());
+                    }
+                    if let Err(error) = event_log.commit_batch() {
+                        let _ = event_log.rollback_batch();
+                        return Err(error.into());
+                    }
+                    let mut live = controller
+                        .lock()
+                        .map_err(|_| "controller lock is poisoned")?;
+                    *live = candidate;
+                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                        eprintln!("durable Group command delivery deferred: {error}");
+                    }
+                    (
+                        "202 Accepted",
+                        serde_json::json!({"status": "group_recovery_stop_requested",
+                        "group_id": group_id, "stop_intent": live.bridge.group_recovery(&group_id),
+                        "resources_released_by_recovery": false, "command_receipt_is_stop_proof": false}),
+                    )
+                }
+                Err(error) => {
+                    event_log.rollback_batch()?;
+                    ("409 Conflict", serde_json::json!({"error": error}))
+                }
+            }
+        }
         ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/recovery") => {
             let execution_id = path
                 .trim_start_matches("/v1/executions/")
@@ -817,7 +956,7 @@ pub(crate) async fn handle_http_connection(
                         .lock()
                         .map_err(|_| "controller lock is poisoned")?;
                     *live = candidate;
-                    if let Err(error) = live.bridge.flush_command_outboxes() {
+                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                         eprintln!("durable command outbox delivery deferred: {error}");
                     }
                     (

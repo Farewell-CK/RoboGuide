@@ -133,6 +133,27 @@ pub(crate) fn begin_current_ambiguity_recoveries(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for group_id in controller.bridge.group_recovery_ids() {
+        if controller
+            .orchestrator
+            .mission_ids()
+            .iter()
+            .any(|mission_id| {
+                controller
+                    .orchestrator
+                    .execution(mission_id)
+                    .is_some_and(|mission| {
+                        mission.group_id() == &group_id
+                            && mission.lifecycle()
+                                == orchestration::MissionExecutionLifecycle::Running
+                    })
+            })
+        {
+            controller
+                .bridge
+                .prepare_group_continuation(&group_id, timestamp, correlation_id)?;
+        }
+    }
     for command in controller.bridge.current_unknown_attempts() {
         apply_recovery_required(controller, &command, timestamp, correlation_id, events)?;
     }
