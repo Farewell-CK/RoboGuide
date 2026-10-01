@@ -73,6 +73,13 @@ B1 provenance 来达到自动通过。
 typed state 与哈希防止矛盾和跨 snapshot 使用，不是可信 SQLite 或全部源证据遭替换时的
 密码学认证。原始失败记录在对账中保持不变；lookup 只保留最近一次，只读调用不累计无界历史。
 显式人工重新 deliberation 沿用既有预算语义，不存在自动创建新 Request 来绕过预算的流程。
+同一 Dialogue 的显式 retry 复用已有冻结 Grounding，而不是重新 capture 后保留旧 review。
+明确的用户澄清开始新 Dialogue/snapshot，当前 review history 属于新周期；旧周期的完整
+review、失败与提交记录由 SQLite immutable history 保留，不重写历史 digest。
+手动 retry 是操作者完成配置修复后的恢复命令，也允许认证/配置失败继续原请求；它不提供
+自动认证重试。408、429、5xx 被标记为 infrastructure transient，不进入草案 regeneration。
+POST 前清空当前回执；旧拒绝留在历史中，不能在新 POST 崩溃后冒充本次拒绝。
+回执和最终状态同一事务保存；兼容旧版本 receipt/state 写入窗口中的明确拒绝恢复。
 真实模型将来是否稳定修复任务语义，不能由 deterministic tests 宣称已证明。
 
 ## 后续通用执行恢复

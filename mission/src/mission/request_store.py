@@ -114,6 +114,16 @@ class MissionRequestStore:
                 ON mission_grounding_contexts(request_id, captured_at_ms, context_digest)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_request_history (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL,
+                    document_digest TEXT NOT NULL UNIQUE,
+                    document_json TEXT NOT NULL
+                )
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         """Open one short-lived SQLite connection with bounded lock waiting."""
@@ -132,6 +142,25 @@ class MissionRequestStore:
             separators=(",", ":"),
         )
         with self._lock, self._connect() as connection:
+            prior = connection.execute(
+                "SELECT document_json FROM mission_requests WHERE request_id = ?",
+                (record.request_id,),
+            ).fetchone()
+            if prior is not None and str(prior[0]) != document:
+                previous = json.loads(str(prior[0]))
+                if previous.get("request", previous)["lifecycle"] in {
+                    "Failed",
+                    "Blocked",
+                    "NeedsClarification",
+                    "AwaitingApproval",
+                }:
+                    # Preserve the complete prior review/failure/POST boundary
+                    # in the same transaction before an explicit command replaces it.
+                    connection.execute(
+                        """INSERT OR IGNORE INTO mission_request_history
+                        (request_id, document_digest, document_json) VALUES (?, ?, ?)""",
+                        (record.request_id, canonical_plan_digest(previous), str(prior[0])),
+                    )
             if record.grounding_context is not None:
                 self._save_grounding_context(connection, record.grounding_context)
             connection.execute(
@@ -216,5 +245,15 @@ class MissionRequestStore:
         with self._lock, self._connect() as connection:
             rows = connection.execute(
                 "SELECT document_json FROM mission_requests ORDER BY request_id"
+            ).fetchall()
+        return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)
+
+    def history(self, request_id: str) -> tuple[MissionRequestRecord, ...]:
+        """Read immutable replaced command-boundary records in durable insertion order."""
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """SELECT document_json FROM mission_request_history
+                WHERE request_id = ? ORDER BY sequence""",
+                (request_id,),
             ).fetchall()
         return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)

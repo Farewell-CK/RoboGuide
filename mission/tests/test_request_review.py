@@ -742,7 +742,10 @@ def test_review_clarification_returns_to_dialogue_without_repair(tmp_path: Path)
     assert accepted.messages == ("指定地点是实验室入口",)
     assert accepted.dialogue[-1].in_reply_to == waiting.dialogue[-1].turn_id
     assert accepted.repair_attempts == 0
-    assert [attempt.draft_revision for attempt in accepted.review_history] == [1, 2]
+    assert [attempt.draft_revision for attempt in accepted.review_history] == [2]
+    history = MissionRequestStore(tmp_path / "review-requests.sqlite3").history(waiting.request_id)
+    assert history[-1].review_history == waiting.review_history
+    assert history[-1].grounding_context == waiting.grounding_context
     assert len(controller.submissions) == 1
 
 

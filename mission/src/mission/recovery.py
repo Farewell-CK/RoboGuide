@@ -37,6 +37,7 @@ class FailureReason(StrEnum):
     IDENTITY_VIOLATION = "identity_violation"
     PROVIDER_AUTHENTICATION = "provider_authentication"
     PROVIDER_TRANSPORT = "provider_transport"
+    PROVIDER_TRANSIENT = "provider_transient"
     PROVIDER_REJECTION = "provider_rejection"
     PROVIDER_CONFIGURATION = "provider_configuration"
     PROVIDER_RESPONSE = "provider_response"
@@ -73,6 +74,10 @@ def classify_failure(error: Exception) -> FailureReason:
             return FailureReason.PROVIDER_AUTHENTICATION
         if error.configuration_failure:
             return FailureReason.PROVIDER_CONFIGURATION
+        if error.status_code in {408, 429} or (
+            error.status_code is not None and 500 <= error.status_code <= 599
+        ):
+            return FailureReason.PROVIDER_TRANSIENT
         if error.status_code is not None:
             return FailureReason.PROVIDER_REJECTION
         if error.transport_failure:

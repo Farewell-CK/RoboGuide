@@ -241,6 +241,7 @@ class MissionRequestEngine:
                 approval_reasons=(),
                 issues=(),
                 repair_attempts=0,
+                review_history=(),
                 recovery_evidence=None,
             )
             return self._process(updated)
@@ -311,12 +312,17 @@ class MissionRequestEngine:
                 # Keep the original error and POST evidence. The status API has
                 # no accepted-plan digest, so a lookup cannot complete admission.
                 return self._update(record, recovery_evidence=recovery)
-            if recovery.action in {RecoveryAction.CHECK_CONFIGURATION, RecoveryAction.REVIEW_INPUT}:
+            if recovery.action is RecoveryAction.REVIEW_INPUT:
                 raise MissionRequestError(
                     f"retry requires {recovery.action.value} before deliberation"
                 )
-            if recovery.action is not RecoveryAction.RETRY_DELIBERATION:
+            if recovery.action not in {
+                RecoveryAction.RETRY_DELIBERATION,
+                RecoveryAction.CHECK_CONFIGURATION,
+            }:
                 raise MissionRequestError("this request cannot be retried through deliberation")
+            # This explicit operator command acknowledges the infrastructure
+            # remediation. It does not grant an automatic Provider retry loop.
             return self._process(
                 self._update(record, issues=(), repair_attempts=0, recovery_evidence=None)
             )
@@ -356,9 +362,11 @@ class MissionRequestEngine:
                 failure_evidence=None,
                 recovery_evidence=None,
             )
-            grounding_context = self._grounding_reader.capture(
-                record.request_id, record.dialogue, self._clock()
-            )
+            grounding_context = record.grounding_context
+            if grounding_context is None:
+                grounding_context = self._grounding_reader.capture(
+                    record.request_id, record.dialogue, self._clock()
+                )
             self._validate_grounding_context(record, grounding_context)
             record = self._update(record, grounding_context=grounding_context)
             stage = "interpreter"
@@ -793,6 +801,7 @@ class MissionRequestEngine:
             record,
             lifecycle=MissionRequestLifecycle.SUBMITTING,
             approval_required=False,
+            submission_evidence=None,
             recovery_evidence=self._recovery_evidence(
                 record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_IN_FLIGHT
             ),
@@ -818,20 +827,22 @@ class MissionRequestEngine:
                     record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_AMBIGUOUS
                 ),
             )
-        record = self._update(
-            record,
-            submission_evidence=(
-                replace(receipt.evidence, request_id=record.request_id)
-                if receipt.evidence
-                else None
-            ),
-            failure_evidence=None,
+        return self._reduce_submission_receipt(record, receipt)
+
+    def _reduce_submission_receipt(
+        self, record: MissionRequestRecord, receipt: SubmissionReceipt
+    ) -> MissionRequestRecord:
+        """Persist the actual receipt and stable lifecycle together without replaying a POST."""
+        evidence = (
+            replace(receipt.evidence, request_id=record.request_id) if receipt.evidence else None
         )
         if receipt.accepted:
             return self._update(
                 record,
                 lifecycle=MissionRequestLifecycle.ACCEPTED,
                 issues=(),
+                submission_evidence=evidence,
+                failure_evidence=None,
                 recovery_evidence=self._recovery_evidence(
                     record,
                     FailureStage.CONTROLLER_SUBMISSION,
@@ -842,6 +853,7 @@ class MissionRequestEngine:
         return self._update(
             record,
             lifecycle=MissionRequestLifecycle.BLOCKED,
+            submission_evidence=evidence,
             issues=(f"Controller HTTP {receipt.status_code}: {receipt.detail}",),
             failure_evidence=self._failure_evidence(
                 record, "controller_submission", receipt.detail
@@ -876,6 +888,7 @@ class MissionRequestEngine:
                     evidence.submitted_mission_id != record.mission_id
                     or evidence.submitted_plan_digest != record.draft_digest
                     or evidence.controller_status_code != receipt.status_code
+                    or evidence.transport_error is not None
                     or (
                         receipt.accepted
                         and (
@@ -1025,6 +1038,7 @@ class MissionRequestEngine:
                 FailureReason.PROVIDER_CONFIGURATION,
                 FailureReason.PROVIDER_REJECTION,
                 FailureReason.PROVIDER_TRANSPORT,
+                FailureReason.PROVIDER_TRANSIENT,
             }
             else "SUT_SYSTEM",
             "detail": detail,
@@ -1115,12 +1129,17 @@ class MissionRequestEngine:
                     record.lifecycle is MissionRequestLifecycle.SUBMITTING
                     and sent is not None
                     and sent.request_id == record.request_id
-                    and sent.controller_status_code in {200, 202}
+                    and sent.controller_status_code in {200, 202, 400, 409, 422}
                 ):
                     try:
                         self._validate_submission_receipt(
                             record,
-                            SubmissionReceipt(True, sent.controller_status_code, "", sent),
+                            SubmissionReceipt(
+                                sent.controller_status_code in {200, 202},
+                                sent.controller_status_code,
+                                "restored durable Controller receipt",
+                                sent,
+                            ),
                         )
                     except MissionControllerError:
                         pass
@@ -1128,17 +1147,13 @@ class MissionRequestEngine:
                         # The real receipt was saved atomically before the
                         # service crashed. Reduce that existing fact; never
                         # replay the POST or infer acceptance from a lookup.
-                        self._update(
+                        self._reduce_submission_receipt(
                             record,
-                            lifecycle=MissionRequestLifecycle.ACCEPTED,
-                            approval_required=False,
-                            issues=(),
-                            failure_evidence=None,
-                            recovery_evidence=self._recovery_evidence(
-                                record,
-                                FailureStage.CONTROLLER_SUBMISSION,
-                                FailureReason.SUBMISSION_ACCEPTED,
+                            SubmissionReceipt(
+                                sent.controller_status_code in {200, 202},
                                 sent.controller_status_code,
+                                "restored durable Controller receipt",
+                                sent,
                             ),
                         )
                         continue
