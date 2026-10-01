@@ -387,6 +387,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Memory authority and introduces no Node toolchain. Built-in demo replay events
   mirror the exact `core/domain::EventPayload` serde shapes for offline display
   but are never real evidence.
+- `website/` contains the MkDocs Material technical documentation site. At build
+  time the stdlib-only `website/sync_docs.py` mirrors a curated list of repository
+  documents into the gitignored `website/docs/`, renames mirrored `README.md`
+  files to `index.md`, rewrites internal links, falls back to GitHub URLs for
+  intentionally unmirrored repository paths, and generates the ADR overview page
+  and the literate-nav `SUMMARY.md`; it never edits source documents. Site builds
+  run `sync_docs.py` and then `mkdocs build --strict`, so broken internal links
+  fail the build. The site deploys through Cloudflare Workers Builds as free
+  Workers static assets (`website/wrangler.jsonc` points at `website/site/`);
+  it never becomes a second authority for any runtime contract; it only
+  publishes existing repository documents.
 - `contracts/mission/` stores versioned cross-language contracts; `config/` stores
   non-secret runtime configuration; `scenarios/` stores deterministic artifacts.
   The Formal B1 RoboGuide scenario runner is workload-generic: it extracts the
@@ -445,6 +456,14 @@ uv run ruff check evaluation
 uv run mypy --strict evaluation/src evaluation/tests
 uv run python tools/quality/check_python_function_docs.py evaluation
 uv run pytest -q
+```
+
+For documentation site changes, run:
+
+```bash
+cd website
+uv run python sync_docs.py
+uvx --from mkdocs --with-requirements requirements.txt mkdocs build --strict
 ```
 
 ## Coding Style & Naming Conventions

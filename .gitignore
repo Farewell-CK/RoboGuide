@@ -28,3 +28,7 @@ logs/
 
 # RoboGuide runtime state (Controller evidence DB, Artifact CAS root)
 /var/
+
+# Documentation site generated content (see website/sync_docs.py)
+/website/docs/
+/website/site/

@@ -1,0 +1,14 @@
+// Cloudflare Workers static-assets configuration for the RoboGuide docs site.
+// Deployed from website/ via Workers Builds (`npx wrangler deploy`); the
+// build command produces ./site with `mkdocs build --strict` before deploy.
+{
+  "name": "roboguide-docs",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./site",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}
