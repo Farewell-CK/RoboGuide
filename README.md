@@ -224,6 +224,10 @@ Habitat 的可选导航 observer 已接入同一 State export（
 验证原绑定、物理身份和资源承诺；暂停不释放资源，完整新 attempts 持久化后才下发。
 初版只支持同一 Execution Session 的 independent 原绑定续跑，默认部署仍关闭。
 真实 Habitat 整组续跑尚未验证；现有单 Role 恢复仍拒绝联合停止，不存在自动停滞重试。
+生产 B1 启动脚本通过 `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION=1` 显式启用，默认关闭。
+仅派生运行目录中的恢复声明，冻结 Node 配置摘要，并在注册前核对 Adapter 实际只读
+能力。实际 Controller/Node 进程的零 Provider/Simulator 检查入口为
+`tools/quality/check_group_continuation_processes.py`；该入口的合成结果不构成物理实验成绩。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 

@@ -70,6 +70,19 @@ Controller checkpoint v18 保存 Group recovery history；兼容 v17/v16/v15/v14
 
 ## 离线验收与能力边界
 
+部署入口保持默认关闭：`ROBOGUIDE_B1_RETAIN_STOPPED_SESSION=1` 同时启用 Local Adapter
+保留世界与运行目录 Node 声明。启动工具只派生已有 operation owner 的恢复 metadata，
+不改变资源、能力、场景或 Mission。完整 Node config 经生产 Node binary 校验后冻结
+原始字节摘要；Controller/Node/MI 启动前核对两个固定只读 support route，配置变化、
+HTTP 错误或超过 64 KiB 的响应 fail closed。默认模板仍声明 unsupported。
+
+零 Provider/Simulator 的 `tools/quality/check_group_continuation_processes.py` 启动真实
+Controller 和两个真实 Node daemon，使用明确标记的 synthetic Local EAIOS fixture。
+Cancel 回执不产生停止事实；部分真实 Node Cancelled 仍不续跑；同 owner/session/intent
+续跑只创建必要的 attempts，Completed peers 不再 dispatch。检查保留 run-local journals、
+Control checkpoint、日志和二进制摘要，不覆盖历史文件，也不声称 synthetic completion 是
+物理世界验证。真实 Habitat continuation 需独立受控运行证明。
+
 验证多成员/多 Task 原绑定、Completed peers、部分/错误/迟到停止事实、预算/idempotency、
 注册与资源变化、持久化失败、restart、Mission cancel、完整新 outbox 和实际 HTTP 路由。
 单 Role coupled-stop 拒绝测试继续通过。Local adapter 的世界/预算 fencing 保持独立。

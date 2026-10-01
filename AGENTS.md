@@ -326,6 +326,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   migration and coupled semantic recovery remain unsupported. Ordinary Mission cancellation
   overrides the recovery round. Controller checkpoint v18 preserves the purpose and accepts
   older checkpoints with no hidden Group permission. No real Habitat continuation is yet proven.
+  The B1 launcher default-off `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION` derives only run-local recovery
+  metadata, validates actual Node configs, and freezes/compares byte identities against both
+  adapters' bounded read-only support before registration. It never requests recovery by itself.
+  `tools/quality/check_group_continuation_processes.py` owns optional zero-Provider, zero-simulator
+  actual Controller/Node process conformance with synthetic Local EAIOS outcomes and fresh local
+  logs/journals/checkpoints; its authored fixture plans are never B1 experiment results.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy

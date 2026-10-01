@@ -74,8 +74,14 @@ Role recovery is rejected before Cancel for these deployments; ordinary joint
 cancel remains available. See [ADR-0059](../../docs/decisions/0059-deployment-stop-continuation-contract.md).
 
 Optional `--retain-stopped-session` adds **local Group continuation**, not independent
-Role stopping or Controller recovery. It is disabled by default; existing B1 launchers and
-Node configs keep the unsupported-continuation declaration. When explicitly enabled, the
+Role stopping or Controller recovery. It is disabled by default; Node templates retain the
+unsupported-continuation declaration. The production B1 launcher accepts
+`ROBOGUIDE_B1_RETAIN_STOPPED_SESSION=1`: it derives only recovery metadata in copied run-local
+Node configs, validates them with the actual Node binary and freezes their byte digests in
+`recovery-deployment.json`. Before Controller/Node registration it compares both read-only
+adapter support responses with that frozen declaration; missing, changed or oversized evidence
+aborts deployment startup. The launcher never issues a recovery command automatically.
+When explicitly enabled, the
 fixed read-only support route reports `execution-group` / `repeat-after-stop`; deployment
 registration must use the same declaration. Either scope still fails the current Role
 `/recover` gate. See [ADR-0060](../../docs/decisions/0060-retained-shared-world-continuation.md).
@@ -110,6 +116,22 @@ It requires the exact complete original set, explicit repeat permissions, actual
 and current Control revalidation of retained resources. It prepares complete new attempts before
 application checkpoint Commit and delivery; it does not enable isolated Role recovery or automatically retry
 a stall. Deployment metadata and `--retain-stopped-session` must both be enabled consistently.
+
+Actual Controller and `roboguide-node` processes can be checked without a simulator or Provider:
+
+```bash
+cargo build -p integration-server -p roboguide-node
+uv run python tools/quality/check_group_continuation_processes.py \
+  --output results/group-continuation-process-check
+```
+
+The output directory must be new. This is synthetic process conformance, using generic authored
+tasks and explicitly controlled local outcomes; it is not B1 evidence or physical validation.
+It checks that Cancel acknowledgement and partial stopping do not admit new attempts or release
+resources, same-owner continuation preserves intent/session, Completed peers are not repeated,
+and actual Node completion permits normal Mission/resource closure. Only its own processes and
+ephemeral listeners are stopped on exit. Process logs, journal databases and checkpoints remain
+available on failures as well as success.
 
 Run the bridge from the independently managed EMOS checkout and Habitat Conda environment:
 
