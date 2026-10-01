@@ -84,6 +84,30 @@ path = "/v1/capabilities/mobility.move"
 [capability_profiles.readiness.step.request]
 base = {}
 
+[[state_exports]]
+id = "execution-progress"
+owner = "habitat-local-eaios"
+object_class = "node"
+object_type = "local-execution"
+object_id = "e1-shared-node-b"
+semantic = "reported"
+payload_schema = "roboguide.execution-progress/v0.1"
+valid_for_ms = 1500
+interval_ms = 500
+value_pointer = ""
+
+[state_exports.step]
+id = "execution-progress-observer"
+connection = "habitat-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/executions/progress"
+
+[state_exports.step.request]
+base = {}
+
 [[resources]]
 id = "habitat-navigation-slot-b"
 kind = "space"

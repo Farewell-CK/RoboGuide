@@ -47,6 +47,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--step-period-ms", type=int, default=20)
     parser.add_argument(
+        "--progress-directory",
+        type=Path,
+        default=None,
+        help="opt-in bounded read-only navigation progress; absent keeps sampling disabled",
+    )
+    parser.add_argument(
         "--video-path",
         type=Path,
         default=None,
@@ -161,14 +167,23 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         spatial_profile_path=arguments.spatial_profile,
         goal_region_navigation=arguments.goal_region_navigation,
         reset_route_support=arguments.reset_route_support,
+        progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
     coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
     endpoint_a = NodeEndpoint(
-        "node-a", arguments.agent_id, ExecutionStore(arguments.state_db), coordinator
+        "node-a",
+        arguments.agent_id,
+        ExecutionStore(arguments.state_db),
+        coordinator,
+        progress_directory=arguments.progress_directory,
     )
     endpoint_b = NodeEndpoint(
-        "node-b", arguments.agent_b_id, ExecutionStore(arguments.state_db_b), coordinator
+        "node-b",
+        arguments.agent_b_id,
+        ExecutionStore(arguments.state_db_b),
+        coordinator,
+        progress_directory=arguments.progress_directory,
     )
     server_a = HabitatBridgeServer((arguments.host, arguments.port), endpoint_a)
     server_b = HabitatBridgeServer((arguments.host, arguments.port_b), endpoint_b)
@@ -213,6 +228,7 @@ def main() -> None:
         "video_fps": arguments.video_fps,
         "live_preview_path": arguments.live_preview_path,
         "live_preview_period_steps": arguments.live_preview_period_steps,
+        "progress_directory": arguments.progress_directory,
     }
     if arguments.backend == "emos-crabagent":
         config: HabitatBackendConfig = CrabAgentBackendConfig(
@@ -231,6 +247,8 @@ def main() -> None:
         store,
         lambda: HabitatProcessBackend(config, arguments.initialization_timeout_s, backend_class),
         arguments.initialization_timeout_s,
+        progress_directory=arguments.progress_directory,
+        agent_id=arguments.agent_id,
     )
     server = HabitatBridgeServer((arguments.host, arguments.port), adapter)
     try:

@@ -26,6 +26,7 @@ VIDEO_ARGS=()
 LIVE_VIEW_ARGS=()
 GOAL_REGION_ARGS=()
 ROUTE_SUPPORT_CHECK_ARGS=()
+PROGRESS_ARGS=()
 
 COMPONENTS=()
 REQUEST_ID=""
@@ -143,6 +144,9 @@ fi
 cp "$INPUT_JSON" "$RUN/b1-input-used.json"
 INPUT_JSON="$RUN/b1-input-used.json"
 mkdir -p "$RUN/mpl" "$RUN/artifacts" "$RUN/evidence"
+if [[ "${ROBOGUIDE_B1_EXECUTION_PROGRESS:-0}" == 1 ]]; then
+    PROGRESS_ARGS=(--progress-directory "$RUN/evidence/execution-progress")
+fi
 # E1 keeps human-reviewable visual evidence for every run by default.  The
 # generic Habitat adapter remains opt-in, and deployments may set this to 0
 # only when a pre-registered paired protocol disables capture for both arms.
@@ -231,6 +235,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         "$HABITAT_PYTHON" -u -m habitat_local_eaios \
         --port 28100 \
         --backend shared-emos-stage2 \
+        "${PROGRESS_ARGS[@]}" \
         "${GOAL_REGION_ARGS[@]}" \
         --subtask-mode natural-objective \
         --port-b 28102 \

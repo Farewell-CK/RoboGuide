@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from .execution_progress import NavigationProgressPublisher
 from .model import CanonicalMobilityInvocation, IntegrationError
 
 
@@ -26,6 +27,7 @@ class HabitatBackendConfig:
     video_fps: int = 30
     live_preview_path: Path | None = None
     live_preview_period_steps: int = 5
+    progress_directory: Path | None = None
 
 
 def habitat_config_overrides(seed: int | None) -> list[str]:
@@ -204,6 +206,10 @@ class HabitatMobilityBackend:
             entity_index = self._entity_index(invocation.destination)
             initial = self._agent_position()
             scene_id = str(habitat_env.current_episode.scene_id)
+            progress = NavigationProgressPublisher(
+                self._config.progress_directory, invocation, self._config.agent_id
+            )
+            progress.observe(habitat_env, "direct-oracle-nav")
             running(
                 f"Habitat episode {self._config.episode_id} started navigation to "
                 f"{invocation.destination}"
@@ -228,6 +234,7 @@ class HabitatMobilityBackend:
                     }
                 )
                 steps += 1
+                progress.observe(habitat_env, "direct-oracle-nav")
                 if self._config.step_period_ms:
                     time.sleep(self._config.step_period_ms / 1_000)
                 if _observation_true(observations, finished_key):

@@ -34,6 +34,7 @@ from .crabagent_backend import CrabAgentBackendConfig
 from .diagnostics import create_physical_diagnostics, diagnostics_enabled
 from .emos_stage2 import EmosStage2Runtime
 from .evidence_io import write_text_atomic
+from .execution_progress import NavigationProgressPublisher, read_execution_progress
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
@@ -561,6 +562,12 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             action_lengths = actor.policy_action_space_shape_lens
             agent_ids = self._agent_ids
             initials = {agent_id: self._agent_position_for(agent_id) for agent_id in agent_ids}
+            progress = {
+                agent_id: NavigationProgressPublisher(
+                    getattr(self._config, "progress_directory", None), invocation, agent_id
+                )
+                for agent_id, invocation in invocations.items()
+            }
             scene_id = str(habitat_env.current_episode.scene_id)
             chat_history_root = self._evidence_dir() / "chat-history"
             (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
@@ -599,6 +606,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 step_result = gym_env.step(env_action)
                 observations, done, info = self._gym_step_result(step_result)
                 steps += 1
+                for agent_id, publisher in progress.items():
+                    publisher.observe(habitat_env, current_skills[agent_id])
                 exception_phase = "post_step_observation"
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
@@ -1045,12 +1054,15 @@ class NodeEndpoint:
         agent_id: int,
         store: ExecutionStore,
         coordinator: SharedWorldCoordinator,
+        *,
+        progress_directory: Path | None = None,
     ) -> None:
         """Bind one durable store and agent mapping to the shared coordinator."""
         self.name = name
         self.agent_id = agent_id
         self._store = store
         self._coordinator = coordinator
+        self._progress_directory = progress_directory
         self._lock = threading.RLock()
         self._scheduled: set[str] = set()
         self._known_keys: dict[str, str] = {
@@ -1139,6 +1151,12 @@ class NodeEndpoint:
     def store(self) -> ExecutionStore:
         """Expose the durable store for coordinator terminal projection."""
         return self._store
+
+    def progress(self) -> dict[str, object]:
+        """Read this endpoint's current attempt; sibling files confer no authority."""
+        return read_execution_progress(
+            self._progress_directory, self.agent_id, self._store.active_execution()
+        )
 
     @staticmethod
     def _execution_response(execution: StoredExecution) -> dict[str, object]:

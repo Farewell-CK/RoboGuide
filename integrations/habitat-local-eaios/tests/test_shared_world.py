@@ -7,6 +7,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -811,11 +812,13 @@ def _single_idle_setup(
 
 
 @pytest.mark.parametrize("assigned_agent_id", [0, 1])
+@pytest.mark.parametrize("progress_enabled", [False, True])
 def test_unassigned_model_is_not_called_while_assigned_task_completes(
-    tmp_path: Path, assigned_agent_id: int
+    tmp_path: Path, assigned_agent_id: int, progress_enabled: bool
 ) -> None:
     """One Task can finish locally without an idle model veto or fabricated PDDL success."""
     runtime, actor, agents = _single_idle_setup(tmp_path, assigned_agent_id=assigned_agent_id)
+    runtime._config.progress_directory = tmp_path / "progress" if progress_enabled else None
     gym_calls: list[object] = []
     destination = "north" if assigned_agent_id == 0 else "south"
 
@@ -829,7 +832,10 @@ def test_unassigned_model_is_not_called_while_assigned_task_completes(
             {"pddl_success": False},
         )
 
-    invocation = CanonicalMobilityInvocation.from_request(_request("m", destination, "first"))
+    invocation = replace(
+        CanonicalMobilityInvocation.from_request(_request("m", destination, "first")),
+        attempt_id="single-attempt",
+    )
     outcome = _single_idle_loop(
         runtime, actor, invocation, SimpleNamespace(step=step), lambda: False
     )
@@ -933,13 +939,15 @@ def test_serial_tasks_rebind_same_actor_without_idle_model_calls(tmp_path: Path)
 
 @pytest.mark.parametrize("completed_first", [False, True])
 @pytest.mark.parametrize("violation", ["wrong-target", "multiple-tools"])
+@pytest.mark.parametrize("progress_enabled", [False, True])
 def test_contract_violation_stops_before_gym_and_preserves_prior_completion(
-    tmp_path: Path, completed_first: bool, violation: str
+    tmp_path: Path, completed_first: bool, violation: str, progress_enabled: bool
 ) -> None:
     """The real pair loop reports a local violation without erasing completed work."""
     diagnostics = RecordingDiagnostics()
     runtime = ContractLoopHarness(tmp_path, diagnostics)
     runtime._config = SimpleNamespace(max_steps=3, step_period_ms=0, episode_id="generic")
+    runtime._config.progress_directory = tmp_path / "progress" if progress_enabled else None
     agents = [
         ContractAgent("agent_0", ContractModel("north", None)),
         ContractAgent(
@@ -975,7 +983,10 @@ def test_contract_violation_stops_before_gym_and_preserves_prior_completion(
         )
 
     invocations = {
-        index: CanonicalMobilityInvocation.from_request(_request("m", target, f"t{index}"))
+        index: replace(
+            CanonicalMobilityInvocation.from_request(_request("m", target, f"t{index}")),
+            attempt_id=f"attempt-{index}",
+        )
         for index, target in enumerate(["north", "south"])
     }
     outcomes, steps, done, _ = runtime._pair_loop(

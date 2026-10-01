@@ -35,6 +35,9 @@ class WorkflowAdapter(Protocol):
     def cancel(self, request: object) -> dict[str, object]:
         """Accept cancellation intent for one handle."""
 
+    def progress(self) -> dict[str, object]:
+        """Read optional operation-owned progress without changing execution."""
+
 
 class HabitatBridgeServer(ThreadingHTTPServer):
     """Threaded loopback server retaining one shared Local EAIOS adapter."""
@@ -56,6 +59,9 @@ class HabitatBridgeHandler(BaseHTTPRequestHandler):
         """Serve read-only health and exact-operation readiness routes."""
         if self.path == "/v1/health":
             self._respond(HTTPStatus.OK, self.server.adapter.health())
+            return
+        if self.path == "/v1/executions/progress":
+            self._respond(HTTPStatus.OK, self.server.adapter.progress())
             return
         if self.path.startswith("/v1/capabilities/"):
             self._respond(HTTPStatus.OK, self.server.adapter.readiness())

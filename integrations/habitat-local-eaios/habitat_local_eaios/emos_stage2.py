@@ -12,6 +12,7 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .evidence_io import write_text_atomic
+from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .source_provenance import build_runtime_source_manifest
@@ -375,6 +376,9 @@ class EmosStage2Runtime:
         action_lengths = actor.policy_action_space_shape_lens
         steps = 0
         step_offset = self._policy_step_offset()
+        progress = NavigationProgressPublisher(
+            getattr(self._config, "progress_directory", None), invocation, self._config.agent_id
+        )
         skill_sequence: list[str] = []
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
@@ -423,6 +427,7 @@ class EmosStage2Runtime:
                 observations, done, info = self._gym_step_result(step_result)
                 self._last_policy_observations = observations
                 steps += 1
+                progress.observe(habitat_env, current_skills[self._config.agent_id])
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
                     previous.copy_(action_data.actions)
