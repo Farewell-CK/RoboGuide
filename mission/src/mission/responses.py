@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
+from http.client import HTTPException
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -78,9 +79,13 @@ class UrllibJsonTransport:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:1000]
-            raise MissionProviderError(f"provider returned HTTP {error.code}: {detail}") from error
-        except urllib.error.URLError as error:
-            raise MissionProviderError(f"provider request failed: {error.reason}") from error
+            raise MissionProviderError(
+                f"provider returned HTTP {error.code}: {detail}", status_code=error.code
+            ) from error
+        except (urllib.error.URLError, TimeoutError, OSError, HTTPException) as error:
+            raise MissionProviderError(
+                f"provider request failed: {error}", transport_failure=True
+            ) from error
         decoded: object = json.loads(body)
         if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
             raise MissionProviderError("provider response must be a JSON object")
@@ -226,7 +231,10 @@ class _ResponsesClient:
     ) -> None:
         """Validate runtime provider access and retain injectable request dependencies."""
         if settings.llm.network_access != "enabled":
-            raise MissionProviderError("Mission LLM network access is disabled by configuration")
+            raise MissionProviderError(
+                "Mission LLM network access is disabled by configuration",
+                configuration_failure=True,
+            )
         self._settings = settings
         self._environment = environment
         self._transport = transport if transport is not None else UrllibJsonTransport()
@@ -237,7 +245,9 @@ class _ResponsesClient:
         """Load the configured JSON Schema used for strict provider output."""
         decoded: object = json.loads(self._settings.schema_path.read_text(encoding="utf-8"))
         if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-            raise MissionProviderError("Mission Plan schema must be a JSON object")
+            raise MissionProviderError(
+                "Mission Plan schema must be a JSON object", configuration_failure=True
+            )
         return cast(JSONObject, decoded)
 
     def _mission_plan_provider_schema(
@@ -250,7 +260,9 @@ class _ResponsesClient:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
         prompt = path.read_text(encoding="utf-8").strip()
         if not prompt:
-            raise MissionProviderError(f"Mission prompt is empty: {path}")
+            raise MissionProviderError(
+                f"Mission prompt is empty: {path}", configuration_failure=True
+            )
         return prompt
 
     def _satisfaction_policy_input(self) -> JSONObject | None:

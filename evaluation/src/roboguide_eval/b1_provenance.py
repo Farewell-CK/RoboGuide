@@ -32,6 +32,9 @@ SUBMISSION_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
 RUN_FAILURE_SCHEMA = "roboguide.e1.run-failure/v0.1"
 OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.1"
+COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
+    {OBSERVATIONS_SCHEMA, "roboguide.mission-request-observations/v0.2"}
+)
 _DIGEST = re.compile(r"sha256:[a-f0-9]{64}$")
 
 
@@ -219,7 +222,8 @@ def observed_request(request: Any, observations: Any) -> dict[str, Any]:
     doc = _object(request)
     obs = _object(observations)
     if (
-        obs.get("schema_version") != OBSERVATIONS_SCHEMA
+        not isinstance(obs.get("schema_version"), str)
+        or obs.get("schema_version") not in COMPATIBLE_OBSERVATIONS_SCHEMAS
         or obs.get("request_id") != doc.get("request_id")
         or obs.get("mission_id") != doc.get("mission_id")
         or obs.get("request_record_digest") != plan_digest(doc)

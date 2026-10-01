@@ -17,6 +17,7 @@ from mission.controller import (
     InventoryNode,
     InventoryResource,
     InventorySnapshot,
+    MissionPlanSubmitter,
     SubmissionReceipt,
 )
 from mission.grounding_context import GroundingContextSnapshot
@@ -354,7 +355,7 @@ def _engine(
     tmp_path: Path,
     interpreter: FakeInterpreter,
     planner: FakePlanner,
-    controller: FakeController,
+    controller: MissionPlanSubmitter,
     risk_contracts: frozenset[str] = frozenset(),
 ) -> MissionRequestEngine:
     """Compose one deterministic engine over a real temporary SQLite store."""
@@ -709,8 +710,8 @@ def test_controller_rejection_remains_blocked_instead_of_fabricating_acceptance(
     assert record.issues == ("Controller HTTP 409: resource conflict",)
 
 
-def test_submission_retry_reuses_exact_draft_without_replanning(tmp_path: Path) -> None:
-    """A lost Controller response retries the persisted plan rather than asking the model again."""
+def test_submission_retry_requires_reconciliation_without_reposting(tmp_path: Path) -> None:
+    """A lost response never replays a POST when the port lacks read-only reconciliation."""
     interpreter = FakeInterpreter([_assessment()])
     planner = FakePlanner()
     controller = FakeController(
@@ -722,12 +723,12 @@ def test_submission_retry_reuses_exact_draft_without_replanning(tmp_path: Path) 
     failed = engine.create("执行明确的运输任务")
     assert failed.lifecycle is MissionRequestLifecycle.FAILED
     assert failed.issues == ("submission failed: response lost",)
-    accepted = engine.retry(failed.request_id)
-
-    assert accepted.lifecycle is MissionRequestLifecycle.ACCEPTED
+    with pytest.raises(MissionRequestError, match="read-only Controller observer"):
+        engine.retry(failed.request_id)
     assert len(planner.calls) == 1
     assert len(interpreter.calls) == 1
-    assert controller.submissions[0].to_json() == controller.submissions[1].to_json()
+    assert len(controller.submissions) == 1
+    assert engine.get(failed.request_id).to_json() == failed.to_json()
 
 
 def test_v01_request_projection_restores_with_empty_review_history() -> None:

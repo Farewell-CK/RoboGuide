@@ -214,7 +214,11 @@ def make_run(
         raw["mission"]["id"] = kwargs["mission_id"]
         return MissionPlan.from_json(raw)
 
-    planner.plan.side_effect = RuntimeError("model output invalid") if case == "D" else generate
+    from mission.provider_errors import MissionProviderError
+
+    planner.plan.side_effect = (
+        MissionProviderError("model output invalid") if case == "D" else generate
+    )
     reviewer = Mock()
     reviewer.review.side_effect = [
         MissionPlanReview(

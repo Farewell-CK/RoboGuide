@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 from mission.submission_evidence import (
@@ -213,9 +214,27 @@ class MissionRequestRecord:
     submission_evidence: ControllerSubmissionEvidence | None = None
     failure_evidence: JSONObject | None = None
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
+    recovery_evidence: RequestRecoveryEvidence | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
+        recovery = self.recovery_evidence
+        if recovery is not None and (
+            recovery.request_id != self.request_id
+            or recovery.mission_id != self.mission_id
+            or recovery.draft_revision != self.draft_revision
+            or recovery.draft_digest != self.draft_digest
+            or (
+                self.plan is not None
+                and recovery.draft_digest is not None
+                and recovery.draft_digest != canonical_plan_digest(self.plan.to_json())
+            )
+            or recovery.grounding_context_digest
+            != (self.grounding_context.context_digest if self.grounding_context else None)
+        ):
+            raise MissionRequestError(
+                "recovery evidence is detached from the current draft/context"
+            )
         context = self.grounding_context
         if context is None:
             return
@@ -259,6 +278,7 @@ class MissionRequestRecord:
             self.submission_evidence,
             self.failure_evidence,
             self.rejected_drafts,
+            self.recovery_evidence,
         )
 
     @classmethod

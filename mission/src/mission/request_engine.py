@@ -12,7 +12,7 @@ from typing import Protocol, cast
 
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
-from mission.controller import MissionControllerError, MissionPlanSubmitter
+from mission.controller import MissionControllerError, MissionPlanSubmitter, SubmissionReceipt
 from mission.grounding_context import (
     GroundingContextSnapshot,
     admitted_physical_entity_ids,
@@ -23,6 +23,13 @@ from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
 from mission.provider_errors import MissionIdentityError
+from mission.recovery import (
+    FailureReason,
+    FailureStage,
+    RecoveryAction,
+    RequestRecoveryEvidence,
+    classify_failure,
+)
 from mission.rejected_draft import (
     RejectedDraftEvidence,
     RejectedPlanError,
@@ -215,6 +222,10 @@ class MissionRequestEngine:
                 raise MissionRequestError(
                     f"cannot add a message while request is {record.lifecycle.value}"
                 )
+            if self._submission_attempted(record):
+                raise MissionRequestError(
+                    "submitted plans cannot be replaced by a dialogue message"
+                )
             updated = self._update(
                 record,
                 dialogue=(
@@ -230,6 +241,7 @@ class MissionRequestEngine:
                 approval_reasons=(),
                 issues=(),
                 repair_attempts=0,
+                recovery_evidence=None,
             )
             return self._process(updated)
 
@@ -250,7 +262,7 @@ class MissionRequestEngine:
             return self._submit(record)
 
     def retry(self, request_id: str) -> MissionRequestRecord:
-        """Retry deliberation from dialogue or resubmit an unchanged rejected draft."""
+        """Route an explicit retry from typed evidence without replaying an ambiguous POST."""
         with self._locked_request(request_id):
             record = self.get(request_id)
             if record.lifecycle not in {
@@ -258,16 +270,56 @@ class MissionRequestEngine:
                 MissionRequestLifecycle.BLOCKED,
             }:
                 raise MissionRequestError("only Failed or Blocked requests can be retried")
-            if (
-                record.plan is not None
-                and record.issues
-                and (
-                    record.issues[0].startswith("submission ")
-                    or record.issues[0].startswith("Controller HTTP ")
-                )
-            ):
+            recovery = record.recovery_evidence
+            if recovery is None:
+                if self._submission_attempted(record):
+                    recovery = self._recovery_evidence(
+                        record,
+                        FailureStage.CONTROLLER_SUBMISSION,
+                        FailureReason.SUBMISSION_AMBIGUOUS,
+                    )
+                    record = self._update(record, recovery_evidence=recovery)
+                else:
+                    return self._process(self._update(record, issues=(), repair_attempts=0))
+            if recovery.action is RecoveryAction.RESUBMIT_UNCHANGED:
                 return self._submit(record)
-            return self._process(self._update(record, issues=(), repair_attempts=0))
+            if recovery.action is RecoveryAction.RECONCILE_SUBMISSION:
+                observer = getattr(self._controller, "observe_mission", None)
+                if not callable(observer):
+                    raise MissionRequestError(
+                        "submission is unresolved; a read-only Controller observer is required"
+                    )
+                try:
+                    observation = observer(record.mission_id)
+                    if not isinstance(observation, dict):
+                        raise MissionControllerError(
+                            "Controller observer returned invalid evidence"
+                        )
+                    recovery = recovery.observe_controller(cast(JSONObject, observation))
+                except Exception as error:
+                    recovery = recovery.observe_controller(
+                        {
+                            "schema_version": "roboguide.controller-mission-observation/v0.1",
+                            "mission_id": record.mission_id,
+                            "lookup_result": "unavailable",
+                            "status_code": None,
+                            "group_id": None,
+                            "mission_status": None,
+                            "error_type": type(error).__name__[:128],
+                        }
+                    )
+                # Keep the original error and POST evidence. The status API has
+                # no accepted-plan digest, so a lookup cannot complete admission.
+                return self._update(record, recovery_evidence=recovery)
+            if recovery.action in {RecoveryAction.CHECK_CONFIGURATION, RecoveryAction.REVIEW_INPUT}:
+                raise MissionRequestError(
+                    f"retry requires {recovery.action.value} before deliberation"
+                )
+            if recovery.action is not RecoveryAction.RETRY_DELIBERATION:
+                raise MissionRequestError("this request cannot be retried through deliberation")
+            return self._process(
+                self._update(record, issues=(), repair_attempts=0, recovery_evidence=None)
+            )
 
     def cancel(self, request_id: str) -> MissionRequestRecord:
         """Cancel pre-execution deliberation without fabricating Mission cancellation."""
@@ -275,6 +327,16 @@ class MissionRequestEngine:
             record = self.get(request_id)
             if record.lifecycle is MissionRequestLifecycle.ACCEPTED:
                 raise MissionRequestError("accepted Missions must use the Mission cancel API")
+            if record.lifecycle is MissionRequestLifecycle.SUBMITTING or (
+                self._submission_attempted(record)
+                and (
+                    record.recovery_evidence is None
+                    or record.recovery_evidence.reason is not FailureReason.SUBMISSION_REJECTED
+                )
+            ):
+                raise MissionRequestError(
+                    "unresolved submissions must use Controller reconciliation/cancellation"
+                )
             if record.lifecycle is MissionRequestLifecycle.CANCELLED:
                 return record
             return self._update(
@@ -292,6 +354,7 @@ class MissionRequestEngine:
                 lifecycle=MissionRequestLifecycle.INTERPRETING,
                 submission_evidence=None,
                 failure_evidence=None,
+                recovery_evidence=None,
             )
             grounding_context = self._grounding_reader.capture(
                 record.request_id, record.dialogue, self._clock()
@@ -329,7 +392,12 @@ class MissionRequestEngine:
                 lifecycle=MissionRequestLifecycle.FAILED,
                 approval_required=False,
                 issues=(str(error),),
-                failure_evidence=self._failure_evidence(record, stage, str(error)),
+                failure_evidence=self._failure_evidence(
+                    record, stage, str(error), classify_failure(error)
+                ),
+                recovery_evidence=self._recovery_evidence(
+                    record, FailureStage(stage), classify_failure(error)
+                ),
             )
         return self._review_and_advance(record, grounded_intent)
 
@@ -556,6 +624,7 @@ class MissionRequestEngine:
             repair_attempts=(
                 record.repair_attempts if repair_attempts is None else repair_attempts
             ),
+            recovery_evidence=None,
         )
 
     def _review_and_advance(
@@ -586,7 +655,12 @@ class MissionRequestEngine:
                     record,
                     lifecycle=MissionRequestLifecycle.FAILED,
                     issues=(f"mission review failed: {error}",),
-                    failure_evidence=self._failure_evidence(record, "reviewer", str(error)),
+                    failure_evidence=self._failure_evidence(
+                        record, "reviewer", str(error), classify_failure(error)
+                    ),
+                    recovery_evidence=self._recovery_evidence(
+                        record, FailureStage.REVIEWER, classify_failure(error)
+                    ),
                 )
             attempt = MissionPlanReviewAttempt(
                 draft_revision=record.draft_revision,
@@ -621,6 +695,9 @@ class MissionRequestEngine:
                     approval_required=False,
                     issues=("mission review rejected automatic repair",),
                     failure_evidence=self._failure_evidence(record, "reviewer", "draft_rejected"),
+                    recovery_evidence=self._recovery_evidence(
+                        record, FailureStage.REVIEWER, FailureReason.DRAFT_REJECTED
+                    ),
                 )
             if record.repair_attempts >= self._max_repair_attempts:
                 return self._update(
@@ -631,6 +708,9 @@ class MissionRequestEngine:
                     failure_evidence=self._failure_evidence(
                         record, "reviewer", "repair_budget_exhausted"
                     ),
+                    recovery_evidence=self._recovery_evidence(
+                        record, FailureStage.REVIEWER, FailureReason.REPAIR_BUDGET_EXHAUSTED
+                    ),
                 )
             if self._repairer is None:
                 return self._update(
@@ -640,6 +720,9 @@ class MissionRequestEngine:
                     issues=("mission review requires repair but no Repairer is configured",),
                     failure_evidence=self._failure_evidence(
                         record, "reviewer", "repair_unavailable"
+                    ),
+                    recovery_evidence=self._recovery_evidence(
+                        record, FailureStage.REVIEWER, FailureReason.REPAIR_UNAVAILABLE
                     ),
                 )
             assessment = record.assessment
@@ -675,7 +758,12 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=(f"mission repair failed: {error}",),
-                    failure_evidence=self._failure_evidence(record, "repairer", str(error)),
+                    failure_evidence=self._failure_evidence(
+                        record, "repairer", str(error), classify_failure(error)
+                    ),
+                    recovery_evidence=self._recovery_evidence(
+                        record, FailureStage.REPAIRER, classify_failure(error)
+                    ),
                 )
 
     def _advance_admitted_draft(self, record: MissionRequestRecord) -> MissionRequestRecord:
@@ -705,9 +793,13 @@ class MissionRequestEngine:
             record,
             lifecycle=MissionRequestLifecycle.SUBMITTING,
             approval_required=False,
+            recovery_evidence=self._recovery_evidence(
+                record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_IN_FLIGHT
+            ),
         )
         try:
             receipt = self._controller.submit_plan(plan)
+            self._validate_submission_receipt(record, receipt)
         except Exception as error:
             observed = (
                 error.submission_evidence if isinstance(error, MissionControllerError) else None
@@ -721,6 +813,9 @@ class MissionRequestEngine:
                 ),
                 failure_evidence=self._failure_evidence(
                     record, "controller_submission", str(error)
+                ),
+                recovery_evidence=self._recovery_evidence(
+                    record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_AMBIGUOUS
                 ),
             )
         record = self._update(
@@ -737,6 +832,12 @@ class MissionRequestEngine:
                 record,
                 lifecycle=MissionRequestLifecycle.ACCEPTED,
                 issues=(),
+                recovery_evidence=self._recovery_evidence(
+                    record,
+                    FailureStage.CONTROLLER_SUBMISSION,
+                    FailureReason.SUBMISSION_ACCEPTED,
+                    receipt.status_code,
+                ),
             )
         return self._update(
             record,
@@ -745,7 +846,52 @@ class MissionRequestEngine:
             failure_evidence=self._failure_evidence(
                 record, "controller_submission", receipt.detail
             ),
+            recovery_evidence=self._recovery_evidence(
+                record,
+                FailureStage.CONTROLLER_SUBMISSION,
+                FailureReason.SUBMISSION_REJECTED
+                if receipt.status_code in {400, 409, 422}
+                else FailureReason.SUBMISSION_AMBIGUOUS,
+                receipt.status_code,
+            ),
         )
+
+    def _validate_submission_receipt(
+        self, record: MissionRequestRecord, receipt: SubmissionReceipt
+    ) -> None:
+        """Reject contradictory receipts without claiming definitive non-acceptance."""
+        evidence = receipt.evidence
+        plan = record.plan
+        if (
+            plan is None
+            or record.draft_digest != _plan_digest(plan)
+            or plan.mission.mission_id != record.mission_id
+            or type(receipt.accepted) is not bool
+            or type(receipt.status_code) is not int
+            or not 100 <= receipt.status_code <= 599
+            or receipt.accepted != (receipt.status_code in {200, 202})
+            or (
+                evidence is not None
+                and (
+                    evidence.submitted_mission_id != record.mission_id
+                    or evidence.submitted_plan_digest != record.draft_digest
+                    or evidence.controller_status_code != receipt.status_code
+                    or (
+                        receipt.accepted
+                        and (
+                            evidence.controller_mission_id != record.mission_id
+                            or not isinstance(evidence.controller_group_id, str)
+                            or not evidence.controller_group_id.strip()
+                            or len(evidence.controller_group_id) > 256
+                            or evidence.transport_error is not None
+                        )
+                    )
+                )
+            )
+        ):
+            failure = MissionControllerError("Controller receipt contradicts the submitted draft")
+            failure.submission_evidence = evidence
+            raise failure
 
     def _update(
         self,
@@ -766,6 +912,7 @@ class MissionRequestEngine:
         submission_evidence: ControllerSubmissionEvidence | None | _Unset = _UNSET,
         failure_evidence: JSONObject | None | _Unset = _UNSET,
         rejected_drafts: tuple[RejectedDraftEvidence, ...] | None = None,
+        recovery_evidence: RequestRecoveryEvidence | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
@@ -808,12 +955,60 @@ class MissionRequestEngine:
                 if isinstance(failure_evidence, _Unset)
                 else failure_evidence
             ),
+            recovery_evidence=(
+                record.recovery_evidence
+                if isinstance(recovery_evidence, _Unset)
+                else recovery_evidence
+            ),
         )
         self._store.save(updated)
         return updated
 
+    def _recovery_evidence(
+        self,
+        record: MissionRequestRecord,
+        stage: FailureStage,
+        reason: FailureReason,
+        status_code: int | None = None,
+    ) -> RequestRecoveryEvidence:
+        """Freeze the recovery boundary beside its draft/context before an external effect."""
+        return RequestRecoveryEvidence(
+            record.request_id,
+            record.mission_id,
+            stage,
+            reason,
+            record.draft_revision,
+            record.draft_digest,
+            record.grounding_context.context_digest if record.grounding_context else None,
+            self._clock(),
+            status_code,
+        )
+
+    def _submission_attempted(self, record: MissionRequestRecord) -> bool:
+        """Fence submitted and ambiguous legacy plans without inspecting diagnostic wording."""
+        if record.recovery_evidence is not None:
+            return record.recovery_evidence.stage is FailureStage.CONTROLLER_SUBMISSION
+        if record.submission_evidence is not None:
+            return True
+        failure = record.failure_evidence
+        if failure is not None and (
+            failure.get("request_id") == record.request_id
+            and failure.get("mission_id") == record.mission_id
+        ):
+            stage = failure.get("stage")
+            if isinstance(stage, str) and stage in {item.value for item in FailureStage}:
+                return stage == FailureStage.CONTROLLER_SUBMISSION.value
+        return record.plan is not None and record.lifecycle in {
+            MissionRequestLifecycle.FAILED,
+            MissionRequestLifecycle.BLOCKED,
+        }
+
     def _failure_evidence(
-        self, record: MissionRequestRecord, stage: str, detail: str
+        self,
+        record: MissionRequestRecord,
+        stage: str,
+        detail: str,
+        reason: FailureReason | None = None,
     ) -> JSONObject:
         """Observe the failing boundary without changing retry or lifecycle policy."""
         return {
@@ -823,6 +1018,14 @@ class MissionRequestEngine:
             "stage": stage,
             "failure_owner": "MODEL"
             if stage in {"interpreter", "planner", "draft_validation", "reviewer", "repairer"}
+            and reason
+            not in {
+                FailureReason.INTERNAL_FAILURE,
+                FailureReason.PROVIDER_AUTHENTICATION,
+                FailureReason.PROVIDER_CONFIGURATION,
+                FailureReason.PROVIDER_REJECTION,
+                FailureReason.PROVIDER_TRANSPORT,
+            }
             else "SUT_SYSTEM",
             "detail": detail,
             "observed_at_ms": self._clock(),
@@ -907,6 +1110,49 @@ class MissionRequestEngine:
         }
         for record in self._store.records():
             if record.lifecycle in transient:
+                sent = record.submission_evidence
+                if (
+                    record.lifecycle is MissionRequestLifecycle.SUBMITTING
+                    and sent is not None
+                    and sent.request_id == record.request_id
+                    and sent.controller_status_code in {200, 202}
+                ):
+                    try:
+                        self._validate_submission_receipt(
+                            record,
+                            SubmissionReceipt(True, sent.controller_status_code, "", sent),
+                        )
+                    except MissionControllerError:
+                        pass
+                    else:
+                        # The real receipt was saved atomically before the
+                        # service crashed. Reduce that existing fact; never
+                        # replay the POST or infer acceptance from a lookup.
+                        self._update(
+                            record,
+                            lifecycle=MissionRequestLifecycle.ACCEPTED,
+                            approval_required=False,
+                            issues=(),
+                            failure_evidence=None,
+                            recovery_evidence=self._recovery_evidence(
+                                record,
+                                FailureStage.CONTROLLER_SUBMISSION,
+                                FailureReason.SUBMISSION_ACCEPTED,
+                                sent.controller_status_code,
+                            ),
+                        )
+                        continue
+                stages = {
+                    MissionRequestLifecycle.RECEIVED: FailureStage.GROUNDING,
+                    MissionRequestLifecycle.INTERPRETING: FailureStage.INTERPRETER
+                    if record.grounding_context is not None
+                    else FailureStage.GROUNDING,
+                    MissionRequestLifecycle.DRAFTED: FailureStage.DRAFT_VALIDATION,
+                    MissionRequestLifecycle.REVIEWING: FailureStage.REVIEWER,
+                    MissionRequestLifecycle.REPAIRING: FailureStage.REPAIRER,
+                    MissionRequestLifecycle.SUBMITTING: FailureStage.CONTROLLER_SUBMISSION,
+                }
+                stage = stages[record.lifecycle]
                 issue = (
                     "submission interrupted by Mission Service restart"
                     if record.lifecycle is MissionRequestLifecycle.SUBMITTING
@@ -917,6 +1163,16 @@ class MissionRequestEngine:
                     lifecycle=MissionRequestLifecycle.FAILED,
                     approval_required=False,
                     issues=(issue,),
+                    failure_evidence=self._failure_evidence(
+                        record, stage.value, issue, FailureReason.INTERNAL_FAILURE
+                    ),
+                    recovery_evidence=self._recovery_evidence(
+                        record,
+                        stage,
+                        FailureReason.SUBMISSION_AMBIGUOUS
+                        if record.lifecycle is MissionRequestLifecycle.SUBMITTING
+                        else FailureReason.DELIBERATION_INTERRUPTED,
+                    ),
                 )
 
 

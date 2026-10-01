@@ -37,6 +37,46 @@ def test_actual_controller_post_digest_matches_captured_bytes(tmp_path: Path) ->
     assert assess_b1_directory(run)["checks"]["provenance_chain_passed"] is True
 
 
+@pytest.mark.parametrize("version", ["v0.1", "v0.2"])
+def test_recovery_observation_versions_preserve_existing_b1_admission(
+    tmp_path: Path, version: str
+) -> None:
+    """Recovery metadata versioning preserves original physical/semantic admission evidence."""
+    run = make_run(tmp_path)
+    before = assess_b1_directory(run)
+    observations = json.loads((run / "b1-request-observations.json").read_text())
+    observations["schema_version"] = f"roboguide.mission-request-observations/{version}"
+    if version == "v0.1":
+        observations.pop("recovery_evidence", None)
+    write_json(run / "b1-request-observations.json", observations)
+    build_provenance(run)
+    after = assess_b1_directory(run)
+    assert after["admission"] == before["admission"]
+    assert after["checks"] == before["checks"]
+
+
+def test_controller_lookup_cannot_replace_an_actual_acceptance_receipt(tmp_path: Path) -> None:
+    """Matching Mission/group lookup facts cannot manufacture missing HTTP admission proof."""
+    run = make_run(tmp_path)
+    observations = json.loads((run / "b1-request-observations.json").read_text())
+    sent = observations["submission_evidence"]
+    sent["controller_status_code"] = None
+    sent["transport_error"] = "TimeoutError"
+    observations["recovery_evidence"]["controller_observation"] = {
+        "schema_version": "roboguide.controller-mission-observation/v0.1",
+        "mission_id": sent["submitted_mission_id"],
+        "lookup_result": "found",
+        "status_code": 200,
+        "group_id": sent["controller_group_id"],
+        "mission_status": "Running",
+    }
+    write_json(run / "b1-request-observations.json", observations)
+    build_provenance(run)
+    verdict = assess_b1_directory(run)
+    assert verdict["admission"]["provenance_valid"] is False
+    assert "controller_mission_missing" in verdict["context"]["provenance_failures"]
+
+
 @pytest.mark.parametrize("mutation", ["destination", "actor", "constraint", "execution_intent"])
 def test_same_task_ids_do_not_hide_changed_actual_submission(tmp_path: Path, mutation: str) -> None:
     """An independently hashed different POST body cannot pass via unchanged TaskIds."""

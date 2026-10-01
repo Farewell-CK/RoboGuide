@@ -11,10 +11,14 @@ from typing import TYPE_CHECKING, cast
 from mission.models import JSONObject
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only dependency keeps the modules acyclic
+    from mission.recovery import RequestRecoveryEvidence
     from mission.rejected_draft import RejectedDraftEvidence
 
 SUBMISSION_EVIDENCE_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
-OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.1"
+OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.2"
+COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
+    {"roboguide.mission-request-observations/v0.1", OBSERVATIONS_SCHEMA}
+)
 
 
 def canonical_plan_digest(document: Mapping[str, object]) -> str:
@@ -73,6 +77,7 @@ class MissionRequestObservations:
     submission_evidence: ControllerSubmissionEvidence | None
     failure_evidence: JSONObject | None
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
+    recovery_evidence: RequestRecoveryEvidence | None = None
     schema_version: str = OBSERVATIONS_SCHEMA
 
     def to_json(self) -> JSONObject:
@@ -81,4 +86,7 @@ class MissionRequestObservations:
         drafts = document["rejected_drafts"]
         if isinstance(drafts, tuple | list):
             document["rejected_drafts"] = list(drafts)
+        document["recovery_evidence"] = (
+            self.recovery_evidence.to_json() if self.recovery_evidence is not None else None
+        )
         return document

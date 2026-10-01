@@ -172,8 +172,8 @@ def test_observations_api_and_storage_do_not_extend_request_v04(tmp_path: Path) 
     assert legacy.submission_evidence is None
 
 
-def test_model_failure_before_plan_is_durable_observation(tmp_path: Path) -> None:
-    """An actual Planner exception records the reached model stage without a fake plan."""
+def test_unclassified_planner_failure_before_plan_is_durable_observation(tmp_path: Path) -> None:
+    """An unclassified Planner exception cannot be asserted to be a model-output error."""
     engine = _engine(
         tmp_path, FakeInterpreter([_assessment()]), FailingPlanner(), FakeController(_inventory())
     )
@@ -182,5 +182,5 @@ def test_model_failure_before_plan_is_durable_observation(tmp_path: Path) -> Non
     assert record.plan is None
     assert record.failure_evidence is not None
     assert record.failure_evidence["stage"] == "planner"
-    assert record.failure_evidence["failure_owner"] == "MODEL"
+    assert record.failure_evidence["failure_owner"] == "SUT_SYSTEM"
     assert MissionRequestStore(tmp_path / "requests.sqlite3").get(record.request_id) == record

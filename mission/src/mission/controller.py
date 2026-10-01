@@ -9,8 +9,9 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.client import HTTPException, HTTPMessage
+from math import isfinite
 from typing import Any, Protocol, cast
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from mission.models import JSONObject, MissionPlan
 from mission.submission_evidence import ControllerSubmissionEvidence
@@ -309,8 +310,8 @@ class HttpMissionController:
             or parsed.fragment
         ):
             raise MissionControllerError("Controller endpoint must be a fixed HTTP(S) origin")
-        if timeout_seconds <= 0:
-            raise MissionControllerError("Controller timeout must be positive")
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise MissionControllerError("Controller timeout must be finite and positive")
         self._endpoint = endpoint.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
@@ -325,6 +326,14 @@ class HttpMissionController:
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit a strict MissionPlan and classify accepted versus rejected responses."""
         status, decoded, evidence = self._request("POST", "/v1/missions", plan.to_json())
+        if status in {200, 202} and (
+            decoded.get("mission_id") != plan.mission.mission_id
+            or not isinstance(decoded.get("group_id"), str)
+            or not str(decoded["group_id"]).strip()
+        ):
+            failure = MissionControllerError("Controller acceptance identity is invalid")
+            failure.submission_evidence = evidence
+            raise failure
         detail_value = decoded.get("error", decoded.get("status", "Controller response"))
         detail = str(detail_value)
         return SubmissionReceipt(
@@ -333,6 +342,47 @@ class HttpMissionController:
             detail=detail,
             evidence=evidence,
         )
+
+    def observe_mission(self, mission_id: str) -> JSONObject:
+        """Read the original Mission identity once without resubmitting or proving plan content.
+
+        Even a 404 cannot prove that an earlier in-flight POST will never be
+        accepted. This observation therefore never grants retry authority.
+        """
+        status, decoded, _ = self._request(
+            "GET", f"/v1/missions/{quote(mission_id, safe='')}", None
+        )
+        if status == 404:
+            return {
+                "schema_version": "roboguide.controller-mission-observation/v0.1",
+                "mission_id": mission_id,
+                "lookup_result": "not_found",
+                "status_code": status,
+                "group_id": None,
+                "mission_status": None,
+            }
+        group_id, mission_status = decoded.get("group_id"), decoded.get("status")
+        if (
+            status != 200
+            or decoded.get("mission_id") != mission_id
+            or not isinstance(group_id, str)
+            or not group_id.strip()
+            or len(group_id) > 256
+            or not isinstance(mission_status, str)
+            or not mission_status.strip()
+            or len(mission_status) > 64
+        ):
+            raise MissionControllerError(
+                "Controller Mission observation is unavailable or mismatched"
+            )
+        return {
+            "schema_version": "roboguide.controller-mission-observation/v0.1",
+            "mission_id": mission_id,
+            "lookup_result": "found",
+            "status_code": status,
+            "group_id": group_id,
+            "mission_status": mission_status,
+        }
 
     def _request(
         self, method: str, path: str, body: Mapping[str, object] | None

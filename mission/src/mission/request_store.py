@@ -9,9 +9,11 @@ from dataclasses import replace
 from pathlib import Path
 
 from mission.grounding_context import GroundingContextSnapshot
+from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
 from mission.submission_evidence import (
+    COMPATIBLE_OBSERVATIONS_SCHEMAS,
     OBSERVATIONS_SCHEMA,
     ControllerSubmissionEvidence,
     canonical_plan_digest,
@@ -28,8 +30,10 @@ def _restore_record(document: object) -> MissionRequestRecord:
     request = _json_object(value["request"], "request")
     record = MissionRequestRecord.from_json(request)
     observations = _json_object(value["observations"], "observations")
+    schema = observations.get("schema_version")
     if (
-        observations.get("schema_version") != OBSERVATIONS_SCHEMA
+        not isinstance(schema, str)
+        or schema not in COMPATIBLE_OBSERVATIONS_SCHEMAS
         or observations.get("request_id") != record.request_id
         or observations.get("mission_id") != record.mission_id
         or observations.get("request_record_digest") != canonical_plan_digest(request)
@@ -37,6 +41,18 @@ def _restore_record(document: object) -> MissionRequestRecord:
         raise MissionRequestError("request observations are detached from durable request")
     submission = observations.get("submission_evidence")
     failure = observations.get("failure_evidence")
+    recovery = observations.get("recovery_evidence")
+    if (
+        observations.get("schema_version") == OBSERVATIONS_SCHEMA
+        and "recovery_evidence" not in observations
+    ):
+        raise MissionRequestError("v0.2 observations must declare recovery evidence availability")
+    try:
+        recovery_evidence = (
+            RequestRecoveryEvidence.from_json(recovery) if recovery is not None else None
+        )
+    except (ValueError, TypeError, KeyError) as error:
+        raise MissionRequestError("invalid durable recovery evidence") from error
     drafts_value = observations.get("rejected_drafts", [])
     if not isinstance(drafts_value, list):
         raise MissionRequestError("rejected draft evidence must be a list")
@@ -58,6 +74,7 @@ def _restore_record(document: object) -> MissionRequestRecord:
         ),
         failure_evidence=(_json_object(failure, "failure evidence") if failure else None),
         rejected_drafts=rejected_drafts,
+        recovery_evidence=recovery_evidence,
     )
 
 

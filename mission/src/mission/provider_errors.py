@@ -8,6 +8,20 @@ from mission.contract_values import JSONObject
 class MissionProviderError(RuntimeError):
     """Report a transport, provider response, or model review failure."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        transport_failure: bool = False,
+        configuration_failure: bool = False,
+    ) -> None:
+        """Retain structured fault identity without parsing provider diagnostic text."""
+        super().__init__(message)
+        self.status_code = status_code
+        self.transport_failure = transport_failure
+        self.configuration_failure = configuration_failure
+
 
 class MissionIdentityError(MissionProviderError):
     """Retain one identity-invalid draft without authorizing regeneration.
