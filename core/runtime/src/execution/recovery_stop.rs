@@ -104,6 +104,11 @@ impl RuntimeExecutionManager {
                 "recovery command references a stale attempt or wrong owner".into(),
             ));
         }
+        if self.group_recovery_holds_dispatch(command.group_id(), now) {
+            return Err(ExecutionRuntimeError::ReconciliationRequired(
+                "an exact-set Group recovery already owns this recovery purpose".into(),
+            ));
+        }
         let support = command.recovery_support().ok_or_else(|| {
             ExecutionRuntimeError::ReconciliationRequired(
                 "physical attempt has no dispatch-time execution recovery declaration".into(),

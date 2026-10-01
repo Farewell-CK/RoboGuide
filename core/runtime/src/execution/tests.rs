@@ -5,6 +5,8 @@ use domain::{
     CapabilityContractRef, CorrelationId, ExecutionIntent, ExecutionRelationId,
     ExecutionRelationKind, ExecutionRelationSpec, MissionId, PlannedExecutionRef, TaskId,
 };
+#[path = "tests/group_recovery.rs"]
+mod group_recovery;
 #[path = "tests/progress.rs"]
 mod progress;
 #[path = "tests/recovery_stop.rs"]

@@ -16,6 +16,7 @@ pub use coordination::{
 pub use execution::{
     DispatchDecision, DispatchIntent, EXECUTION_PROGRESS_SCHEMA, ExecutionAttemptSnapshot,
     ExecutionContext, ExecutionEvent, ExecutionRuntimeError, ExecutionSlot, ExecutionStatus,
+    GroupRecoveryDisposition, GroupRecoveryMember, GroupRecoveryStopIntent,
     ObservedTaskExecutionResult, OperationActivity, OperationProgressBatch,
     OperationProgressSample, ProgressDisposition, ProgressObservation, RecoveryStopDisposition,
     RecoveryStopIntent, RuntimeExecutionCheckpoint, RuntimeExecutionManager,

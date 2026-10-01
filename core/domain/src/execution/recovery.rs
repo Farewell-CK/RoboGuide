@@ -44,6 +44,12 @@ pub struct OperationRecoverySupport {
 }
 
 impl OperationRecoverySupport {
+    /// Reports same-Group continuation support without granting isolated stopping or repetition.
+    pub const fn supports_group_continuation(&self) -> bool {
+        matches!(self.stop_scope, ExecutionStopScope::ExecutionGroup)
+            && matches!(self.continuation, ExecutionContinuation::RepeatAfterStop)
+    }
+
     /// Reports technical Role retry support; explicit repeat and stop evidence are still required.
     pub const fn supports_role_retry(&self) -> bool {
         matches!(self.stop_scope, ExecutionStopScope::Execution)

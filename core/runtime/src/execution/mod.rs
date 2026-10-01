@@ -13,9 +13,11 @@ use std::fmt::{Display, Formatter};
 
 mod checkpoint;
 mod dispatch;
+mod group_recovery;
 mod observation;
 mod progress;
 mod recovery_stop;
+pub use group_recovery::{GroupRecoveryDisposition, GroupRecoveryMember, GroupRecoveryStopIntent};
 pub use progress::{
     EXECUTION_PROGRESS_SCHEMA, OperationActivity, OperationProgressBatch, OperationProgressSample,
     ProgressDisposition, ProgressObservation,
@@ -249,6 +251,9 @@ struct ActiveExecutionCheckpoint {
 /// Transport-neutral durable Runtime projection embedded in the controller checkpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeExecutionCheckpoint {
+    /// Explicit whole-set authorizations; old checkpoints never invent Group continuation.
+    #[serde(default)]
+    group_recoveries: Vec<GroupRecoveryStopIntent>,
     /// Explicit recovery cancellation purposes and original deadlines.
     #[serde(default)]
     recovery_stops: BTreeMap<String, RecoveryStopIntent>,
@@ -343,6 +348,8 @@ impl std::error::Error for ExecutionRuntimeError {}
 /// Live Runtime authority for stable distributed execution identities and facts.
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExecutionManager {
+    /// Immutable bounded recovery rounds, separate from isolated Role stop/release purposes.
+    group_recoveries: Vec<GroupRecoveryStopIntent>,
     /// Stop-and-replace is opt-in; ordinary cancellation has no recovery purpose.
     recovery_stops: BTreeMap<String, RecoveryStopIntent>,
     /// Logical-slot budgets cannot be reset by allocating a new physical attempt.

@@ -318,6 +318,13 @@ impl RuntimeExecutionManager {
             .map(|execution| execution.resource_ids.clone())
     }
 
+    /// Borrows exact immutable invocation evidence without copying the complete attempt history.
+    pub fn execution_command(&self, execution_id: &str) -> Option<&ExecutionCommand> {
+        self.executions
+            .get(execution_id)
+            .map(|context| &context.command)
+    }
+
     /// Returns the latest accepted Runtime status for one execution identity.
     pub fn execution_status(&self, execution_id: &str) -> Option<ExecutionStatus> {
         self.execution_status.get(execution_id).copied()
@@ -406,6 +413,7 @@ impl RuntimeExecutionManager {
         if let Some(intent) = self.recovery_stops.get_mut(execution_id) {
             intent.aborted = true;
         }
+        self.abort_group_recovery_for_attempt(execution_id);
         self.cancellation_intents.insert(execution_id.to_string());
         Ok(())
     }

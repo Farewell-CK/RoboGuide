@@ -6,6 +6,7 @@ impl RuntimeExecutionManager {
     /// Creates an empty live execution authority.
     pub const fn new() -> Self {
         Self {
+            group_recoveries: Vec::new(),
             recovery_stops: BTreeMap::new(),
             recovery_budgets: BTreeMap::new(),
             progress: BTreeMap::new(),
@@ -33,6 +34,7 @@ impl RuntimeExecutionManager {
     /// Returns a durable transport-neutral Runtime projection.
     pub fn checkpoint(&self) -> RuntimeExecutionCheckpoint {
         RuntimeExecutionCheckpoint {
+            group_recoveries: self.group_recoveries.clone(),
             recovery_stops: self.recovery_stops.clone(),
             recovery_budgets: self.recovery_budgets.values().cloned().collect(),
             progress: self.progress.clone(),
@@ -198,6 +200,7 @@ impl RuntimeExecutionManager {
             }
         }
         let mut restored = Self {
+            group_recoveries: checkpoint.group_recoveries,
             recovery_stops: checkpoint.recovery_stops,
             recovery_budgets,
             progress: checkpoint.progress,
@@ -253,6 +256,7 @@ impl RuntimeExecutionManager {
         restored.refresh_all_relations_after_restore();
         restored.validate_progress()?;
         restored.validate_recovery_stops()?;
+        restored.validate_group_recoveries()?;
         Ok(restored)
     }
 }
