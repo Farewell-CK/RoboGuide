@@ -2,6 +2,34 @@
 
 use super::*;
 
+/// Technical deployment support is distinct from explicit repeat permission and physical stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum RecoverySupportDisposition {
+    /// No declaration was frozen for this attempt; newer registration cannot upgrade it.
+    NotDeclared,
+    /// A declaration cannot be used with a different canonical operation.
+    InvalidDeclaration,
+    /// Cancelling one invocation may affect another physical execution.
+    StopNotIsolated,
+    /// The local deployment cannot preserve context for a new attempt after stopping.
+    ContinuationUnsupported,
+    /// Current exact owner/operation support is missing or differs from the original snapshot.
+    RegistrationChanged,
+    /// Technical support matches; recovery still needs explicit authorization and actual stop.
+    Supported,
+}
+
+/// Read-only source-attributed support view, never a release or redispatch authorization.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecoveryDeploymentSupport {
+    /// Dispatch-time declaration retained with the exact physical attempt.
+    pub original: Option<domain::ExecutionRecoverySupport>,
+    /// Latest exact operation-owner declaration; absent facts remain unknown.
+    pub current: Option<domain::ExecutionRecoverySupport>,
+    /// Stable support classification; applications never parse diagnostic strings.
+    pub disposition: RecoverySupportDisposition,
+}
+
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     /// Prepares an existing Runtime command for durable application-level outbox delivery.
     ///
@@ -67,6 +95,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
+            if self
+                .runtime
+                .is_stopped_recovery_replacement(&intent.execution_id)
+                && !self.execution_recovery_supported(&intent.command)
+            {
+                continue;
+            }
             let mut resources = intent.resource_ids.clone();
             match self.flush_dispatch_intent(&intent.execution_id, &intent.command, &mut resources)
             {
@@ -103,6 +138,19 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let mut delivered = 0;
         let mut first_error = None;
         for (execution_id, node_id) in &pending {
+            if self
+                .runtime
+                .recovery_stop(execution_id)
+                .is_some_and(|intent| !intent.aborted)
+                && !self
+                    .runtime
+                    .attempt_history()
+                    .into_iter()
+                    .find(|attempt| attempt.execution_id() == execution_id)
+                    .is_some_and(|attempt| self.execution_recovery_supported(attempt.command()))
+            {
+                continue;
+            }
             match self.router.cancel(
                 node_id.as_str(),
                 format!("cancel-{execution_id}"),
@@ -298,6 +346,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 .validate_slot(task_ref.mission_id(), group_id, task_ref.task_id(), role_id)
                 .map_err(IntegrationRuntimeError::Protocol)?;
         }
+        let recovery_support = self.state.node(&node_id).and_then(|snapshot| {
+            snapshot
+                .registration()
+                .execution_recovery_support(intent.operation())
+        });
         let mut command = ExecutionCommand::new(
             task_ref.mission_id().clone(),
             task_ref.task_id().clone(),
@@ -309,6 +362,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         );
         if let Some(session) = session {
             command = command.with_session(session);
+        }
+        if let Some(support) = recovery_support {
+            command = command.with_recovery_support(support);
         }
         self.runtime
             .prepare_dispatch(execution_id, command.clone(), resource_ids)
@@ -368,6 +424,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 "recovery owner is not the current Control binding".into(),
             ));
         }
+        if !self.execution_recovery_supported(&command) {
+            return Err(IntegrationRuntimeError::Protocol(
+                "recovery requires unchanged dispatch-time owner support for isolated stop and context-preserving repetition".into(),
+            ));
+        }
         self.runtime
             .request_recovery_stop(
                 execution_id,
@@ -398,17 +459,66 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Lists only current attempts with timely real stop evidence awaiting Control release.
     pub fn stopped_recovery_commands(&self, now: TimestampMs) -> Vec<ExecutionCommand> {
-        self.runtime.stopped_recovery_commands(now)
+        self.runtime
+            .stopped_recovery_commands(now)
+            .into_iter()
+            .filter(|command| self.execution_recovery_supported(command))
+            .collect()
     }
 
     /// Verifies the current exact stopped command before Control can partially release it.
     pub fn recovery_stop_ready(&self, command: &ExecutionCommand, now: TimestampMs) -> bool {
-        self.runtime.recovery_stop_ready(command, now)
+        self.runtime.recovery_stop_ready(command, now) && self.execution_recovery_supported(command)
+    }
+
+    /// Requires original exact operation/owner facts and the same current registration declaration.
+    pub fn execution_recovery_supported(&self, command: &ExecutionCommand) -> bool {
+        self.recovery_deployment_support(command).disposition
+            == RecoverySupportDisposition::Supported
+    }
+
+    /// Compares original and current declarations without changing a budget, plan or local state.
+    pub fn recovery_deployment_support(
+        &self,
+        command: &ExecutionCommand,
+    ) -> RecoveryDeploymentSupport {
+        let original = command.recovery_support().cloned();
+        let current = self.state.node(command.node_id()).and_then(|snapshot| {
+            snapshot
+                .registration()
+                .execution_recovery_support(command.intent().operation())
+        });
+        let disposition = match original.as_ref() {
+            None => RecoverySupportDisposition::NotDeclared,
+            Some(declaration) if declaration.support.operation != *command.intent().operation() => {
+                RecoverySupportDisposition::InvalidDeclaration
+            }
+            Some(declaration)
+                if declaration.support.stop_scope != domain::ExecutionStopScope::Execution =>
+            {
+                RecoverySupportDisposition::StopNotIsolated
+            }
+            Some(declaration)
+                if declaration.support.continuation
+                    != domain::ExecutionContinuation::RepeatAfterStop =>
+            {
+                RecoverySupportDisposition::ContinuationUnsupported
+            }
+            Some(declaration) if current.as_ref() != Some(declaration) => {
+                RecoverySupportDisposition::RegistrationChanged
+            }
+            Some(_) => RecoverySupportDisposition::Supported,
+        };
+        RecoveryDeploymentSupport {
+            original,
+            current,
+            disposition,
+        }
     }
 
     /// Allows the initial partial release once; a same-owner Rebind must not release it again.
     pub fn recovery_release_ready(&self, command: &ExecutionCommand, now: TimestampMs) -> bool {
-        self.runtime.recovery_stop_ready(command, now)
+        self.recovery_stop_ready(command, now)
             && self
                 .runtime
                 .current_attempt_id(command.group_id(), command.task_ref(), command.role_id())
@@ -440,9 +550,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             attempt.execution_id() == intent.execution_id
                                 && attempt.command().node_id() == need.current_node_id()
                         })
-                        .is_some_and(|attempt| {
-                            self.runtime.recovery_stop_ready(attempt.command(), now)
-                        })
+                        .is_some_and(|attempt| self.recovery_stop_ready(attempt.command(), now))
             })
     }
 
@@ -458,6 +566,24 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .is_some_and(|intent| {
                 intent.release_authorized
                     && (intent.aborted || now.as_millis() >= intent.deadline_ms)
+            })
+    }
+
+    /// Fences already released recovery after an operation-owner declaration changes or disappears.
+    pub fn recovery_release_invalidated(&self, need: &control::RoleRecoveryNeed) -> bool {
+        self.runtime
+            .current_attempt_id(need.group_id(), need.task_ref(), need.role_id())
+            .and_then(|id| self.runtime.recovery_stop(id))
+            .is_some_and(|intent| {
+                intent.release_authorized
+                    && self
+                        .runtime
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == intent.execution_id)
+                        .is_some_and(|attempt| {
+                            !self.execution_recovery_supported(attempt.command())
+                        })
             })
     }
 
@@ -479,9 +605,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         .attempt_history()
                         .into_iter()
                         .find(|attempt| attempt.execution_id() == intent.execution_id)
-                        .is_some_and(|attempt| {
-                            self.runtime.recovery_stop_ready(attempt.command(), now)
-                        })
+                        .is_some_and(|attempt| self.recovery_stop_ready(attempt.command(), now))
             })
     }
 

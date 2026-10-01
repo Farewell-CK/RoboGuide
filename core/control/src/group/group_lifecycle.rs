@@ -369,6 +369,50 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
+        if committed.stopped_owner_allowed() {
+            return Err(ControlError::InvalidProposal(
+                "stopped recovery requires current State at Rebind".into(),
+            ));
+        }
+        self.rebind_role_validated(committed, timestamp, correlation_id, events)
+    }
+
+    /// Revalidates current exact operation recovery support before binding a stopped replacement.
+    pub fn rebind_role_with_state<S: ports::SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        state: &S,
+        committed: &CommittedRecoveryAssignment,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryOutcome, ControlError> {
+        if committed.stopped_owner_allowed()
+            && !state
+                .node(committed.replacement_node_id())
+                .is_some_and(|node| {
+                    committed.operation().is_some_and(|operation| {
+                        node.registration()
+                            .execution_recovery_support(operation)
+                            .is_some_and(|declaration| declaration.support.supports_role_retry())
+                    })
+                })
+        {
+            return Err(ControlError::InvalidProposal(
+                "stopped replacement no longer supports isolated context-preserving recovery"
+                    .into(),
+            ));
+        }
+        self.rebind_role_validated(committed, timestamp, correlation_id, events)
+    }
+
+    /// Applies the existing committed-only binding transition after policy-specific preflight.
+    fn rebind_role_validated<E: EventSink>(
+        &mut self,
+        committed: &CommittedRecoveryAssignment,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryOutcome, ControlError> {
         let group = self
             .groups
             .get(committed.group_id())

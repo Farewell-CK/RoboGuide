@@ -21,6 +21,11 @@ struct Fixture {
 impl Fixture {
     /// Runs actual Submit -> Match -> Schedule -> Commit -> Bind and an original Started fact.
     fn new() -> Self {
+        Self::with_support(Some(("execution", "repeat-after-stop")))
+    }
+
+    /// Builds the same real dispatch with independently varied deployment stop/continuation facts.
+    fn with_support(support: Option<(&str, &str)>) -> Self {
         let directory = tempfile::tempdir().expect("isolated directory");
         let events =
             state::SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("opens");
@@ -31,7 +36,7 @@ impl Fixture {
             control
                 .register_node(
                     &mut state,
-                    recovery_driver_node(node, resource),
+                    recovery_driver_node_with_support(node, resource, support),
                     domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
                     TimestampMs::new(1),
                     &correlation,
@@ -175,6 +180,235 @@ impl Fixture {
             .allocation_snapshot(TimestampMs::new(10))
             .expect("allocation invariants")
     }
+
+    /// Replaces current registration evidence while preserving the already-dispatched attempt.
+    fn update_support(&mut self, support: Option<(&str, &str)>, now: u64) {
+        let mut state = self.controller.bridge.state().clone();
+        let node = self.attempt.command().node_id().as_str();
+        let resource = if node == "node-a" { "cpu-a" } else { "cpu-b" };
+        self.controller
+            .bridge
+            .control_mut()
+            .register_node(
+                &mut state,
+                recovery_driver_node_with_support(node, resource, support),
+                domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(now)),
+                TimestampMs::new(now),
+                &self.correlation,
+                &mut self.events.clone(),
+            )
+            .expect("current registration changes");
+        *self.controller.bridge.state_mut() = state;
+    }
+}
+
+/// Unsafe deployment scopes fail the real HTTP transaction without Cancel, release or budget writes.
+#[tokio::test]
+async fn unsupported_deployment_recovery_is_rejected_before_cancel() {
+    for (support, disposition) in [
+        (None, "NotDeclared"),
+        (
+            Some(("execution-group", "repeat-after-stop")),
+            "StopNotIsolated",
+        ),
+        (
+            Some(("execution", "unsupported")),
+            "ContinuationUnsupported",
+        ),
+        (Some(("execution-group", "unsupported")), "StopNotIsolated"),
+    ] {
+        let fixture = Fixture::with_support(support);
+        let execution = fixture.attempt.execution_id().to_owned();
+        let body = serde_json::json!({
+            "schema_version": "roboguide.execution-recovery-command/v0.1",
+            "expected_node_id": fixture.attempt.command().node_id(),
+            "repeat_authorized": true, "timeout_ms": 1000, "max_replacements": 2
+        });
+        let original = server_checkpoint_json(&fixture.controller).expect("checkpoint");
+        let sequence = fixture.events.latest_sequence().expect("sequence");
+        let controller = Arc::new(Mutex::new(fixture.controller));
+        let (status, _) = admission::request(
+            &controller,
+            &fixture.events,
+            "POST",
+            &format!("/v1/executions/{execution}/recover"),
+            body.to_string().as_bytes(),
+        )
+        .await;
+        assert!(status.contains("409"));
+        assert_eq!(
+            fixture.events.latest_sequence().expect("sequence"),
+            sequence
+        );
+        assert_eq!(
+            server_checkpoint_json(&controller.lock().expect("lock")).expect("checkpoint"),
+            original
+        );
+        let (_, view) = admission::request(
+            &controller,
+            &fixture.events,
+            "GET",
+            &format!("/v1/executions/{execution}/recovery"),
+            b"",
+        )
+        .await;
+        assert_eq!(
+            view["schema_version"],
+            "roboguide.execution-recovery-view/v0.2"
+        );
+        assert_eq!(view["deployment_support"]["disposition"], disposition);
+        assert_eq!(view["support_is_authorization"], false);
+        assert!(
+            controller
+                .lock()
+                .expect("lock")
+                .bridge
+                .execution_recovery_stop(&execution)
+                .is_none()
+        );
+    }
+}
+
+/// A later positive registration does not grant support to an older undeclared physical attempt.
+#[test]
+fn current_registration_cannot_upgrade_legacy_attempt() {
+    let mut fixture = Fixture::with_support(None);
+    fixture.update_support(Some(("execution", "repeat-after-stop")), 5);
+    let view = fixture
+        .controller
+        .bridge
+        .recovery_deployment_support(fixture.attempt.command());
+    assert_eq!(
+        view.disposition,
+        orchestration::RecoverySupportDisposition::NotDeclared
+    );
+    assert!(view.current.is_some());
+    assert!(view.original.is_none());
+    let before = fixture.allocations();
+    assert!(
+        fixture
+            .controller
+            .bridge
+            .request_execution_recovery(
+                fixture.attempt.execution_id(),
+                fixture.attempt.command().node_id(),
+                TimestampMs::new(6),
+                100,
+                2,
+            )
+            .is_err()
+    );
+    assert_eq!(fixture.allocations(), before);
+}
+
+/// Migration retains a legacy stop budget but cannot deliver recovery Cancel or release resources.
+#[test]
+fn pre_support_controller_checkpoint_preserves_history_without_recovery_permission() {
+    let mut fixture = Fixture::new();
+    fixture.authorize(100);
+    let mut checkpoint: serde_json::Value = serde_json::from_str(
+        &fixture
+            .controller
+            .bridge
+            .checkpoint_json()
+            .expect("checkpoint"),
+    )
+    .expect("document");
+    checkpoint["schema"] = "roboguide.controller-checkpoint/v16".into();
+    for context in checkpoint["runtime"]["executions"]
+        .as_object_mut()
+        .expect("executions")
+        .values_mut()
+    {
+        context["command"]
+            .as_object_mut()
+            .expect("command")
+            .remove("recovery_support");
+    }
+    for intent in checkpoint["runtime"]["dispatch_outbox"]
+        .as_array_mut()
+        .expect("outbox")
+    {
+        intent["command"]
+            .as_object_mut()
+            .expect("command")
+            .remove("recovery_support");
+    }
+    fixture.controller.bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &checkpoint.to_string(),
+        fixture.events.clone(),
+        integration::GrpcNodeRouter::default(),
+        TimestampMs::new(6),
+    )
+    .expect("supported migration");
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .flush_cancellation_outbox()
+            .expect("fenced"),
+        0
+    );
+    let command = fixture.controller.bridge.attempt_history()[0]
+        .command()
+        .clone();
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .recovery_deployment_support(&command)
+            .disposition,
+        orchestration::RecoverySupportDisposition::NotDeclared,
+    );
+    let before = fixture.allocations();
+    fixture.fact(2, ExecutionPhase::Cancelled, 7);
+    fixture.recover_tick(8);
+    assert_eq!(fixture.allocations(), before);
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 1);
+    let intent = fixture
+        .controller
+        .bridge
+        .execution_recovery_stop(fixture.attempt.execution_id())
+        .expect("history");
+    assert_eq!(intent.deadline_ms, 105);
+    assert!(!intent.release_authorized);
+}
+
+/// Changed declarations fence durable Cancel delivery and actual-stop resource release.
+#[test]
+fn registration_change_fences_recovery_cancel_and_partial_release() {
+    let mut fixture = Fixture::new();
+    fixture.authorize(100);
+    fixture.update_support(Some(("execution-group", "unsupported")), 6);
+    let before = fixture.allocations();
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .flush_cancellation_outbox()
+            .expect("no unsafe route"),
+        0
+    );
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .recovery_deployment_support(fixture.attempt.command())
+            .disposition,
+        orchestration::RecoverySupportDisposition::RegistrationChanged
+    );
+    fixture.fact(2, ExecutionPhase::Cancelled, 7);
+    fixture.recover_tick(8);
+    assert_eq!(fixture.allocations(), before);
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 1);
+    assert!(
+        !fixture
+            .controller
+            .bridge
+            .execution_recovery_stop(fixture.attempt.execution_id())
+            .expect("history")
+            .release_authorized
+    );
 }
 
 /// Unknown without stop authorization retains the binding; a genuine late completion can finish.
@@ -289,6 +523,41 @@ fn confirmed_stop_creates_one_new_attempt_with_intact_operation() {
     );
 }
 
+/// A changed declaration after preparation cannot send a replacement Execute from the outbox.
+#[test]
+fn changed_replacement_support_fences_prepared_execute_delivery() {
+    let mut fixture = Fixture::new();
+    fixture.authorize(100);
+    fixture.fact(2, ExecutionPhase::Cancelled, 7);
+    fixture.recover_tick(8);
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 2);
+    // No route is registered: an attempted delivery must return a router error.
+    assert!(fixture.controller.bridge.flush_dispatch_outbox().is_err());
+    fixture.update_support(Some(("execution", "unsupported")), 9);
+    let checkpoint = fixture
+        .controller
+        .bridge
+        .checkpoint_json()
+        .expect("checkpoint");
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .flush_dispatch_outbox()
+            .expect("fenced"),
+        0
+    );
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .checkpoint_json()
+            .expect("unchanged"),
+        checkpoint
+    );
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 2);
+}
+
 /// Stop timeout preserves physical ownership and cannot be disguised as an execution failure.
 #[test]
 fn stop_timeout_keeps_resources_and_exposes_budget_expiry() {
@@ -391,6 +660,31 @@ fn stopped_role_with_no_available_replacement_stays_pending() {
 
 /// Prepares a resource-bearing pending Commit under actual stop proof.
 fn committed_fixture() -> (Fixture, control::RoleRecoveryNeed) {
+    let (mut fixture, need, requirement, proposal) = proposed_fixture();
+    let state = fixture.controller.bridge.state().clone();
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .commit_role_recovery(
+            &state,
+            &requirement,
+            &proposal,
+            TimestampMs::new(9),
+            &fixture.correlation,
+            &mut fixture.events.clone(),
+        )
+        .expect("commit");
+    (fixture, need)
+}
+
+/// Prepares a real candidate/proposal without committing a single replacement resource.
+fn proposed_fixture() -> (
+    Fixture,
+    control::RoleRecoveryNeed,
+    domain::TaskRequirement,
+    control::RecoveryAssignmentProposal,
+) {
     let mut fixture = Fixture::new();
     fixture.authorize(100);
     fixture.fact(2, ExecutionPhase::Cancelled, 7);
@@ -489,20 +783,117 @@ fn committed_fixture() -> (Fixture, control::RoleRecoveryNeed) {
             &mut fixture.events.clone(),
         )
         .expect("propose");
-    fixture
+    (fixture, need, requirement, proposal)
+}
+
+/// Candidate and Commit revalidation reject a deployment that lost context-preserving repetition.
+#[test]
+fn replacement_matching_and_commit_revalidate_recovery_support() {
+    let (mut fixture, need, requirement, proposal) = proposed_fixture();
+    fixture.update_support(Some(("execution", "unsupported")), 10);
+    let state = fixture.controller.bridge.state().clone();
+    let candidates = fixture
         .controller
         .bridge
-        .control_mut()
-        .commit_role_recovery(
+        .control()
+        .match_stopped_recovery_candidates_for_operation(
             &state,
+            &need,
             &requirement,
-            &proposal,
-            TimestampMs::new(9),
+            fixture.attempt.command().intent().operation(),
+            TimestampMs::new(10),
             &fixture.correlation,
             &mut fixture.events.clone(),
         )
-        .expect("commit");
-    (fixture, need)
+        .expect("observable matching shortage");
+    assert!(candidates.is_empty());
+    let before = fixture.allocations();
+    assert!(
+        fixture
+            .controller
+            .bridge
+            .control_mut()
+            .commit_role_recovery(
+                &state,
+                &requirement,
+                &proposal,
+                TimestampMs::new(10),
+                &fixture.correlation,
+                &mut fixture.events.clone(),
+            )
+            .is_err()
+    );
+    assert_eq!(fixture.allocations(), before);
+}
+
+/// Stateful Rebind rejects changed support; the timer aborts only the unused replacement resources.
+#[test]
+fn stopped_rebind_requires_current_support_and_aborts_invalidated_commit() {
+    let (mut fixture, need) = committed_fixture();
+    let committed = fixture
+        .controller
+        .bridge
+        .control()
+        .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
+        .expect("pending commitment")
+        .clone();
+    assert!(
+        fixture
+            .controller
+            .bridge
+            .control_mut()
+            .rebind_role(
+                &committed,
+                TimestampMs::new(10),
+                &fixture.correlation,
+                &mut fixture.events.clone(),
+            )
+            .is_err()
+    );
+    fixture.update_support(Some(("execution-group", "unsupported")), 10);
+    let state = fixture.controller.bridge.state().clone();
+    let before = fixture.allocations();
+    assert!(
+        fixture
+            .controller
+            .bridge
+            .control_mut()
+            .rebind_role_with_state(
+                &state,
+                &committed,
+                TimestampMs::new(10),
+                &fixture.correlation,
+                &mut fixture.events.clone(),
+            )
+            .is_err()
+    );
+    assert_eq!(fixture.allocations(), before);
+    resume_role_recovery(
+        &mut fixture.controller,
+        &need,
+        TimestampMs::new(11),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("abort unsupported commitment");
+    assert!(
+        fixture
+            .controller
+            .bridge
+            .control()
+            .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
+            .is_none()
+    );
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 1);
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .control()
+            .pending_role_recoveries()
+            .len(),
+        1
+    );
 }
 
 /// Reuses a committed replacement only with original stop proof, preserved through restart.

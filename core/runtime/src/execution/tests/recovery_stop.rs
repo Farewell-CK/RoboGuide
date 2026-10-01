@@ -28,6 +28,118 @@ fn authorize(runtime: &mut RuntimeExecutionManager) {
         .expect("explicit authorization");
 }
 
+/// Unsupported or missing technical support cannot consume budgets or create a Cancel intent.
+#[test]
+fn recovery_deployment_support_is_required_before_any_mutation() {
+    for (scope, continuation) in [
+        (None, "unsupported"),
+        (Some("execution-group"), "repeat-after-stop"),
+        (Some("execution"), "unsupported"),
+        (Some("unsupported"), "unsupported"),
+    ] {
+        let mut value = serde_json::to_value(command()).expect("command");
+        if let Some(scope) = scope {
+            value["recovery_support"]["support"]["stop_scope"] = scope.into();
+            value["recovery_support"]["support"]["continuation"] = continuation.into();
+        } else {
+            value
+                .as_object_mut()
+                .expect("object")
+                .remove("recovery_support");
+        }
+        let command: ExecutionCommand = serde_json::from_value(value).expect("declared command");
+        let mut runtime = RuntimeExecutionManager::new();
+        runtime
+            .prepare_dispatch("attempt".into(), command.clone(), Vec::new())
+            .expect("normal dispatch");
+        assert!(
+            runtime
+                .request_recovery_stop("attempt", command.node_id(), TimestampMs::new(10), 100, 2)
+                .is_err()
+        );
+        assert!(runtime.recovery_stop("attempt").is_none());
+        assert!(runtime.pending_cancellations().is_empty());
+        assert!(runtime.checkpoint().recovery_budgets.is_empty());
+    }
+}
+
+/// Old checkpoints retain history but cannot use unproven scope to deliver recovery Cancel or release.
+#[test]
+fn legacy_recovery_intent_cannot_bypass_missing_dispatch_declaration() {
+    let mut runtime = running();
+    authorize(&mut runtime);
+    let mut value = serde_json::to_value(runtime.checkpoint()).expect("checkpoint");
+    for context in value["executions"]
+        .as_object_mut()
+        .expect("executions")
+        .values_mut()
+    {
+        context["command"]
+            .as_object_mut()
+            .expect("command")
+            .remove("recovery_support");
+    }
+    for intent in value["dispatch_outbox"].as_array_mut().expect("outbox") {
+        intent["command"]
+            .as_object_mut()
+            .expect("command")
+            .remove("recovery_support");
+    }
+    let checkpoint = serde_json::from_value(value).expect("old checkpoint shape");
+    let mut runtime = RuntimeExecutionManager::restore(checkpoint).expect("conservative migration");
+    let command = runtime.attempt_history()[0].command().clone();
+    assert!(command.recovery_support().is_none());
+    assert!(runtime.pending_cancellations().is_empty());
+    assert!(
+        runtime
+            .request_recovery_stop("old", command.node_id(), TimestampMs::new(11), 100, 2)
+            .is_err()
+    );
+    let mut ordinary = runtime.clone();
+    ordinary
+        .request_cancellation("old")
+        .expect("explicit ordinary cancel remains possible");
+    assert_eq!(ordinary.pending_cancellations().len(), 1);
+    stopped(&mut runtime, 20);
+    assert!(!runtime.recovery_stop_ready(&command, TimestampMs::new(21)));
+    assert!(
+        runtime
+            .stopped_recovery_commands(TimestampMs::new(21))
+            .is_empty()
+    );
+    assert_eq!(runtime.checkpoint().recovery_budgets[0].used, 1);
+    assert_eq!(
+        runtime
+            .recovery_stop("old")
+            .expect("retained history")
+            .deadline_ms,
+        110
+    );
+}
+
+/// Wrong-operation support never becomes a valid attempt or a compatible restored checkpoint.
+#[test]
+fn recovery_declaration_cannot_cross_operations() {
+    let mut value = serde_json::to_value(command()).expect("command");
+    value["recovery_support"]["support"]["operation"]["name"] = "other".into();
+    let wrong: ExecutionCommand = serde_json::from_value(value).expect("valid identity");
+    let mut runtime = RuntimeExecutionManager::new();
+    assert!(
+        runtime
+            .prepare_dispatch("wrong".into(), wrong, Vec::new())
+            .is_err()
+    );
+    assert!(runtime.attempt_history().is_empty());
+    let runtime = running();
+    let mut value = serde_json::to_value(runtime.checkpoint()).expect("checkpoint");
+    value["executions"]["old"]["command"]["recovery_support"]["support"]["operation"]["name"] =
+        "other".into();
+    assert!(
+        RuntimeExecutionManager::restore(serde_json::from_value(value).expect("checkpoint"))
+            .is_err()
+    );
+}
+
 /// Reduces actual owner cancellation before capturing its Controller-local receive time.
 fn stopped(runtime: &mut RuntimeExecutionManager, received: u64) {
     runtime

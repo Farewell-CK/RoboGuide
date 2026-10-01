@@ -313,6 +313,17 @@ pub(super) fn validate_checkpoint(
         ));
     }
     for (execution_id, context) in &checkpoint.executions {
+        if context
+            .command
+            .recovery_support()
+            .is_some_and(|declaration| {
+                declaration.support.operation != *context.command.intent().operation()
+            })
+        {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                "checkpoint recovery declaration belongs to a different operation".into(),
+            ));
+        }
         if execution_id.is_empty() {
             return Err(ExecutionRuntimeError::InvalidCheckpoint(
                 "checkpoint contains an empty execution id".to_string(),

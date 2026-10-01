@@ -173,7 +173,9 @@ pub(crate) fn resume_role_recovery(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if controller.bridge.recovery_release_expired(need, timestamp) {
+    if controller.bridge.recovery_release_expired(need, timestamp)
+        || controller.bridge.recovery_release_invalidated(need)
+    {
         if let Some(committed) = controller
             .bridge
             .control()
@@ -198,8 +200,26 @@ pub(crate) fn resume_role_recovery(
         .control()
         .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
         .cloned();
+    let state = controller.bridge.state().clone();
     if let Some(committed) = committed {
-        controller.bridge.control_mut().rebind_role(
+        let supported = state
+            .node(committed.replacement_node_id())
+            .is_some_and(|node| {
+                committed.operation().is_some_and(|operation| {
+                    node.registration()
+                        .execution_recovery_support(operation)
+                        .is_some_and(|declaration| declaration.support.supports_role_retry())
+                })
+            });
+        if !supported {
+            controller
+                .bridge
+                .control_mut()
+                .abort_role_recovery_commitment(&committed, timestamp, correlation_id, events)?;
+            return Ok(());
+        }
+        controller.bridge.control_mut().rebind_role_with_state(
+            &state,
             &committed,
             timestamp,
             correlation_id,
@@ -223,7 +243,6 @@ pub(crate) fn resume_role_recovery(
                 .map(|intent| (task.requirement().clone(), intent.operation().clone()))
         })
         .ok_or_else(|| "pending recovery has no accepted Task requirement".to_string())?;
-    let state = controller.bridge.state().clone();
     let candidates = controller
         .bridge
         .control()
@@ -268,9 +287,12 @@ pub(crate) fn resume_role_recovery(
         correlation_id,
         events,
     )?;
-    controller
-        .bridge
-        .control_mut()
-        .rebind_role(&committed, timestamp, correlation_id, events)?;
+    controller.bridge.control_mut().rebind_role_with_state(
+        &state,
+        &committed,
+        timestamp,
+        correlation_id,
+        events,
+    )?;
     Ok(())
 }

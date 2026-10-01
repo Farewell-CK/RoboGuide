@@ -34,7 +34,7 @@ pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
     GroupSpatialVerification, GroupViewFreshness, IntegrationRuntimeBridge,
     IntegrationRuntimeError, ObservedTaskExecutionOutcome, ObservedTaskExecutionResult,
-    RemoteExecutionStatus,
+    RecoveryDeploymentSupport, RecoverySupportDisposition, RemoteExecutionStatus,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission_contract::decode_mission_plan;

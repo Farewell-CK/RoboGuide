@@ -50,6 +50,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
                 | LEGACY_CONTROLLER_CHECKPOINT_SCHEMA
         ) {

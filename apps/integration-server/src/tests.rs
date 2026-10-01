@@ -158,24 +158,57 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
 
 /// Builds one eligible node for the recovery-driver fixture.
 fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistration {
-    domain::NodeRegistration::new_with_contracts(
+    recovery_driver_node_with_support(
+        node_id,
+        resource_id,
+        Some(("execution", "repeat-after-stop")),
+    )
+}
+
+/// Declares fake deployment implementation support independently from the plan and operation.
+fn recovery_driver_node_with_support(
+    node_id: &str,
+    resource_id: &str,
+    support: Option<(&str, &str)>,
+) -> domain::NodeRegistration {
+    let owner = domain::LocalSystemId::new("fixture-runtime").expect("owner");
+    let contract = domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract");
+    let operation = domain::OperationRef::from(contract.clone());
+    let resource = domain::Resource::new(
+        domain::ResourceId::new(resource_id).expect("resource"),
+        domain::ResourceKind::Compute,
+        1,
+    )
+    .expect("resource");
+    let metadata = support.map_or_else(BTreeMap::new, |(stop_scope, continuation)| {
+        BTreeMap::from([(
+            domain::EXECUTION_RECOVERY_METADATA_KEY.to_string(),
+            serde_json::json!({
+                "schema_version": domain::EXECUTION_RECOVERY_PROFILE_SCHEMA,
+                "operations": [{"operation": operation, "stop_scope": stop_scope, "continuation": continuation}]
+            }).to_string(),
+        )])
+    });
+    domain::NodeRegistration::new_with_local_systems(
         domain::NodeId::new(node_id).expect("node valid"),
-        domain::LocalRuntime::new("fixture", "1").expect("runtime valid"),
-        domain::NodeContractVersion::v0_4(),
+        vec![domain::LocalSystemDescriptor::new(
+            owner.clone(),
+            domain::LocalRuntime::new("fixture", "1").expect("runtime"),
+            metadata,
+        )],
+        domain::NodeContractVersion::v0_6(),
         vec![domain::Capability::new(
             domain::CapabilityKind::Compute,
             true,
         )],
-        vec![domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid")],
-        vec![
-            domain::Resource::new(
-                domain::ResourceId::new(resource_id).expect("resource valid"),
-                domain::ResourceKind::Compute,
-                1,
-            )
-            .expect("resource valid"),
-        ],
+        BTreeMap::from([(contract, owner.clone())]),
+        Vec::new(),
+        vec![resource.clone()],
+        BTreeMap::from([(resource.id().clone(), owner.clone())]),
     )
+    .expect("registration")
+    .with_operation_support(vec![domain::OperationSupport::new(operation, owner)])
+    .expect("exact operation ownership")
 }
 
 /// Only the local owner of a selected operation may opt its Node into session transport.

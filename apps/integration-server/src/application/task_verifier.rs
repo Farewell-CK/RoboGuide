@@ -355,6 +355,7 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
             | ADMISSION_SERVER_CHECKPOINT_SCHEMA
             | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
     ) && checkpoint.verifier_source_digest.as_deref() != configured_digest

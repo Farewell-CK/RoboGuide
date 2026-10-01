@@ -57,6 +57,28 @@ pub(super) struct RecoveryBudget {
 }
 
 impl RuntimeExecutionManager {
+    /// Identifies a replacement from retained stop/release history, never from Node identity.
+    ///
+    /// This read-only query survives checkpoint restore and also covers same-owner retries.
+    /// It does not grant permission or infer that a prepared Execute has reached the Node.
+    pub fn is_stopped_recovery_replacement(&self, execution_id: &str) -> bool {
+        let Some(replacement) = self.executions.get(execution_id) else {
+            return false;
+        };
+        self.recovery_stops.values().any(|intent| {
+            intent.execution_id != execution_id
+                && intent.release_authorized
+                && self
+                    .executions
+                    .get(&intent.execution_id)
+                    .is_some_and(|original| {
+                        original.command.group_id() == replacement.command.group_id()
+                            && original.command.task_ref() == replacement.command.task_ref()
+                            && original.command.role_id() == replacement.command.role_id()
+                    })
+        })
+    }
+
     /// Records an explicitly repeat-authorized cancellation without freeing Control resources.
     pub fn request_recovery_stop(
         &mut self,
@@ -80,6 +102,19 @@ impl RuntimeExecutionManager {
         {
             return Err(ExecutionRuntimeError::NodeOwnership(
                 "recovery command references a stale attempt or wrong owner".into(),
+            ));
+        }
+        let support = command.recovery_support().ok_or_else(|| {
+            ExecutionRuntimeError::ReconciliationRequired(
+                "physical attempt has no dispatch-time execution recovery declaration".into(),
+            )
+        })?;
+        if support.support.operation != *command.intent().operation()
+            || !support.support.supports_role_retry()
+        {
+            return Err(ExecutionRuntimeError::ReconciliationRequired(
+                "Role recovery requires isolated execution stop and context-preserving repetition"
+                    .into(),
             ));
         }
         if let Some(intent) = self.recovery_stops.get(execution_id) {
@@ -202,7 +237,13 @@ impl RuntimeExecutionManager {
                     && self
                         .executions
                         .get(&intent.execution_id)
-                        .is_some_and(|context| context.command == *command)
+                        .is_some_and(|context| {
+                            context.command == *command
+                                && command.recovery_support().is_some_and(|declaration| {
+                                    declaration.support.operation == *command.intent().operation()
+                                        && declaration.support.supports_role_retry()
+                                })
+                        })
                     && intent
                         .confirmed_at_ms
                         .is_some_and(|time| time < intent.deadline_ms)

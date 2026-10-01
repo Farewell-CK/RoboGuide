@@ -694,11 +694,15 @@ pub(crate) async fn handle_http_connection(
                 Some(status) => (
                     "200 OK",
                     serde_json::json!({
-                        "schema_version": "roboguide.execution-recovery-view/v0.1",
+                        "schema_version": "roboguide.execution-recovery-view/v0.2",
                         "execution_id": execution_id,
                         "execution_status": format!("{status:?}"),
                         "disposition": controller.bridge.execution_recovery_disposition(execution_id, clock.now()),
                         "stop_intent": controller.bridge.execution_recovery_stop(execution_id),
+                        "deployment_support": controller.bridge.attempt_history().into_iter()
+                            .find(|attempt| attempt.execution_id() == execution_id)
+                            .map(|attempt| controller.bridge.recovery_deployment_support(attempt.command())),
+                        "support_is_authorization": false,
                     }),
                 ),
                 None => (

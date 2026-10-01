@@ -520,6 +520,15 @@ impl ControlPlane {
                     },
                 )
             })
+            .filter(|snapshot| {
+                !stopped_owner_allowed
+                    || operation.is_some_and(|operation| {
+                        snapshot
+                            .registration()
+                            .execution_recovery_support(operation)
+                            .is_some_and(|declaration| declaration.support.supports_role_retry())
+                    })
+            })
             .map(|snapshot| snapshot.node_id().clone())
             .collect::<Vec<_>>();
         let mut candidates = operation.map_or_else(
@@ -718,6 +727,19 @@ impl ControlPlane {
                 "replacement node {} no longer supports operation {operation}",
                 proposal.replacement_node_id()
             )));
+        }
+        if proposal.stopped_owner_allowed
+            && !proposal.operation().is_some_and(|operation| {
+                replacement
+                    .registration()
+                    .execution_recovery_support(operation)
+                    .is_some_and(|declaration| declaration.support.supports_role_retry())
+            })
+        {
+            return Err(ControlError::InvalidProposal(
+                "replacement no longer declares isolated stop and context-preserving repetition"
+                    .into(),
+            ));
         }
         validate_recovery_resources(replacement, &role, proposal.replacement_resource_ids())?;
         for resource_id in proposal.replacement_resource_ids() {

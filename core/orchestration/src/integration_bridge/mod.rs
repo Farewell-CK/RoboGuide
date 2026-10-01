@@ -32,13 +32,17 @@ mod liveness;
 mod relation_view;
 
 use conversion::*;
+pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 15 adds registry anti-rollback provenance without restoring deployment routing.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+/// Version 17 freezes operation-owner stop/continuation facts for each physical attempt.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
 
-/// Immediately previous checkpoint accepted for one-step migration.
+/// Pre-declaration attempts restore without independent-stop or repetition support.
+const PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+
+/// Historical registry watermark checkpoint accepted without renewal of evidence.
 const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
 /// Historical checkpoint with no registry watermark or operation progress.
 const LEGACY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";

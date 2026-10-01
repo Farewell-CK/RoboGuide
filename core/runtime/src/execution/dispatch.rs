@@ -10,6 +10,13 @@ impl RuntimeExecutionManager {
         command: &ExecutionCommand,
         resource_ids: &[ResourceId],
     ) -> Result<DispatchDecision, ExecutionRuntimeError> {
+        if command.recovery_support().is_some_and(|declaration| {
+            declaration.support.operation != *command.intent().operation()
+        }) {
+            return Err(ExecutionRuntimeError::ExecutionConflict(
+                "recovery declaration belongs to a different operation".into(),
+            ));
+        }
         if self.restored_executions.contains(execution_id) {
             return Err(ExecutionRuntimeError::ReconciliationRequired(
                 "execution was restored after controller restart; reconciliation is required before routing"
@@ -411,6 +418,22 @@ impl RuntimeExecutionManager {
                 !self
                     .execution_status(id)
                     .is_some_and(ExecutionStatus::is_terminal)
+            })
+            .filter(|id| {
+                !self
+                    .recovery_stops
+                    .get(id.as_str())
+                    .is_some_and(|intent| !intent.aborted)
+                    || self.executions.get(id.as_str()).is_some_and(|context| {
+                        context
+                            .command
+                            .recovery_support()
+                            .is_some_and(|declaration| {
+                                declaration.support.operation
+                                    == *context.command.intent().operation()
+                                    && declaration.support.supports_role_retry()
+                            })
+                    })
             })
             .filter_map(|id| {
                 self.cancellation_node(id)
