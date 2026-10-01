@@ -607,6 +607,12 @@ pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort�
 outbox delivery 再检查能力。当前 Habitat shared-world 声明联合停止和不支持中断续跑；
 其正常顺序 Task 能力独立。部署支持不是停止证明或重复授权，不进入 MI 任务语义。
 
+部署侧 retained-world continuation 依 [ADR-0060](../../decisions/0060-retained-shared-world-continuation.md)
+实现中：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
+attempt；已 Completed 端不重执行，步数不重置，重启不重建旧世界。Controller Group
+recovery 尚未实现；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
+不修改 MI、任务语义或官方成功判断。
+
 ```mermaid
 flowchart LR
   L[Local EAIOS operation-specific progress] --> S[Registered State export]

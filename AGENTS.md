@@ -310,6 +310,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Current Habitat shared-world declares `execution-group` / `unsupported` and fails Role recovery
   before Cancel; normal dual endpoints and single-Actor next-Task execution remain supported.
   Recovery support is neither repeat permission nor physical-stop/resource authority. See ADR-0059.
+  The deployment-owned retained-session admission module bounds exact stopped-world attempts
+  and fences restart before reset (ADR-0060). Group continuation is separate from the existing
+  isolated Role recovery API; neither local admission nor a continuation declaration authorizes
+  repetition, resource release, reassignment or a new simulator world.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy
