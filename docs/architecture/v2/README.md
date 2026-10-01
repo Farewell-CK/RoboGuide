@@ -610,7 +610,7 @@ outbox delivery 再检查能力。默认 Habitat shared-world 声明联合停止
 部署侧 retained-world continuation 依 [ADR-0060](../../decisions/0060-retained-shared-world-continuation.md)
 已实现本地路径：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
 attempt；已 Completed 端不重执行，步数不重置，重启不重建旧世界。Controller Group
-recovery 尚未实现；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
+recovery 依 ADR-0061 独立提供；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
 不修改 MI、任务语义或官方成功判断。
 
 ```mermaid
@@ -636,6 +636,33 @@ flowchart LR
 ```
 
 自动进度触发取消、自动重写计划与执行期 MI replacement revision 尚未实现。
+
+整组原绑定恢复已依 [ADR-0061](../../decisions/0061-confirmed-stop-group-continuation.md)
+实现并离线验证：显式冻结全部 current attempts 与重复授权，取得完整停止证明后由 Control 重新
+验证原资源承诺，再准备完整的新 attempts。暂停保留 ownership；不能逐 Role 释放、
+迁移 endpoint 或续时间/步数预算。完整新 outbox checkpoint Commit 后重新读取时钟，
+再次核对原 owner/注册、当前完整集合及资源。默认仍关闭，真实 Habitat 续跑尚未验证。
+现有单 Role 恢复与本地续跑边界保持独立。
+
+```mermaid
+flowchart LR
+  U[Explicit complete-set repeat authorization] --> R[Runtime frozen members and durable budgets]
+  D[Frozen and current exact deployment support] --> R
+  R --> C[Durable whole-set Cancel outbox]
+  C --> S{Actual stop facts for every affected attempt?}
+  S -->|missing / Unknown / expired| F[Retain original commitments and expose fence]
+  S -->|Cancelled or natural Completed| P[Control retained-binding Proposal]
+  P --> K[Control rechecks current eligibility, physical identity and resource ownership]
+  K --> A[Atomic new attempts only for Cancelled slots]
+  A --> Q[Persist checkpoint and events]
+  Q --> V[Fresh clock and unchanged complete-set check]
+  V --> E[New Execute outbox to original endpoints]
+  E --> L[Local EAIOS same-world admission and remaining budget]
+  X[Already Completed peer] --> W[Preserved outcome and passive original wait]
+  W --> L
+  M[Ordinary Mission Cancel] --> B[Abort continuation and await physical stopping]
+```
+
 `Unknown`、Cancel receipt 或心跳都不是物理停止证明。没有配置 progress observer 的部署
 返回 Unknown；operation-specific 误报率及真实硬件停止保证须另行受控验证。
 

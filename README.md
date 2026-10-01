@@ -218,8 +218,12 @@ Habitat 的可选导航 observer 已接入同一 State export（
 部署侧 retained-world continuation 已依
 [ADR-0060](docs/decisions/0060-retained-shared-world-continuation.md) 实现默认关闭的本地路径：
 联合取消后的新 attempts 复用原世界、观察与剩余步数，已完成端不再次调用模型。
-有界的精确 session/intent/new-attempt 检查与重启 fencing 属于 Local EAIOS。Controller Group recovery
-尚未实现，现有单 Role 恢复继续拒绝联合停止；不能把本地可续跑当作自动恢复授权。
+有界的精确 session/intent/new-attempt 检查与重启 fencing 属于 Local EAIOS。
+[ADR-0061](docs/decisions/0061-confirmed-stop-group-continuation.md) 增加独立的整组恢复命令：
+冻结全部 current attempts 与逐操作重复授权，取得完整实际停止证明后，由 Control 重新
+验证原绑定、物理身份和资源承诺；暂停不释放资源，完整新 attempts 持久化后才下发。
+初版只支持同一 Execution Session 的 independent 原绑定续跑，默认部署仍关闭。
+真实 Habitat 整组续跑尚未验证；现有单 Role 恢复仍拒绝联合停止，不存在自动停滞重试。
 
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
@@ -307,7 +311,7 @@ commitments 及所有指向该 Group 的 reservations，确保 Released Group �
 Pending commitment 不是 Execution Group lifecycle state，也不写入 Shared Node State。
 Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit。
 
-本切片未实现 background reconciliation loop、multi-role joint recovery、
+本切片未实现 background reconciliation loop、跨 Node 的整组重匹配、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
 

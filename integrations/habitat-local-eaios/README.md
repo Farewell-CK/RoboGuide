@@ -104,9 +104,12 @@ rewrite local outcomes. No terminal verifier verdict is published for a resumabl
 `stage2-assignment-segment-N.json` identifies active and retained/passive agents directly.
 
 This implementation has deterministic policy-loop, Pipe and loopback HTTP coverage; it has
-not been validated with a new real Habitat/Provider run. A Controller Group recovery API,
-whole-Group repeat authorization and joint resource lifecycle still require a separate ADR
-and implementation before this primitive can support an end-to-end RoboGuide recovery.
+not been validated with a new real Habitat/Provider run. The separate Controller Group
+recovery API is implemented in [ADR-0061](../../docs/decisions/0061-confirmed-stop-group-continuation.md).
+It requires the exact complete original set, explicit repeat permissions, actual terminal facts
+and current Control revalidation of retained resources. It prepares complete new attempts before
+application checkpoint Commit and delivery; it does not enable isolated Role recovery or automatically retry
+a stall. Deployment metadata and `--retain-stopped-session` must both be enabled consistently.
 
 Run the bridge from the independently managed EMOS checkout and Habitat Conda environment:
 

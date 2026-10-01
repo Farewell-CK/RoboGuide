@@ -317,6 +317,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Group continuation is separate from the existing isolated Role recovery API;
   neither local admission nor a continuation declaration authorizes
   repetition, resource release, reassignment or a new simulator world.
+  Explicit Group recovery (ADR-0061) freezes the complete current attempt set and per-operation
+  repeat permission with immutable time/count limits. Actual full-set stopping precedes Control
+  revalidation of the retained original bindings, Actor identity, operation support and exclusive
+  resources. No ownership is partially released; fresh attempts are prepared atomically and only
+  delivered after checkpoint Commit and a fresh clock/support/current-set check. Completed peers
+  remain Completed. The first profile requires one immutable independent Execution Session;
+  migration and coupled semantic recovery remain unsupported. Ordinary Mission cancellation
+  overrides the recovery round. Controller checkpoint v18 preserves the purpose and accepts
+  older checkpoints with no hidden Group permission. No real Habitat continuation is yet proven.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy

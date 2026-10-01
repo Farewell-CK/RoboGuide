@@ -1,6 +1,6 @@
 # ADR-0060: 联合停止后的本地原世界续跑
 
-- Status: Implemented — 本地 opt-in 与离线验证；Controller Group recovery 尚未实现
+- Status: Implemented — 本地 opt-in 与离线验证；配套 Controller 恢复见 ADR-0061
 - Date: 2026-10-01
 
 ## 已确认的边界
@@ -11,7 +11,8 @@
 
 本决策实现部署侧的 retained-world continuation，保持 ADR-0059 的权威边界。它不是
 Controller Group recovery，也不赋予适配器重分配、资源释放、自动重试或操作重复授权。
-当前 Controller `/recover` 仍只支持独立 Role，因此继续拒绝联合停止部署。
+Controller 原有单 Role `/recover` 继续拒绝联合停止部署；独立的 Group command 见
+[ADR-0061](0061-confirmed-stop-group-continuation.md)。
 
 ## 本地履约
 
@@ -49,7 +50,8 @@ segment/state 归档失败记录日志和有界 failure counts；可用的最终
 
 默认声明仍为 `execution-group` / `unsupported`；显式开启且配套注册一致时，部署可声明
 `execution-group` / `repeat-after-stop`。任何一个版本都不能通过单 Role 恢复检查。
-这项本地技术支持不证明 Group 重复操作已获授权，也不代表完整 RoboGuide 恢复闭环已实现。
+这项本地技术支持不证明 Group 重复操作已获授权。Controller 的显式授权与原资源承诺
+复核属于 ADR-0061；本地及 Controller 的离线验证都不能证明真实物理续跑已验证。
 
 ## 验证与后续
 
@@ -57,6 +59,6 @@ segment/state 归档失败记录日志和有界 failure counts；可用的最终
 拒绝、Completed 端 passive wait、取消后一次 reset、累计步数、提前结束、I/O 异常、restart
 fence。不得用测试 double 宣称真实 Habitat/Provider 已验证。
 
-后续 Controller Group recovery 需要独立 ADR：冻结全部受影响 current attempts、显式
-授权其重复、取得全部真实 stop evidence 后由 Control 统一管理资源与重绑定。不能把本
-primitive 接到单 Role `/recover`，也不能因 progress stall 自动 Cancel。
+配套 Controller Group recovery 已由 ADR-0061 单独设计：冻结全部 current attempts、
+显式授权其重复、取得全部真实 stop evidence 后由 Control 复核保留的原资源承诺。
+不能把本 primitive 接到单 Role `/recover`，也不能因 progress stall 自动 Cancel。
