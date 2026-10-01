@@ -3,6 +3,7 @@
 use crate::{CorrelationId, ExecutionGroupId, MissionId, NodeId, RoleId, TaskId, TaskRef};
 
 use super::ExecutionIntent;
+use super::ExecutionRecoverySupport;
 use super::ExecutionSessionDescriptor;
 
 /// A command sent through the runtime to a local node.
@@ -21,6 +22,9 @@ pub struct ExecutionCommand {
     /// Immutable accepted-plan topology evidence; absent on legacy commands.
     #[serde(default)]
     session: Option<ExecutionSessionDescriptor>,
+    /// Immutable dispatch-time stop/continuation declaration; absent legacy attempts cannot retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_support: Option<ExecutionRecoverySupport>,
     /// Correlation identity for the command and its observations.
     correlation_id: CorrelationId,
 }
@@ -43,6 +47,7 @@ impl ExecutionCommand {
             node_id,
             intent,
             session: None,
+            recovery_support: None,
             correlation_id,
         }
     }
@@ -91,6 +96,17 @@ impl ExecutionCommand {
     /// Returns immutable topology evidence retained across durable Runtime replay.
     pub const fn session(&self) -> Option<&ExecutionSessionDescriptor> {
         self.session.as_ref()
+    }
+
+    /// Freezes exact implementation support without granting cancellation or repetition authority.
+    pub fn with_recovery_support(mut self, support: ExecutionRecoverySupport) -> Self {
+        self.recovery_support = Some(support);
+        self
+    }
+
+    /// Returns original stop/continuation facts; later registration cannot upgrade this attempt.
+    pub const fn recovery_support(&self) -> Option<&ExecutionRecoverySupport> {
+        self.recovery_support.as_ref()
     }
 
     /// Returns the operation correlation identity.

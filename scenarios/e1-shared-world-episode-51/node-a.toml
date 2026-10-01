@@ -8,7 +8,9 @@ reconnect_delay_ms = 500
 id = "habitat-local-eaios"
 runtime_name = "emos-habitat-local-eaios"
 runtime_version = "c1-s0"
-metadata = { "roboguide.execution-session" = "roboguide.execution-session/v0.1" }
+[local_systems.metadata]
+"roboguide.execution-session" = "roboguide.execution-session/v0.1"
+"roboguide.execution-recovery" = '''{"schema_version":"roboguide.local-execution-recovery/v0.1","operations":[{"operation":{"namespace":"mobility","name":"navigate","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"},{"operation":{"namespace":"mobility","name":"move","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"}]}'''
 
 [local_systems.health]
 state_pointer = "/state"

@@ -2,6 +2,37 @@
 
 use super::*;
 
+/// Compiles the real deployment profile without network, simulator or State mutation.
+#[test]
+fn recovery_metadata_validates_exact_operations_before_connections_open() {
+    let config: NodeServiceConfig = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scenarios/e1-shared-world-episode-51/node-a.toml"
+    )))
+    .expect("deployment TOML");
+    CompiledLocalCatalog::compile(config.clone(), Path::new("."))
+        .expect("valid negative support declaration");
+    let key = domain::EXECUTION_RECOVERY_METADATA_KEY;
+    for mutation in ["schema", "scope", "operation", "unknown-field"] {
+        let mut changed = config.clone();
+        let raw = changed.local_systems[0].metadata.get(key).expect("profile");
+        let mut value: serde_json::Value = serde_json::from_str(raw).expect("JSON");
+        match mutation {
+            "schema" => value["schema_version"] = "unknown".into(),
+            "scope" => value["operations"][0]["stop_scope"] = "unknown".into(),
+            "operation" => value["operations"][0]["operation"]["name"] = "undeclared".into(),
+            _ => value["assume_safe"] = true.into(),
+        }
+        changed.local_systems[0]
+            .metadata
+            .insert(key.into(), value.to_string());
+        assert!(
+            matches!(CompiledLocalCatalog::compile(changed, Path::new(".")),
+            Err(CatalogError::Validation { field, .. }) if field == "local_systems.metadata.execution-recovery")
+        );
+    }
+}
+
 /// Catalog compiles multiple local systems and all generic driver configurations.
 #[test]
 fn compiles_multi_system_generic_catalog() {

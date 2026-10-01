@@ -146,6 +146,32 @@ impl CompiledLocalCatalog {
             "operations",
             "must contain at least one executable canonical operation",
         )?;
+        for system in local_systems.values() {
+            if let Some(raw) = system
+                .metadata()
+                .get(domain::EXECUTION_RECOVERY_METADATA_KEY)
+            {
+                require(
+                    separates_capabilities_and_operations,
+                    "local_systems.metadata.execution-recovery",
+                    "recovery declaration requires independently owned v0.7 operations",
+                )?;
+                let profile =
+                    domain::ExecutionRecoveryProfile::from_metadata(raw).map_err(|reason| {
+                        validation("local_systems.metadata.execution-recovery", reason)
+                    })?;
+                for support in profile.operations() {
+                    let operation = support.operation.to_string();
+                    require(
+                        operations
+                            .get(&operation)
+                            .is_some_and(|binding| binding.owner() == system.id()),
+                        "local_systems.metadata.execution-recovery",
+                        "recovery declaration must reference an exact operation owned by this Local System",
+                    )?;
+                }
+            }
+        }
         require(
             supports_artifacts || config.artifacts.is_none(),
             "artifacts",
