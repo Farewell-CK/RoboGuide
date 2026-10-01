@@ -2,6 +2,7 @@
 
 mod model;
 mod pipeline;
+pub(crate) use model::validate_recovery_resources;
 
 pub use model::{
     CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,

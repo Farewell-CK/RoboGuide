@@ -125,6 +125,8 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
+        | EventPayload::GroupContinuationProposed { .. }
+        | EventPayload::GroupContinuationCommitted { .. }
         | EventPayload::ExecutionRelationRegistered { .. }
         | EventPayload::ExecutionRelationStateChanged { .. }
         | EventPayload::PeerChannelReadinessObserved { .. }

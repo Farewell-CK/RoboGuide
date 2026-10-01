@@ -19,6 +19,7 @@ mod scheduler;
 pub use allocation::AllocationProjectionError;
 pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
 pub use coordination::CommittedPlan;
+pub use group::{CommittedGroupContinuation, GroupContinuationProposal};
 pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use initial_preferences::{InitialCandidatePreferences, MAX_INITIAL_PREFERENCE_AGE_MS};
 pub use matching::{CandidateSet, RoleCandidates};

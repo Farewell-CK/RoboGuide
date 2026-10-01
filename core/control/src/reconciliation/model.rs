@@ -417,7 +417,7 @@ pub(super) fn recovery_role(
 }
 
 /// Validates proposed resources against one node and role without reserving them.
-pub(super) fn validate_recovery_resources(
+pub(crate) fn validate_recovery_resources(
     node: &NodeStateSnapshot,
     role: &RoleRequirement,
     resource_ids: &[ResourceId],

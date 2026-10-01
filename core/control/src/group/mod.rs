@@ -14,6 +14,8 @@ use ports::EventSink;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod checkpoint;
+mod continuation;
+pub use continuation::{CommittedGroupContinuation, GroupContinuationProposal};
 mod group_lifecycle;
 mod mission_binding;
 mod task_lifecycle;
