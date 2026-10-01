@@ -25,12 +25,20 @@ def _intent(invocation: CanonicalMobilityInvocation) -> dict[str, object]:
 class RetainedWorldSession:
     """Fence same-endpoint attempts around actual Group stop and a fixed world budget."""
 
-    def __init__(self, invocations: dict[int, CanonicalMobilityInvocation], max_steps: int) -> None:
+    def __init__(
+        self,
+        invocations: dict[int, CanonicalMobilityInvocation],
+        max_steps: int,
+        *,
+        continuations: int = 0,
+    ) -> None:
         """Freeze complete supported topology before any continuation may be admitted."""
         sessions = [invocation.execution_session for invocation in invocations.values()]
         if (
             not invocations
             or max_steps < 1
+            or not 0 <= continuations <= MAX_CONTINUATIONS
+            or any(session is not None and len(session.slots) > 32 for session in sessions)
             or any(session is None or session.topology() == "unsupported" for session in sessions)
             or len({session.digest for session in sessions if session is not None}) != 1
             or any(not invocation.attempt_id for invocation in invocations.values())
@@ -52,8 +60,10 @@ class RetainedWorldSession:
         }
         self.max_steps = max_steps
         self.steps = 0
-        self.continuations = 0
+        self.continuations = continuations
         self.phase = "running"
+        self.episode_terminated = False
+        self.normal_completion = False
         self.outcomes: dict[int, LocalExecutionOutcome] = {}
         self._seen = {value.attempt_id for value in self.invocations.values()}
 
@@ -102,6 +112,7 @@ class RetainedWorldSession:
             if outcome.state == "COMPLETED"
         }
         self.continuations += 1
+        self.normal_completion = False
         self.phase = "running"
 
     def finish(
@@ -121,6 +132,7 @@ class RetainedWorldSession:
             self.close()
             raise IntegrationError("retained world returned inconsistent segment evidence")
         self.steps = steps
+        self.episode_terminated = episode_terminated
         self.outcomes = dict(outcomes)
         resumable = (
             not episode_terminated
@@ -130,10 +142,16 @@ class RetainedWorldSession:
             and all(outcome.state in {"COMPLETED", "CANCELLED"} for outcome in outcomes.values())
         )
         self.phase = "stopped" if resumable else "closed"
+        self.normal_completion = (
+            not episode_terminated
+            and steps < self.max_steps
+            and all(outcome.state == "COMPLETED" for outcome in outcomes.values())
+        )
 
     def close(self) -> None:
         """Fence an ended, unavailable, timed-out or failed world without inventing outcomes."""
         self.phase = "closed"
+        self.normal_completion = False
 
     def as_dict(self) -> dict[str, object]:
         """Expose bounded local admission evidence, separate from benchmark and stop authority."""
@@ -142,6 +160,7 @@ class RetainedWorldSession:
             "phase": self.phase,
             "simulator_steps": self.steps,
             "max_steps": self.max_steps,
+            "episode_terminated": self.episode_terminated,
             "continuations": self.continuations,
             "max_continuations": MAX_CONTINUATIONS,
             "attempts": {str(agent): value.as_dict() for agent, value in self.invocations.items()},

@@ -16,6 +16,7 @@ ROOT = Path(__file__).parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from habitat_local_eaios import __main__ as bridge_main  # noqa: E402
 from habitat_local_eaios.adapter import HabitatLocalAdapter  # noqa: E402
 from habitat_local_eaios.execution_recovery import execution_recovery_profile  # noqa: E402
 from habitat_local_eaios.http_service import HabitatBridgeServer  # noqa: E402
@@ -84,6 +85,37 @@ def test_standalone_support_does_not_need_worker_or_backend() -> None:
     """Reading deployment facts cannot construct a simulator, call a model or change lifecycle."""
     adapter = HabitatLocalAdapter.__new__(HabitatLocalAdapter)
     assert adapter.recovery_support() == execution_recovery_profile(shared_world=False)
+
+
+def test_opted_in_continuation_still_declares_group_stop_only() -> None:
+    """Retained-world support cannot turn coupled cancellation into isolated Role permission."""
+    profile = execution_recovery_profile(shared_world=True, retain_stopped_session=True)
+    operations = cast(list[dict[str, Any]], profile["operations"])
+    assert {entry["stop_scope"] for entry in operations} == {"execution-group"}
+    assert {entry["continuation"] for entry in operations} == {"repeat-after-stop"}
+    standalone = execution_recovery_profile(shared_world=False, retain_stopped_session=True)
+    assert standalone == execution_recovery_profile(shared_world=False)
+
+
+def test_cli_continuation_is_default_off_and_rejects_standalone_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opt-in cannot silently apply to a reset-based backend or change existing launch defaults."""
+    arguments = [
+        "bridge",
+        "--state-db",
+        str(tmp_path / "state.sqlite3"),
+        "--habitat-config",
+        str(tmp_path / "config.yaml"),
+        "--episode-id",
+        "generic",
+    ]
+    monkeypatch.setattr(sys, "argv", arguments)
+    assert bridge_main._arguments().retain_stopped_session is False
+    monkeypatch.setattr(sys, "argv", [*arguments, "--retain-stopped-session"])
+    with pytest.raises(SystemExit, match="shared EMOS Stage2"):
+        bridge_main.main()
+    assert not (tmp_path / "state.sqlite3").exists()
 
 
 def test_http_support_read_does_not_observe_or_mutate_world(tmp_path: Path) -> None:

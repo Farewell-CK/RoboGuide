@@ -967,6 +967,31 @@ class PhysicalDiagnostics:
 
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record the true final world state at episode termination."""
+        self._record_boundary(
+            habitat_env, steps, reason, "diagnostics-terminal.json", "terminal_world_state", True
+        )
+
+    def record_stop(self, habitat_env: Any, steps: int, reason: str, segment: int) -> None:
+        """Snapshot an actual local stop without declaring the physical episode terminal."""
+        self._record_boundary(
+            habitat_env,
+            steps,
+            reason,
+            f"diagnostics-stop-{segment}.json",
+            "stopped_world_state",
+            False,
+        )
+
+    def _record_boundary(
+        self,
+        habitat_env: Any,
+        steps: int,
+        reason: str,
+        name: str,
+        phase: str,
+        terminal: bool,
+    ) -> None:
+        """Read a bounded boundary snapshot; only final termination restores probes."""
         if not self._enabled:
             return
         self.flush_boundary()
@@ -977,7 +1002,7 @@ class PhysicalDiagnostics:
             goal_positions = self._goal_entity_positions(problem)
             document: dict[str, Any] = {
                 "schema_version": DIAGNOSTICS_SCHEMA,
-                "phase": "terminal_world_state",
+                "phase": phase,
                 "episode_id": _read(lambda: str(episode.episode_id)) if episode else _UNAVAILABLE,
                 "scene_id": _read(lambda: str(episode.scene_id)) if episode else _UNAVAILABLE,
                 "termination_reason": reason,
@@ -1007,14 +1032,13 @@ class PhysicalDiagnostics:
                 "dropped_diagnostic_records": self._dropped_records,
                 "collection_stats": self._collection_stats(),
             }
-            self._write_json("diagnostics-terminal.json", document)
+            self._write_json(name, document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
-            self._write_unavailable_snapshot(
-                "diagnostics-terminal.json", "terminal_world_state", error, steps
-            )
+            self._write_unavailable_snapshot(name, phase, error, steps)
         finally:
-            self._restore_nav_probes()
+            if terminal:
+                self._restore_nav_probes()
 
     def flush_boundary(self) -> None:
         """Persist a segment's buffered steps without declaring official episode termination."""
@@ -1083,6 +1107,11 @@ class UnavailablePhysicalDiagnostics:
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record that terminal diagnostics are unavailable, when storage permits."""
         self._write("diagnostics-terminal.json", "terminal_world_state", steps)
+
+    def record_stop(self, habitat_env: Any, steps: int, reason: str, segment: int) -> None:
+        """Record unavailable stop evidence without implying terminal state or doing control."""
+        del habitat_env, reason
+        self._write(f"diagnostics-stop-{segment}.json", "stopped_world_state", steps)
 
     def flush_boundary(self) -> None:
         """Keep unavailable diagnostics side-effect-free at a local Task boundary."""

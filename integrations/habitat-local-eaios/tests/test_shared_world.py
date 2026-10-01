@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import threading
 import time
+import urllib.request
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -19,15 +21,18 @@ if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
 from habitat_local_eaios import idle_endpoint  # noqa: E402
+from habitat_local_eaios import shared_world as shared_world_module  # noqa: E402
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
 from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.http_service import HabitatBridgeServer  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
 from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
 from habitat_local_eaios.shared_world import (  # noqa: E402
     InProcessWorldService,
     NodeEndpoint,
+    ProcessWorldService,
     SharedEmosStage2Runtime,
     SharedWorldCoordinator,
 )
@@ -98,6 +103,7 @@ class RecordingDiagnostics:
         self.persisted_steps: list[int] = []
         self.terminals: list[tuple[int, str]] = []
         self.reset_calls = 0
+        self.stops: list[tuple[int, str, int]] = []
 
     def record_reset(self, habitat_env: object, config: object) -> None:
         """Count one reset observation without reading the fake environment."""
@@ -126,6 +132,12 @@ class RecordingDiagnostics:
         """Persist pending segment records before the next Task starts."""
         self.persisted_steps.extend(self.pending_steps)
         self.pending_steps.clear()
+
+    def record_stop(self, habitat_env: object, steps: int, reason: str, segment: int) -> None:
+        """Flush an actual stopped-world snapshot without terminating the diagnostic stream."""
+        del habitat_env
+        self.flush_boundary()
+        self.stops.append((steps, reason, segment))
 
 
 class WaitSkillPolicy:
@@ -309,7 +321,9 @@ class SerialRuntimeHarness(SharedEmosStage2Runtime):
             episodes=[],
             current_episode=SimpleNamespace(episode_id="3", scene_id="scene"),
             episode_over=False,
-            task=SimpleNamespace(get_task_text_context=lambda: {"scene_description": "scene"}),
+            task=SimpleNamespace(
+                get_task_text_context=lambda: {"scene_description": "scene"}, actions={}
+            ),
             sim=SimpleNamespace(get_agent_data=agent_data),
             get_metrics=lambda: {"pddl_success": self._gym_env.steps == 2},
         )
@@ -809,6 +823,769 @@ class SingleIdleContractLoopHarness(ContractLoopHarness):
     def _record_video(self, step: int, observations: Any, info: dict[str, Any]) -> None:
         """Omit recording while retaining the physical step observation boundary."""
         del step, observations, info
+
+
+class RetainedGym:
+    """Advance one counted world; actual skill observations are independent of official success."""
+
+    def __init__(self, *, completed_first: bool, final_step: int, official: bool) -> None:
+        """Configure terminal observations and optional parent/child cancellation handshake."""
+        self.resets = 0
+        self.steps = 0
+        self.completed_first = completed_first
+        self.final_step = final_step
+        self.official = official
+        self.episode_over = False
+        self.on_step: Callable[[], None] = lambda: None
+
+    def reset(self) -> dict[str, Any]:
+        """Return the sole reset observation; continuation must never invoke this again."""
+        self.resets += 1
+        return {"step": 0}
+
+    def step(self, action: object) -> tuple[dict[str, Any], float, bool, dict[str, bool]]:
+        """Emit navigation completion at specified actual simulator steps."""
+        del action
+        self.steps += 1
+        self.on_step()
+        self.episode_over = self.steps >= self.final_step
+        return (
+            {
+                "step": self.steps,
+                "agent_0_has_finished_oracle_nav": [int(self.completed_first or self.episode_over)],
+                "agent_1_has_finished_oracle_nav": [int(self.episode_over)],
+            },
+            0.0,
+            self.episode_over,
+            {"pddl_success": self.official and self.episode_over},
+        )
+
+    def close(self) -> None:
+        """Release the fake world without advancing or resetting it."""
+
+
+class RecordingVideo:
+    """Count continuous frame observations and closure without producing experiment media."""
+
+    def __init__(self) -> None:
+        """Start an open trace stream."""
+        self.steps: list[int] = []
+        self.closures: list[str] = []
+
+    def close(self, reason: str) -> None:
+        """Observe the boundary that closes a real video writer."""
+        self.closures.append(reason)
+
+
+class RetainedRuntimeHarness(SingleIdleContractLoopHarness):
+    """Use production stop/resume and guard code with vendor-shaped policy and physics doubles."""
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        completed_first: bool = True,
+        final_step: int = 3,
+        max_steps: int = 3,
+    ) -> None:
+        """Construct an unreset world with real continuation admission and original loop code."""
+        super().__init__(tmp_path, RecordingDiagnostics())
+        self._config = CrabAgentBackendConfig(
+            config_path=tmp_path / "unused.yaml",
+            episode_id="generic",
+            agent_id=0,
+            max_steps=max_steps,
+            step_period_ms=0,
+            evidence_dir=tmp_path / "evidence",
+            retain_stopped_session=True,
+        )
+        self._gym_env = RetainedGym(
+            completed_first=completed_first, final_step=final_step, official=False
+        )
+        self._habitat_env = SimpleNamespace(
+            episodes=[],
+            current_episode=SimpleNamespace(episode_id="generic", scene_id="scene"),
+            episode_over=False,
+            task=SimpleNamespace(get_task_text_context=lambda: {"scene_description": "scene"}),
+            sim=SimpleNamespace(
+                get_agent_data=lambda unused: SimpleNamespace(
+                    articulated_agent=SimpleNamespace(base_pos=(0.0, 0.0, 0.0))
+                )
+            ),
+            get_metrics=lambda: {"pddl_success": False},
+        )
+        self.agents = [
+            ContractAgent(f"agent_{agent}", ContractModel(target, None))
+            for agent, target in enumerate(("north", "south"))
+        ]
+        self._actor = ContractActor(self.agents)
+        self._agent_access = SimpleNamespace(masks_shape=(1,))
+        self._episode = object()
+        self._prepared_observations = None
+        self._reset_started = False
+        self._pair_session = None
+        self._serial_session = None
+        self._video = cast(Any, RecordingVideo())
+        self.batch_inputs: list[int] = []
+
+    def initialize(self) -> None:
+        """Exercise the real one-reset preparer without importing vendor environments."""
+        if self._prepared_observations is None:
+            self._prepare_reset()
+
+    @property
+    def gym(self) -> RetainedGym:
+        """Expose the concrete counted simulator double for deterministic assertions."""
+        return cast(RetainedGym, self._gym_env)
+
+    @property
+    def actor(self) -> ContractActor:
+        """Expose the original policy-shaped double without weakening production types."""
+        return cast(ContractActor, self._actor)
+
+    @property
+    def video_observer(self) -> RecordingVideo:
+        """Expose continuous-video evidence counters for boundary checks."""
+        return cast(RecordingVideo, self._video)
+
+    @property
+    def diagnostic_observer(self) -> RecordingDiagnostics:
+        """Expose actual diagnostic calls around the production policy loop."""
+        return cast(RecordingDiagnostics, self._diagnostics)
+
+    def _batch(self, observations: Any) -> Any:
+        """Expose the exact observation from which each original policy segment resumes."""
+        self.batch_inputs.append(int(observations.get("step", -1)))
+        return observations
+
+    def _record_video(self, step: int, observations: Any, info: dict[str, Any]) -> None:
+        """Retain globally numbered sampling positions without simulated media."""
+        del observations, info
+        cast(RecordingVideo, self._video).steps.append(step)
+
+    def _pair_arguments(
+        self, text_context: dict[str, Any], invocations: dict[int, CanonicalMobilityInvocation]
+    ) -> dict[str, Any]:
+        """Use fresh vendor-shaped argument objects while preserving each frozen target."""
+        del text_context
+        return {
+            f"agent_{agent}": SimpleNamespace(subtask_description=self._subtask(value))
+            for agent, value in invocations.items()
+        }
+
+    def _assigned_arguments(
+        self, text_context: dict[str, Any], invocation: CanonicalMobilityInvocation
+    ) -> dict[str, Any]:
+        """Keep the real single-policy path independent of vendor AgentArguments import."""
+        del text_context, invocation
+        return {"agent_0": object(), "agent_1": object()}
+
+
+def _retained_invocations() -> dict[int, CanonicalMobilityInvocation]:
+    """Bind both unrelated targets to complete independent topology and exact attempts."""
+    slots = [_slot("first", "first-actor"), _slot("second", "second-actor")]
+    return {
+        agent: replace(
+            CanonicalMobilityInvocation.from_request(_session_request("m", target, task, slots)),
+            attempt_id=f"original-{agent}",
+        )
+        for agent, (target, task) in enumerate((("north", "first"), ("south", "second")))
+    }
+
+
+@pytest.mark.parametrize("completed_first", [False, True])
+def test_real_pair_loop_continues_one_world_with_global_budget_and_completed_peer(
+    tmp_path: Path, completed_first: bool
+) -> None:
+    """Stop before the next act, then repeat only cancelled slots from actual saved observations."""
+    runtime = RetainedRuntimeHarness(tmp_path, completed_first=completed_first)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    outcomes, first = runtime.execute_pair(
+        invocations, lambda: runtime.gym.steps >= 1, lambda agent, detail: None
+    )
+    assert first["continuation"]["phase"] == "stopped"
+    assert runtime.gym.resets == runtime.gym.steps == runtime.actor.calls == 1
+    assert runtime.video_observer.closures == []
+    assert runtime.diagnostic_observer.stops == [(1, "cancellation", 0)]
+    assert runtime.diagnostic_observer.terminals == []
+    replacements = {
+        agent: replace(invocations[agent], attempt_id=f"retry-{agent}")
+        for agent, outcome in outcomes.items()
+        if outcome.state == "CANCELLED"
+    }
+    before = [agent.llm_model.calls for agent in runtime.agents]
+    later, final = runtime.resume_pair(replacements, lambda: False, lambda agent, detail: None)
+    assert runtime.gym.resets == 1
+    assert runtime.gym.steps == final["identity"]["simulator_steps"] == 3
+    assert runtime.actor.calls == 3
+    assert runtime.batch_inputs == [0, 1, 1, 2, 3]
+    assert final["continuation"]["phase"] == "closed"
+    assert later[1].state == "COMPLETED"
+    if completed_first:
+        assert later[0] == outcomes[0]
+        assert runtime.agents[0].llm_model.calls == before[0]
+        assigned = json.loads((tmp_path / "evidence/stage2-assignment-segment-1.json").read_text())
+        assert assigned["assignments"]["0"]["provider_active"] is False
+        assert assigned["assignments"]["0"]["subtask_description"] == "Nothing to do"
+        assert assigned["assignments"]["1"]["provider_active"] is True
+    assert [
+        policy._high_level_policy.llm_agent for policy in runtime.actor._active_policies
+    ] == runtime.agents
+    assert runtime.diagnostic_observer.persisted_steps == [1, 2, 3]
+    assert runtime.video_observer.steps == [0, 1, 2, 3]
+    assert runtime.video_observer.closures == ["episode_done"]
+    assert not any(outcome.benchmark_task_achieved for outcome in later.values())
+
+
+def test_continued_pair_wrong_target_still_fails_before_another_step(tmp_path: Path) -> None:
+    """Continuation reinstalls exact new-attempt guards without repairing model output."""
+    runtime = RetainedRuntimeHarness(tmp_path)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    runtime.execute_pair(invocations, lambda: runtime.gym.steps >= 1, lambda agent, detail: None)
+    runtime.agents[1].llm_model.target = "north"
+    outcomes, summary = runtime.resume_pair(
+        {1: replace(invocations[1], attempt_id="retry")}, lambda: False, lambda agent, detail: None
+    )
+    assert outcomes[0].state == "COMPLETED"
+    assert outcomes[1].state == "FAILED"
+    assert outcomes[1].terminal_basis == "local-contract-failure"
+    assert runtime.gym.steps == 1
+    assert summary["continuation"]["phase"] == "closed"
+
+
+def test_pair_budget_is_not_renewed_and_failure_cannot_continue(tmp_path: Path) -> None:
+    """The resumed policy gets only remaining world steps, without another episode reset."""
+    runtime = RetainedRuntimeHarness(tmp_path, final_step=100, completed_first=False)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    runtime.execute_pair(invocations, lambda: runtime.gym.steps >= 1, lambda agent, detail: None)
+    replacements = {
+        agent: replace(value, attempt_id=f"new-{agent}") for agent, value in invocations.items()
+    }
+    outcomes, summary = runtime.resume_pair(replacements, lambda: False, lambda agent, detail: None)
+    assert runtime.gym.resets == 1 and runtime.gym.steps == 3
+    assert {outcome.terminal_basis for outcome in outcomes.values()} == {"step-budget-exhausted"}
+    assert summary["continuation"]["phase"] == "closed"
+    with pytest.raises(IntegrationError):
+        runtime.resume_pair(
+            {
+                agent: replace(value, attempt_id=f"extra-{agent}")
+                for agent, value in invocations.items()
+            },
+            lambda: False,
+            lambda agent, detail: None,
+        )
+    assert runtime.gym.steps == 3
+
+
+def test_stale_pair_resume_preserves_stopped_world_without_action(tmp_path: Path) -> None:
+    """Invalid local admission does not erase actual Cancelled or step the world."""
+    runtime = RetainedRuntimeHarness(tmp_path)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    original, _ = runtime.execute_pair(
+        invocations, lambda: runtime.gym.steps >= 1, lambda agent, detail: None
+    )
+    with pytest.raises(IntegrationError):
+        runtime.resume_pair(
+            {1: replace(invocations[1], attempt_id="new", parameters={"destination": "north"})},
+            lambda: False,
+            lambda agent, detail: None,
+        )
+    assert runtime._pair_session is not None and runtime._pair_session.phase == "stopped"
+    assert runtime._pair_session.outcomes == original
+    assert runtime.gym.steps == 1
+
+
+def test_serial_stop_resumes_same_task_in_same_world(tmp_path: Path) -> None:
+    """A one-Actor cancelled Task repeats its exact intent without jumping to a later Task."""
+    runtime = RetainedRuntimeHarness(tmp_path, completed_first=False)
+    runtime.initialize()
+    slots = [_slot("first", "actor"), _slot("next", "actor", ["first"])]
+    invocation = replace(
+        CanonicalMobilityInvocation.from_request(_session_request("m", "north", "first", slots)),
+        attempt_id="original",
+    )
+    outcome, first = runtime.execute_serial(
+        invocation, 0, lambda: runtime.gym.steps >= 1, lambda agent, detail: None, False
+    )
+    assert outcome.state == "CANCELLED"
+    assert first["continuation"]["phase"] == "stopped"
+    other = replace(invocation, task_id="next", attempt_id="wrong-next")
+    with pytest.raises(IntegrationError):
+        runtime.execute_serial(other, 0, lambda: False, lambda agent, detail: None, True)
+    assert runtime.gym.steps == 1
+    result, final = runtime.execute_serial(
+        replace(invocation, attempt_id="replacement"),
+        0,
+        lambda: False,
+        lambda agent, detail: None,
+        False,
+    )
+    assert result.state == "COMPLETED"
+    assert final["identity"]["simulator_steps"] == 3
+    assert final["identity"]["episode_terminated"] is True
+    assert final["continuation"]["continuations"] == 1
+    assert runtime.gym.resets == 1
+    assert runtime.diagnostic_observer.stops == [(1, "cancellation", 0)]
+
+
+def _wait_terminal(endpoint: NodeEndpoint, handle: str) -> dict[str, object]:
+    """Wait boundedly for real test worker projection, never synthesizing a terminal fact."""
+    for _ in range(1000):
+        record = _execution(endpoint.store(), handle)
+        if record["state"] in TERMINAL:
+            return record
+        time.sleep(0.001)
+    raise AssertionError("local execution did not reach its observed terminal")
+
+
+def _retained_endpoints(
+    tmp_path: Path, *, completed_first: bool = True, monotonic: Callable[[], float] = time.monotonic
+) -> tuple[RetainedRuntimeHarness, SharedWorldCoordinator, NodeEndpoint, NodeEndpoint]:
+    """Connect actual coordinator and runtime to two durable Node endpoint stores."""
+    runtime = RetainedRuntimeHarness(tmp_path, completed_first=completed_first)
+    coordinator = SharedWorldCoordinator(
+        InProcessWorldService(runtime),
+        2.0,
+        tmp_path / "evidence",
+        retain_stopped_session=True,
+        max_steps=3,
+        wait_poll_s=0.001,
+        monotonic=monotonic,
+    )
+    endpoints = [
+        NodeEndpoint(
+            f"node-{agent}",
+            agent,
+            ExecutionStore(tmp_path / f"{agent}.sqlite3"),
+            coordinator,
+            retain_stopped_session=True,
+        )
+        for agent in range(2)
+    ]
+    return runtime, coordinator, endpoints[0], endpoints[1]
+
+
+@pytest.mark.parametrize("completed_first", [False, True])
+def test_coordinator_continuation_preserves_old_handles_and_final_evidence(
+    tmp_path: Path, completed_first: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only genuine stop enables fresh handles; paused metrics never become final evidence."""
+    runtime, coordinator, first, second = _retained_endpoints(
+        tmp_path, completed_first=completed_first
+    )
+    invocations = _retained_invocations()
+    original = runtime.execute_pair
+
+    def stop_after_first(
+        values: dict[int, CanonicalMobilityInvocation],
+        cancellation: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Inject a durable real endpoint cancel only after one actual shared step."""
+
+        def stop() -> bool:
+            """Accept cancel intent and then observe it at the normal loop boundary."""
+            if runtime.gym.steps >= 1:
+                active = second.store().active_execution()
+                assert active is not None
+                second.cancel({"execution_id": active["execution_id"]})
+            return cancellation()
+
+        return original(values, stop, running)
+
+    monkeypatch.setattr(runtime, "execute_pair", stop_after_first)
+    endpoints = {0: first, 1: second}
+    handles = {
+        agent: str(endpoints[agent].submit({"invocation": value.as_dict()})["execution_id"])
+        for agent, value in invocations.items()
+    }
+    records = {agent: _wait_terminal(endpoints[agent], handle) for agent, handle in handles.items()}
+    evidence = tmp_path / "evidence"
+    assert not (evidence / "shared-world-summary.json").exists()
+    assert not (evidence / "task-verifier-verdict.json").exists()
+    assert json.loads((evidence / "shared-world-segment-0.json").read_text())["is_final"] is False
+    monkeypatch.setattr(runtime, "execute_pair", original)
+    replacements = {
+        agent: replace(invocations[agent], attempt_id=f"replacement-{agent}")
+        for agent, record in records.items()
+        if record["state"] == "CANCELLED"
+    }
+    fresh = {
+        agent: str(endpoints[agent].submit({"invocation": value.as_dict()})["execution_id"])
+        for agent, value in replacements.items()
+    }
+    try:
+        for agent, handle in fresh.items():
+            assert _wait_terminal(endpoints[agent], handle)["state"] == "COMPLETED"
+        assert {
+            agent: _execution(endpoints[agent].store(), handle) for agent, handle in handles.items()
+        } == records
+        final = json.loads((evidence / "shared-world-summary.json").read_text())
+        assert final["official_pddl_success"] is False
+        assert final["identity"]["episode_reset_count"] == 1
+        assert final["identity"]["simulator_steps"] == 3
+        assert len(final["execution_segments"]) == 2
+        assert runtime.gym.resets == 1
+        assert first.accept({"invocation": invocations[0].as_dict()})["execution_id"] == handles[0]
+        with pytest.raises(IntegrationError, match="consumed"):
+            second.accept({"invocation": replace(invocations[1], attempt_id="extra").as_dict()})
+    finally:
+        coordinator.shutdown()
+
+
+def test_process_transport_resumes_existing_child_without_another_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise actual Pipe commands and the child handler with no vendor/model dependencies."""
+    import multiprocessing
+
+    runtime = RetainedRuntimeHarness(tmp_path)
+    monkeypatch.setattr(
+        shared_world_module, "SharedEmosStage2Runtime", lambda config, agents: runtime
+    )
+    parent, child = multiprocessing.Pipe()
+    thread = threading.Thread(
+        target=shared_world_module._child_world_process,
+        args=(child, runtime._config, (0, 1)),
+        daemon=True,
+    )
+    thread.start()
+    assert parent.poll(2)
+    assert parent.recv()[0] == "READY"
+    world = ProcessWorldService(cast(CrabAgentBackendConfig, runtime._config), (0, 1))
+    world._connection = parent
+    world._process = thread
+    world._ready = True
+    invocations = _retained_invocations()
+    first_step = threading.Event()
+
+    def pause_first_step() -> None:
+        """Let the parent observe cancel during a counted action without polling the Provider."""
+        if runtime.gym.steps == 1:
+            first_step.wait(timeout=2)
+
+    runtime.gym.on_step = pause_first_step
+
+    def cancellation_requested() -> bool:
+        """Release the step and send one actual child CANCEL command from the parent."""
+        if runtime.gym.steps >= 1:
+            first_step.set()
+            return True
+        return False
+
+    try:
+        outcomes, stopped = world.run_pair(
+            invocations, cancellation_requested, lambda agent, detail: None
+        )
+        assert stopped["continuation"]["phase"] == "stopped"
+        assert outcomes[1].state == "CANCELLED"
+        assert runtime.gym.steps == 1
+        current_world = world._process
+        outcomes, final = world.resume_pair(
+            {1: replace(invocations[1], attempt_id="retry")},
+            lambda: False,
+            lambda agent, detail: None,
+        )
+        assert world._process is current_world
+        assert outcomes[1].state == "COMPLETED"
+        assert runtime.gym.resets == 1 and runtime.gym.steps == 3
+        assert final["identity"]["simulator_steps"] == 3
+        assert final["official_metrics"]["pddl_success"] is False
+    finally:
+        parent.send(("CLOSE", None))
+        thread.join(timeout=2)
+        parent.close()
+    assert not thread.is_alive()
+
+
+def test_incomplete_continuation_expires_without_running_half_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing second replacement cannot renew the wait window or manufacture success."""
+    now = [0.0]
+    runtime, coordinator, first, second = _retained_endpoints(
+        tmp_path, completed_first=False, monotonic=lambda: now[0]
+    )
+    original = runtime.execute_pair
+
+    def stop_after_one(
+        values: dict[int, CanonicalMobilityInvocation],
+        unused: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Drive one actual cancelled production segment, isolated from timing policy."""
+        del unused
+        return original(values, lambda: runtime.gym.steps >= 1, running)
+
+    monkeypatch.setattr(runtime, "execute_pair", stop_after_one)
+    invocations = _retained_invocations()
+    first_handle = str(first.submit({"invocation": invocations[0].as_dict()})["execution_id"])
+    second_handle = str(second.submit({"invocation": invocations[1].as_dict()})["execution_id"])
+    assert _wait_terminal(first, first_handle)["state"] == "CANCELLED"
+    assert _wait_terminal(second, second_handle)["state"] == "CANCELLED"
+    pending = str(
+        first.submit({"invocation": replace(invocations[0], attempt_id="retry").as_dict()})[
+            "execution_id"
+        ]
+    )
+    assert first.store().get(pending) is not None
+    assert runtime.gym.steps == 1
+    gym = runtime.gym
+    now[0] = 3.0
+    try:
+        assert _wait_terminal(first, pending)["state"] == "FAILED"
+        assert gym.resets == 1 and gym.steps == 1
+        assert coordinator._pair_session is not None and coordinator._pair_session.phase == "closed"
+        assert not (tmp_path / "evidence/shared-world-summary.json").exists()
+        assert (
+            json.loads((tmp_path / "evidence/retained-session-state.json").read_text())["reason"]
+            == "joint continuation window expired"
+        )
+    finally:
+        coordinator.shutdown()
+
+
+def _http_post(server: HabitatBridgeServer, path: str, body: object) -> dict[str, Any]:
+    """Use the actual loopback HTTP workflow boundary with no authenticated remote calls."""
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_address[1]}{path}",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=2) as response:
+        value: Any = json.load(response)
+    assert isinstance(value, dict)
+    return cast(dict[str, Any], value)
+
+
+def test_http_cancel_receipt_precedes_real_group_stop_and_fresh_continuation(
+    tmp_path: Path,
+) -> None:
+    """HTTP acceptance, observed stop and resumed execution remain distinct measured facts."""
+    runtime, coordinator, first, second = _retained_endpoints(tmp_path)
+    first_step = threading.Event()
+    release_step = threading.Event()
+
+    def wait_for_http_cancel() -> None:
+        """Hold one real step until the external test caller observes the cancellation receipt."""
+        if runtime.gym.steps == 1:
+            first_step.set()
+            assert release_step.wait(2)
+
+    runtime.gym.on_step = wait_for_http_cancel
+    servers = [HabitatBridgeServer(("127.0.0.1", 0), endpoint) for endpoint in (first, second)]
+    threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in servers]
+    for thread in threads:
+        thread.start()
+    invocations = _retained_invocations()
+    try:
+        handles = [
+            _http_post(
+                servers[agent], "/v1/executions", {"invocation": invocations[agent].as_dict()}
+            )["execution_id"]
+            for agent in range(2)
+        ]
+        assert first_step.wait(2)
+        receipt = _http_post(servers[1], "/v1/executions/cancel", {"execution_id": handles[1]})
+        assert receipt["cancel_requested"] is True
+        assert receipt["state"] == "RUNNING"
+        assert (
+            _http_post(servers[1], "/v1/executions/status", {"execution_id": handles[1]})["state"]
+            == "RUNNING"
+        )
+        release_step.set()
+        assert _wait_terminal(first, handles[0])["state"] == "COMPLETED"
+        assert _wait_terminal(second, handles[1])["state"] == "CANCELLED"
+        replacement = replace(invocations[1], attempt_id="new-attempt")
+        new_handle = _http_post(
+            servers[1], "/v1/executions", {"invocation": replacement.as_dict()}
+        )["execution_id"]
+        assert new_handle != handles[1]
+        assert _wait_terminal(second, new_handle)["state"] == "COMPLETED"
+        assert (
+            _http_post(servers[1], "/v1/executions/status", {"execution_id": handles[1]})["state"]
+            == "CANCELLED"
+        )
+        assert runtime.gym.resets == 1 and runtime.gym.steps == 3
+        summary = json.loads((tmp_path / "evidence/shared-world-summary.json").read_text())
+        assert summary["official_pddl_success"] is False
+    finally:
+        release_step.set()
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
+        coordinator.shutdown()
+
+
+def test_retained_world_restart_is_rejected_before_reset(tmp_path: Path) -> None:
+    """A second coordinator cannot reset a replacement world behind old continuation evidence."""
+    runtime, coordinator, _, _ = _retained_endpoints(tmp_path)
+    replacement = RetainedRuntimeHarness(tmp_path)
+    try:
+        with pytest.raises(IntegrationError, match="unused durable"):
+            SharedWorldCoordinator(
+                InProcessWorldService(replacement),
+                2.0,
+                tmp_path / "evidence",
+                retain_stopped_session=True,
+                max_steps=3,
+            )
+        assert replacement.gym.resets == 0
+        assert runtime._prepared_observations is not None
+    finally:
+        coordinator.shutdown()
+
+
+def test_lost_child_continuation_cannot_spawn_replacement_world(tmp_path: Path) -> None:
+    """Unavailable child means unavailable retained context, never a reset fallback."""
+    runtime = RetainedRuntimeHarness(tmp_path)
+    world = ProcessWorldService(cast(CrabAgentBackendConfig, runtime._config), (0, 1))
+    world._process = SimpleNamespace(is_alive=lambda: False)
+    world._connection = object()
+    world._ready = True
+    assert not world.is_ready()
+    with pytest.raises(IntegrationError, match="not alive"):
+        world.resume_pair(
+            {1: replace(_retained_invocations()[1], attempt_id="new")},
+            lambda: False,
+            lambda agent, detail: None,
+        )
+    assert runtime.gym.resets == 0
+
+
+def test_actual_resume_exception_keeps_primary_cause_and_closes_session(tmp_path: Path) -> None:
+    """An original actor fault cannot become Cancelled, Completed or a new reset opportunity."""
+    runtime = RetainedRuntimeHarness(tmp_path)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    runtime.execute_pair(invocations, lambda: runtime.gym.steps >= 1, lambda agent, detail: None)
+    runtime.actor.fail_at = 2
+    with pytest.raises(IntegrationError, match="actor failure sentinel") as caught:
+        runtime.resume_pair(
+            {1: replace(invocations[1], attempt_id="new")},
+            lambda: False,
+            lambda agent, detail: None,
+        )
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert runtime.gym.resets == 1 and runtime.gym.steps == 1
+    assert runtime._pair_session is not None and runtime._pair_session.phase == "closed"
+    assert runtime.diagnostic_observer.terminals == [
+        (1, "execution_exception:actor_act:RuntimeError")
+    ]
+    assert [
+        policy._high_level_policy.llm_agent for policy in runtime.actor._active_policies
+    ] == runtime.agents
+
+
+def test_stop_snapshot_and_segment_write_failures_do_not_change_actual_outcomes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Optional failed archival cannot hide stop evidence or create a simulator failure."""
+    runtime, coordinator, first, second = _retained_endpoints(tmp_path)
+    original_execute = runtime.execute_pair
+
+    def stop(
+        values: dict[int, CanonicalMobilityInvocation],
+        unused: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Use a measured stop despite intentionally unavailable diagnostic storage."""
+        del unused
+        return original_execute(values, lambda: runtime.gym.steps >= 1, running)
+
+    def broken_stop(*args: object) -> None:
+        """Emulate diagnostic disk failure after the simulator has really stopped."""
+        del args
+        raise OSError("test storage unavailable")
+
+    original_write = coordinator._write_json
+
+    def broken_archive(name: str, value: object) -> None:
+        """Fail only optional segment/state archival; final summary remains independent."""
+        if name.startswith(("shared-world-segment-", "retained-session-state")):
+            raise OSError("test segment write unavailable")
+        original_write(name, value)
+
+    monkeypatch.setattr(runtime, "execute_pair", stop)
+    monkeypatch.setattr(runtime.diagnostic_observer, "record_stop", broken_stop)
+    monkeypatch.setattr(coordinator, "_write_json", broken_archive)
+    values = _retained_invocations()
+    old_first = str(first.submit({"invocation": values[0].as_dict()})["execution_id"])
+    old_second = str(second.submit({"invocation": values[1].as_dict()})["execution_id"])
+    try:
+        assert _wait_terminal(first, old_first)["state"] == "COMPLETED"
+        assert _wait_terminal(second, old_second)["state"] == "CANCELLED"
+        monkeypatch.setattr(runtime, "execute_pair", original_execute)
+        new_handle = str(
+            second.submit({"invocation": replace(values[1], attempt_id="new").as_dict()})[
+                "execution_id"
+            ]
+        )
+        assert _wait_terminal(second, new_handle)["state"] == "COMPLETED"
+        assert runtime.gym.resets == 1 and runtime.gym.steps == 3
+        assert len(coordinator._segment_history) == 2
+        summary = json.loads((tmp_path / "evidence/shared-world-summary.json").read_text())
+        assert summary["continuation_archival"] == {
+            "complete": False,
+            "failure_counts": {"segment": 2, "state": 2},
+        }
+    finally:
+        coordinator.shutdown()
+
+
+def test_serial_next_task_carries_used_world_continuation_budget(tmp_path: Path) -> None:
+    """A normal next Task cannot reset the retry ceiling or step history of this world."""
+    runtime = RetainedRuntimeHarness(tmp_path, max_steps=10, final_step=100)
+    runtime.initialize()
+    slots = [_slot("first", "actor"), _slot("next", "actor", ["first"])]
+    first = replace(
+        CanonicalMobilityInvocation.from_request(_session_request("m", "north", "first", slots)),
+        attempt_id="initial",
+    )
+    runtime.execute_serial(first, 0, lambda: True, lambda agent, detail: None, False)
+    complete, _ = runtime.execute_serial(
+        replace(first, attempt_id="retry-first"),
+        0,
+        lambda: False,
+        lambda agent, detail: None,
+        False,
+    )
+    assert complete.state == "COMPLETED"
+    assert runtime.gym.steps == 1
+    next_task = replace(
+        CanonicalMobilityInvocation.from_request(_session_request("m", "north", "next", slots)),
+        attempt_id="next-initial",
+    )
+    cancelled, snapshot = runtime.execute_serial(
+        next_task, 0, lambda: True, lambda agent, detail: None, True
+    )
+    assert cancelled.state == "CANCELLED"
+    assert snapshot["continuation"]["continuations"] == 1
+    assert snapshot["identity"]["simulator_steps"] == 1
+    assert runtime.diagnostic_observer.stops == [(0, "cancellation", 0), (1, "cancellation", 1)]
+    assert runtime.gym.resets == 1
+
+
+def test_retained_configuration_mismatch_is_rejected_before_world_start(tmp_path: Path) -> None:
+    """Startup mode/budget agreement precedes readiness and any physical reset."""
+    runtime = RetainedRuntimeHarness(tmp_path)
+    with pytest.raises(IntegrationError, match="does not match"):
+        SharedWorldCoordinator(
+            InProcessWorldService(runtime),
+            2.0,
+            tmp_path / "evidence",
+            retain_stopped_session=True,
+            max_steps=100,
+        )
+    assert runtime.gym.resets == 0
+    assert not (tmp_path / "evidence/retained-world-owner.json").exists()
 
 
 def _single_idle_loop(

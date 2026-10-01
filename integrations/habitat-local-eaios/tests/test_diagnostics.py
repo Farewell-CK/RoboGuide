@@ -466,6 +466,27 @@ def test_terminal_goal_entity_positions_are_read_from_final_world(tmp_path: Path
     assert terminal["robot_at_threshold_m"]["_status"] == "unavailable"
 
 
+def test_stopped_snapshot_keeps_probes_and_stream_until_actual_terminal(tmp_path: Path) -> None:
+    """A paused world is observed without finalizing sensors or replacing terminal evidence."""
+    diagnostics = make_diagnostics(tmp_path)
+    env = FakeEnv([FakePredicate("any_targets|0", False)])
+    restored: list[bool] = []
+    diagnostics._restore_nav_probes = lambda: restored.append(True)  # type: ignore[method-assign]
+    diagnostics.record_reset(env, None)
+    diagnostics.record_stop(env, 1, "cancellation", 0)
+    assert not restored
+    assert not (tmp_path / "evidence/diagnostics-terminal.json").exists()
+    stopped = json.loads((tmp_path / "evidence/diagnostics-stop-0.json").read_text())
+    assert stopped["phase"] == "stopped_world_state"
+    assert stopped["termination_reason"] == "cancellation"
+    diagnostics.record_terminal(env, 2, "episode_done")
+    assert restored == [True]
+    assert (
+        json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())["phase"]
+        == "terminal_world_state"
+    )
+
+
 def test_pddl_reference_position_is_distinct_from_navigation_ground_point(
     tmp_path: Path,
 ) -> None:

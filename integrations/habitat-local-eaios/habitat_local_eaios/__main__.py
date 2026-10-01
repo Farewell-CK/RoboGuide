@@ -134,6 +134,11 @@ def _arguments() -> argparse.Namespace:
         action="store_true",
         help="shared backend: observe bounded reset routes without excluding Node candidates",
     )
+    parser.add_argument(
+        "--retain-stopped-session",
+        action="store_true",
+        help="shared backend: retain cancelled Group worlds for coordinated exact attempts",
+    )
     return parser.parse_args()
 
 
@@ -167,16 +172,24 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         spatial_profile_path=arguments.spatial_profile,
         goal_region_navigation=arguments.goal_region_navigation,
         reset_route_support=arguments.reset_route_support,
+        retain_stopped_session=arguments.retain_stopped_session,
         progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
-    coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
+    coordinator = SharedWorldCoordinator(
+        world,
+        arguments.pair_wait_s,
+        arguments.evidence_dir,
+        retain_stopped_session=arguments.retain_stopped_session,
+        max_steps=arguments.max_steps,
+    )
     endpoint_a = NodeEndpoint(
         "node-a",
         arguments.agent_id,
         ExecutionStore(arguments.state_db),
         coordinator,
         progress_directory=arguments.progress_directory,
+        retain_stopped_session=arguments.retain_stopped_session,
     )
     endpoint_b = NodeEndpoint(
         "node-b",
@@ -184,6 +197,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         ExecutionStore(arguments.state_db_b),
         coordinator,
         progress_directory=arguments.progress_directory,
+        retain_stopped_session=arguments.retain_stopped_session,
     )
     server_a = HabitatBridgeServer((arguments.host, arguments.port), endpoint_a)
     server_b = HabitatBridgeServer((arguments.host, arguments.port_b), endpoint_b)
@@ -207,6 +221,8 @@ def main() -> None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
     if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
         raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
+    if arguments.retain_stopped_session and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("retained stopped sessions require the shared EMOS Stage2 backend")
     if arguments.reset_route_support and (
         arguments.backend != "shared-emos-stage2" or not arguments.goal_region_navigation
     ):

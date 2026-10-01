@@ -36,10 +36,12 @@ from .emos_stage2 import EmosStage2Runtime
 from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher, read_execution_progress
 from .execution_recovery import execution_recovery_profile
+from .idle_endpoint import PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
 from .reset_route_support import build_reset_route_support
+from .retained_session import MAX_CONTINUATIONS, RetainedWorldSession, claim_retained_world
 from .semantic_evidence import build_authoritative_semantic_evidence
 from .source_provenance import build_runtime_source_manifest
 from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
@@ -75,6 +77,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         )
         self._prepared_observations: Any | None = None
         self._reset_started = False
+        self._pair_session: RetainedWorldSession | None = None
+        self._serial_session: RetainedWorldSession | None = None
 
     def initialize(self) -> None:
         """Reset once, then publish evidence from that same world before readiness."""
@@ -221,6 +225,36 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         if agent_id not in self._agent_ids:
             raise IntegrationError("serial assignment uses an unconfigured endpoint")
         original_config = self._config
+        retained = bool(getattr(original_config, "retain_stopped_session", False))
+        session = getattr(self, "_serial_session", None)
+        if retained:
+            if habitat_env.episode_over or self._serial_steps >= original_config.max_steps:
+                raise IntegrationError("retained serial world is ended or out of steps")
+            if session is not None and session.phase == "stopped":
+                session.resume({agent_id: invocation})
+            elif session is None or (
+                session.phase == "closed"
+                and session.normal_completion
+                and all(
+                    (value.task_id, value.role_id) != (invocation.task_id, invocation.role_id)
+                    for value in session.invocations.values()
+                )
+            ):
+                if session is not None and (
+                    invocation.execution_session
+                    != next(iter(session.invocations.values())).execution_session
+                ):
+                    raise IntegrationError(
+                        "serial continuation cannot replace its accepted session"
+                    )
+                session = RetainedWorldSession(
+                    {agent_id: invocation},
+                    original_config.max_steps,
+                    continuations=getattr(self, "_continuations_used", 0),
+                )
+                self._serial_session = session
+            else:
+                raise IntegrationError("serial stopped session does not admit this Task/attempt")
         self._config = replace(original_config, agent_id=agent_id)
         phase = "serial_reset"
         terminal_recorded = False
@@ -274,8 +308,29 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 outcome.as_dict(),
                 "serial local outcome",
             )
-            self._diagnostics.flush_boundary()
-            complete = final_slot or outcome.state != "COMPLETED" or habitat_env.episode_over
+            try:
+                self._diagnostics.flush_boundary()
+            except Exception:  # noqa: BLE001 - optional evidence cannot fail physical execution
+                _LOG.exception("physical diagnostics boundary flush unavailable")
+            if session is not None:
+                session.finish(
+                    {agent_id: outcome},
+                    self._serial_steps,
+                    bool(habitat_env.episode_over or outcome.episode_terminated),
+                )
+                self._continuations_used = session.continuations
+            paused = session is not None and session.phase == "stopped"
+            complete = not paused and (
+                final_slot
+                or outcome.state != "COMPLETED"
+                or habitat_env.episode_over
+                or (retained and outcome.episode_terminated)
+            )
+            if paused:
+                assert session is not None
+                self._record_stopped_diagnostics(
+                    habitat_env, self._serial_steps, "cancellation", session.continuations
+                )
             if complete:
                 self._record_terminal_diagnostics(
                     habitat_env,
@@ -297,10 +352,16 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     "habitat_seed": original_config.seed,
                     "initial_agent_positions": self._serial_initial_positions,
                     "simulator_steps": self._serial_steps,
-                    "episode_terminated": bool(habitat_env.episode_over),
+                    "episode_terminated": bool(
+                        habitat_env.episode_over or outcome.episode_terminated
+                    ),
+                    **({"max_steps": original_config.max_steps} if retained else {}),
                 },
+                **({"continuation": session.as_dict()} if session is not None else {}),
             }
         except BaseException:
+            if session is not None:
+                session.close()
             if not terminal_recorded:
                 self._record_terminal_diagnostics(
                     habitat_env,
@@ -357,6 +418,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         invocations: dict[int, CanonicalMobilityInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
+        *,
+        _continuation: bool = False,
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Run one shared episode with both committed assignments.
 
@@ -366,12 +429,28 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """
         gym_env, habitat_env, actor, access = self._require_initialized()
         agent_ids = self._agent_ids
+        retained = bool(getattr(self._config, "retain_stopped_session", False))
+        session = getattr(self, "_pair_session", None)
+        if _continuation:
+            if not retained or session is None or habitat_env.episode_over:
+                raise IntegrationError("stopped pair world is not available for continuation")
+            session.resume(invocations)
+            invocations = dict(session.invocations)
+        elif retained:
+            if session is not None:
+                raise IntegrationError("retained pair must use explicit continuation admission")
+            session = RetainedWorldSession(invocations, self._config.max_steps)
+            self._pair_session = session
+        completed = {} if session is None else dict(session.outcomes)
+        step_offset = 0 if session is None else session.steps
         loop_owns_terminal_diagnostics = False
         setup_phase = "prepared_reset"
         try:
             if self._prepared_observations is None:
                 raise IntegrationError("shared-world reset evidence is unavailable")
-            observations = self._prepared_observations
+            observations = (
+                self._retained_pair_observations if _continuation else self._prepared_observations
+            )
             setup_phase = "task_context"
             episode_started_at = self._episode_started_at
             text_context = habitat_env.task.get_task_text_context()
@@ -386,7 +465,29 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     self._subtask(invocations[agent_id]),
                 )
             assignment = self._pair_arguments(text_context, invocations)
+            for agent_id in completed:
+                assignment[f"agent_{agent_id}"].subtask_description = "Nothing to do"
+            if session is not None:
+                self._best_effort_write_json(
+                    f"stage2-assignment-segment-{session.continuations}.json",
+                    {
+                        "simulator_steps_before_segment": step_offset,
+                        "assignments": {
+                            str(agent): {
+                                "invocation": value.as_dict(),
+                                "subtask_description": assignment[
+                                    f"agent_{agent}"
+                                ].subtask_description,
+                                "provider_active": agent not in completed,
+                            }
+                            for agent, value in invocations.items()
+                        },
+                    },
+                    "retained Stage2 assignment",
+                )
             for agent_id in agent_ids:
+                if agent_id in completed:
+                    continue
                 running(
                     agent_id,
                     f"shared EMOS Stage2 episode {self._config.episode_id} started "
@@ -406,6 +507,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 "habitat_seed": self._config.seed,
                 "initial_agent_positions": self._initial_positions,
             }
+            if retained:
+                identity["max_steps"] = self._config.max_steps
+                identity["segment_initial_agent_positions"] = initial_agent_positions(
+                    habitat_env, self._agent_ids
+                )
             loop_owns_terminal_diagnostics = True
             outcomes, steps, done, info = self._pair_loop(
                 observations,
@@ -418,17 +524,26 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 habitat_env,
                 cancellation_requested,
                 running,
+                step_offset=step_offset,
+                completed_outcomes=completed,
             )
             identity["episode_terminated"] = bool(done or habitat_env.episode_over)
             identity["simulator_steps"] = steps
+            if session is not None:
+                session.finish(outcomes, steps, bool(identity["episode_terminated"]))
             return outcomes, {
                 "action_trace_collection": self._action_trace_stats(),
                 "identity": identity,
                 "final_info": info,
+                **({"continuation": session.as_dict()} if session is not None else {}),
             }
         except IntegrationError:
+            if session is not None:
+                session.close()
             raise
         except Exception as error:
+            if session is not None:
+                session.close()
             raise IntegrationError(f"shared EMOS Stage2 execution failed: {error}") from error
         finally:
             if not loop_owns_terminal_diagnostics:
@@ -437,6 +552,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     0,
                     f"execution_exception:{setup_phase}",
                 )
+
+    def resume_pair(
+        self,
+        replacements: dict[int, CanonicalMobilityInvocation],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Continue a stopped Group in its original world, never an isolated Role retry."""
+        return self.execute_pair(replacements, cancellation_requested, running, _continuation=True)
 
     def _admit_pair_spatial_feasibility(
         self,
@@ -528,20 +652,24 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         habitat_env: Any,
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
+        *,
+        step_offset: int = 0,
+        completed_outcomes: dict[int, LocalExecutionOutcome] | None = None,
     ) -> tuple[dict[int, LocalExecutionOutcome], int, bool, dict[str, Any]]:
         """Drive the original joint policy loop with per-agent completion."""
-        steps = 0
+        steps = step_offset
         done = False
         info: dict[str, Any] = {}
         termination_reason = "execution_exception:pair_loop_setup"
         exception_phase = "pair_loop_setup"
         primary_error: BaseException | None = None
         skill_sequence: list[str] = []
-        outcomes: dict[int, LocalExecutionOutcome] = {}
+        outcomes: dict[int, LocalExecutionOutcome] = dict(completed_outcomes or {})
         terminal_bases: dict[int, str] = {}
         module: Any = None
         original_group_discussion: Any = None
         contract_restore: Callable[[], None] | None = None
+        idle_binding: PassiveIdleBinding | None = None
         contract_failure: Stage2ContractViolation | None = None
         cancelled = False
         try:
@@ -573,12 +701,22 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             chat_history_root = self._evidence_dir() / "chat-history"
             (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
             module, original_group_discussion = self._install_assignment(assignment)
+            if outcomes:
+                remaining = set(agent_ids) - set(outcomes)
+                if len(remaining) != 1:
+                    raise IntegrationError(
+                        "continued pair needs exactly its remaining assigned endpoint"
+                    )
+                idle_binding = install_passive_idle_agents(
+                    actor, assignment, f"agent_{next(iter(remaining))}"
+                )
             contract_restore = self._install_execution_contract(
                 {
                     f"agent_{agent_id}": Stage2ExecutionContract.for_invocation(
                         invocations[agent_id]
                     )
                     for agent_id in invocations
+                    if agent_id not in outcomes
                 },
                 lambda: steps,
             )
@@ -607,6 +745,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 step_result = gym_env.step(env_action)
                 observations, done, info = self._gym_step_result(step_result)
                 steps += 1
+                self._retained_pair_observations = observations
                 for agent_id, publisher in progress.items():
                     publisher.observe(habitat_env, current_skills[agent_id])
                 exception_phase = "post_step_observation"
@@ -705,6 +844,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         step_result = gym_env.step(env_action * 0)
                         observations, done, info = self._gym_step_result(step_result)
                         steps += 1
+                        self._retained_pair_observations = observations
                         exception_phase = "settle_post_step_observation"
                         self._diagnostics.record_step(
                             steps,
@@ -739,10 +879,16 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             raise
         finally:
             try:
-                if contract_restore is not None:
-                    contract_restore()
-                if module is not None:
-                    module.group_discussion = original_group_discussion
+                try:
+                    if contract_restore is not None:
+                        contract_restore()
+                finally:
+                    try:
+                        if idle_binding is not None:
+                            idle_binding.restore()
+                    finally:
+                        if module is not None:
+                            module.group_discussion = original_group_discussion
             except Exception:
                 if primary_error is None:
                     raise
@@ -755,7 +901,25 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 except Exception:  # noqa: BLE001 - evidence cannot mask execution
                     _LOG.exception("action trace flush failed at shared-world termination")
                 finally:
-                    self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
+                    self._retained_pair_steps = steps
+                    session = getattr(self, "_pair_session", None)
+                    if (
+                        cancelled
+                        and getattr(self._config, "retain_stopped_session", False)
+                        and not done
+                        and not habitat_env.episode_over
+                        and steps < self._config.max_steps
+                        and (session is None or session.continuations < MAX_CONTINUATIONS)
+                    ):
+                        self._retained_pair_observations = observations
+                        self._record_stopped_diagnostics(
+                            habitat_env,
+                            steps,
+                            termination_reason,
+                            0 if session is None else session.continuations,
+                        )
+                    else:
+                        self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
         if contract_failure is not None:
             for agent_id in agent_ids:
                 # A later joint-policy stop cannot erase an already observed
@@ -816,6 +980,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 )
         return outcomes, steps, bool(done or habitat_env.episode_over), info
 
+    def _record_stopped_diagnostics(
+        self, habitat_env: Any, steps: int, reason: str, segment: int
+    ) -> None:
+        """Flush and snapshot a stopped world without closing probes or continuous video."""
+        try:
+            self._diagnostics.record_stop(habitat_env, steps, reason, segment)
+        except Exception:  # noqa: BLE001 - diagnostics never change physical execution
+            _LOG.exception("physical stop snapshot unavailable")
+
     def _record_terminal_diagnostics(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Persist best-effort terminal evidence without changing SUT failure semantics."""
         try:
@@ -868,9 +1041,19 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
 
     def close(self) -> None:
         """Finalize optional video evidence before releasing the shared simulator."""
+        sessions = (getattr(self, "_pair_session", None), getattr(self, "_serial_session", None))
+        for session in sessions:
+            if session is not None and session.phase == "stopped":
+                self._record_terminal_diagnostics(
+                    self._habitat_env, session.steps, "retained_world_closed"
+                )
+                session.close()
         video = getattr(self, "_video", None)
         if video is not None:
-            video.close("runtime_close")
+            try:
+                video.close("runtime_close")
+            except Exception:  # noqa: BLE001 - optional media must not prevent physical cleanup
+                _LOG.exception("video close unavailable during physical world cleanup")
         super().close()
 
     def final_metrics(self) -> dict[str, Any]:
@@ -1057,13 +1240,19 @@ class NodeEndpoint:
         coordinator: SharedWorldCoordinator,
         *,
         progress_directory: Path | None = None,
+        retain_stopped_session: bool = False,
     ) -> None:
         """Bind one durable store and agent mapping to the shared coordinator."""
+        if retain_stopped_session and not coordinator._retain_stopped_session:
+            raise IntegrationError(
+                "endpoint continuation declaration does not match its coordinator"
+            )
         self.name = name
         self.agent_id = agent_id
         self._store = store
         self._coordinator = coordinator
         self._progress_directory = progress_directory
+        self._retain_stopped_session = retain_stopped_session
         self._lock = threading.RLock()
         self._scheduled: set[str] = set()
         self._known_keys: dict[str, str] = {
@@ -1160,8 +1349,10 @@ class NodeEndpoint:
         )
 
     def recovery_support(self) -> dict[str, object]:
-        """Declare joint-segment cancellation and no stopped-session retry, without mutation."""
-        return execution_recovery_profile(shared_world=True)
+        """Return frozen deployment facts; joint continuation never implies isolated stopping."""
+        return execution_recovery_profile(
+            shared_world=True, retain_stopped_session=self._retain_stopped_session
+        )
 
     @staticmethod
     def _execution_response(execution: StoredExecution) -> dict[str, object]:
@@ -1191,9 +1382,13 @@ class InProcessWorldService:
     def __init__(self, runtime: Any) -> None:
         """Retain the runtime double that owns the shared world."""
         self._runtime = runtime
+        self._start_requested = False
 
     def start(self) -> str:
         """Initialize the world on the current thread."""
+        if self._start_requested:
+            raise IntegrationError("one world service cannot restart or replace its simulator")
+        self._start_requested = True
         self._runtime.initialize()
         return str(self._runtime.readiness_detail())
 
@@ -1204,6 +1399,11 @@ class InProcessWorldService:
     def readiness_detail(self) -> str:
         """Describe the world."""
         return str(self._runtime.readiness_detail())
+
+    def continuation_config(self) -> tuple[bool, int]:
+        """Read fixed local configuration, never model, simulator or policy state."""
+        config = self._runtime._config
+        return bool(getattr(config, "retain_stopped_session", False)), int(config.max_steps)
 
     def run_pair(
         self,
@@ -1230,6 +1430,17 @@ class InProcessWorldService:
         )
         summary["official_metrics"] = self._runtime.final_metrics()
         return outcome, summary
+
+    def resume_pair(
+        self,
+        replacements: dict[int, CanonicalMobilityInvocation],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Continue only the stopped slots while retaining completed peers in the same world."""
+        outcomes, summary = self._runtime.resume_pair(replacements, cancellation_requested, running)
+        summary["official_metrics"] = self._runtime.final_metrics()
+        return outcomes, summary
 
     def shutdown(self) -> None:
         """Release the in-process world."""
@@ -1263,16 +1474,20 @@ def _child_world_process(
                 return
             if kind == "CLOSE":
                 return
-            if kind not in {"EXECUTE_PAIR", "EXECUTE_SERIAL"}:
+            if kind not in {"EXECUTE_PAIR", "EXECUTE_SERIAL", "RESUME_PAIR"}:
                 connection.send(("WORLD_ERROR", "invalid world process command"))
                 continue
+            closing = False
 
             def cancellation_requested() -> bool:
                 """Consume cancellation or shutdown commands between world steps."""
+                nonlocal closing
                 while connection.poll():
                     nested_kind, _ = _receive_message(connection)
                     if nested_kind in {"CANCEL", "CLOSE"}:
+                        closing = nested_kind == "CLOSE"
                         return True
+                    raise IntegrationError("only cancellation/shutdown is valid during execution")
                 return False
 
             def running(agent_id: int, detail: str) -> None:
@@ -1280,12 +1495,13 @@ def _child_world_process(
                 connection.send(("RUNNING", (agent_id, detail)))
 
             try:
-                if kind == "EXECUTE_PAIR":
+                if kind in {"EXECUTE_PAIR", "RESUME_PAIR"}:
                     if not isinstance(payload, dict):
                         raise IntegrationError("pair command requires invocation mapping")
-                    outcomes, summary = runtime.execute_pair(
-                        payload, cancellation_requested, running
+                    executor = (
+                        runtime.execute_pair if kind == "EXECUTE_PAIR" else runtime.resume_pair
                     )
+                    outcomes, summary = executor(payload, cancellation_requested, running)
                 else:
                     if not isinstance(payload, tuple) or len(payload) != 3:
                         raise IntegrationError("serial command requires one invocation and slot")
@@ -1304,6 +1520,8 @@ def _child_world_process(
                 connection.send(("TERMINAL", (outcomes, summary)))
             except Exception as error:  # noqa: BLE001 - terminal failure for both nodes
                 connection.send(("WORLD_ERROR", str(error)))
+            if closing:
+                return
     finally:
         runtime.close()
         connection.close()
@@ -1323,9 +1541,13 @@ class ProcessWorldService:
         self._process: Any = None
         self._ready_detail = "shared world process is not initialized"
         self._ready = False
+        self._start_requested = False
 
     def start(self) -> str:
         """Spawn the world process and wait for explicit readiness evidence."""
+        if self._start_requested:
+            raise IntegrationError("one world service cannot restart or replace its simulator")
+        self._start_requested = True
         parent_connection, child_connection = self._context.Pipe()
         process = self._context.Process(
             target=_child_world_process,
@@ -1353,11 +1575,15 @@ class ProcessWorldService:
 
     def is_ready(self) -> bool:
         """Report whether the child world reported readiness."""
-        return self._ready
+        return bool(self._ready and self._process is not None and self._process.is_alive())
 
     def readiness_detail(self) -> str:
         """Describe the child-owned shared world."""
         return self._ready_detail
+
+    def continuation_config(self) -> tuple[bool, int]:
+        """Expose startup-fixed continuation mode and the child world's total step budget."""
+        return self._config.retain_stopped_session, self._config.max_steps
 
     def run_pair(
         self,
@@ -1366,8 +1592,27 @@ class ProcessWorldService:
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Execute one shared episode in the child and relay lifecycle evidence."""
+        return self._run_pair_command("EXECUTE_PAIR", invocations, cancellation_requested, running)
+
+    def resume_pair(
+        self,
+        replacements: dict[int, CanonicalMobilityInvocation],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Send exact replacements to the existing child without spawning or resetting."""
+        return self._run_pair_command("RESUME_PAIR", replacements, cancellation_requested, running)
+
+    def _run_pair_command(
+        self,
+        kind: str,
+        invocations: dict[int, CanonicalMobilityInvocation],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Relay one original-world segment; child errors cannot trigger a new world."""
         connection, process = self._require_live()
-        connection.send(("EXECUTE_PAIR", invocations))
+        connection.send((kind, invocations))
         cancel_sent = False
         while True:
             if cancellation_requested() and not cancel_sent:
@@ -1445,8 +1690,12 @@ class ProcessWorldService:
 
     def _require_live(self) -> tuple[Any, Any]:
         """Return live IPC state or reject before pairing."""
-        if self._connection is None or self._process is None or not self._process.is_alive():
+        if self._connection is None or self._process is None or not self._ready:
             raise IntegrationError("shared world process is not initialized")
+        if not self._process.is_alive():
+            raise IntegrationError(
+                "shared world process is not alive; retained context unavailable"
+            )
         return self._connection, self._process
 
 
@@ -1466,17 +1715,30 @@ class SharedWorldCoordinator:
         *,
         monotonic: Callable[[], float] = time.monotonic,
         wait_poll_s: float = 0.2,
+        retain_stopped_session: bool = False,
+        max_steps: int | None = None,
     ) -> None:
         """Own the single-episode state machine and evidence log."""
         if pair_wait_s <= 0:
             raise IntegrationError("pair_wait_s must be positive")
         if wait_poll_s <= 0:
             raise IntegrationError("wait_poll_s must be positive")
+        if retain_stopped_session and (max_steps is None or max_steps < 1):
+            raise IntegrationError("retained continuation requires the frozen world step budget")
+        if retain_stopped_session:
+            if world.continuation_config() != (True, max_steps):
+                raise IntegrationError(
+                    "coordinator continuation configuration does not match its world"
+                )
+            claim_retained_world(evidence_dir)
         self._world = world
         self._pair_wait_s = pair_wait_s
         self._monotonic = monotonic
         self._wait_poll_s = wait_poll_s
         self._evidence_dir = evidence_dir
+        self._retain_stopped_session = retain_stopped_session
+        self._max_steps = max_steps
+        self._closing = threading.Event()
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._queue: list[tuple[NodeEndpoint, str]] = []
@@ -1489,6 +1751,14 @@ class SharedWorldCoordinator:
         self._serial_arrivals: list[tuple[NodeEndpoint, str]] = []
         self._serial_waited_from: float | None = None
         self._serial_finished = False
+        self._serial_session: RetainedWorldSession | None = None
+        self._continuations_used = 0
+        self._pair_session: RetainedWorldSession | None = None
+        self._retained_pair_entries: dict[int, tuple[NodeEndpoint, str]] = {}
+        self._replacement_entries: dict[int, tuple[NodeEndpoint, str]] = {}
+        self._retained_waited_from: float | None = None
+        self._segment_history: list[dict[str, object]] = []
+        self._archival_failures: dict[str, int] = {}
         self._initialization_error: str | None = None
         self._worker = threading.Thread(
             target=self._run, name="shared-world-coordinator", daemon=True
@@ -1510,6 +1780,8 @@ class SharedWorldCoordinator:
             ),
             "unix": time.time(),
         }
+        if invocation.attempt_id is not None:
+            record["attempt_id"] = invocation.attempt_id
         self._evidence_dir.mkdir(parents=True, exist_ok=True)
         with self._arrival_log.open("a", encoding="utf-8") as output:
             output.write(json.dumps(record, sort_keys=True) + "\n")
@@ -1556,8 +1828,32 @@ class SharedWorldCoordinator:
     def can_accept(self, endpoint: NodeEndpoint, invocation: CanonicalMobilityInvocation) -> bool:
         """Admit only an unused episode or the next slot of its exact serial session."""
         with self._condition:
+            if self._closing.is_set() or self._initialization_error is not None:
+                return False
+            if self._pair_session is not None:
+                original = self._retained_pair_entries.get(endpoint.agent_id)
+                return bool(
+                    original is not None
+                    and original[0] is endpoint
+                    and self._retained_waited_from is not None
+                    and self._monotonic() - self._retained_waited_from < self._pair_wait_s
+                    and self._pair_session.can_replace(endpoint.agent_id, invocation)
+                )
+            if self._serial_session is not None and self._serial_session.phase == "stopped":
+                return bool(
+                    endpoint is self._serial_endpoint
+                    and self._serial_session.can_replace(endpoint.agent_id, invocation)
+                    and not self._serial_finished
+                    and self._serial_waited_from is not None
+                    and self._monotonic() - self._serial_waited_from < self._pair_wait_s
+                )
             if not self._episode_consumed:
-                return True
+                return not self._retain_stopped_session or bool(
+                    invocation.attempt_id
+                    and invocation.execution_session is not None
+                    and invocation.execution_session.topology() != "unsupported"
+                    and len(invocation.execution_session.slots) <= 32
+                )
             session = invocation.execution_session
             slot = (invocation.task_id, invocation.role_id)
             return bool(
@@ -1576,6 +1872,12 @@ class SharedWorldCoordinator:
 
     def shutdown(self) -> None:
         """Stop the world service cooperatively."""
+        self._closing.set()
+        with self._condition:
+            self._condition.notify_all()
+        for session in (self._pair_session, self._serial_session):
+            if session is not None:
+                session.close()
         self._world.shutdown()
 
     def _run(self) -> None:
@@ -1587,12 +1889,22 @@ class SharedWorldCoordinator:
             return
         waited_from: float | None = None
         pair: list[tuple[NodeEndpoint, str]] = []
-        while True:
+        while not self._closing.is_set():
             with self._condition:
                 if not self._queue:
                     self._condition.wait(timeout=self._wait_poll_s)
                 entries = list(self._queue)
             if self._serial_endpoint is not None:
+                if (
+                    self._serial_session is not None
+                    and self._serial_session.phase == "stopped"
+                    and self._serial_waited_from is not None
+                    and self._monotonic() - self._serial_waited_from >= self._pair_wait_s
+                ):
+                    self._serial_finished = True
+                    self._serial_session.close()
+                    self._archive_retained_state("serial continuation window expired")
+                    self._world.shutdown()
                 for entry in entries:
                     self._dequeue(entry)
                     self._execute_serial(entry)
@@ -1609,6 +1921,13 @@ class SharedWorldCoordinator:
                     )
                     with self._condition:
                         self._serial_finished = True
+                        if self._serial_session is not None:
+                            self._serial_session.close()
+                            self._archive_retained_state("serial continuation window expired")
+                            self._world.shutdown()
+                continue
+            if self._pair_session is not None:
+                self._continue_stopped_pair(entries)
                 continue
             if self._episode_consumed:
                 for entry in entries:
@@ -1686,6 +2005,109 @@ class SharedWorldCoordinator:
         with self._condition:
             if entry in self._queue:
                 self._queue.remove(entry)
+
+    def _continue_stopped_pair(self, entries: list[tuple[NodeEndpoint, str]]) -> None:
+        """Wait for exactly every stopped slot without renewing its fixed continuation window."""
+        session = self._pair_session
+        if session is None:
+            return
+        expired = (
+            session.phase == "stopped"
+            and self._retained_waited_from is not None
+            and self._monotonic() - self._retained_waited_from >= self._pair_wait_s
+        )
+        if expired:
+            session.close()
+            self._archive_retained_state("joint continuation window expired")
+            for entry in list(self._replacement_entries.values()):
+                self._fail_extra(entry)
+            self._replacement_entries.clear()
+            self._world.shutdown()
+        for endpoint, execution_id in entries:
+            entry = (endpoint, execution_id)
+            self._dequeue(entry)
+            record = endpoint.store().get(execution_id)
+            if (
+                record is None
+                or record["state"] != "ACCEPTED"
+                or not session.can_replace(endpoint.agent_id, record["invocation"])
+                or endpoint.agent_id in self._replacement_entries
+                or self._retained_pair_entries[endpoint.agent_id][0] is not endpoint
+            ):
+                self._fail_extra(entry)
+                continue
+            self._replacement_entries[endpoint.agent_id] = entry
+        if session.pending_agents and set(self._replacement_entries) == session.pending_agents:
+            replacements = list(self._replacement_entries.values())
+            self._replacement_entries.clear()
+            self._execute_pair(replacements, continuation=True)
+
+    def _archive_retained_state(self, reason: str) -> None:
+        """Best-effort record local session closure/admission without changing execution results."""
+        session = self._pair_session or self._serial_session
+        if session is None:
+            return
+        try:
+            self._write_json(
+                "retained-session-state.json",
+                dict(
+                    session.as_dict(),
+                    reason=reason,
+                    segments=self._segment_history,
+                    archival_failure_counts=dict(self._archival_failures),
+                ),
+            )
+        except Exception:  # noqa: BLE001 - archival is not physical authority
+            self._archival_failures["state"] = self._archival_failures.get("state", 0) + 1
+            _LOG.exception("retained session state archival unavailable")
+
+    def _archive_segment(
+        self, entries: list[tuple[NodeEndpoint, str]], summary: dict[str, Any]
+    ) -> None:
+        """Preserve bounded attempt/segment evidence separately from final benchmark data."""
+        session = self._pair_session or self._serial_session
+        if session is None:
+            return
+        record: dict[str, object] = {
+            "sequence": len(self._segment_history),
+            "assignments": [
+                self._start_assignment_identity(endpoint, handle) for endpoint, handle in entries
+            ],
+            "continuation": session.as_dict(),
+            "identity": summary["identity"],
+            "is_final": session.phase == "closed",
+        }
+        self._segment_history.append(record)
+        try:
+            self._write_json(f"shared-world-segment-{record['sequence']}.json", record)
+        except Exception:  # noqa: BLE001 - failed diagnostics cannot authorize or deny physical work
+            self._archival_failures["segment"] = self._archival_failures.get("segment", 0) + 1
+            _LOG.exception("shared-world segment archival unavailable")
+        self._archive_retained_state("actual segment ended")
+
+    def _finish_retained_segment(
+        self,
+        session: RetainedWorldSession,
+        outcomes: dict[int, LocalExecutionOutcome],
+        summary: dict[str, Any],
+    ) -> None:
+        """Cross-check child admission state and immutable budget before exposing resumability."""
+        identity = summary.get("identity", {})
+        steps = identity.get("simulator_steps")
+        ended = identity.get("episode_terminated")
+        if (
+            not isinstance(steps, int)
+            or isinstance(steps, bool)
+            or not isinstance(ended, bool)
+            or identity.get("max_steps") != self._max_steps
+        ):
+            raise IntegrationError(
+                "retained world did not report its frozen step budget and terminal state"
+            )
+        session.finish(outcomes, steps, ended)
+        if summary.get("continuation") != session.as_dict():
+            session.close()
+            raise IntegrationError("parent and child retained session evidence disagree")
 
     def _fail_extra(self, entry: tuple[NodeEndpoint, str]) -> None:
         """Fail closed a dispatch that cannot join the current episode."""
@@ -1799,10 +2221,28 @@ class SharedWorldCoordinator:
 
         try:
             final_slot = len(self._serial_completed) + 1 == len(self._serial_slots)
+            retained = self._serial_session
+            if self._retain_stopped_session:
+                if retained is not None and retained.phase == "stopped":
+                    retained.resume({endpoint.agent_id: invocation})
+                else:
+                    assert self._max_steps is not None
+                    retained = RetainedWorldSession(
+                        {endpoint.agent_id: invocation},
+                        self._max_steps,
+                        continuations=self._continuations_used,
+                    )
+                    self._serial_session = retained
             outcome, summary = self._world.run_serial(
                 invocation, endpoint.agent_id, cancellation_requested, running, final_slot
             )
-            self._serial_completed.add(slot)
+            if retained is not None:
+                self._finish_retained_segment(retained, {endpoint.agent_id: outcome}, summary)
+                self._continuations_used = retained.continuations
+                self._archive_segment([entry], summary)
+            paused = retained is not None and retained.phase == "stopped"
+            if not paused:
+                self._serial_completed.add(slot)
             self._serial_outcomes.append(
                 {
                     "task_id": invocation.task_id,
@@ -1810,7 +2250,7 @@ class SharedWorldCoordinator:
                     "outcome": outcome.as_dict(),
                 }
             )
-            terminal = (
+            terminal = not paused and (
                 final_slot
                 or outcome.state != "COMPLETED"
                 or summary["identity"].get("episode_terminated")
@@ -1822,16 +2262,17 @@ class SharedWorldCoordinator:
                     summary,
                     serial_task_outcomes=self._serial_outcomes,
                 )
-                verifier_invocations: list[CanonicalMobilityInvocation] = []
+                latest: dict[tuple[str, str], CanonicalMobilityInvocation] = {}
                 for arrival_endpoint, arrival_id in self._serial_arrivals:
                     arrival = arrival_endpoint.store().get(arrival_id)
                     if arrival is None:
                         _LOG.warning("serial verifier evidence lost a retained Task invocation")
-                        verifier_invocations = []
+                        latest = {}
                         break
-                    verifier_invocations.append(arrival["invocation"])
-                if verifier_invocations:
-                    self._publish_verifier_verdict_best_effort(summary, verifier_invocations)
+                    value = arrival["invocation"]
+                    latest[(value.task_id, value.role_id)] = value
+                if latest:
+                    self._publish_verifier_verdict_best_effort(summary, list(latest.values()))
             store.mark_terminal(execution_id, outcome)
             self._serial_waited_from = self._monotonic()
         except Exception as error:  # noqa: BLE001 - local failure cannot become success
@@ -1839,6 +2280,9 @@ class SharedWorldCoordinator:
             if current is not None and current["state"] not in TERMINAL_STATES:
                 store.mark_failed(execution_id, f"shared serial episode failed: {error}")
             self._serial_finished = True
+            if self._serial_session is not None:
+                self._serial_session.close()
+                self._archive_retained_state("serial segment exception")
 
     def _fail_incompatible(self, pair: list[tuple[NodeEndpoint, str]], reason: str) -> None:
         """Archive and fail both incompatible assignments before any Habitat reset."""
@@ -1849,17 +2293,28 @@ class SharedWorldCoordinator:
             if current is not None and current["state"] not in TERMINAL_STATES:
                 store.mark_failed(execution_id, f"shared-world episode start rejected: {reason}")
 
-    def _execute_pair(self, pair: list[tuple[NodeEndpoint, str]]) -> None:
+    def _execute_pair(
+        self, pair: list[tuple[NodeEndpoint, str]], *, continuation: bool = False
+    ) -> None:
         """Run the single shared episode and project per-agent terminal facts."""
         self._write_start_admission(
             "ADMITTED",
             pair,
             "both required distinct endpoint assignments arrived before reset",
         )
-        endpoints = {endpoint.agent_id: endpoint for endpoint, _ in pair}
+        if continuation:
+            self._retained_pair_entries.update(
+                {endpoint.agent_id: (endpoint, handle) for endpoint, handle in pair}
+            )
+        elif self._retain_stopped_session:
+            self._retained_pair_entries = {
+                endpoint.agent_id: (endpoint, handle) for endpoint, handle in pair
+            }
+        complete_pair = list(self._retained_pair_entries.values()) if continuation else pair
+        endpoints = {endpoint.agent_id: endpoint for endpoint, _ in complete_pair}
         handles: dict[int, str] = {}
         invocations: dict[int, CanonicalMobilityInvocation] = {}
-        for endpoint, execution_id in pair:
+        for endpoint, execution_id in complete_pair:
             execution = endpoint.store().get(execution_id)
             if execution is None:
                 raise IntegrationError("paired execution disappeared before the episode")
@@ -1880,12 +2335,43 @@ class SharedWorldCoordinator:
                 endpoints[agent_id].store().mark_running(handles[agent_id], detail)
 
         try:
-            outcomes, summary = self._world.run_pair(invocations, cancellation_requested, running)
-            self._publish_summary_best_effort(outcomes, summary)
-            self._publish_verifier_verdict_best_effort(summary, list(invocations.values()))
+            if self._retain_stopped_session:
+                if continuation:
+                    assert self._pair_session is not None
+                    replacements = {
+                        endpoint.agent_id: invocations[endpoint.agent_id] for endpoint, _ in pair
+                    }
+                    self._pair_session.resume(replacements)
+                    outcomes, summary = self._world.resume_pair(
+                        replacements, cancellation_requested, running
+                    )
+                else:
+                    assert self._max_steps is not None
+                    self._pair_session = RetainedWorldSession(invocations, self._max_steps)
+                    outcomes, summary = self._world.run_pair(
+                        invocations, cancellation_requested, running
+                    )
+                self._finish_retained_segment(self._pair_session, outcomes, summary)
+                self._archive_segment(pair, summary)
+            else:
+                outcomes, summary = self._world.run_pair(
+                    invocations, cancellation_requested, running
+                )
+            paused = self._pair_session is not None and self._pair_session.phase == "stopped"
+            if paused:
+                self._retained_waited_from = self._monotonic()
+            else:
+                self._publish_summary_best_effort(outcomes, summary)
+                self._publish_verifier_verdict_best_effort(summary, list(invocations.values()))
             for agent_id, outcome in outcomes.items():
-                endpoints[agent_id].store().mark_terminal(handles[agent_id], outcome)
+                store = endpoints[agent_id].store()
+                record = store.get(handles[agent_id])
+                if record is not None and record["state"] not in TERMINAL_STATES:
+                    store.mark_terminal(handles[agent_id], outcome)
         except Exception as error:  # noqa: BLE001 - terminal failure must reach both nodes
+            if self._pair_session is not None:
+                self._pair_session.close()
+                self._archive_retained_state("joint segment exception")
             for endpoint, execution_id in pair:
                 store = endpoint.store()
                 current = store.get(execution_id)
@@ -1913,6 +2399,12 @@ class SharedWorldCoordinator:
         }
         if serial_task_outcomes is not None:
             summary_document["serial_task_outcomes"] = serial_task_outcomes
+        if self._retain_stopped_session:
+            summary_document["execution_segments"] = self._segment_history
+            summary_document["continuation_archival"] = {
+                "complete": not self._archival_failures,
+                "failure_counts": dict(self._archival_failures),
+            }
         semantic_evidence = self._evidence_dir / "authoritative-semantic-evidence.json"
         if semantic_evidence.is_file():
             semantic_document = json.loads(semantic_evidence.read_text(encoding="utf-8"))
@@ -2031,6 +2523,8 @@ class SharedWorldCoordinator:
                 "task_id": invocation.task_id,
             }
         )
+        if invocation.attempt_id is not None:
+            document["attempt_id"] = invocation.attempt_id
         return document
 
 

@@ -33,6 +33,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     spatial_profile_path: Path | None = None
     goal_region_navigation: bool = False
     reset_route_support: bool = False
+    retain_stopped_session: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
