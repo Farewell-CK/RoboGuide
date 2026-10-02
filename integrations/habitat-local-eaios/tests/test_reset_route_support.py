@@ -205,6 +205,79 @@ def test_probe_miss_records_budget_not_physical_impossibility() -> None:
     assert len(probe.pathfinder.queries) <= routes.PATH_QUERIES_PER_RECORD
 
 
+def test_geometry_is_independently_opted_in_and_reuses_endpoint_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default-off execution never exports geometry; opt-in never adds path queries."""
+    from habitat_local_eaios.navmesh_region import RegionBudget
+
+    env = _environment(found=False)
+    probe = routes.ResetRouteProbe(env, 0, _api())
+    exports: list[int] = []
+
+    def vertices(component: int) -> list[tuple[float, float, float]]:
+        """Count one bounded detached export shared by both observations."""
+        exports.append(component)
+        return [(-1.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 0.0, 1.0)]
+
+    probe.pathfinder.get_island = lambda start: 0
+    probe.pathfinder.build_navmesh_vertices = vertices
+    probe.pathfinder.build_navmesh_vertex_indices = lambda component: [0, 1, 2]
+    ordinary = probe.observe("goal")
+    assert exports == [] and "region_analysis" not in ordinary
+    env.task.pddl_problem.sim_info.get_entity_pos = lambda name: (20.0, 0.0, 0.0)
+    observation = probe.observe("goal")
+    before = len(probe.pathfinder.queries)
+    region = probe.observe_region(observation, RegionBudget())
+    assert region["status"] == "disjoint" and region["complete"] is True
+    assert probe.observe_region(observation, RegionBudget())["mesh_digest"] == region["mesh_digest"]
+    assert exports == [0] and len(probe.pathfinder.queries) == before
+    assert env.task.actions["agent_0_oracle_nav_action"].pathfinder is None
+    monkeypatch.setattr(routes, "ResetRouteProbe", lambda environment, agent_id: probe)
+    semantic, matrix, profile, runtime = _sources()
+    baseline = routes.build_reset_route_support(env, semantic, matrix, profile, runtime)
+    assert baseline["schema_version"] == routes.RESET_ROUTE_SUPPORT_SCHEMA
+    assert "region_analysis" not in baseline["records"][0]
+    profile["reset_route_geometry_enabled"] = True
+    enriched = routes.build_reset_route_support(env, semantic, matrix, profile, runtime)
+    assert enriched["schema_version"] == routes.GEOMETRY_ROUTE_SUPPORT_SCHEMA
+    assert enriched["records"][0]["region_analysis"]["status"] == "disjoint"
+    assert enriched["probe"]["region_analysis"]["is_node_exclusion"] is False
+
+
+def test_geometry_failure_does_not_overwrite_route_outcome() -> None:
+    """An export failure remains unknown while the original route result survives."""
+    from habitat_local_eaios.navmesh_region import RegionBudget
+
+    env = _environment()
+    probe = routes.ResetRouteProbe(env, 0, _api())
+    record = probe.observe("goal")
+    before = copy.deepcopy(record)
+    region = probe.observe_region(record, RegionBudget())
+    assert region["status"] == "unknown" and region["complete"] is False
+    assert region["minimum_reference_distance_m"] is None
+    assert record == before and record["status"] == "supported"
+
+
+def test_geometry_requires_existing_observer_configuration() -> None:
+    """Geometry cannot accidentally activate on the default execution profile."""
+    assert (
+        CrabAgentBackendConfig(
+            config_path=Path("unused"), episode_id="x", agent_id=0, max_steps=3, step_period_ms=0
+        ).reset_route_geometry
+        is False
+    )
+    with pytest.raises(IntegrationError, match="requires reset route support"):
+        CrabAgentBackendConfig(
+            config_path=Path("unused"),
+            episode_id="x",
+            agent_id=0,
+            max_steps=3,
+            step_period_ms=0,
+            reset_route_geometry=True,
+        )
+
+
 def test_adjacent_floor_witness_uses_the_original_goal_tolerance() -> None:
     """Different goal height can have a valid same-floor route without teleporting."""
     env = _environment()

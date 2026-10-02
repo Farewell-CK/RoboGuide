@@ -241,7 +241,11 @@ class EmosStage2Runtime:
             self._write_json(
                 "local-how-profile.json",
                 {
-                    "schema_version": "roboguide.habitat-local-how-profile/v0.2",
+                    "schema_version": (
+                        "roboguide.habitat-local-how-profile/v0.3"
+                        if getattr(self._config, "reset_route_geometry", False)
+                        else "roboguide.habitat-local-how-profile/v0.2"
+                    ),
                     "navigation_point_resolver": (
                         "official-any-at-agent-navmesh/v0.1"
                         if goal_region_enabled
@@ -250,6 +254,11 @@ class EmosStage2Runtime:
                     "official_success_authority": "habitat-pddl",
                     "reset_route_support_enabled": bool(
                         getattr(self._config, "reset_route_support", False)
+                    ),
+                    **(
+                        {"reset_route_geometry_enabled": True}
+                        if getattr(self._config, "reset_route_geometry", False)
+                        else {}
                     ),
                 },
             )
@@ -270,6 +279,7 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",
                         "habitat_local_eaios.reset_route_support",
+                        "habitat_local_eaios.navmesh_region",
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",

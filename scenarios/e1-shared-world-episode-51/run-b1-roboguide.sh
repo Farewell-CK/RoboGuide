@@ -179,6 +179,14 @@ if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" == 1 ]]; then
     GOAL_REGION_ARGS+=(--reset-route-support)
     ROUTE_SUPPORT_CHECK_ARGS=(--require-route-support)
 fi
+if [[ "${ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY:-0}" == 1 ]]; then
+    if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" != 1 ]]; then
+        echo "reset route geometry requires ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1" >&2
+        exit 1
+    fi
+    GOAL_REGION_ARGS+=(--reset-route-geometry)
+    ROUTE_SUPPORT_CHECK_ARGS+=(--require-route-geometry)
+fi
 trap finish_run EXIT
 INITIAL_PREFERENCES_PATH=""
 INITIAL_PREFERENCES_SOURCE=""

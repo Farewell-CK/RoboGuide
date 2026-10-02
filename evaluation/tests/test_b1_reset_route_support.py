@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 from b1_helpers import make_run, write_json
 from roboguide_eval.b1_deployment_feasibility import _content_digest
-from roboguide_eval.b1_reset_route_support import _PROBE, preflight_reset_route_support
+from roboguide_eval.b1_reset_route_support import (
+    _PROBE,
+    _REGION_PROFILE,
+    preflight_reset_route_support,
+)
 from roboguide_eval.b1_run import assess_b1_directory
 from roboguide_eval.b1_workload import extract_b1_workload
 
@@ -168,6 +172,170 @@ def _archive(run: Path) -> dict[str, Any]:
 def _save(run: Path, document: dict[str, Any]) -> None:
     """Persist a resealed mutated archive for deterministic preflight rejection."""
     write_json(run / "evidence/reset-route-support.json", _seal(document))
+
+
+def _geometry_archive(run: Path, *, disjoint: bool = False) -> dict[str, Any]:
+    """Freeze a complete v0.2 snapshot with geometrically consistent source points."""
+    document = _archive(run)
+    matrix = json.loads((run / "evidence/preassignment-feasibility.json").read_text())
+    if disjoint:
+        for source in matrix["records"]:
+            source["destination_entity"]["position"] = [20.0, 0.0, 0.0]
+        matrix = _seal(matrix)
+        write_json(run / "evidence/preassignment-feasibility.json", matrix)
+    local_how = json.loads((run / "evidence/local-how-profile.json").read_text())
+    local_how.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.3", reset_route_geometry_enabled=True
+    )
+    write_json(run / "evidence/local-how-profile.json", local_how)
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    module = run / "offline-region-module.py"
+    module.write_text("# immutable geometry producer fixture\n")
+    runtime["modules"]["habitat_local_eaios.navmesh_region"] = {
+        "path": str(module),
+        "sha256": hashlib.sha256(module.read_bytes()).hexdigest(),
+    }
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["schema_version"] = "roboguide.deployment-reset-route-support/v0.2"
+    document["probe"]["region_analysis"] = copy.deepcopy(_REGION_PROFILE)
+    document["identity"].update(
+        preassignment_digest=matrix["digest"],
+        local_how_digest=_content_digest(local_how),
+        runtime_sources_digest=_content_digest(runtime),
+    )
+    for record in document["records"]:
+        if disjoint:
+            record.update(
+                status="not_found",
+                reason_code="initial_candidates_exhausted",
+                selection=None,
+                goal_center=[20.0, 0.0, 0.0],
+                search={
+                    "reason_code": "candidates_exhausted",
+                    "vertices_seen": 0,
+                    "candidates_in_region": 0,
+                    "path_queries": 1,
+                    "search_truncated": False,
+                },
+            )
+        record["region_analysis"] = {
+            "schema_version": "roboguide.static-navigation-region/v0.1",
+            "scope": "reset_static_start_component",
+            "status": "disjoint" if disjoint else "intersects",
+            "reason_code": "static_component_disjoint"
+            if disjoint
+            else "static_triangle_intersection",
+            "component_id": 0,
+            "mesh_digest": "sha256:" + "c" * 64,
+            "start_snap_position": [0.0, 0.0, 0.0],
+            "start_snap_distance_m": 0.0,
+            "vertices": 3,
+            "triangles": 1,
+            "triangles_examined": 1,
+            "complete": True,
+            "minimum_reference_distance_m": 19.0 if disjoint else 0.0,
+            "minimum_base_distance_m": 19.0 if disjoint else 0.0,
+            "orientation_safe_distance_lower_bound_m": 19.0 if disjoint else 0.0,
+            "closest_base_position": [1.0, 0.0, 0.0],
+            "closest_triangle": [[-1.0, 0.0, -1.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 1.0]],
+            "closest_base_center_position": [1.0, 0.0, 0.0],
+            "closest_base_center_triangle": [[-1.0, 0.0, -1.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 1.0]],
+            "elapsed_ms": 1.0,
+        }
+    _save(run, document)
+    return _seal(document)
+
+
+@pytest.mark.parametrize("disjoint", [False, True])
+def test_scoped_geometry_archives_without_changing_formal_admission(
+    tmp_path: Path,
+    disjoint: bool,
+) -> None:
+    """A static intersection or negative remains separate from benchmark results."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _geometry_archive(run, disjoint=disjoint)
+    assert preflight_reset_route_support(run, require_geometry=True) == document
+    assert assess_b1_directory(run) == baseline
+
+
+def test_requested_geometry_cannot_silently_fall_back_to_old_schema(tmp_path: Path) -> None:
+    """An explicitly requested new observation requires the new identity-bound artifact."""
+    run = make_run(tmp_path)
+    _archive(run)
+    with pytest.raises(ValueError, match="requested but its archive is missing"):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "partial",
+        "margin",
+        "distance",
+        "triangle",
+        "scope",
+        "budget",
+        "source",
+        "missing",
+        "witness",
+        "projection",
+        "local_profile",
+    ],
+)
+def test_resealed_geometry_faults_do_not_become_valid_evidence(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    """A fresh checksum never excuses invented completeness, distance or scope."""
+    run = make_run(tmp_path)
+    document = _geometry_archive(run, disjoint=True)
+    record = document["records"][0]
+    region = record["region_analysis"]
+    if fault == "partial":
+        region["complete"] = False
+    elif fault == "margin":
+        record["official_robot_at_threshold_m"] = 19.0
+    elif fault == "distance":
+        region["minimum_reference_distance_m"] = 20.0
+    elif fault == "triangle":
+        region["closest_base_position"] = [1.0, 1.0, 0.0]
+    elif fault == "scope":
+        region["scope"] = "all_physical_behavior"
+    elif fault == "budget":
+        region["triangles_examined"] = 50_001
+    elif fault == "source":
+        (run / "offline-region-module.py").write_text("# source changed\n")
+    elif fault == "missing":
+        record.pop("region_analysis")
+    elif fault == "projection":
+        region["start_snap_position"][0] = 1.0
+    elif fault == "local_profile":
+        profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+        profile["reset_route_geometry_enabled"] = False
+        write_json(run / "evidence/local-how-profile.json", profile)
+        document["identity"]["local_how_digest"] = _content_digest(profile)
+    else:
+        record.update(
+            status="supported",
+            reason_code="static_path_witness",
+            search=None,
+            selection={
+                "point": [20.0, 0.0, 0.0],
+                "source": "agent-navmesh",
+                "original_status": "outside_goal_region",
+                "estimated_pddl_reference_distance_m": 0.0,
+                "estimated_stop_envelope_distance_m": 0.5,
+                "path_length_m": 3.0,
+                "vertices_seen": 0,
+                "candidates_in_region": 1,
+                "path_queries": 1,
+                "search_truncated": False,
+            },
+        )
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
 
 
 def test_supported_miss_and_unavailable_are_archival_states_only(tmp_path: Path) -> None:

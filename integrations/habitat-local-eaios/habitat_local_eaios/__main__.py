@@ -135,6 +135,11 @@ def _arguments() -> argparse.Namespace:
         help="shared backend: observe bounded reset routes without excluding Node candidates",
     )
     parser.add_argument(
+        "--reset-route-geometry",
+        action="store_true",
+        help="shared backend: add bounded static component geometry to reset route evidence",
+    )
+    parser.add_argument(
         "--retain-stopped-session",
         action="store_true",
         help="shared backend: retain cancelled Group worlds for coordinated exact attempts",
@@ -172,6 +177,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         spatial_profile_path=arguments.spatial_profile,
         goal_region_navigation=arguments.goal_region_navigation,
         reset_route_support=arguments.reset_route_support,
+        reset_route_geometry=arguments.reset_route_geometry,
         retain_stopped_session=arguments.retain_stopped_session,
         progress_directory=arguments.progress_directory,
     )
@@ -229,6 +235,8 @@ def main() -> None:
         raise SystemExit(
             "reset route support requires shared EMOS Stage2 and goal-region navigation"
         )
+    if arguments.reset_route_geometry and not arguments.reset_route_support:
+        raise SystemExit("reset route geometry requires reset route support")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if arguments.backend == "shared-emos-stage2":
         _run_shared_world(arguments)

@@ -20,9 +20,17 @@ from .goal_region_navigation import (
     point3,
     select_goal_region_point,
 )
+from .navmesh_region import (
+    REGION_PROFILE,
+    ComponentMesh,
+    RegionBudget,
+    analyze_region,
+    unknown_region,
+)
 from .preassignment_feasibility import preassignment_digest
 
 RESET_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.1"
+GEOMETRY_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.2"
 MAX_ROUTE_RECORDS = 128
 PATH_QUERIES_PER_RECORD = 2
 MAX_TOTAL_PATH_QUERIES = MAX_ROUTE_RECORDS * PATH_QUERIES_PER_RECORD
@@ -124,6 +132,38 @@ class ResetRouteProbe:
         self.pathfinder = self.api.PathFinder()
         if not sim.recompute_navmesh(self.pathfinder, settings) or not self.pathfinder.is_loaded:
             raise GoalRegionResolutionError("isolated agent navmesh build failed")
+        self._component_mesh: ComponentMesh | None = None
+        self._component_error: str | None = None
+
+    def observe_region(self, observation: dict[str, Any], budget: RegionBudget) -> dict[str, Any]:
+        """Inspect the detached reset component only when geometry was requested.
+
+        Failed reads and incomplete scans remain unknown. No action cache,
+        native path query, random sampling, or active mesh is touched here.
+        The copied mesh is retained only for this endpoint's bounded goal set.
+        """
+        if observation["status"] == "unavailable":
+            return unknown_region("route_observation_unavailable")
+        try:
+            start = point3(observation["start_base_position"])
+            if self._component_error is not None:
+                return unknown_region(self._component_error)
+            if self._component_mesh is None:
+                try:
+                    self._component_mesh = ComponentMesh.read(self.pathfinder, start)
+                except Exception:
+                    self._component_error = "component_export_unavailable"
+                    raise
+            return analyze_region(
+                self._component_mesh,
+                start,
+                point3(observation["start_reference_position"]),
+                point3(observation["goal_center"]),
+                observation["official_robot_at_threshold_m"],
+                budget,
+            )
+        except Exception:
+            return unknown_region("component_export_unavailable")
 
     def observe(self, destination: str) -> dict[str, Any]:
         """Record a static route witness or bounded miss for one exact entity."""
@@ -233,6 +273,8 @@ def build_reset_route_support(
     ):
         raise ValueError("route support differs from active Local How profile")
     goals = sorted(any_at_conjunct_names(semantic["goal"]))
+    geometry_enabled = local_how.get("reset_route_geometry_enabled") is True
+    geometry_budget = RegionBudget()
     endpoints = sorted({(item["agent_id"], item["node_id"]) for item in preassignment["records"]})
     records: list[dict[str, Any]] = []
     reason = "observed"
@@ -271,6 +313,12 @@ def build_reset_route_support(
                         error_type="ResetStateChanged",
                         error="agent moved since the reset snapshot",
                     )
+                if geometry_enabled:
+                    observation["region_analysis"] = (
+                        probe.observe_region(observation, geometry_budget)
+                        if probe is not None
+                        else unknown_region("route_observation_unavailable")
+                    )
                 records.append(
                     {
                         "agent_id": agent_id,
@@ -280,7 +328,9 @@ def build_reset_route_support(
                     }
                 )
     body: dict[str, Any] = {
-        "schema_version": RESET_ROUTE_SUPPORT_SCHEMA,
+        "schema_version": (
+            GEOMETRY_ROUTE_SUPPORT_SCHEMA if geometry_enabled else RESET_ROUTE_SUPPORT_SCHEMA
+        ),
         "authority": "deployment-observed-reset-state",
         "purpose": "diagnostic_only",
         "identity": {
@@ -298,6 +348,7 @@ def build_reset_route_support(
             "max_path_queries_per_record": PATH_QUERIES_PER_RECORD,
             "max_total_path_queries": MAX_TOTAL_PATH_QUERIES,
             "is_node_exclusion": False,
+            **({"region_analysis": REGION_PROFILE.copy()} if geometry_enabled else {}),
         },
         "scope_status": "available" if reason == "observed" else "unavailable",
         "scope_reason": reason,
