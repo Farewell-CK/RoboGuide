@@ -24,6 +24,7 @@ Execute 路径的新 attempt，不会由适配器自行创建。
 - 同一 Mission/Group/session digest、同一逻辑 Task/Role、同一物理 endpoint；
 - exact operation、objective、parameters 不变；资源选择仍来自外部 Commit；
 - 新 attempt identity 非空、未使用，每个世界最多 16 次续跑，不因正常下一 Task 续预算；
+- 本地技能完成后的收尾步进也计入同一累计预算；即使 Gym 尚未报告终态，也不得超限；
 - retained profile 最多 32 个 accepted-plan slots，segment history 最多 48 条；
 - 每个被取消的端都需新 assignment 才能继续；缺一端有界等待后关闭 session；
 - 已 Completed 端保留历史结果，使用原始 wait skill 的 model-free passive policy，不

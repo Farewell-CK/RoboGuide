@@ -1080,6 +1080,49 @@ def test_pair_budget_is_not_renewed_and_failure_cannot_continue(tmp_path: Path) 
     assert runtime.gym.steps == 3
 
 
+@pytest.mark.parametrize("stopped_step", [0, 4, 5])
+def test_completed_pair_settling_respects_retained_global_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stopped_step: int
+) -> None:
+    """Settling cannot step beyond the original budget even if Gym never reports done."""
+    runtime = RetainedRuntimeHarness(tmp_path, completed_first=False, final_step=100, max_steps=6)
+    runtime.initialize()
+    invocations = _retained_invocations()
+    runtime.execute_pair(
+        invocations, lambda: runtime.gym.steps >= stopped_step, lambda agent, detail: None
+    )
+    assert runtime.gym.steps == stopped_step
+
+    def finish_skills(action: object) -> Any:
+        """Finish both local skills while keeping official success and episode done false."""
+        del action
+        runtime.gym.steps += 1
+        return (
+            {
+                "step": runtime.gym.steps,
+                "agent_0_has_finished_oracle_nav": [1],
+                "agent_1_has_finished_oracle_nav": [1],
+            },
+            0.0,
+            False,
+            {"pddl_success": False},
+        )
+
+    monkeypatch.setattr(runtime.gym, "step", finish_skills)
+    replacements = {
+        agent: replace(value, attempt_id=f"resumed-{agent}") for agent, value in invocations.items()
+    }
+    outcomes, summary = runtime.resume_pair(replacements, lambda: False, lambda agent, detail: None)
+    assert runtime.gym.resets == 1
+    assert runtime.gym.steps == summary["identity"]["simulator_steps"] == 6
+    assert runtime.actor.calls == stopped_step + 1
+    assert summary["final_info"]["pddl_success"] is False
+    assert all(outcome.local_skill_completed for outcome in outcomes.values())
+    assert all(not outcome.benchmark_task_achieved for outcome in outcomes.values())
+    assert runtime.video_observer.steps == list(range(7))
+    assert runtime.diagnostic_observer.terminals == [(6, "step_budget_exhausted")]
+
+
 def test_stale_pair_resume_preserves_stopped_world_without_action(tmp_path: Path) -> None:
     """Invalid local admission does not erase actual Cancelled or step the world."""
     runtime = RetainedRuntimeHarness(tmp_path)

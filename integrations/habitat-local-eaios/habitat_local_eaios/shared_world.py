@@ -838,7 +838,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     # Both assigned skills finished; step briefly until the episode
                     # settles so official pddl_success is measured on terminal state.
                     for _ in range(50):
-                        if done or habitat_env.episode_over:
+                        if done or habitat_env.episode_over or steps >= self._config.max_steps:
                             break
                         exception_phase = "settle_gym_env_step"
                         step_result = gym_env.step(env_action * 0)
