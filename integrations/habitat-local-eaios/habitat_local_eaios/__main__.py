@@ -125,6 +125,11 @@ def _arguments() -> argparse.Namespace:
         help="shared backend: digest-bound Node capability snapshot",
     )
     parser.add_argument(
+        "--step-aware-navmesh",
+        action="store_true",
+        help="shared backend: preserve declared climb in copied vertical NavMesh resolution",
+    )
+    parser.add_argument(
         "--goal-region-navigation",
         action="store_true",
         help="shared backend: opt in to agent-navmesh target selection for official any_at goals",
@@ -176,6 +181,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         spatial_capabilities=load_spatial_profile_snapshot(arguments.spatial_profile),
         spatial_profile_path=arguments.spatial_profile,
         goal_region_navigation=arguments.goal_region_navigation,
+        step_aware_navmesh=arguments.step_aware_navmesh,
         reset_route_support=arguments.reset_route_support,
         reset_route_geometry=arguments.reset_route_geometry,
         retain_stopped_session=arguments.retain_stopped_session,
@@ -227,6 +233,8 @@ def main() -> None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
     if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
         raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
+    if arguments.step_aware_navmesh and not arguments.goal_region_navigation:
+        raise SystemExit("step-aware navmesh requires goal-region navigation")
     if arguments.retain_stopped_session and arguments.backend != "shared-emos-stage2":
         raise SystemExit("retained stopped sessions require the shared EMOS Stage2 backend")
     if arguments.reset_route_support and (

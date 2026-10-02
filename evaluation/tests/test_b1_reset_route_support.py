@@ -267,6 +267,65 @@ def test_requested_geometry_cannot_silently_fall_back_to_old_schema(tmp_path: Pa
         preflight_reset_route_support(run, require_geometry=True)
 
 
+def _step_aware_archive(run: Path, *, geometry: bool) -> dict[str, Any]:
+    """Bind the opt-in resolution profile to actual settings and its own source."""
+    document = _geometry_archive(run) if geometry else _archive(run)
+    local_how = json.loads((run / "evidence/local-how-profile.json").read_text())
+    local_how.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.4",
+        navmesh_resolution_profile="step-preserving-cell-height/v0.1",
+    )
+    write_json(run / "evidence/local-how-profile.json", local_how)
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    path = run / "offline-mesh-profile.py"
+    path.write_text("# immutable resolution producer fixture\n")
+    runtime["modules"]["habitat_local_eaios.navmesh_profile"] = {
+        "path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(local_how), runtime_sources_digest=_content_digest(runtime)
+    )
+    for record in document["records"]:
+        record["navmesh_settings"].update(agent_max_climb=0.02, cell_height=0.01)
+    _save(run, document)
+    return _seal(document)
+
+
+@pytest.mark.parametrize("geometry", [False, True])
+def test_resolution_profile_is_bound_independently_of_geometry(
+    tmp_path: Path, geometry: bool
+) -> None:
+    """The explicit Local How difference neither invents success nor changes admission."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _step_aware_archive(run, geometry=geometry)
+    assert preflight_reset_route_support(run, require_geometry=geometry) == document
+    assert assess_b1_directory(run) == baseline
+
+
+@pytest.mark.parametrize("fault", ["climb_resolution", "tiny_voxel", "source", "profile"])
+def test_resealed_resolution_inconsistency_is_rejected(tmp_path: Path, fault: str) -> None:
+    """A checksum cannot hide coarse settings or an unidentified Local How change."""
+    run = make_run(tmp_path)
+    document = _step_aware_archive(run, geometry=True)
+    if fault in {"climb_resolution", "tiny_voxel"}:
+        document["records"][0]["navmesh_settings"]["cell_height"] = (
+            0.2 if fault == "climb_resolution" else 0.001
+        )
+    elif fault == "source":
+        (run / "offline-mesh-profile.py").write_text("# changed resolution source\n")
+    else:
+        local_how = json.loads((run / "evidence/local-how-profile.json").read_text())
+        local_how["navmesh_resolution_profile"] = "unidentified-policy"
+        write_json(run / "evidence/local-how-profile.json", local_how)
+        document["identity"]["local_how_digest"] = _content_digest(local_how)
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
 @pytest.mark.parametrize(
     "fault",
     [

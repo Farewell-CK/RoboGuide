@@ -18,6 +18,7 @@ if str(INTEGRATION_ROOT) not in sys.path:
 from habitat_local_eaios import reset_route_support as routes  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.model import IntegrationError  # noqa: E402
+from habitat_local_eaios.navmesh_profile import NAVMESH_FIELDS  # noqa: E402
 from habitat_local_eaios.preassignment_feasibility import preassignment_digest  # noqa: E402
 from habitat_local_eaios.shared_world import SharedEmosStage2Runtime  # noqa: E402
 
@@ -27,7 +28,7 @@ class FakeSettings:
 
     def __init__(self) -> None:
         """Set distinct template values to reveal accidental shared mutation."""
-        for name in routes._NAVMESH_FIELDS:
+        for name in NAVMESH_FIELDS:
             setattr(
                 self,
                 name,

@@ -558,8 +558,21 @@ Local How、官方 benchmark authority 和 Formal admission 均保持各自权�
 正向路径覆盖和成本；只改变现有候选搜索顺序，包括静态不相交在内的候选仍可使用。
 完整静态网格观测没有动态物理不可达、永久 Actor 排除或全局不可解的权威。
 
+默认关闭的 step-aware Local How（[ADR-0063](../../decisions/0063-step-aware-local-navmesh-resolution.md)）
+让执行动作与 reset observer 共用复制后的导航配置。只细化垂直体素，保留已声明的正台阶
+高度，而不扩大机器人能力。它属于本地执行策略，会影响实际路线；不是只读诊断，也
+不是 Control 的路线证明。Local How v0.4 与实际动作网格证据明确记录启用状态，官方
+PDDL 仍独立裁决物理终态。
+
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
+                                                        |
+                                           active agent NavMesh
+                                      (original / opt-in step-aware copy)
+                                                        |
+                                               original Oracle control
+                                                        |
+                                               official PDDL outcome
         |
         +-> isolated bounded route queries -> reset-route-support.json
                      ^                            ^

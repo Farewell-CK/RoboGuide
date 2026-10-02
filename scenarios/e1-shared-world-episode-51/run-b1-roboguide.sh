@@ -171,6 +171,13 @@ fi
 if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" == 1 ]]; then
     GOAL_REGION_ARGS=(--goal-region-navigation)
 fi
+if [[ "${ROBOGUIDE_B1_STEP_AWARE_NAVMESH:-0}" == 1 ]]; then
+    if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" != 1 ]]; then
+        echo "step-aware navmesh requires ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1" >&2
+        exit 1
+    fi
+    GOAL_REGION_ARGS+=(--step-aware-navmesh)
+fi
 if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" == 1 ]]; then
     if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" != 1 ]]; then
         echo "reset route support requires ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1" >&2

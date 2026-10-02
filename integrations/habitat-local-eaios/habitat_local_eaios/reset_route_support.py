@@ -20,6 +20,7 @@ from .goal_region_navigation import (
     point3,
     select_goal_region_point,
 )
+from .navmesh_profile import STEP_AWARE_PROFILE, copied_agent_settings, settings_snapshot
 from .navmesh_region import (
     REGION_PROFILE,
     ComponentMesh,
@@ -34,27 +35,6 @@ GEOMETRY_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.2"
 MAX_ROUTE_RECORDS = 128
 PATH_QUERIES_PER_RECORD = 2
 MAX_TOTAL_PATH_QUERIES = MAX_ROUTE_RECORDS * PATH_QUERIES_PER_RECORD
-_NAVMESH_FIELDS = frozenset(
-    (
-        "agent_height",
-        "agent_max_climb",
-        "agent_max_slope",
-        "agent_radius",
-        "cell_height",
-        "cell_size",
-        "detail_sample_dist",
-        "detail_sample_max_error",
-        "edge_max_error",
-        "edge_max_len",
-        "filter_ledge_spans",
-        "filter_low_hanging_obstacles",
-        "filter_walkable_low_height_spans",
-        "include_static_objects",
-        "region_merge_size",
-        "region_min_size",
-        "verts_per_poly",
-    )
-)
 
 
 def _empty_observation() -> dict[str, Any]:
@@ -99,36 +79,23 @@ class ResetRouteProbe:
         self.environment = environment
         self.agent_id = agent_id
         self.action = environment.task.actions[f"agent_{agent_id}_oracle_nav_action"]
-        if type(self.action).__name__ != "GoalRegionOracleNavDiffBaseAction":
+        action_type = type(self.action).__name__
+        if action_type not in {
+            "GoalRegionOracleNavDiffBaseAction",
+            "StepAwareGoalRegionOracleNavDiffBaseAction",
+        }:
             raise GoalRegionResolutionError("reset route probe requires the goal-region action")
+        self.step_aware = action_type == "StepAwareGoalRegionOracleNavDiffBaseAction"
         if self.action.config.spawn_max_dist_to_obj != -1:
             raise GoalRegionResolutionError("randomized Oracle target placement is unsupported")
         sim = environment.sim
-        if getattr(sim, "navmesh_visualization", False):
-            raise GoalRegionResolutionError("navmesh visualization prevents isolated observation")
-        template = sim.pathfinder.nav_mesh_settings
-        fields = {
-            name
-            for name in dir(template)
-            if not name.startswith("_") and not callable(getattr(template, name))
-        }
-        if fields != _NAVMESH_FIELDS:
-            raise GoalRegionResolutionError("unsupported navmesh settings layout")
-        settings = self.api.NavMeshSettings()
-        for name in sorted(fields):
-            value = getattr(template, name)
-            if not isinstance(value, (bool, int, float)) or not math.isfinite(value):
-                raise GoalRegionResolutionError("navmesh settings contain unavailable scalars")
-            setattr(settings, name, value)
-        config = self.action.config
-        for name in ("agent_radius", "agent_height", "agent_max_climb", "agent_max_slope"):
-            value = float(getattr(config, name))
-            if not math.isfinite(value) or value < 0:
-                raise GoalRegionResolutionError("agent navmesh configuration is unavailable")
-            setattr(settings, name, value)
-        settings.agent_radius += 0.05
-        settings.include_static_objects = True
-        self.settings = {name: getattr(settings, name) for name in sorted(fields)}
+        settings = copied_agent_settings(
+            sim,
+            self.action.config,
+            self.api,
+            step_aware=self.step_aware,
+        )
+        self.settings = settings_snapshot(settings)
         self.pathfinder = self.api.PathFinder()
         if not sim.recompute_navmesh(self.pathfinder, settings) or not self.pathfinder.is_loaded:
             raise GoalRegionResolutionError("isolated agent navmesh build failed")
@@ -273,6 +240,11 @@ def build_reset_route_support(
     ):
         raise ValueError("route support differs from active Local How profile")
     goals = sorted(any_at_conjunct_names(semantic["goal"]))
+    step_aware = local_how.get("navmesh_resolution_profile") == STEP_AWARE_PROFILE
+    if ("navmesh_resolution_profile" in local_how and not step_aware) or (
+        step_aware and local_how.get("schema_version") != "roboguide.habitat-local-how-profile/v0.4"
+    ):
+        raise ValueError("route support has an unsupported navmesh resolution profile")
     geometry_enabled = local_how.get("reset_route_geometry_enabled") is True
     geometry_budget = RegionBudget()
     endpoints = sorted({(item["agent_id"], item["node_id"]) for item in preassignment["records"]})
@@ -290,6 +262,8 @@ def build_reset_route_support(
                 probe = ResetRouteProbe(environment, agent_id)
             except Exception as error:
                 initialization_error = error
+            if probe is not None and getattr(probe, "step_aware", False) != step_aware:
+                raise ValueError("route support resolution profile differs from the active action")
             for destination in goals:
                 observation = _empty_observation()
                 if probe is not None:

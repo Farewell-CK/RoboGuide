@@ -541,6 +541,7 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         load_document(run / "evidence/runtime-source-manifest.json"), "runtime sources"
     )
     geometry_enabled = document.get("schema_version") == _GEOMETRY_SCHEMA
+    step_aware = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.4"
     if require_geometry and not geometry_enabled:
         raise ValueError("reset route geometry was requested but its archive is missing")
     record_keys = _RECORD_KEYS | ({"region_analysis"} if geometry_enabled else set())
@@ -572,7 +573,9 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
     if _content_digest(local_how) != _content_digest(
         {
             "schema_version": (
-                "roboguide.habitat-local-how-profile/v0.3"
+                "roboguide.habitat-local-how-profile/v0.4"
+                if step_aware
+                else "roboguide.habitat-local-how-profile/v0.3"
                 if geometry_enabled
                 else "roboguide.habitat-local-how-profile/v0.2"
             ),
@@ -580,6 +583,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
             "official_success_authority": "habitat-pddl",
             "reset_route_support_enabled": True,
             **({"reset_route_geometry_enabled": True} if geometry_enabled else {}),
+            **(
+                {"navmesh_resolution_profile": "step-preserving-cell-height/v0.1"}
+                if step_aware
+                else {}
+            ),
         }
     ):
         raise ValueError("reset route support differs from active Local How profile")
@@ -613,6 +621,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         "habitat_local_eaios.goal_region_navigation",
         "habitat_local_eaios.reset_route_support",
         *(("habitat_local_eaios.navmesh_region",) if geometry_enabled else ()),
+        *(
+            ("habitat_local_eaios.navmesh_profile",)
+            if step_aware or "habitat_local_eaios.navmesh_profile" in modules
+            else ()
+        ),
     ):
         module = _object(modules.get(name), "runtime module")
         if (
@@ -670,6 +683,13 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         ):
             raise ValueError("reset route support repeats or invents an endpoint/goal")
         _check_record(record, sources[key])
+        if step_aware and record["navmesh_settings"] is not None:
+            settings = _object(record["navmesh_settings"], "step-aware navmesh settings")
+            if settings["cell_height"] < 0.005 or (
+                settings["agent_max_climb"] > 0
+                and settings["cell_height"] > settings["agent_max_climb"] / 2
+            ):
+                raise ValueError("reset route support does not preserve declared climb resolution")
         if geometry_enabled:
             triangle_checks += _check_region_analysis(record)
             if triangle_checks > 200_000:

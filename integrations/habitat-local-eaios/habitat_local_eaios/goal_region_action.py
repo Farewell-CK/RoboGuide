@@ -27,6 +27,7 @@ from .goal_region_navigation import (
     point3,
     select_goal_region_point,
 )
+from .navmesh_profile import STEP_AWARE_PROFILE, copied_agent_settings, settings_snapshot
 from .semantic_evidence import _expression
 
 _SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.2"
@@ -160,4 +161,39 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
         """Expose bounded local selections for best-effort terminal archival."""
         return [
             self._roboguide_selections[index].copy() for index in sorted(self._roboguide_selections)
+        ]
+
+
+@registry.register_task_action
+class StepAwareGoalRegionOracleNavDiffBaseAction(GoalRegionOracleNavDiffBaseAction):
+    """Retain Oracle control while avoiding climb loss in coarse vertical voxels.
+
+    Deployment selects this class explicitly. Only the detached agent mesh's
+    cell height changes; targets, robot abilities, stepping, finished sensors,
+    skill budgets and the official success calculation retain their owners.
+    """
+
+    def _create_pathfinder(self, config: Any) -> Any:
+        """Build the active mesh with the same copied profile used by observation."""
+        settings = copied_agent_settings(self._sim, config, habitat_sim, step_aware=True)
+        pathfinder = habitat_sim.PathFinder()
+        if not self._sim.recompute_navmesh(pathfinder, settings) or not pathfinder.is_loaded:
+            raise GoalRegionResolutionError("step-aware agent navmesh build failed")
+        self._roboguide_mesh_settings = settings_snapshot(settings)
+        return pathfinder
+
+    def navigation_selection_evidence(self) -> list[dict[str, Any]]:
+        """Archive the actual active settings independently of physical success."""
+        return [
+            {
+                **record,
+                "schema_version": "roboguide.habitat-goal-region-navigation/v0.3",
+                "navmesh_resolution_profile": STEP_AWARE_PROFILE,
+                "active_navmesh_settings": (
+                    dict(self._roboguide_mesh_settings)
+                    if hasattr(self, "_roboguide_mesh_settings")
+                    else None
+                ),
+            }
+            for record in super().navigation_selection_evidence()
         ]

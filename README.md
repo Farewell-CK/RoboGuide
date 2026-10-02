@@ -629,6 +629,13 @@ Scheduler 仅调整搜索顺序，未知候选、资源约束和 Actor 绑定规
 覆盖与成本，仍保留所有原有候选。静态不相交不等于物理任务不可解，不能用于永久
 Actor 排除、MI 输入、任务成功或 Formal admission。此开关默认关闭，不修改导航参数。
 
+`ROBOGUIDE_B1_STEP_AWARE_NAVMESH=1` 是另一个默认关闭的 Local How 选项，要求启用
+goal-region navigation。它细化独立导航网格的垂直分辨率，避免已声明的正台阶高度被
+粗体素向下取整为零；机器人尺寸、爬阶/爬坡能力、目标、动作控制和官方成功规则保持
+原有值。执行与 reset observer 共用复制配置，Local How v0.4 和实际网格证据记录该差异。
+它会改变本地路线和移动可能性，对照原生 EMOS 时必须明示；静态路径仍不等于任务成功。
+见 [ADR-0063](docs/decisions/0063-step-aware-local-navmesh-resolution.md)。
+
 ## 三条核心语义链
 
 ```text

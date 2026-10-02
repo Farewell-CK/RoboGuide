@@ -249,13 +249,18 @@ def test_only_direct_conjunctive_any_at_goals_are_admitted() -> None:
     )
 
 
+@pytest.mark.parametrize("step_aware", [False, True])
 def test_config_switches_only_expected_vendor_navigation_actions(
     monkeypatch: pytest.MonkeyPatch,
+    step_aware: bool,
 ) -> None:
     """Require every configured agent to use the declared original action type."""
     module = ModuleType("habitat_local_eaios.goal_region_action")
     module.GoalRegionOracleNavDiffBaseAction = type(  # type: ignore[attr-defined]
         "GoalRegionOracleNavDiffBaseAction", (), {}
+    )
+    module.StepAwareGoalRegionOracleNavDiffBaseAction = type(  # type: ignore[attr-defined]
+        "StepAwareGoalRegionOracleNavDiffBaseAction", (), {}
     )
     monkeypatch.setitem(sys.modules, module.__name__, module)
     actions = {
@@ -275,16 +280,20 @@ def test_config_switches_only_expected_vendor_navigation_actions(
         """Mimic the deployment's temporary OmegaConf write scope."""
         yield
 
-    _configure_goal_region_navigation(config, read_write)
+    _configure_goal_region_navigation(config, read_write, step_aware=step_aware)
+    expected = (
+        "StepAwareGoalRegionOracleNavDiffBaseAction"
+        if step_aware
+        else "GoalRegionOracleNavDiffBaseAction"
+    )
     assert all(
-        actions[f"agent_{agent_id}_oracle_nav_action"].type == "GoalRegionOracleNavDiffBaseAction"
-        for agent_id in (0, 1)
+        actions[f"agent_{agent_id}_oracle_nav_action"].type == expected for agent_id in (0, 1)
     )
     assert actions["agent_0_pick_action"].type == "PickAction"
     actions["agent_0_oracle_nav_action"].type = "OracleNavDiffBaseAction"
     actions["agent_1_oracle_nav_action"].type = "UnexpectedAction"
     with pytest.raises(IntegrationError, match="agent_1_oracle_nav_action"):
-        _configure_goal_region_navigation(config, read_write)
+        _configure_goal_region_navigation(config, read_write, step_aware=step_aware)
 
 
 def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(

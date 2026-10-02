@@ -211,6 +211,22 @@ assumed reference geometry; incomplete or boundary cases remain `unknown`.
 No path query, RNG sample or physical step is added. When the separate initial
 preference consumer is enabled, neutral v0.2 support grades only order current
 eligible candidates; even static-disjoint endpoints remain valid fallbacks.
+
+`--step-aware-navmesh` is a separate default-off **execution** profile requiring
+`--goal-region-navigation` (B1: `ROBOGUIDE_B1_STEP_AWARE_NAVMESH=1`). It refines only
+the copied vertical cell height to `min(original, declared_climb / 2)` for positive
+climb; zero climb retains the original. Robot radius/height/climb/slope and the
+existing collision buffer stay unchanged. Resolution below 5 mm or refinement
+above 32 times fails explicitly. The action and observer build independent meshes
+from identical copied settings, leaving global settings untouched. Original
+Oracle control, exact destination and official PDDL retain their owners.
+
+Local How v0.4 declares `step-preserving-cell-height/v0.1`; action selection v0.3
+records actual active settings. Existing reset-route versions bind this profile
+through their Local How digest and source fingerprint. Native construction cost
+is outside Python observation bounds. This can change actual routes and motion:
+disclose it as an arm difference from original EMOS, and never infer completion
+from mesh connectivity. See [ADR-0063](../../docs/decisions/0063-step-aware-local-navmesh-resolution.md).
 First Bind, expiry and restore fences remain unchanged. See
 [ADR-0062](../../docs/decisions/0062-scoped-static-navigation-region-evidence.md).
 

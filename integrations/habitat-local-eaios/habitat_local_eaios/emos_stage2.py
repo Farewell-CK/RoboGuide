@@ -15,6 +15,7 @@ from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .navmesh_profile import STEP_AWARE_PROFILE
 from .source_provenance import build_runtime_source_manifest
 from .stage2_contract import (
     Stage2ActionAudit,
@@ -26,7 +27,9 @@ from .stage2_contract import (
 _LOG = logging.getLogger(__name__)
 
 
-def _configure_goal_region_navigation(config: Any, read_write: Callable[[Any], Any]) -> None:
+def _configure_goal_region_navigation(
+    config: Any, read_write: Callable[[Any], Any], *, step_aware: bool = False
+) -> None:
     """Select the adapter-owned Oracle subclass before constructing Habitat.
 
     Only the configured original differential-base navigation action is
@@ -35,7 +38,12 @@ def _configure_goal_region_navigation(config: Any, read_write: Callable[[Any], A
     """
     from .goal_region_action import GoalRegionOracleNavDiffBaseAction
 
-    action_name = GoalRegionOracleNavDiffBaseAction.__name__
+    if step_aware:
+        from .goal_region_action import StepAwareGoalRegionOracleNavDiffBaseAction
+
+        action_name = StepAwareGoalRegionOracleNavDiffBaseAction.__name__
+    else:
+        action_name = GoalRegionOracleNavDiffBaseAction.__name__
     actions = config.habitat.task.actions
     agent_count = len(config.habitat.simulator.agents_order)
     keys = [f"agent_{agent_id}_oracle_nav_action" for agent_id in range(agent_count)]
@@ -191,8 +199,9 @@ class EmosStage2Runtime:
                 overrides=habitat_config_overrides(self._config.seed),
             )
             goal_region_enabled = bool(getattr(self._config, "goal_region_navigation", False))
+            step_aware_enabled = bool(getattr(self._config, "step_aware_navmesh", False))
             if goal_region_enabled:
-                _configure_goal_region_navigation(config, read_write)
+                _configure_goal_region_navigation(config, read_write, step_aware=step_aware_enabled)
             if self._config.video_path is not None or self._config.live_preview_path is not None:
                 _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
@@ -242,7 +251,9 @@ class EmosStage2Runtime:
                 "local-how-profile.json",
                 {
                     "schema_version": (
-                        "roboguide.habitat-local-how-profile/v0.3"
+                        "roboguide.habitat-local-how-profile/v0.4"
+                        if step_aware_enabled
+                        else "roboguide.habitat-local-how-profile/v0.3"
                         if getattr(self._config, "reset_route_geometry", False)
                         else "roboguide.habitat-local-how-profile/v0.2"
                     ),
@@ -258,6 +269,11 @@ class EmosStage2Runtime:
                     **(
                         {"reset_route_geometry_enabled": True}
                         if getattr(self._config, "reset_route_geometry", False)
+                        else {}
+                    ),
+                    **(
+                        {"navmesh_resolution_profile": STEP_AWARE_PROFILE}
+                        if step_aware_enabled
                         else {}
                     ),
                 },
@@ -278,6 +294,7 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.emos_stage2",
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",
+                        "habitat_local_eaios.navmesh_profile",
                         "habitat_local_eaios.reset_route_support",
                         "habitat_local_eaios.navmesh_region",
                         "habitat_local_eaios.idle_endpoint",

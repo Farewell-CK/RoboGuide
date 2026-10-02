@@ -214,6 +214,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   the separate initial preference consumer may rank scoped misses after exact
   source checks but never exclude a Node. MI inputs, operation intent, physical
   navigation parameters, Core contracts and Formal admission stay unchanged.
+- Optional step-aware NavMesh resolution (ADR-0063) is a default-off Local How
+  profile, separate from diagnostic observation. Active navigation and reset
+  observation use identical copied settings; vertical cells may be refined to
+  preserve declared positive climb, with explicit minimum-resolution/refinement
+  limits. Robot dimensions/climb/slope, canonical target, original Oracle control
+  and official PDDL remain unchanged. Local How v0.4 and action evidence v0.3
+  disclose the arm difference from original EMOS; paths never prove success.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

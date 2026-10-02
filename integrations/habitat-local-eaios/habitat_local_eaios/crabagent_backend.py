@@ -32,6 +32,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     spatial_capabilities: tuple[FloorTransitionProfile, ...] = ()
     spatial_profile_path: Path | None = None
     goal_region_navigation: bool = False
+    step_aware_navmesh: bool = False
     reset_route_support: bool = False
     reset_route_geometry: bool = False
     retain_stopped_session: bool = False
@@ -53,6 +54,8 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
             )
         if self.reset_route_geometry and not self.reset_route_support:
             raise IntegrationError("reset route geometry requires reset route support")
+        if self.step_aware_navmesh and not self.goal_region_navigation:
+            raise IntegrationError("step-aware navmesh requires goal-region navigation")
 
     def spatial_capability_for(self, agent_id: int) -> FloorTransitionProfile | None:
         """Return the startup-frozen spatial profile for one Habitat agent."""
