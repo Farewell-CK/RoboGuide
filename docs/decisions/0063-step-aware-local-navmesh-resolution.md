@@ -32,6 +32,8 @@ that the actual action cannot use.
    a route. The minimum supported vertical cell size is 5 mm and refinement is
    limited to 32 times. Exceeding those limits or an unknown layout fails explicitly
    before native construction; there is no undisclosed fallback.
+   A 1 nm cell-height and 1 ppm refinement-ratio allowance cover native float32
+   storage at the supported boundaries, not smaller physical ability declarations.
 3. Use this same pure settings builder for the active action and detached reset
    observation. Neither modifies the shared settings or replaces the simulator's
    global pathfinder. Habitat retains mesh-construction and physical collision

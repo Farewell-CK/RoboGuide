@@ -15,6 +15,7 @@ from .goal_region_navigation import GoalRegionResolutionError
 STEP_AWARE_PROFILE = "step-preserving-cell-height/v0.1"
 MIN_CELL_HEIGHT_M = 0.005
 MAX_VERTICAL_REFINEMENT = 32.0
+CELL_HEIGHT_ROUNDING_M = 1e-9
 NAVMESH_FIELDS = frozenset(
     (
         "agent_height",
@@ -90,8 +91,8 @@ def copied_agent_settings(sim: Any, config: Any, api: Any, *, step_aware: bool =
         refined = min(original, climb / 2.0) if climb > 0 else original
         if (
             original <= 0
-            or refined < MIN_CELL_HEIGHT_M
-            or original / refined > MAX_VERTICAL_REFINEMENT
+            or refined < MIN_CELL_HEIGHT_M - CELL_HEIGHT_ROUNDING_M
+            or original / refined > MAX_VERTICAL_REFINEMENT * (1 + 1e-6)
         ):
             raise GoalRegionResolutionError(
                 "step-aware navmesh refinement exceeds supported bounds"

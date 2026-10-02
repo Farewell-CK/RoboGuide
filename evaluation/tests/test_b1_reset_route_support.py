@@ -326,6 +326,18 @@ def test_resealed_resolution_inconsistency_is_rejected(tmp_path: Path, fault: st
         preflight_reset_route_support(run, require_geometry=True)
 
 
+def test_float32_resolution_boundary_remains_archive_compatible(tmp_path: Path) -> None:
+    """Native 5 mm rounding is accepted without weakening the genuine small-voxel fence."""
+    run = make_run(tmp_path)
+    document = _step_aware_archive(run, geometry=True)
+    for record in document["records"]:
+        record["navmesh_settings"].update(
+            agent_max_climb=0.009999999776482582, cell_height=0.004999999888241291
+        )
+    _save(run, document)
+    assert preflight_reset_route_support(run, require_geometry=True) == _seal(document)
+
+
 @pytest.mark.parametrize(
     "fault",
     [

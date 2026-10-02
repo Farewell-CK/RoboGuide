@@ -685,7 +685,7 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         _check_record(record, sources[key])
         if step_aware and record["navmesh_settings"] is not None:
             settings = _object(record["navmesh_settings"], "step-aware navmesh settings")
-            if settings["cell_height"] < 0.005 or (
+            if settings["cell_height"] < 0.005 - 1e-9 or (
                 settings["agent_max_climb"] > 0
                 and settings["cell_height"] > settings["agent_max_climb"] / 2
             ):

@@ -5,13 +5,14 @@ from __future__ import annotations
 import copy
 import importlib.util
 import math
+import struct
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
-from test_reset_route_support import _api, _environment, _sources
+from test_reset_route_support import FakeSettings, _api, _environment, _sources
 
 INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
@@ -191,3 +192,30 @@ def test_invalid_robot_climb_is_never_coerced(value: Any) -> None:
     with pytest.raises(GoalRegionResolutionError, match="configuration is unavailable"):
         copied_agent_settings(env.sim, config, _api(), step_aware=True)
     assert env.builds == []
+
+
+def test_native_float32_boundary_does_not_reject_supported_resolution() -> None:
+    """Accept 5 mm represented by native float32 while retaining the refinement limit."""
+    env = _environment()
+    env.sim.pathfinder.nav_mesh_settings.cell_height = 0.16
+    config = env.task.actions["agent_0_oracle_nav_action"].config
+    config.agent_max_climb = 0.01
+    api = _api()
+
+    class Float32Settings(FakeSettings):
+        """Mimic the native settings properties' float32 storage."""
+
+        def __setattr__(self, name: str, value: Any) -> None:
+            """Round scalar floats as the compiled Habitat settings class does."""
+            if isinstance(value, float):
+                value = struct.unpack("f", struct.pack("f", value))[0]
+            super().__setattr__(name, value)
+
+    api.NavMeshSettings = Float32Settings
+    settings = copied_agent_settings(env.sim, config, api, step_aware=True)
+    assert settings.cell_height < 0.005
+    assert settings.cell_height >= 0.005 - 1e-9
+    assert math.floor(settings.agent_max_climb / settings.cell_height) >= 2
+    config.agent_max_climb = 0.0099
+    with pytest.raises(GoalRegionResolutionError, match="supported bounds"):
+        copied_agent_settings(env.sim, config, api, step_aware=True)
