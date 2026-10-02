@@ -541,7 +541,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         load_document(run / "evidence/runtime-source-manifest.json"), "runtime sources"
     )
     geometry_enabled = document.get("schema_version") == _GEOMETRY_SCHEMA
-    step_aware = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.4"
+    spatial_arrival = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    step_aware = (
+        spatial_arrival
+        or local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.4"
+    )
     if require_geometry and not geometry_enabled:
         raise ValueError("reset route geometry was requested but its archive is missing")
     record_keys = _RECORD_KEYS | ({"region_analysis"} if geometry_enabled else set())
@@ -573,7 +577,9 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
     if _content_digest(local_how) != _content_digest(
         {
             "schema_version": (
-                "roboguide.habitat-local-how-profile/v0.4"
+                "roboguide.habitat-local-how-profile/v0.5"
+                if spatial_arrival
+                else "roboguide.habitat-local-how-profile/v0.4"
                 if step_aware
                 else "roboguide.habitat-local-how-profile/v0.3"
                 if geometry_enabled
@@ -586,6 +592,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
             **(
                 {"navmesh_resolution_profile": "step-preserving-cell-height/v0.1"}
                 if step_aware
+                else {}
+            ),
+            **(
+                {"navigation_arrival_profile": "spatial-route-arrival/v0.1"}
+                if spatial_arrival
                 else {}
             ),
         }
@@ -620,6 +631,15 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         "habitat_local_eaios.goal_region_action",
         "habitat_local_eaios.goal_region_navigation",
         "habitat_local_eaios.reset_route_support",
+        *(
+            (
+                "habitat.tasks.rearrange.actions.actions",
+                "habitat_local_eaios.spatial_navigation",
+                "habitat_local_eaios.spatial_navigation_action",
+            )
+            if spatial_arrival
+            else ()
+        ),
         *(("habitat_local_eaios.navmesh_region",) if geometry_enabled else ()),
         *(
             ("habitat_local_eaios.navmesh_profile",)

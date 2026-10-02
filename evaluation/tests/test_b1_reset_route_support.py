@@ -305,6 +305,89 @@ def test_resolution_profile_is_bound_independently_of_geometry(
     assert assess_b1_directory(run) == baseline
 
 
+def _spatial_arrival_archive(run: Path, *, geometry: bool) -> dict[str, Any]:
+    """Freeze the Local How and original base-action sources without a simulator."""
+    document = _step_aware_archive(run, geometry=geometry)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    profile.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.5",
+        navigation_arrival_profile="spatial-route-arrival/v0.1",
+    )
+    write_json(run / "evidence/local-how-profile.json", profile)
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    for module in [
+        "habitat_local_eaios.spatial_navigation",
+        "habitat_local_eaios.spatial_navigation_action",
+        "habitat.tasks.rearrange.actions.actions",
+    ]:
+        path = run / (module.rsplit(".", 1)[-1] + ".py")
+        path.write_text("# immutable spatial arrival producer fixture\n")
+        runtime["modules"][module] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(profile), runtime_sources_digest=_content_digest(runtime)
+    )
+    _save(run, document)
+    return _seal(document)
+
+
+@pytest.mark.parametrize("geometry", [False, True])
+def test_spatial_arrival_archive_preserves_admission_and_official_authority(
+    tmp_path: Path, geometry: bool
+) -> None:
+    """The separately disclosed motion profile never changes population or benchmark truth."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _spatial_arrival_archive(run, geometry=geometry)
+    assert preflight_reset_route_support(run, require_geometry=geometry) == document
+    assert assess_b1_directory(run) == baseline
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "arrival",
+        "missing_profile",
+        "downgrade",
+        "missing_source",
+        "changed_source",
+        "missing_base_source",
+        "changed_base_source",
+    ],
+)
+def test_resealed_spatial_profile_mismatch_fails_closed(tmp_path: Path, fault: str) -> None:
+    """Resealing a route digest cannot hide a different or missing active controller."""
+    run = make_run(tmp_path)
+    document = _spatial_arrival_archive(run, geometry=True)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    if fault == "arrival":
+        profile["navigation_arrival_profile"] = "unidentified-controller"
+    elif fault == "missing_profile":
+        del profile["navigation_arrival_profile"]
+    elif fault == "downgrade":
+        profile["schema_version"] = "roboguide.habitat-local-how-profile/v0.4"
+    elif fault == "missing_source":
+        del runtime["modules"]["habitat_local_eaios.spatial_navigation_action"]
+    elif fault == "missing_base_source":
+        del runtime["modules"]["habitat.tasks.rearrange.actions.actions"]
+    elif fault == "changed_base_source":
+        (run / "actions.py").write_text("# changed original base action source\n")
+    else:
+        (run / "spatial_navigation_action.py").write_text("# changed source\n")
+    write_json(run / "evidence/local-how-profile.json", profile)
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(profile), runtime_sources_digest=_content_digest(runtime)
+    )
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
 @pytest.mark.parametrize("fault", ["climb_resolution", "tiny_voxel", "source", "profile"])
 def test_resealed_resolution_inconsistency_is_rejected(tmp_path: Path, fault: str) -> None:
     """A checksum cannot hide coarse settings or an unidentified Local How change."""
