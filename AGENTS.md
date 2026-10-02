@@ -206,6 +206,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Mission's preferences, expiry restores stable order, and recovery/restore
   never renew reset evidence. This is an opt-in initial policy, not MI input,
   resource authority, route feasibility proof or automatic terminal replanning.
+- Optional reset-route geometry (ADR-0062) reads only the detached starting
+  component under explicit retained-array, triangle-work and processing limits.
+  Full triangle interiors, reference-offset rotation and boundary uncertainty
+  distinguish static intersections, scoped disjoint geometry and unknown.
+  Opted-in B1 requires identity/source/budget consistency and the v0.2 archive;
+  the separate initial preference consumer may rank scoped misses after exact
+  source checks but never exclude a Node. MI inputs, operation intent, physical
+  navigation parameters, Core contracts and Formal admission stay unchanged.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

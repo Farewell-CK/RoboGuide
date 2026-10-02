@@ -196,6 +196,24 @@ The Local How profile is v0.2; per-action selection records are v0.2 and add
 actual progress on bounded runtime misses. See
 [ADR-0052](../../docs/decisions/0052-reset-route-support-observations.md).
 
+The independently enabled `--reset-route-geometry` flag requires the above
+observer. It emits reset-route-support v0.2 with complete static starting-component
+triangle analysis; without it, v0.1 and the original point-only observation are
+unchanged. B1 uses `ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY=1` and requires that exact
+version rather than silently falling back. Local How v0.3 declares the observer;
+the navigation resolver and original controller remain unchanged.
+
+The retained geometry limits are 25,000 vertices / 50,000 triangles per endpoint,
+200,000 total triangle checks, and a checked one-second analysis deadline per
+record. Native mesh export/recomputation cost is outside those Python limits.
+`intersects` is not a path; `disjoint` concerns only the static component and
+assumed reference geometry; incomplete or boundary cases remain `unknown`.
+No path query, RNG sample or physical step is added. When the separate initial
+preference consumer is enabled, neutral v0.2 support grades only order current
+eligible candidates; even static-disjoint endpoints remain valid fallbacks.
+First Bind, expiry and restore fences remain unchanged. See
+[ADR-0062](../../docs/decisions/0062-scoped-static-navigation-region-evidence.md).
+
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
 `terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat

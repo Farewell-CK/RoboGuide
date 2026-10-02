@@ -38,13 +38,20 @@ fn check_route_source(
     source_digest: &str,
     feasibility: &DeploymentFeasibility,
     costs: &BTreeMap<(String, String), BTreeMap<domain::NodeId, Option<u64>>>,
+    disjoint: &BTreeSet<(String, String, domain::NodeId)>,
+    geometry_enabled: bool,
 ) -> Result<(), String> {
     let (source, digest) = load_body(path)?;
     let identity = source["identity"]
         .as_object()
         .ok_or("route source lacks reset identity")?;
     if digest != source_digest
-        || source["schema_version"] != "roboguide.deployment-reset-route-support/v0.1"
+        || source["schema_version"]
+            != if geometry_enabled {
+                "roboguide.deployment-reset-route-support/v0.2"
+            } else {
+                "roboguide.deployment-reset-route-support/v0.1"
+            }
         || source["purpose"] != "diagnostic_only"
         || source["authority"] != "deployment-observed-reset-state"
         || identity.get("preassignment_digest") != Some(&serde_json::json!(feasibility.digest()))
@@ -70,6 +77,7 @@ fn check_route_source(
         return Err("route source exceeds its record budget".into());
     }
     let mut observed = BTreeMap::new();
+    let mut observed_disjoint = BTreeSet::new();
     for record in records {
         let node = domain::NodeId::new(record["node_id"].as_str().unwrap_or_default())
             .map_err(|error| error.to_string())?;
@@ -91,6 +99,40 @@ fn check_route_source(
             Some("not_found" | "unavailable") if record["selection"].is_null() => None,
             _ => return Err("route source witness status is invalid".into()),
         };
+        if geometry_enabled {
+            let region = &record["region_analysis"];
+            match region["status"].as_str() {
+                Some("disjoint") => {
+                    let lower_bound = region["orientation_safe_distance_lower_bound_m"]
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or("route source disjoint bound is invalid")?;
+                    let radius = record["official_robot_at_threshold_m"]
+                        .as_f64()
+                        .filter(|value| value.is_finite() && *value > 0.0)
+                        .ok_or("route source disjoint radius is invalid")?;
+                    let triangles = region["triangles"]
+                        .as_u64()
+                        .filter(|value| (1..=50_000).contains(value))
+                        .ok_or("route source disjoint triangle count is invalid")?;
+                    if cost.is_some()
+                        || region["schema_version"] != "roboguide.static-navigation-region/v0.1"
+                        || region["scope"] != "reset_static_start_component"
+                        || region["reason_code"] != "static_component_disjoint"
+                        || region["complete"] != true
+                        || region["triangles_examined"].as_u64() != Some(triangles)
+                        || lower_bound <= radius + 0.001
+                    {
+                        return Err(
+                            "route source disjoint claim lacks a complete scoped miss".into()
+                        );
+                    }
+                    observed_disjoint.insert((node.clone(), destination.to_string()));
+                }
+                Some("intersects" | "unknown") => {}
+                _ => return Err("route source region status is invalid".into()),
+            }
+        }
         if observed
             .insert((node, destination.to_string()), cost)
             .is_some()
@@ -131,6 +173,15 @@ fn check_route_source(
     {
         return Err("projected costs differ from actual route-source coverage or witnesses".into());
     }
+    for ((operation, destination), nodes) in costs {
+        for node in nodes.keys() {
+            if disjoint.contains(&(operation.clone(), destination.clone(), node.clone()))
+                != observed_disjoint.contains(&(node.clone(), destination.clone()))
+            {
+                return Err("projected static support differs from actual region source".into());
+            }
+        }
+    }
     Ok(())
 }
 
@@ -141,6 +192,8 @@ pub(crate) struct InitialOperationPreferences {
     digest: String,
     /// Exact operation/destination costs per declared deployment endpoint.
     costs: BTreeMap<(String, String), BTreeMap<domain::NodeId, Option<u64>>>,
+    /// Scoped static misses affect order only and never remove eligible Nodes.
+    disjoint: BTreeSet<(String, String, domain::NodeId)>,
     /// Local source receive time, unchanged by Mission arrival.
     received_at: domain::TimestampMs,
     /// Exclusive local expiry; checkpoint restore never renews it.
@@ -160,6 +213,8 @@ impl InitialOperationPreferences {
     ) -> Result<Self, String> {
         let (document, digest) = load_body(path)?;
         let body = document.as_object().expect("checked object");
+        let geometry_enabled =
+            body["schema_version"] == "roboguide.deployment-initial-operation-preferences/v0.2";
         if body.keys().map(String::as_str).collect::<BTreeSet<_>>()
             != BTreeSet::from([
                 "schema_version",
@@ -169,7 +224,9 @@ impl InitialOperationPreferences {
                 "feasibility_digest",
                 "records",
             ])
-            || body["schema_version"] != "roboguide.deployment-initial-operation-preferences/v0.1"
+            || (!geometry_enabled
+                && body["schema_version"]
+                    != "roboguide.deployment-initial-operation-preferences/v0.1")
             || body["authority"] != "deployment-observed-reset-state"
             || body["scope"] != "initial_world_before_first_dispatch"
             || body["feasibility_digest"] != feasibility.digest()
@@ -184,11 +241,15 @@ impl InitialOperationPreferences {
             return Err("initial cost count exceeds its budget or is empty".into());
         }
         let mut costs = BTreeMap::<(String, String), BTreeMap<domain::NodeId, Option<u64>>>::new();
+        let mut disjoint = BTreeSet::new();
         for record in records {
             let item = record.as_object().ok_or("initial cost must be an object")?;
-            if item.keys().map(String::as_str).collect::<BTreeSet<_>>()
-                != BTreeSet::from(["operation", "parameters", "node_id", "cost_micrometers"])
-            {
+            let mut expected_fields =
+                BTreeSet::from(["operation", "parameters", "node_id", "cost_micrometers"]);
+            if geometry_enabled {
+                expected_fields.insert("static_support");
+            }
+            if item.keys().map(String::as_str).collect::<BTreeSet<_>>() != expected_fields {
                 return Err("initial cost fields are invalid".into());
             }
             let operation = item["operation"]
@@ -218,6 +279,15 @@ impl InitialOperationPreferences {
                         .ok_or("initial cost is not a bounded nonnegative integer")?,
                 )
             };
+            if geometry_enabled {
+                match (item["static_support"].as_str(), cost.is_some()) {
+                    (Some("witnessed"), true) | (Some("unknown"), false) => {}
+                    (Some("static-disjoint"), false) => {
+                        disjoint.insert((operation.into(), destination.into(), node.clone()));
+                    }
+                    _ => return Err("initial static support and witnessed cost disagree".into()),
+                }
+            }
             if costs
                 .entry((operation.into(), destination.into()))
                 .or_default()
@@ -242,6 +312,8 @@ impl InitialOperationPreferences {
             body["source_digest"].as_str().expect("checked digest"),
             feasibility,
             &costs,
+            &disjoint,
+            geometry_enabled,
         )?;
         let expires_at = received_at
             .as_millis()
@@ -251,6 +323,7 @@ impl InitialOperationPreferences {
         Ok(Self {
             digest,
             costs,
+            disjoint,
             received_at,
             expires_at,
             enabled: fresh_controller,
@@ -328,7 +401,17 @@ impl InitialOperationPreferences {
             options.push(
                 nodes
                     .iter()
-                    .map(|node| (node.clone(), costs.get(node).copied().flatten()))
+                    .map(|node| {
+                        (
+                            node.clone(),
+                            costs.get(node).copied().flatten(),
+                            self.disjoint.contains(&(
+                                intent.operation().to_string(),
+                                destination.clone(),
+                                node.clone(),
+                            )),
+                        )
+                    })
                     .collect::<Vec<_>>(),
             );
         }
@@ -338,20 +421,25 @@ impl InitialOperationPreferences {
             && roots[0].requirement().roles()[0].actor_id()
                 != roots[1].requirement().roles()[0].actor_id();
         let mut scores = Vec::new();
-        for (node, cost) in &options[0] {
+        for (node, cost, is_disjoint) in &options[0] {
             let score = if separate {
                 options[1]
                     .iter()
-                    .filter(|(other, _)| other != node)
-                    .map(|(_, other_cost)| {
+                    .filter(|(other, _, _)| other != node)
+                    .map(|(_, other_cost, other_disjoint)| {
                         (
+                            u8::from(*is_disjoint) + u8::from(*other_disjoint),
                             u8::from(cost.is_none()) + u8::from(other_cost.is_none()),
                             cost.unwrap_or(0) + other_cost.unwrap_or(0),
                         )
                     })
                     .min()
             } else {
-                Some((u8::from(cost.is_none()), cost.unwrap_or(0)))
+                Some((
+                    u8::from(*is_disjoint),
+                    u8::from(cost.is_none()),
+                    cost.unwrap_or(0),
+                ))
             };
             if let Some(score) = score {
                 scores.push((score, node.clone()));

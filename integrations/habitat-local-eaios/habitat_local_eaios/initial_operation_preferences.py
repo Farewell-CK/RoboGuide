@@ -16,6 +16,7 @@ from typing import Any
 from .preassignment_feasibility import preassignment_digest
 
 SCHEMA = "roboguide.deployment-initial-operation-preferences/v0.1"
+GEOMETRY_SCHEMA = "roboguide.deployment-initial-operation-preferences/v0.2"
 MAX_RECORDS = 128
 MAX_COST_MICROMETERS = 1_000_000_000_000
 
@@ -39,7 +40,15 @@ def build_initial_operation_preferences(
     The source remains a consistency-checked deployment observation, not proof
     that execution will succeed or that null-cost candidates are impossible.
     """
-    _sealed(routes, "roboguide.deployment-reset-route-support/v0.1")
+    geometry_enabled = (
+        routes.get("schema_version") == "roboguide.deployment-reset-route-support/v0.2"
+    )
+    _sealed(
+        routes,
+        "roboguide.deployment-reset-route-support/v0.2"
+        if geometry_enabled
+        else "roboguide.deployment-reset-route-support/v0.1",
+    )
     _sealed(feasibility, "roboguide.deployment-intent-feasibility/v0.3")
     identity = routes["identity"]
     if (
@@ -69,6 +78,7 @@ def build_initial_operation_preferences(
         if witness is not None and witness["agent_id"] != record["agent_id"]:
             raise ValueError("initial preferences endpoint identity differs")
         cost: int | None = None
+        static_support = "unknown"
         if witness is not None and witness["status"] == "supported":
             length = witness["selection"]["path_length_m"]
             if (
@@ -79,11 +89,25 @@ def build_initial_operation_preferences(
             ):
                 raise ValueError("initial preferences witness cost is invalid")
             cost = round(length * 1_000_000)
+            static_support = "witnessed"
+        if geometry_enabled and witness is not None:
+            region = witness.get("region_analysis")
+            if not isinstance(region, dict) or region.get("status") not in {
+                "intersects",
+                "disjoint",
+                "unknown",
+            }:
+                raise ValueError("initial preferences region observation is invalid")
+            if region["status"] == "disjoint":
+                if region.get("complete") is not True or cost is not None:
+                    raise ValueError("initial preferences disjoint geometry lacks a complete miss")
+                static_support = "static-disjoint"
         entries[intent_key] = {
             "operation": record["operation"],
             "parameters": {"destination": record["destination"]},
             "node_id": record["node_id"],
             "cost_micrometers": cost,
+            **({"static_support": static_support} if geometry_enabled else {}),
         }
     expected = {(key[2], key[1]) for key in entries}
     endpoints = {key[2] for key in entries}
@@ -102,7 +126,7 @@ def build_initial_operation_preferences(
     ):
         raise ValueError("initial preferences source coverage is incomplete or exceeds budget")
     body = {
-        "schema_version": SCHEMA,
+        "schema_version": GEOMETRY_SCHEMA if geometry_enabled else SCHEMA,
         "authority": "deployment-observed-reset-state",
         "scope": "initial_world_before_first_dispatch",
         "source_digest": routes["digest"],

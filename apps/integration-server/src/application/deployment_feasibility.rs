@@ -551,6 +551,242 @@ mod tests {
         body
     }
 
+    /// Freeze scoped static misses separately from neutral initial candidate ordering.
+    fn geometry_preference_documents(
+        matrix: &serde_json::Value,
+        misses: [bool; 4],
+    ) -> (serde_json::Value, serde_json::Value) {
+        let mut source = initial_route_document(matrix, [None; 4]);
+        source["schema_version"] =
+            serde_json::json!("roboguide.deployment-reset-route-support/v0.2");
+        for (record, missing) in source["records"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(misses)
+        {
+            record["official_robot_at_threshold_m"] = serde_json::json!(2.0);
+            record["region_analysis"] = serde_json::json!({
+                "schema_version": "roboguide.static-navigation-region/v0.1",
+                "scope": "reset_static_start_component",
+                "status": if missing { "disjoint" } else { "unknown" },
+                "reason_code": if missing { "static_component_disjoint" } else { "triangle_budget" },
+                "complete": missing, "triangles": 1,
+                "triangles_examined": if missing { 1 } else { 0 },
+                "orientation_safe_distance_lower_bound_m": if missing { serde_json::json!(5.0) } else { serde_json::Value::Null },
+            });
+        }
+        seal(&mut source);
+        let mut projection = initial_cost_document(matrix, [None; 4]);
+        projection["schema_version"] =
+            serde_json::json!("roboguide.deployment-initial-operation-preferences/v0.2");
+        projection["source_digest"] = source["digest"].clone();
+        for (record, missing) in projection["records"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(misses)
+        {
+            record["static_support"] = serde_json::json!(if missing {
+                "static-disjoint"
+            } else {
+                "unknown"
+            });
+        }
+        seal(&mut projection);
+        (source, projection)
+    }
+
+    /// Full Control preparation retains every eligible endpoint despite a static miss.
+    #[test]
+    fn initial_geometry_changes_order_without_exclusion_or_success() {
+        for (misses, expected) in [
+            ([true, false, false, false], "node-b"),
+            ([true; 4], "node-a"),
+            ([false; 4], "node-a"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let matrix_path = directory.path().join("reset.json");
+            let matrix = snapshot(&matrix_path, true);
+            let mut deployment = DeploymentFeasibility::load(&matrix_path).unwrap();
+            let (source, projection) = geometry_preference_documents(&matrix, misses);
+            let source_path = directory.path().join("routes.json");
+            let costs_path = directory.path().join("costs.json");
+            std::fs::write(&source_path, source.to_string()).unwrap();
+            std::fs::write(&costs_path, projection.to_string()).unwrap();
+            let now = domain::TimestampMs::new(0);
+            deployment
+                .configure_initial_preferences(&costs_path, &source_path, now, true)
+                .unwrap();
+            let plan = orchestration::decode_mission_plan(&plan_document(false, true).to_string())
+                .unwrap();
+            let mut events =
+                state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+            let mut control = control::ControlPlane::new();
+            let state = initial_cost_nodes(&mut control, &plan, &mut events);
+            let correlation = domain::CorrelationId::new("geometry-order").unwrap();
+            let mut orchestrator = orchestration::MissionOrchestrator::new();
+            orchestrator
+                .submit(
+                    plan.clone(),
+                    domain::ExecutionGroupId::new("geometry-group").unwrap(),
+                    &mut control,
+                    now,
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap();
+            let preference = deployment
+                .initial_preferences_for_plan(
+                    &plan,
+                    &control,
+                    &state,
+                    now,
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap()
+                .unwrap();
+            control
+                .set_initial_candidate_preferences(&plan, preference)
+                .unwrap();
+            let first = &plan.task_graph().tasks()[0];
+            let candidates = control
+                .match_capabilities_for_mission(
+                    &state,
+                    &plan,
+                    first.requirement(),
+                    now,
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap();
+            assert_eq!(
+                candidates
+                    .for_role(first.requirement().roles()[0].role_id())
+                    .unwrap()
+                    .node_ids()
+                    .len(),
+                2
+            );
+            assert!(plan.actors().iter().all(|actor| {
+                control
+                    .actor_binding(plan.goal().mission_id(), actor.id())
+                    .is_none()
+            }));
+            for (index, task) in plan.task_graph().tasks().iter().enumerate() {
+                orchestrator
+                    .prepare_task(
+                        plan.goal().mission_id(),
+                        task.requirement().task_ref(),
+                        &state,
+                        &mut control,
+                        now,
+                        &correlation,
+                        &mut events,
+                    )
+                    .unwrap();
+                let node = control
+                    .actor_binding(
+                        plan.goal().mission_id(),
+                        task.requirement().roles()[0].actor_id().unwrap(),
+                    )
+                    .unwrap()
+                    .node_id();
+                assert_eq!(
+                    node.as_str(),
+                    if index == 0 {
+                        expected
+                    } else if expected == "node-a" {
+                        "node-b"
+                    } else {
+                        "node-a"
+                    }
+                );
+            }
+            assert!(
+                deployment
+                    .initial_preferences_for_plan(
+                        &plan,
+                        &control,
+                        &state,
+                        domain::TimestampMs::new(control::MAX_INITIAL_PREFERENCE_AGE_MS),
+                        &correlation,
+                        &mut events
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    /// A recomputed digest cannot turn partial geometry or a different source into a miss.
+    #[test]
+    fn initial_geometry_rejects_forged_projection_and_partial_negative() {
+        for fault in [
+            "partial",
+            "wrong_bound",
+            "wrong_scope",
+            "wrong_version",
+            "projection",
+            "cost",
+            "missing",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("reset.json");
+            let matrix = snapshot(&path, true);
+            let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+            let (mut source, mut projection) =
+                geometry_preference_documents(&matrix, [true, false, false, false]);
+            match fault {
+                "partial" => {
+                    source["records"][0]["region_analysis"]["complete"] = serde_json::json!(false)
+                }
+                "wrong_bound" => {
+                    source["records"][0]["region_analysis"]["orientation_safe_distance_lower_bound_m"] =
+                        serde_json::json!(1.0)
+                }
+                "wrong_scope" => {
+                    source["records"][0]["region_analysis"]["scope"] =
+                        serde_json::json!("global_impossibility")
+                }
+                "wrong_version" => {
+                    source["schema_version"] =
+                        serde_json::json!("roboguide.deployment-reset-route-support/v0.1")
+                }
+                "projection" => {
+                    projection["records"][0]["static_support"] = serde_json::json!("unknown")
+                }
+                "cost" => projection["records"][0]["cost_micrometers"] = serde_json::json!(1),
+                "missing" => {
+                    source["records"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("region_analysis");
+                }
+                _ => unreachable!(),
+            }
+            seal(&mut source);
+            projection["source_digest"] = source["digest"].clone();
+            seal(&mut projection);
+            let source_path = directory.path().join("routes.json");
+            let costs_path = directory.path().join("costs.json");
+            std::fs::write(&source_path, source.to_string()).unwrap();
+            std::fs::write(&costs_path, projection.to_string()).unwrap();
+            assert!(
+                deployment
+                    .configure_initial_preferences(
+                        &costs_path,
+                        &source_path,
+                        domain::TimestampMs::new(0),
+                        true
+                    )
+                    .is_err(),
+                "{fault}"
+            );
+        }
+    }
+
     /// Register current capability and resource facts for initial policy tests.
     fn initial_cost_nodes(
         control: &mut control::ControlPlane,

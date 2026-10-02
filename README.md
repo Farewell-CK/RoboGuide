@@ -622,6 +622,13 @@ Scheduler 仅调整搜索顺序，未知候选、资源约束和 Actor 绑定规
 不是可达性或 benchmark 成功证明；对照实验应记录开关与源摘要。
 见 [`ADR-0053`](docs/decisions/0053-initial-candidate-preferences.md)。
 
+另行启用 `ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY=1` 可在上述 reset observer 中增加有界的
+完整起点连通区域检查（[ADR-0062](docs/decisions/0062-scoped-static-navigation-region-evidence.md)）。
+它检查三角面内部及参考点偏移，输出 reset-route-support v0.2；读取失败、预算耗尽、
+阈值接触保持 unknown。初次偏好 consumer 可优先减少静态不相交组合，再比较正向路径
+覆盖与成本，仍保留所有原有候选。静态不相交不等于物理任务不可解，不能用于永久
+Actor 排除、MI 输入、任务成功或 Formal admission。此开关默认关闭，不修改导航参数。
+
 ## 三条核心语义链
 
 ```text

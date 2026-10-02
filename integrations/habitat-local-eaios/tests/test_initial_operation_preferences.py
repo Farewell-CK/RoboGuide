@@ -100,6 +100,32 @@ def test_unavailable_scope_is_neutral() -> None:
     assert all(item["cost_micrometers"] is None for item in output["records"])
 
 
+def test_geometry_projection_preserves_unknown_and_static_miss_as_preferences() -> None:
+    """Static disjoint is advisory, a geometric intersection alone has no route cost."""
+    routes, matrix = _sources()
+    routes["schema_version"] = "roboguide.deployment-reset-route-support/v0.2"
+    for record, status in zip(
+        routes["records"], ("intersects", "disjoint", "intersects", "unknown"), strict=True
+    ):
+        record["region_analysis"] = {"status": status, "complete": True}
+    _seal(routes)
+    before = copy.deepcopy((routes, matrix))
+    output = preferences.build_initial_operation_preferences(routes, matrix)
+    assert output["schema_version"] == preferences.GEOMETRY_SCHEMA
+    assert [r["static_support"] for r in output["records"]] == [
+        "unknown",
+        "witnessed",
+        "witnessed",
+        "static-disjoint",
+    ]
+    assert len(output["records"]) == 4 and (routes, matrix) == before
+    assert all("excluded" not in r for r in output["records"])
+    routes["records"][1]["region_analysis"]["complete"] = False
+    _seal(routes)
+    with pytest.raises(ValueError, match="complete miss"):
+        preferences.build_initial_operation_preferences(routes, matrix)
+
+
 def test_full_entity_catalog_and_operation_aliases_keep_unprobed_costs_unknown() -> None:
     """The matrix covers all entities/operations; the probe covers only official goals."""
     routes, matrix = _sources()

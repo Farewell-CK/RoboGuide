@@ -550,16 +550,27 @@ Controller 在当前双 endpoint 容量约束下比较初次并发任务的候�
 偏好有 receive-time 时限，首次成功 Bind 后失效，恢复不重新激活；MI、任务语义、
 Local How、官方 benchmark authority 和 Formal admission 均保持各自权威。
 
+独立的默认关闭几何扩展（[ADR-0062](../../decisions/0062-scoped-static-navigation-region-evidence.md)）
+可在同一隔离网格上检查完整起点连通区域与目标容差的三角面关系，记录静态相交、
+静态不相交或未知。它不增加路径查询和物理 step；预算耗尽、参考点旋转或边界不确定
+不能伪装成完整负证据。B1 检查 source/profile/identity 与新版本归档。初次 consumer
+可将其转成中性的 exact-operation support grade，优先减少静态不相交组合，再比较
+正向路径覆盖和成本；只改变现有候选搜索顺序，包括静态不相交在内的候选仍可使用。
+完整静态网格观测没有动态物理不可达、永久 Actor 排除或全局不可解的权威。
+
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
         |
         +-> isolated bounded route queries -> reset-route-support.json
+                     ^                            ^
+                     |                            |
+             copied agent NavMesh -> optional bounded complete-component geometry
                                                   |
                                   B1 identity/source/geometry check
                                                   |
                                       diagnostic archive only
                                                   |
-                               optional neutral cost projection
+                               optional neutral cost/support projection
                                                   |
                               initial eligible-candidate ordering
                               (first Bind / expiry / restore fence)
