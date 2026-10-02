@@ -564,13 +564,19 @@ Local How、官方 benchmark authority 和 Formal admission 均保持各自权�
 不是 Control 的路线证明。Local How v0.4 与实际动作网格证据明确记录启用状态，官方
 PDDL 仍独立裁决物理终态。
 
+空间到达 Local How（[ADR-0064](../../decisions/0064-spatial-route-arrival-local-navigation.md)）
+是另一个明确声明、默认关闭的本地控制分支：三维接近选定导航点前继续跟随路径，
+之后才朝向原实体并报告本地完成。它保留原阈值、速度和执行预算，单次原 base action
+下发、无额外模型或 Gym step；找不到路径不伪造直线。Local How v0.5 与 action evidence
+v0.4 明示与原生控制的区别，未改变官方谓词、Control 资源权威或 Orchestration 满足边界。
+
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
                                                         |
                                            active agent NavMesh
                                       (original / opt-in step-aware copy)
                                                         |
-                                               original Oracle control
+                                  original Oracle / opt-in spatial-route control
                                                         |
                                                official PDDL outcome
         |

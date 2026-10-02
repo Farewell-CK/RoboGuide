@@ -811,6 +811,12 @@ class PhysicalDiagnostics:
             "oracle_skill_done": _read(lambda: bool(action.skill_done))
             if action
             else {"_status": _UNAVAILABLE, "reason": "oracle action unavailable"},
+            **(
+                {"spatial_arrival_decision": _read(action.navigation_arrival_evidence)}
+                if action is not None
+                and callable(getattr(action, "navigation_arrival_evidence", None))
+                else {}
+            ),
         }
 
     def _annotate_skill_transition(self, agent_id: int, state: Any) -> Any:

@@ -230,6 +230,21 @@ from mesh connectivity. See [ADR-0063](../../docs/decisions/0063-step-aware-loca
 First Bind, expiry and restore fences remain unchanged. See
 [ADR-0062](../../docs/decisions/0062-scoped-static-navigation-region-evidence.md).
 
+`--spatial-navigation-arrival` is a separate default-off differential-base control
+profile requiring step-aware and goal-region navigation. B1 uses
+`ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL=1`. Until full 3D proximity to the selected
+point, follow the next planar route waypoint; only then face the original entity
+and set the existing finished flag. Thresholds, velocities and skill/simulator
+budgets remain unchanged. An unavailable/unusable bounded route fails without a
+straight-line fallback. Each invocation dispatches exactly one original base action.
+
+This changes Local How control; the original/goal-region/step-aware classes retain
+their existing behavior when this flag is off. External EMOS and official PDDL are
+untouched. Local How v0.5 and selection v0.4 disclose the profile; B1 verifies exact
+sources and continues accepting older archives. Optional diagnostics expose a bounded
+pre-base-action decision, not physical arrival or benchmark truth. See
+[ADR-0064](../../docs/decisions/0064-spatial-route-arrival-local-navigation.md).
+
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
 `terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat

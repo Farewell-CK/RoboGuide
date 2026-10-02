@@ -221,6 +221,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   limits. Robot dimensions/climb/slope, canonical target, original Oracle control
   and official PDDL remain unchanged. Local How v0.4 and action evidence v0.3
   disclose the arm difference from original EMOS; paths never prove success.
+- Optional spatial route arrival (ADR-0064) is a separate default-off Local How
+  controller for the existing differential-base motion profiles. It preserves the
+  exact entity, copied mesh/ability and original thresholds, velocities and budgets,
+  but follows the route until 3D proximity before facing the entity. Missing or
+  unusable routes fail explicitly; there is one original base dispatch per action,
+  no extra model/action/Gym step and no external EMOS edit. Local How v0.5 and action
+  evidence v0.4 disclose this change. Reset observation retains identical copied
+  settings; bounded pre-motion decision diagnostics never become official truth.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

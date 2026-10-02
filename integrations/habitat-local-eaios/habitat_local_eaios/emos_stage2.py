@@ -17,6 +17,7 @@ from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive
 from .model import CanonicalMobilityInvocation, IntegrationError
 from .navmesh_profile import STEP_AWARE_PROFILE
 from .source_provenance import build_runtime_source_manifest
+from .spatial_navigation import SPATIAL_ARRIVAL_PROFILE
 from .stage2_contract import (
     Stage2ActionAudit,
     Stage2ContractViolation,
@@ -28,7 +29,11 @@ _LOG = logging.getLogger(__name__)
 
 
 def _configure_goal_region_navigation(
-    config: Any, read_write: Callable[[Any], Any], *, step_aware: bool = False
+    config: Any,
+    read_write: Callable[[Any], Any],
+    *,
+    step_aware: bool = False,
+    spatial_arrival: bool = False,
 ) -> None:
     """Select the adapter-owned Oracle subclass before constructing Habitat.
 
@@ -38,7 +43,13 @@ def _configure_goal_region_navigation(
     """
     from .goal_region_action import GoalRegionOracleNavDiffBaseAction
 
-    if step_aware:
+    if spatial_arrival:
+        if not step_aware:
+            raise IntegrationError("spatial navigation arrival requires step-aware navmesh")
+        from .spatial_navigation_action import SpatialArrivalGoalRegionOracleNavDiffBaseAction
+
+        action_name = SpatialArrivalGoalRegionOracleNavDiffBaseAction.__name__
+    elif step_aware:
         from .goal_region_action import StepAwareGoalRegionOracleNavDiffBaseAction
 
         action_name = StepAwareGoalRegionOracleNavDiffBaseAction.__name__
@@ -200,8 +211,16 @@ class EmosStage2Runtime:
             )
             goal_region_enabled = bool(getattr(self._config, "goal_region_navigation", False))
             step_aware_enabled = bool(getattr(self._config, "step_aware_navmesh", False))
+            spatial_arrival_enabled = bool(
+                getattr(self._config, "spatial_navigation_arrival", False)
+            )
             if goal_region_enabled:
-                _configure_goal_region_navigation(config, read_write, step_aware=step_aware_enabled)
+                _configure_goal_region_navigation(
+                    config,
+                    read_write,
+                    step_aware=step_aware_enabled,
+                    spatial_arrival=spatial_arrival_enabled,
+                )
             if self._config.video_path is not None or self._config.live_preview_path is not None:
                 _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
@@ -251,7 +270,9 @@ class EmosStage2Runtime:
                 "local-how-profile.json",
                 {
                     "schema_version": (
-                        "roboguide.habitat-local-how-profile/v0.4"
+                        "roboguide.habitat-local-how-profile/v0.5"
+                        if spatial_arrival_enabled
+                        else "roboguide.habitat-local-how-profile/v0.4"
                         if step_aware_enabled
                         else "roboguide.habitat-local-how-profile/v0.3"
                         if getattr(self._config, "reset_route_geometry", False)
@@ -274,6 +295,11 @@ class EmosStage2Runtime:
                     **(
                         {"navmesh_resolution_profile": STEP_AWARE_PROFILE}
                         if step_aware_enabled
+                        else {}
+                    ),
+                    **(
+                        {"navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE}
+                        if spatial_arrival_enabled
                         else {}
                     ),
                 },
@@ -300,6 +326,15 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",
+                        *(
+                            (
+                                "habitat.tasks.rearrange.actions.actions",
+                                "habitat_local_eaios.spatial_navigation",
+                                "habitat_local_eaios.spatial_navigation_action",
+                            )
+                            if spatial_arrival_enabled
+                            else ()
+                        ),
                     )
                 ),
             )

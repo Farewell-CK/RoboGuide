@@ -29,6 +29,7 @@ from .navmesh_region import (
     unknown_region,
 )
 from .preassignment_feasibility import preassignment_digest
+from .spatial_navigation import SPATIAL_ARRIVAL_PROFILE
 
 RESET_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.1"
 GEOMETRY_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.2"
@@ -83,9 +84,14 @@ class ResetRouteProbe:
         if action_type not in {
             "GoalRegionOracleNavDiffBaseAction",
             "StepAwareGoalRegionOracleNavDiffBaseAction",
+            "SpatialArrivalGoalRegionOracleNavDiffBaseAction",
         }:
             raise GoalRegionResolutionError("reset route probe requires the goal-region action")
-        self.step_aware = action_type == "StepAwareGoalRegionOracleNavDiffBaseAction"
+        self.step_aware = action_type in {
+            "StepAwareGoalRegionOracleNavDiffBaseAction",
+            "SpatialArrivalGoalRegionOracleNavDiffBaseAction",
+        }
+        self.spatial_arrival = action_type == "SpatialArrivalGoalRegionOracleNavDiffBaseAction"
         if self.action.config.spawn_max_dist_to_obj != -1:
             raise GoalRegionResolutionError("randomized Oracle target placement is unsupported")
         sim = environment.sim
@@ -242,10 +248,20 @@ def build_reset_route_support(
     goals = sorted(any_at_conjunct_names(semantic["goal"]))
     step_aware = local_how.get("navmesh_resolution_profile") == STEP_AWARE_PROFILE
     if ("navmesh_resolution_profile" in local_how and not step_aware) or (
-        step_aware and local_how.get("schema_version") != "roboguide.habitat-local-how-profile/v0.4"
+        step_aware
+        and local_how.get("schema_version")
+        not in {
+            "roboguide.habitat-local-how-profile/v0.4",
+            "roboguide.habitat-local-how-profile/v0.5",
+        }
     ):
         raise ValueError("route support has an unsupported navmesh resolution profile")
     geometry_enabled = local_how.get("reset_route_geometry_enabled") is True
+    spatial_arrival = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    if spatial_arrival != (
+        local_how.get("navigation_arrival_profile") == SPATIAL_ARRIVAL_PROFILE
+    ) or ("navigation_arrival_profile" in local_how and not spatial_arrival):
+        raise ValueError("route support has an unsupported spatial arrival profile")
     geometry_budget = RegionBudget()
     endpoints = sorted({(item["agent_id"], item["node_id"]) for item in preassignment["records"]})
     records: list[dict[str, Any]] = []
@@ -264,6 +280,8 @@ def build_reset_route_support(
                 initialization_error = error
             if probe is not None and getattr(probe, "step_aware", False) != step_aware:
                 raise ValueError("route support resolution profile differs from the active action")
+            if probe is not None and getattr(probe, "spatial_arrival", False) != spatial_arrival:
+                raise ValueError("route support spatial arrival differs from the active action")
             for destination in goals:
                 observation = _empty_observation()
                 if probe is not None:

@@ -636,6 +636,14 @@ goal-region navigation。它细化独立导航网格的垂直分辨率，避免�
 它会改变本地路线和移动可能性，对照原生 EMOS 时必须明示；静态路径仍不等于任务成功。
 见 [ADR-0063](docs/decisions/0063-step-aware-local-navmesh-resolution.md)。
 
+`ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL=1` 单独启用默认关闭的空间到达 Local How，
+要求前两个执行 profile 已明确启用。它在三维接近选定导航点前继续沿 waypoint 移动，
+接近后才朝向原实体并报告本地完成；不因 X/Z 重合就在不同楼层提前停止。保留原实体、
+能力、速度、阈值与技能/仿真预算，每次调用只下发一次原 base action，路径失败不伪造
+直线或成功。不编辑外部 EMOS；Local How v0.5 与 action evidence v0.4 明示控制差异，
+官方 PDDL 与 Mission satisfaction 仍独立判定。见
+[ADR-0064](docs/decisions/0064-spatial-route-arrival-local-navigation.md)。
+
 ## 三条核心语义链
 
 ```text
