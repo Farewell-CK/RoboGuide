@@ -787,6 +787,51 @@ mod tests {
         }
     }
 
+    /// Resealed missing or malformed versions must reject startup evidence without panic.
+    #[test]
+    fn initial_preferences_reject_missing_and_malformed_schema_without_panic() {
+        for geometry in [false, true] {
+            for fault in ["missing", "null", "non_string"] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("reset.json");
+                let matrix = snapshot(&path, true);
+                let mut deployment = DeploymentFeasibility::load(&path).unwrap();
+                let (source, mut projection) = if geometry {
+                    geometry_preference_documents(&matrix, [true, false, false, false])
+                } else {
+                    (
+                        initial_route_document(&matrix, [Some(1); 4]),
+                        initial_cost_document(&matrix, [Some(1); 4]),
+                    )
+                };
+                match fault {
+                    "missing" => {
+                        projection.as_object_mut().unwrap().remove("schema_version");
+                    }
+                    "null" => projection["schema_version"] = serde_json::Value::Null,
+                    "non_string" => projection["schema_version"] = serde_json::json!(2),
+                    _ => unreachable!(),
+                }
+                seal(&mut projection);
+                let source_path = directory.path().join("routes.json");
+                let costs_path = directory.path().join("costs.json");
+                std::fs::write(&source_path, source.to_string()).unwrap();
+                std::fs::write(&costs_path, projection.to_string()).unwrap();
+                assert!(
+                    deployment
+                        .configure_initial_preferences(
+                            &costs_path,
+                            &source_path,
+                            domain::TimestampMs::new(0),
+                            true
+                        )
+                        .is_err(),
+                    "geometry={geometry}, fault={fault}"
+                );
+            }
+        }
+    }
+
     /// Register current capability and resource facts for initial policy tests.
     fn initial_cost_nodes(
         control: &mut control::ControlPlane,

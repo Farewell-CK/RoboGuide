@@ -213,8 +213,10 @@ impl InitialOperationPreferences {
     ) -> Result<Self, String> {
         let (document, digest) = load_body(path)?;
         let body = document.as_object().expect("checked object");
-        let geometry_enabled =
-            body["schema_version"] == "roboguide.deployment-initial-operation-preferences/v0.2";
+        let geometry_enabled = body
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str)
+            == Some("roboguide.deployment-initial-operation-preferences/v0.2");
         if body.keys().map(String::as_str).collect::<BTreeSet<_>>()
             != BTreeSet::from([
                 "schema_version",
