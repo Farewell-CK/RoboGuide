@@ -14,6 +14,13 @@ from typing import Protocol, cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
 from mission.contract_values import MissionPlanError
+from mission.deployment_assessment import InitialOperationAssessment
+from mission.deployment_recovery import (
+    DeploymentRecoveryAction,
+    DeploymentRecoveryDecision,
+    DeploymentRecoverySession,
+    frozen_document,
+)
 from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
@@ -41,6 +48,7 @@ from mission.satisfaction_policy import (
 )
 from mission.semantic_admission import validate_authoritative_executor_constraints
 from mission.semantic_evidence import semantic_goal_review_payload
+from mission.submission_evidence import canonical_plan_digest
 
 
 class JsonTransport(Protocol):
@@ -278,6 +286,7 @@ class _ResponsesClient:
         input_text: str,
         schema_name: str,
         schema: JSONObject,
+        timeout_seconds: float | None = None,
     ) -> JSONObject:
         """Send one bounded, non-streaming Responses request with strict structured output."""
         headers = {"Content-Type": "application/json"}
@@ -303,7 +312,9 @@ class _ResponsesClient:
             self._endpoint,
             headers,
             payload,
-            self._settings.llm.timeout_seconds,
+            self._settings.llm.timeout_seconds
+            if timeout_seconds is None
+            else min(self._settings.llm.timeout_seconds, timeout_seconds),
         )
         if response.get("error") is not None:
             raise MissionProviderError(f"provider returned an error: {response['error']}")
@@ -548,6 +559,153 @@ class ResponsesMissionRepairer:
         self._settings = settings
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
+
+    def reconsider_deployment(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        reviewed_plan: MissionPlan,
+        assessment: InitialOperationAssessment,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        session: DeploymentRecoverySession,
+    ) -> tuple[DeploymentRecoveryDecision, JSONObject]:
+        """Reason once over exact-plan feedback; never query inventory or bypass new Review."""
+        if (
+            mission_id != reviewed_plan.mission.mission_id
+            or not assessment.matches_plan(reviewed_plan)
+            or (
+                session.request_id != grounding_context.request_id
+                or session.mission_id != mission_id
+                or not session.attempts
+                or session.attempts[-1].outcome != "pending"
+                or session.attempts[-1].assessment != assessment
+                or session.attempts[-1].input_plan_digest
+                != canonical_plan_digest(reviewed_plan.to_json())
+                or session.attempts[-1].grounding_context_digest != grounding_context.context_digest
+            )
+        ):
+            raise MissionProviderError(
+                "deployment recovery inputs are detached", configuration_failure=True
+            )
+        canonical_schema = self._client._load_schema()
+        plan_schema = self._client._mission_plan_provider_schema(canonical_schema, mission_id)
+        definitions = plan_schema.pop("$defs")
+        schema: JSONObject = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["action", "explanation", "replacement_plan"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [item.value for item in DeploymentRecoveryAction],
+                },
+                "explanation": {"type": "string"},
+                "replacement_plan": {"anyOf": [plan_schema, {"type": "null"}]},
+            },
+            "$defs": definitions,
+        }
+        payload: JSONObject = {
+            "request_mode": "deployment_recovery",
+            "mission_id": mission_id,
+            "grounded_intent": grounded_intent.to_json(),
+            "reviewed_plan": reviewed_plan.to_json(),
+            "initial_operation_assessment": assessment.to_json(),
+            "capability_catalog": capability_catalog.to_json(),
+            "grounding_context": grounding_context.to_json(),
+            "satisfaction_policy": self._client._satisfaction_policy_input(),
+            "recovery_budget": {
+                "max_attempts": session.max_attempts,
+                "attempt_index": len(session.attempts),
+                "expires_at_ms": session.expires_at_ms,
+            },
+            "prior_attempts": [
+                {
+                    "input_plan_digest": item.input_plan_digest,
+                    "assessment": item.assessment.to_json(),
+                    "decision": item.decision.to_json() if item.decision else None,
+                    "outcome": item.outcome,
+                }
+                for item in session.attempts[:-1]
+            ],
+            **(
+                {"deployment_execution_profile": self._execution_profile.to_json()}
+                if self._execution_profile
+                else {}
+            ),
+            **(
+                {"deployment_planning_profile": self._planning_profile.to_json()}
+                if self._planning_profile
+                else {}
+            ),
+        }
+        remaining_seconds = (session.expires_at_ms - int(time.time() * 1000)) / 1000
+        if remaining_seconds <= 0:
+            raise TimeoutError("deployment recovery deadline expired before Provider call")
+        response = self._client._request(
+            model=self._settings.llm.model,
+            instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
+            input_text=json.dumps(
+                _with_planning_world_evidence(
+                    _with_semantic_goal(
+                        payload, grounding_context, self._settings.satisfaction_policy
+                    ),
+                    grounding_context,
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            schema_name="deployment_recovery_v0",
+            schema=schema,
+            timeout_seconds=remaining_seconds,
+        )
+        try:
+            raw = self._client._extract_output_json(response)
+        except (ValueError, TypeError) as error:
+            raise MissionProviderError("deployment recovery output is not a JSON object") from error
+        try:
+            frozen_document(raw)
+            if set(raw) != {"action", "explanation", "replacement_plan"}:
+                raise ValueError("deployment recovery decision fields are invalid")
+            action_value = raw["action"]
+            if not isinstance(action_value, str):
+                raise ValueError("deployment recovery action must be text")
+            action = DeploymentRecoveryAction(action_value)
+            replacement = raw["replacement_plan"]
+            plan = None
+            if replacement is not None:
+                if action is not DeploymentRecoveryAction.REVISE or not isinstance(
+                    replacement, dict
+                ):
+                    raise ValueError("only revise_plan may return a replacement plan")
+                plan = _validated_provider_draft(
+                    replacement,
+                    canonical_schema,
+                    int(time.time() * 1000),
+                    mission_id,
+                    grounded_intent,
+                    capability_catalog,
+                    self._settings.satisfaction_policy,
+                    grounding_context,
+                    self._execution_profile,
+                )
+            explanation = raw["explanation"]
+            if not isinstance(explanation, str):
+                raise ValueError("deployment recovery explanation must be text")
+            decision = DeploymentRecoveryDecision(action, explanation, plan)
+            return decision, raw
+        except Exception as error:
+            if isinstance(error, ValueError) and not isinstance(error, RejectedPlanError):
+                failure = MissionProviderError("deployment recovery decision is malformed")
+                try:
+                    frozen_document(raw)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    failure.recovery_provider_output = raw  # type: ignore[attr-defined]
+                raise failure from error
+            error.recovery_provider_output = raw  # type: ignore[attr-defined]
+            raise
 
     def repair(
         self,

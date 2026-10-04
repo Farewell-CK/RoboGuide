@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RoboGuide Deployment Recovery Session v0.1",
+  "description": "Bounded MI proposal evidence; domain validation additionally checks digests, source/context, chronology and semantic contracts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "mission_id",
+    "max_attempts",
+    "started_at_ms",
+    "expires_at_ms",
+    "attempts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.deployment-recovery-session/v0.1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "started_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expires_at_ms": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "attempts": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/attempt"
+      }
+    }
+  },
+  "$defs": {
+    "assessment": {
+      "$ref": "../initial-operation-assessment-v0.2/assessment.schema.json"
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "explanation",
+        "replacement_plan"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "recheck",
+            "revise_plan",
+            "wait_for_evidence"
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "replacement_plan": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "revise_plan"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "replacement_plan": {
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "replacement_plan": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_index",
+        "input_plan",
+        "input_plan_digest",
+        "grounding_context_digest",
+        "assessment",
+        "started_at_ms",
+        "finished_at_ms",
+        "outcome",
+        "decision",
+        "provider_output",
+        "error_type"
+      ],
+      "properties": {
+        "attempt_index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "input_plan": {
+          "type": "object"
+        },
+        "input_plan_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "grounding_context_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "assessment": {
+          "$ref": "#/$defs/assessment"
+        },
+        "started_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finished_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "outcome": {
+          "enum": [
+            "pending",
+            "decided",
+            "failed",
+            "interrupted",
+            "expired"
+          ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_output": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "pending"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "finished_at_ms": {
+                "type": "null"
+              },
+              "decision": {
+                "type": "null"
+              },
+              "provider_output": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "finished_at_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "decided"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "decision": {
+                "$ref": "#/$defs/decision"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "decision": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
