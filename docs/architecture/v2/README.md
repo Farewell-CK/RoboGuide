@@ -558,6 +558,33 @@ Local How、官方 benchmark authority 和 Formal admission 均保持各自权�
 正向路径覆盖和成本；只改变现有候选搜索顺序，包括静态不相交在内的候选仍可使用。
 完整静态网格观测没有动态物理不可达、永久 Actor 排除或全局不可解的权威。
 
+独立、默认关闭的初始支持度反馈
+（[ADR-0066](../../decisions/0066-initial-operation-support-feedback.md)）
+在正常 MI 规划、审查与批准之后、唯一 Controller submit 之前运行。Controller 查询
+使用当前 Control Matching 的私有副本和不落盘的 query sink，只投影精确逻辑 slot、
+支持分类、源摘要及原始 receive-time 有效期，不输出 Node/Resource 标识。仅限新
+Controller 首个 admission 前的初始世界，后续 Task、restore 和 recovery 不重用起点。
+全部部署组合均含完整 scoped disjoint 才返回 blocked；有限 miss 与 unknown 保留可能性。
+
+Request Engine 在显式配置要求下，将 blocked/unavailable 保存为部署就绪 hold；
+显式 retry 重新检查同一计划，不调用模型，不隐式重分工。query 中断不会变成重新
+deliberation 或一次模糊提交。not_blocked 也不是 route 或资源承诺，真实 submit 仍须
+通过 Control 当前条件；Formal population 与官方 benchmark authority 不变。
+
+```mermaid
+flowchart LR
+    MI[生产 MI 规划与审查] --> Q[可选 Controller 只读预检]
+    E[冻结 reset 来源与当前 Control eligibility] --> Q
+    Q -->|blocked / unavailable| H[Request durable hold]
+    H -->|显式 retry 同一计划| Q
+    Q -->|not_blocked| S[唯一 Mission submit]
+    S --> C[Control Match Schedule Commit Bind]
+    C --> X[Runtime Node Local EAIOS]
+    X --> B[独立官方 benchmark 判定]
+```
+
+这是已实现路径图，不表示模型会自动修复物理缺口，也不表示真实 Episode3 已成功。
+
 默认关闭的 step-aware Local How（[ADR-0063](../../decisions/0063-step-aware-local-navmesh-resolution.md)）
 让执行动作与 reset observer 共用复制后的导航配置。只细化垂直体素，保留已声明的正台阶
 高度，而不扩大机器人能力。它属于本地执行策略，会影响实际路线；不是只读诊断，也

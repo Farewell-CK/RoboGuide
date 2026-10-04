@@ -204,6 +204,18 @@ fi
 trap finish_run EXIT
 INITIAL_PREFERENCES_PATH=""
 INITIAL_PREFERENCES_SOURCE=""
+INITIAL_SUPPORT_FLAG="${ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT:-0}"
+if [[ "$INITIAL_SUPPORT_FLAG" != 0 && "$INITIAL_SUPPORT_FLAG" != 1 ]]; then
+    echo "initial support assessment flag must be 0 or 1" >&2
+    exit 1
+fi
+if [[ "$INITIAL_SUPPORT_FLAG" == 1 && ( \
+    "${ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES:-0}" != 1 || \
+    "${ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY:-0}" != 1 || \
+    "${ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL:-0}" != 1 ) ]]; then
+    echo "initial support assessment requires geometry, preferences and spatial arrival" >&2
+    exit 1
+fi
 if [[ "${ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES:-0}" == 1 \
     && "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" != 1 ]]; then
     echo "initial candidate preferences require ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1" >&2
@@ -246,6 +258,10 @@ sed -e "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
     -e "s|SEMANTIC_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-semantic-evidence.json|" \
     -e "s|PLANNING_WORLD_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-planning-world-evidence.json|" \
     "$SCENARIO/mission-service-b1.toml" > "$RUN/mission-service-b1.toml"
+if [[ "$INITIAL_SUPPORT_FLAG" == 1 ]]; then
+    sed -i 's/^controller_preflight_enabled = false$/controller_preflight_enabled = true/' \
+        "$RUN/mission-service-b1.toml"
+fi
 
 clean_port 25060
 clean_port 28060
@@ -338,6 +354,7 @@ if [[ "${ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES:-0}" == 1 ]]; then
 fi
 
 ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH="$INITIAL_PREFERENCES_PATH" \
+ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT="$INITIAL_SUPPORT_FLAG" \
 ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_SOURCE_PATH="$INITIAL_PREFERENCES_SOURCE" \
 ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
 ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH="$RUN/evidence/task-verifier-source.json" \

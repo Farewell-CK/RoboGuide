@@ -214,6 +214,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   the separate initial preference consumer may rank scoped misses after exact
   source checks but never exclude a Node. MI inputs, operation intent, physical
   navigation parameters, Core contracts and Formal admission stay unchanged.
+- Optional initial-support feedback (ADR-0066) is a read-only Controller
+  projection for the first fresh-world admission. It binds the exact generated
+  plan and source/Local How/lifetime, inspects existing Control eligibility on
+  a private copy and returns neutral logical-slot support counts without Node
+  inventory. Complete scoped disjoint combinations may hold the reviewed
+  Request under an explicitly enabled deployment readiness policy; bounded
+  misses and unknowns never independently block. Explicit retry rechecks the
+  same plan, with no model regeneration, reservation or automatic reassignment.
+  Recovery evidence v0.2 durably fences interrupted queries. Attributable holds
+  remain Formal system failures with benchmark unavailable. The neutral schema
+  lives in `contracts/mission/initial-operation-assessment-v0.1/`; public Request,
+  MissionPlan and Core authority are unchanged, and defaults remain off.
 - Optional step-aware NavMesh resolution (ADR-0063) is a default-off Local How
   profile, separate from diagnostic observation. Active navigation and reset
   observation use identical copied settings; vertical cells may be refined to

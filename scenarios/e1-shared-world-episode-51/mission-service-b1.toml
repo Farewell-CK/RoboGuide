@@ -6,6 +6,7 @@ listen_port = 8070
 state_db = "STATE_DB_PLACEHOLDER"
 controller_endpoint = "http://127.0.0.1:28060"
 controller_timeout_seconds = 30
+controller_preflight_enabled = false
 artifact_endpoint = "http://127.0.0.1:28090"
 grounding_timeout_seconds = 5
 grounding_acquisition_attempts = 2

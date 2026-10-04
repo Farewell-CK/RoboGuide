@@ -264,6 +264,10 @@ def test_budget_follows_the_actual_run_configuration(tmp_path: Path) -> None:
     )
     changed = derive_wait_budget(mission, service)
     assert changed.total_seconds == pytest.approx(120 + 120 + 120 + 20 + 30 + 300)
+    service.write_text(service.read_text() + "controller_preflight_enabled = true\n")
+    preflight = derive_wait_budget(mission, service)
+    assert preflight.total_seconds == changed.total_seconds + 30
+    assert preflight.components["controller_preflight"] == 30
     with pytest.raises(WaitConfigurationError):
         derive_wait_budget(tmp_path / "missing.toml", service)
 

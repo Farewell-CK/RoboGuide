@@ -651,6 +651,22 @@ goal-region navigation。它细化独立导航网格的垂直分辨率，避免�
 目标/网格缓存，并非只读观察；不保证任意仿真异常可以回滚，也不证明路径全局不可达。
 版本与限制见 [ADR-0065](docs/decisions/0065-joint-navigation-preparation.md)。
 
+可独立启用 `ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT=1`，要求上述 geometry、initial
+preferences 和 spatial-arrival profile 已启用。生产 MI 生成并审查计划后，Request Engine
+通过 Controller 的只读 `POST /v1/missions/assess-initial-support` 查询初始支持度。
+Controller 用现有 Control Matching 的私有副本检查受支持的初始组合，不提交 Mission，
+不创建资源承诺，返回精确计划/来源/有效期绑定的中性 Task/Role 反馈。所有组合都含
+完整的静态不相交证据时，或所要求的预检不可用时，Request 显式 Blocked；有限搜索
+未找到与 unknown 本身不阻塞。该 hold 是声明的部署就绪策略，不是物理不可解证明。
+
+显式 retry 只重查同一份已审查计划和冻结 context，不重新调用模型；通过后才走原来的
+唯一提交路径。中途重启恢复为可观察的 hold，不能偷偷重规划。真实预检失败仍计入
+Formal population 的系统失败，官方物理结果 unavailable。默认关闭，不改 Prompt、
+机器人能力、官方任务或控制动作；初次证据不用于后续顺序 Task、恢复或新的 world。
+Schema、开关、时限及未验证边界见
+[ADR-0066](docs/decisions/0066-initial-operation-support-feedback.md) 和
+[反馈契约](contracts/mission/initial-operation-assessment-v0.1/README.md)。
+
 ## 三条核心语义链
 
 ```text

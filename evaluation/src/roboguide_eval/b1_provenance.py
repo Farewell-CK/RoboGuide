@@ -16,10 +16,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from mission.models import MissionPlan
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
 )
+from mission.recovery import FailureStage, RequestRecoveryEvidence
 from mission.submission_evidence import ControllerAdmissionEvidence
 
 from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
@@ -214,12 +216,40 @@ def request_failure(request: Any) -> dict[str, Any]:
             "reviewer",
             "repairer",
             "controller_submission",
+            "controller_preflight",
         }
         or not failure.get("detail")
         or type(failure.get("observed_at_ms")) is not int
     ):
         return {}
+    if failure["stage"] == "controller_preflight" and not _valid_preflight_failure(doc):
+        return {}
     return failure
+
+
+def _valid_preflight_failure(request: dict[str, Any]) -> bool:
+    """Keep typed deployment holds before submission without hiding actual execution gates."""
+    try:
+        recovery = RequestRecoveryEvidence.from_json(request.get("recovery_evidence"))
+        plan = MissionPlan.from_json(request["plan"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    return (
+        _object(request.get("failure_evidence")).get("failure_owner") == "SUT_SYSTEM"
+        and not request.get("submission_evidence")
+        and not request.get("admission_evidence")
+        and recovery.stage is FailureStage.CONTROLLER_PREFLIGHT
+        and recovery.request_id == request.get("request_id")
+        and recovery.mission_id == request.get("mission_id")
+        and recovery.draft_revision == request.get("draft_revision")
+        and recovery.draft_digest == request.get("draft_digest") == plan_digest(request["plan"])
+        and recovery.grounding_context_digest
+        == _object(request.get("grounding_context")).get("context_digest")
+        and (
+            recovery.deployment_assessment is None
+            or recovery.deployment_assessment.matches_plan(plan)
+        )
+    )
 
 
 def observed_request(request: Any, observations: Any) -> dict[str, Any]:
@@ -242,6 +272,7 @@ def observed_request(request: Any, observations: Any) -> dict[str, Any]:
         **doc,
         "submission_evidence": obs.get("submission_evidence"),
         "failure_evidence": obs.get("failure_evidence"),
+        "recovery_evidence": obs.get("recovery_evidence"),
         "admission_evidence": obs.get("admission_evidence")
         if obs.get("schema_version") == "roboguide.mission-request-observations/v0.3"
         else None,

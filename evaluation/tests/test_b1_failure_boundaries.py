@@ -106,6 +106,44 @@ def test_missing_benchmark_never_creates_external_failure(tmp_path: Path) -> Non
     assert collect(run)["values"]["infrastructure_failure"] is False
 
 
+def test_deployment_preflight_failure_remains_an_admitted_system_outcome(tmp_path: Path) -> None:
+    """A reviewed but held plan is Formal evidence, never a fabricated physical benchmark."""
+    run = make_run(tmp_path, case="preflight", repaired=True)
+    verdict = assess_b1_directory(run)
+    assert verdict["admission"]["provenance_valid"] is True
+    assert verdict["admission"]["valid_for_formal_population"] is True
+    assert verdict["admission"]["valid_for_benchmark_population"] is False
+    assert verdict["admission"]["failure_owner"] == "SUT_SYSTEM"
+    assert verdict["system_outcome"] == "FAILURE"
+    assert verdict["context"]["benchmark_tri_state"] == "BENCHMARK_UNAVAILABLE"
+    assert not (run / "actual-controller-body.json").exists()
+    assert not (run / "evidence/shared-world-summary.json").exists()
+    record = json.loads((run / "b1-request-record.json").read_text())
+    assert len(record["review_history"]) == 2
+
+
+@pytest.mark.parametrize("fault", ["digest", "recovery", "owner", "submission"])
+def test_malformed_preflight_cannot_hide_missing_execution_evidence(
+    tmp_path: Path, fault: str
+) -> None:
+    """Only an exact typed pre-submit hold can use the existing early-failure boundary."""
+    run = make_run(tmp_path, case="preflight")
+    observations = json.loads((run / "b1-request-observations.json").read_text())
+    if fault == "digest":
+        observations["recovery_evidence"]["deployment_assessment"]["plan_body_sha256"] = (
+            "sha256:" + "0" * 64
+        )
+    elif fault == "recovery":
+        observations["recovery_evidence"] = None
+    elif fault == "owner":
+        observations["failure_evidence"]["failure_owner"] = "MODEL"
+    else:
+        observations["submission_evidence"] = {"controller_status_code": 202}
+    write_json(run / "b1-request-observations.json", observations)
+    build_provenance(run)
+    assert assess_b1_directory(run)["admission"]["provenance_valid"] is False
+
+
 def test_collector_requires_matching_request_and_observations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

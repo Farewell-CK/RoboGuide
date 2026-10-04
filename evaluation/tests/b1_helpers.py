@@ -13,6 +13,7 @@ from unittest.mock import Mock
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import HttpMissionController
+from mission.deployment_assessment import AssessedRole, InitialOperationAssessment, plan_body_digest
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.models import MissionPlan
 from mission.planning_world_evidence import (
@@ -69,7 +70,9 @@ class StaticSemanticGroundingReader:
 
 
 @contextmanager
-def controller_server(status: int = 202) -> Iterator[tuple[str, list[bytes]]]:
+def controller_server(
+    status: int = 202, *, initial_support: bool = False
+) -> Iterator[tuple[str, list[bytes]]]:
     """Capture real POST bytes at an offline Controller-shaped HTTP endpoint."""
     bodies: list[bytes] = []
 
@@ -78,18 +81,54 @@ def controller_server(status: int = 202) -> Iterator[tuple[str, list[bytes]]]:
 
         def do_POST(self) -> None:
             """Return the production Controller identity shape after recording bytes."""
-            assert self.path == "/v1/missions"
             raw = self.rfile.read(int(self.headers["Content-Length"]))
-            bodies.append(raw)
             plan = json.loads(raw)
             mission_id = plan["mission"]["id"]
-            response = (
-                {"mission_id": mission_id, "group_id": "group-" + mission_id, "status": "Running"}
-                if status == 202
-                else {"error": "Control rejected assignment"}
-            )
+            if self.path == "/v1/missions/assess-initial-support" and initial_support:
+                parsed = MissionPlan.from_json(plan)
+                response = InitialOperationAssessment(
+                    mission_id,
+                    plan_body_digest(parsed),
+                    "blocked",
+                    "scoped_static_support_shortage",
+                    "sha256:" + "a" * 64,
+                    "sha256:" + "b" * 64,
+                    "sha256:" + "c" * 64,
+                    0,
+                    600000,
+                    100,
+                    2,
+                    tuple(
+                        AssessedRole(
+                            task.task_id,
+                            role.role_id,
+                            f"{role.execution.operation.namespace}.{role.execution.operation.name}@{role.execution.operation.version}",
+                            0,
+                            0,
+                            2,
+                            0,
+                        )
+                        for task in parsed.tasks
+                        if not task.depends_on
+                        for role in task.roles
+                    ),
+                ).to_json()
+                reply_status = 200
+            else:
+                assert self.path == "/v1/missions"
+                bodies.append(raw)
+                response = (
+                    {
+                        "mission_id": mission_id,
+                        "group_id": "group-" + mission_id,
+                        "status": "Running",
+                    }
+                    if status == 202
+                    else {"error": "Control rejected assignment"}
+                )
+                reply_status = status
             encoded = json.dumps(response).encode()
-            self.send_response(status)
+            self.send_response(reply_status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
@@ -240,7 +279,9 @@ def make_run(
         return MissionPlan.from_json(updated)
 
     repairer.repair.side_effect = repair
-    with controller_server(409 if case == "C-rejected" else 202) as (endpoint, bodies):
+    with controller_server(
+        409 if case == "C-rejected" else 202, initial_support=case == "preflight"
+    ) as (endpoint, bodies):
         engine = MissionRequestEngine(
             MissionRequestStore(run / "mi.sqlite3"),
             interpreter,
@@ -252,6 +293,7 @@ def make_run(
             repairer=repairer if repaired else None,
             max_repair_attempts=1 if repaired else 0,
             grounding_reader=StaticSemanticGroundingReader(semantic, planning_evidence),
+            controller_preflight_enabled=case == "preflight",
         )
         record = engine.create(INSTRUCTION)
         write_json(run / "b1-request-record.json", record.to_json())
@@ -262,8 +304,10 @@ def make_run(
     if case == "D":
         assert request["lifecycle"] == "Failed"
         assert record.failure_evidence and record.failure_evidence["failure_owner"] == "MODEL"
-    elif case == "C-rejected":
+    elif case in {"C-rejected", "preflight"}:
         assert request["lifecycle"] == "Blocked"
+        if case == "preflight":
+            assert not bodies and record.submission_evidence is None
     else:
         assert request["lifecycle"] == "Accepted", request["issues"]
         mission_id = record.mission_id

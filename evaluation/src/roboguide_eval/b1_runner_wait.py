@@ -91,7 +91,8 @@ class WaitBudget:
             "derivation": (
                 "grounding 2*attempts*timeout + interpreter timeout + "
                 "planner (1+prevalidation)*timeout + reviewer (max_repair+1)*timeout "
-                "+ repairer max_repair*timeout + controller timeout + margin"
+                "+ repairer max_repair*timeout + controller timeout "
+                "+ optional controller preflight timeout + margin"
             ),
         }
 
@@ -126,6 +127,9 @@ def derive_wait_budget(mission_config_path: Path, service_config_path: Path) -> 
     controller_timeout = _positive(
         svc, "controller_timeout_seconds", "service.controller_timeout_seconds"
     )
+    preflight = svc.get("controller_preflight_enabled", False)
+    if not isinstance(preflight, bool):
+        raise WaitConfigurationError("service.controller_preflight_enabled must be Boolean")
     components = {
         "grounding_capture": 2 * grounding_attempts * grounding_timeout,
         "interpreter": timeout,
@@ -135,6 +139,8 @@ def derive_wait_budget(mission_config_path: Path, service_config_path: Path) -> 
         "controller_submission": controller_timeout,
         "scheduling_margin": SCHEDULING_MARGIN_SECONDS,
     }
+    if preflight:
+        components["controller_preflight"] = controller_timeout
     # A slow-drip provider can hold one socket-level call open far past
     # timeout_seconds; two nominal call ceilings bound any legitimate gap
     # between observable lifecycle transitions.
