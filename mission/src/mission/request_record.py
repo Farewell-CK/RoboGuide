@@ -9,7 +9,7 @@ from typing import Protocol, cast
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.recovery import FailureReason, RequestRecoveryEvidence
+from mission.recovery import FailureReason, FailureStage, RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 from mission.submission_evidence import (
@@ -228,6 +228,12 @@ class MissionRequestRecord:
         ):
             raise MissionRequestError("reconciled admission requires an authority receipt")
         admission, sent = self.admission_evidence, self.submission_evidence
+        if (
+            recovery is not None
+            and recovery.stage is FailureStage.CONTROLLER_PREFLIGHT
+            and (admission is not None or sent is not None)
+        ):
+            raise MissionRequestError("Controller preflight cannot contain submission evidence")
         if admission is not None and (
             sent is None
             or admission.mission_id != self.mission_id
@@ -252,6 +258,12 @@ class MissionRequestRecord:
             )
             or recovery.grounding_context_digest
             != (self.grounding_context.context_digest if self.grounding_context else None)
+            or (
+                recovery.deployment_assessment is not None
+                and (
+                    self.plan is None or not recovery.deployment_assessment.matches_plan(self.plan)
+                )
+            )
         ):
             raise MissionRequestError(
                 "recovery evidence is detached from the current draft/context"

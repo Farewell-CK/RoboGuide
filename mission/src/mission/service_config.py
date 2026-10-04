@@ -45,6 +45,7 @@ class MissionServiceSettings:
     planning_profile_path: Path | None
     max_request_bytes: int
     approval_policy: ApprovalPolicy
+    controller_preflight_enabled: bool = False
 
     @property
     def approval_required_contracts(self) -> frozenset[str]:
@@ -85,6 +86,9 @@ def load_service_settings(
         )
     if planning_world_required and planning_world_path is None:
         raise MissionServiceConfigError("required planning world evidence needs a configured path")
+    preflight = service.get("controller_preflight_enabled", False)
+    if not isinstance(preflight, bool):
+        raise MissionServiceConfigError("service.controller_preflight_enabled must be a Boolean")
     return MissionServiceSettings(
         listen_host=host,
         listen_port=port,
@@ -121,6 +125,7 @@ def load_service_settings(
         planning_profile_path=_optional_path(service, "planning_profile_path", root),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
+        controller_preflight_enabled=preflight,
     )
 
 

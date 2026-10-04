@@ -10,11 +10,13 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from mission.deployment_assessment import InitialOperationAssessment
 from mission.models import JSONObject, MissionPlanError
 from mission.provider_errors import MissionIdentityError, MissionProviderError
 from mission.rejected_draft import RejectedPlanError
 
 RECOVERY_SCHEMA = "roboguide.mission-request-recovery/v0.1"
+ASSESSMENT_RECOVERY_SCHEMA = "roboguide.mission-request-recovery/v0.2"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
@@ -28,6 +30,7 @@ class FailureStage(StrEnum):
     REVIEWER = "reviewer"
     REPAIRER = "repairer"
     CONTROLLER_SUBMISSION = "controller_submission"
+    CONTROLLER_PREFLIGHT = "controller_preflight"
 
 
 class FailureReason(StrEnum):
@@ -51,6 +54,8 @@ class FailureReason(StrEnum):
     SUBMISSION_REJECTED = "submission_rejected"
     SUBMISSION_ACCEPTED = "submission_accepted"
     SUBMISSION_RECONCILED = "submission_reconciled"
+    DEPLOYMENT_SUPPORT_BLOCKED = "deployment_support_blocked"
+    DEPLOYMENT_ASSESSMENT_UNAVAILABLE = "deployment_assessment_unavailable"
 
 
 class RecoveryAction(StrEnum):
@@ -62,6 +67,7 @@ class RecoveryAction(StrEnum):
     RESUBMIT_UNCHANGED = "resubmit_unchanged"
     RECONCILE_SUBMISSION = "reconcile_submission"
     OBSERVE_MISSION = "observe_mission"
+    RECHECK_DEPLOYMENT = "recheck_deployment"
 
 
 def classify_failure(error: Exception) -> FailureReason:
@@ -89,6 +95,8 @@ def classify_failure(error: Exception) -> FailureReason:
 
 def recovery_action(stage: FailureStage, reason: FailureReason) -> RecoveryAction:
     """Choose a conservative action; only explicit Controller rejection permits another POST."""
+    if stage is FailureStage.CONTROLLER_PREFLIGHT:
+        return RecoveryAction.RECHECK_DEPLOYMENT
     if stage is FailureStage.CONTROLLER_SUBMISSION:
         if reason is FailureReason.SUBMISSION_REJECTED:
             return RecoveryAction.RESUBMIT_UNCHANGED
@@ -196,6 +204,7 @@ class RequestRecoveryEvidence:
     observed_at_ms: int
     controller_status_code: int | None = None
     controller_observation: ControllerMissionObservation | None = None
+    deployment_assessment: InitialOperationAssessment | None = None
 
     def __post_init__(self) -> None:
         """Reject malformed identities, contradictory classifications and unbounded lookups."""
@@ -242,6 +251,42 @@ class RequestRecoveryEvidence:
                 or self.stage is not FailureStage.CONTROLLER_SUBMISSION
             ):
                 raise ValueError("Controller lookup is detached or malformed")
+        if self.reason in {
+            FailureReason.DEPLOYMENT_SUPPORT_BLOCKED,
+            FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE,
+        }:
+            if self.stage is not FailureStage.CONTROLLER_PREFLIGHT or status is not None:
+                raise ValueError("deployment feedback must remain before Controller submission")
+        if self.stage is FailureStage.CONTROLLER_PREFLIGHT and self.reason not in {
+            FailureReason.DEPLOYMENT_SUPPORT_BLOCKED,
+            FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE,
+        }:
+            raise ValueError("Controller preflight reason is invalid")
+        assessment = self.deployment_assessment
+        if assessment is not None and (
+            not isinstance(assessment, InitialOperationAssessment)
+            or assessment.mission_id != self.mission_id
+        ):
+            raise ValueError("deployment assessment is detached from the request")
+        if assessment is not None and (
+            self.stage
+            not in {FailureStage.CONTROLLER_PREFLIGHT, FailureStage.CONTROLLER_SUBMISSION}
+            or (
+                self.stage is FailureStage.CONTROLLER_SUBMISSION
+                and assessment.decision != "not_blocked"
+            )
+        ):
+            raise ValueError("deployment assessment cannot authorize this recovery boundary")
+        if self.reason is FailureReason.DEPLOYMENT_SUPPORT_BLOCKED and (
+            assessment is None or assessment.decision != "blocked"
+        ):
+            raise ValueError("blocked deployment requires actual scoped support feedback")
+        if (
+            self.reason is FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE
+            and assessment is not None
+            and assessment.decision != "unavailable"
+        ):
+            raise ValueError("unavailable deployment feedback contradicts its decision")
 
     @property
     def action(self) -> RecoveryAction:
@@ -250,8 +295,11 @@ class RequestRecoveryEvidence:
 
     def to_json(self) -> JSONObject:
         """Serialize versioned evidence independently of the Mission Request v0.4 projection."""
-        return {
-            "schema_version": RECOVERY_SCHEMA,
+        output: JSONObject = {
+            "schema_version": ASSESSMENT_RECOVERY_SCHEMA
+            if self.deployment_assessment is not None
+            or self.stage is FailureStage.CONTROLLER_PREFLIGHT
+            else RECOVERY_SCHEMA,
             "request_id": self.request_id,
             "mission_id": self.mission_id,
             "stage": self.stage.value,
@@ -266,14 +314,34 @@ class RequestRecoveryEvidence:
             if self.controller_observation is not None
             else None,
         }
+        if output["schema_version"] == ASSESSMENT_RECOVERY_SCHEMA:
+            output["deployment_assessment"] = (
+                self.deployment_assessment.to_json()
+                if self.deployment_assessment is not None
+                else None
+            )
+        return output
 
     @classmethod
     def from_json(cls, value: object) -> RequestRecoveryEvidence:
         """Restore a decision without allowing a corrupt stored action to authorize resubmission."""
-        if not isinstance(value, dict) or value.get("schema_version") != RECOVERY_SCHEMA:
+        if not isinstance(value, dict) or value.get("schema_version") not in {
+            RECOVERY_SCHEMA,
+            ASSESSMENT_RECOVERY_SCHEMA,
+        }:
             raise ValueError("unsupported Mission recovery evidence")
         fields = dict(value)
-        fields.pop("schema_version")
+        schema = fields.pop("schema_version")
+        if (schema == ASSESSMENT_RECOVERY_SCHEMA) != ("deployment_assessment" in fields):
+            raise ValueError("recovery assessment must declare its schema and availability")
+        if fields.get("stage") == FailureStage.CONTROLLER_PREFLIGHT.value and (
+            schema != ASSESSMENT_RECOVERY_SCHEMA
+        ):
+            raise ValueError("Controller preflight requires the assessment recovery schema")
+        assessment = fields.get("deployment_assessment")
+        fields["deployment_assessment"] = (
+            InitialOperationAssessment.from_json(assessment) if assessment is not None else None
+        )
         action = fields.pop("action", None)
         fields["stage"] = FailureStage(fields["stage"])
         fields["reason"] = FailureReason(fields["reason"])

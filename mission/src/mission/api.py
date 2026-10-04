@@ -78,6 +78,7 @@ def build_engine(
         capability_catalog,
         service_settings.approval_policy,
         prevalidation_recovery_attempts=planner_settings.prevalidation_recovery_attempts,
+        controller_preflight_enabled=service_settings.controller_preflight_enabled,
         provider_identity={
             "provider": planner_settings.llm.model_provider,
             "model": planner_settings.llm.model,

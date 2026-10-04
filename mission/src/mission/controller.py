@@ -13,6 +13,7 @@ from math import isfinite
 from typing import Any, Protocol, cast
 from urllib.parse import quote, urlparse
 
+from mission.deployment_assessment import InitialOperationAssessment
 from mission.models import JSONObject, MissionPlan
 from mission.submission_evidence import ControllerAdmissionEvidence, ControllerSubmissionEvidence
 
@@ -326,6 +327,19 @@ class HttpMissionController:
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit a strict MissionPlan and classify accepted versus rejected responses."""
         return self.submit_plan_observed(plan, None)
+
+    def assess_initial_support(self, plan: MissionPlan) -> InitialOperationAssessment:
+        """Query support once without submitting a Mission or exposing inventory to a model."""
+        status, decoded, _ = self._request(
+            "POST", "/v1/missions/assess-initial-support", plan.to_json()
+        )
+        try:
+            assessment = InitialOperationAssessment.from_json(decoded)
+        except (TypeError, ValueError, KeyError) as error:
+            raise MissionControllerError("Controller initial assessment is invalid") from error
+        if status != 200 or not assessment.matches_plan(plan):
+            raise MissionControllerError("Controller initial assessment is unavailable or detached")
+        return assessment
 
     def submit_plan_observed(
         self,

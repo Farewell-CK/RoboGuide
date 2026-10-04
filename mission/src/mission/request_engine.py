@@ -13,6 +13,7 @@ from typing import Protocol, cast
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionControllerError, MissionPlanSubmitter, SubmissionReceipt
+from mission.deployment_assessment import InitialOperationAssessment
 from mission.grounding_context import (
     GroundingContextSnapshot,
     admitted_physical_entity_ids,
@@ -123,6 +124,7 @@ class MissionRequestEngine:
         grounding_reader: MissionGroundingReader | None = None,
         prevalidation_recovery_attempts: int = 0,
         provider_identity: JSONObject | None = None,
+        controller_preflight_enabled: bool = False,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
@@ -148,6 +150,9 @@ class MissionRequestEngine:
         self._max_repair_attempts = max_repair_attempts
         self._prevalidation_recovery_attempts = prevalidation_recovery_attempts
         self._provider_identity = provider_identity or {}
+        if not isinstance(controller_preflight_enabled, bool):
+            raise MissionRequestError("controller preflight flag must be a Boolean")
+        self._controller_preflight_enabled = controller_preflight_enabled
         self._grounding_reader = grounding_reader or EmptyMissionGroundingReader()
         self._identity_lock = threading.Lock()
         self._request_locks_guard = threading.Lock()
@@ -287,6 +292,8 @@ class MissionRequestEngine:
                 else:
                     return self._process(self._update(record, issues=(), repair_attempts=0))
             if recovery.action is RecoveryAction.RESUBMIT_UNCHANGED:
+                return self._submit(record)
+            if recovery.action is RecoveryAction.RECHECK_DEPLOYMENT:
                 return self._submit(record)
             if recovery.action is RecoveryAction.RECONCILE_SUBMISSION:
                 return self._reconcile_submission(record, recovery)
@@ -843,6 +850,19 @@ class MissionRequestEngine:
         plan = record.plan
         if plan is None:
             raise MissionRequestError("cannot submit a request without a MissionPlan")
+        assessment: InitialOperationAssessment | None = None
+        if (
+            record.recovery_evidence is not None
+            and record.recovery_evidence.action is RecoveryAction.RECHECK_DEPLOYMENT
+            and not self._controller_preflight_enabled
+        ):
+            raise MissionRequestError(
+                "deployment-held request requires enabled preflight before retry"
+            )
+        if self._controller_preflight_enabled:
+            record, assessment = self._assess_deployment(record, plan)
+            if assessment is None or assessment.decision != "not_blocked":
+                return record
         record = self._update(
             record,
             lifecycle=MissionRequestLifecycle.SUBMITTING,
@@ -850,7 +870,10 @@ class MissionRequestEngine:
             submission_evidence=None,
             admission_evidence=None,
             recovery_evidence=self._recovery_evidence(
-                record, FailureStage.CONTROLLER_SUBMISSION, FailureReason.SUBMISSION_IN_FLIGHT
+                record,
+                FailureStage.CONTROLLER_SUBMISSION,
+                FailureReason.SUBMISSION_IN_FLIGHT,
+                deployment_assessment=assessment,
             ),
         )
         try:
@@ -888,6 +911,69 @@ class MissionRequestEngine:
                 ),
             )
         return self._reduce_submission_receipt(record, receipt)
+
+    def _assess_deployment(
+        self, record: MissionRequestRecord, plan: MissionPlan
+    ) -> tuple[MissionRequestRecord, InitialOperationAssessment | None]:
+        """Observe initial support once; keep deployment holds outside semantic review.
+
+        Explicit retry reevaluates the same approved plan and immutable context.
+        No automatic Provider call, new dialogue or Mission submission occurs on
+        blocked/unavailable feedback. Unknown candidates in a usable assessment
+        are allowed; not_blocked is neither feasibility nor admission evidence.
+        """
+        record = self._update(
+            record,
+            lifecycle=MissionRequestLifecycle.SUBMITTING,
+            approval_required=False,
+            submission_evidence=None,
+            admission_evidence=None,
+            failure_evidence=None,
+            recovery_evidence=self._recovery_evidence(
+                record,
+                FailureStage.CONTROLLER_PREFLIGHT,
+                FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE,
+                deployment_assessment=None,
+            ),
+        )
+        assessment = None
+        detail = "Controller initial support assessment unavailable"
+        reason = FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE
+        try:
+            assessor = getattr(self._controller, "assess_initial_support", None)
+            if not callable(assessor):
+                raise MissionControllerError("configured Controller has no initial assessment port")
+            result = assessor(plan)
+            if not isinstance(result, InitialOperationAssessment) or not result.matches_plan(plan):
+                raise MissionControllerError(
+                    "Controller assessment is detached from the reviewed plan"
+                )
+            assessment = result
+            if assessment.decision == "not_blocked":
+                return record, assessment
+            detail = assessment.reason_code
+            if assessment.decision == "blocked":
+                reason = FailureReason.DEPLOYMENT_SUPPORT_BLOCKED
+        except Exception as error:
+            detail = (
+                "Controller initial support assessment unavailable: "
+                f"{type(error).__name__}: {error}"
+            )
+        recovery = self._recovery_evidence(
+            record,
+            FailureStage.CONTROLLER_PREFLIGHT,
+            reason,
+            deployment_assessment=assessment,
+        )
+        record = self._update(
+            record,
+            lifecycle=MissionRequestLifecycle.BLOCKED,
+            approval_required=False,
+            issues=(detail,),
+            failure_evidence=self._failure_evidence(record, "controller_preflight", detail, reason),
+            recovery_evidence=recovery,
+        )
+        return record, assessment
 
     def _reduce_submission_receipt(
         self, record: MissionRequestRecord, receipt: SubmissionReceipt
@@ -1049,6 +1135,7 @@ class MissionRequestEngine:
         stage: FailureStage,
         reason: FailureReason,
         status_code: int | None = None,
+        deployment_assessment: InitialOperationAssessment | None | _Unset = _UNSET,
     ) -> RequestRecoveryEvidence:
         """Freeze the recovery boundary beside its draft/context before an external effect."""
         return RequestRecoveryEvidence(
@@ -1061,6 +1148,13 @@ class MissionRequestEngine:
             record.grounding_context.context_digest if record.grounding_context else None,
             self._clock(),
             status_code,
+            deployment_assessment=(
+                record.recovery_evidence.deployment_assessment
+                if record.recovery_evidence is not None
+                else None
+            )
+            if isinstance(deployment_assessment, _Unset)
+            else deployment_assessment,
         )
 
     def _submission_attempted(self, record: MissionRequestRecord) -> bool:
@@ -1190,6 +1284,31 @@ class MissionRequestEngine:
         }
         for record in self._store.records():
             if record.lifecycle in transient:
+                if (
+                    record.lifecycle is MissionRequestLifecycle.SUBMITTING
+                    and record.recovery_evidence is not None
+                    and record.recovery_evidence.stage is FailureStage.CONTROLLER_PREFLIGHT
+                ):
+                    issue = "Controller preflight interrupted by Mission Service restart"
+                    self._update(
+                        record,
+                        lifecycle=MissionRequestLifecycle.BLOCKED,
+                        approval_required=False,
+                        issues=(issue,),
+                        failure_evidence=self._failure_evidence(
+                            record,
+                            FailureStage.CONTROLLER_PREFLIGHT.value,
+                            issue,
+                            FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE,
+                        ),
+                        recovery_evidence=self._recovery_evidence(
+                            record,
+                            FailureStage.CONTROLLER_PREFLIGHT,
+                            FailureReason.DEPLOYMENT_ASSESSMENT_UNAVAILABLE,
+                            deployment_assessment=None,
+                        ),
+                    )
+                    continue
                 sent = record.submission_evidence
                 if (
                     record.lifecycle is MissionRequestLifecycle.SUBMITTING
