@@ -26,6 +26,7 @@ from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig  # noqa: E402
 from habitat_local_eaios.diagnostics import BufferedJsonlWriter  # noqa: E402
 from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.goal_region_navigation import GoalRegionSearchMiss  # noqa: E402
 from habitat_local_eaios.http_service import HabitatBridgeServer  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
 from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
@@ -40,6 +41,274 @@ from habitat_local_eaios.stage2_contract import Stage2ExecutionContract  # noqa:
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
+
+
+class PreparedAction:
+    """Observe the production pre-motion boundary without querying Habitat."""
+
+    def __init__(self, agent_id: int, *, fail_at: int | None = None) -> None:
+        """Configure one bounded path miss and count preparation versus motion."""
+        self.agent_id = agent_id
+        self.fail_at = fail_at
+        self.preparations = self.moves = 0
+        self.pending = False
+
+    def prepare_navigation_step(self, **arguments: Any) -> None:
+        """Cache one command; a miss occurs before any robot motion."""
+        self.preparations += 1
+        self.pending = True
+        if self.preparations == self.fail_at:
+            raise GoalRegionSearchMiss(
+                "bounded local miss",
+                {"path_queries": 2, "search_truncated": False},
+            )
+
+    def discard_prepared_navigation(self) -> None:
+        """Remove an unconsumed command without changing physical state."""
+        self.pending = False
+
+    def step(self) -> None:
+        """Move only after production preparation admitted the complete joint command."""
+        assert self.pending
+        self.pending = False
+        self.moves += 1
+
+
+@pytest.mark.parametrize("completed_first", [False, True])
+@pytest.mark.parametrize("evidence_fault", [False, True])
+def test_pair_preparation_failure_precedes_motion_and_preserves_completed_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed_first: bool, evidence_fault: bool
+) -> None:
+    """The actual loop attributes a miss, flushes diagnostics and never partly dispatches it."""
+    diagnostics = RecordingDiagnostics()
+    runtime = LoopHarness(tmp_path, diagnostics)
+    runtime._config.episode_id = "generic"
+    runtime._config.spatial_navigation_arrival = True
+    actor = PolicyActor()
+    runtime._actor = actor
+    actions = {
+        f"agent_{agent}_oracle_nav_action": PreparedAction(
+            agent, fail_at=(2 if completed_first else 1) if agent == 1 else None
+        )
+        for agent in (0, 1)
+    }
+    habitat = SimpleNamespace(
+        current_episode=SimpleNamespace(scene_id="scene", episode_id="generic"),
+        task=SimpleNamespace(actions=actions),
+        episode_over=False,
+        get_metrics=lambda: {"pddl_success": False},
+    )
+    runtime._habitat_env = habitat
+    decodes: list[object] = []
+
+    def decode(original: object, flat: object, action: object) -> dict[str, Any]:
+        """Receive precisely the spaces and action used by the Gym facade."""
+        assert original is gym.original_action_space and flat is gym.action_space
+        decodes.append(action)
+        return {"action": tuple(actions), "action_args": {}}
+
+    runtime._runtime.update(
+        decode_navigation_action=decode,
+        habitat_config=SimpleNamespace(
+            habitat=SimpleNamespace(simulator=SimpleNamespace(agents_order=["agent_0", "agent_1"]))
+        ),
+    )
+
+    def step(action: object) -> Any:
+        """Consume each cached command once after the whole preparation succeeded."""
+        assert action is decodes[-1]
+        for local in actions.values():
+            local.step()
+        return (
+            {"agent_0_has_finished_oracle_nav": [1], "agent_1_has_finished_oracle_nav": [0]},
+            0.0,
+            False,
+            {"pddl_success": False},
+        )
+
+    gym = SimpleNamespace(original_action_space=object(), action_space=object(), step=step)
+    if evidence_fault:
+
+        def fail_write(_name: str, _value: object) -> None:
+            """A diagnostic storage fault cannot authorize motion or mask the local failure."""
+            raise OSError("evidence storage sentinel")
+
+        monkeypatch.setattr(runtime, "_write_json", fail_write)
+    invocations = {
+        agent: replace(
+            CanonicalMobilityInvocation.from_request(_request("m", goal, f"task-{agent}")),
+            attempt_id=f"attempt-{agent}",
+        )
+        for agent, goal in enumerate(["north", "south"])
+    }
+    outcomes, steps, done, _ = runtime._pair_loop(
+        {},
+        {"episode_id": "generic"},
+        {},
+        invocations,
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        gym,
+        habitat,
+        lambda: False,
+        lambda *unused: None,
+    )
+    assert steps == int(completed_first) and done is False
+    assert actor.calls == len(decodes) == 1 + int(completed_first)
+    assert [local.moves for local in actions.values()] == [steps, steps]
+    assert all(not local.pending for local in actions.values())
+    assert outcomes[1].terminal_basis == "local-navigation-preparation-failure"
+    assert outcomes[0].state == ("COMPLETED" if completed_first else "FAILED")
+    assert outcomes[0].terminal_basis == (
+        "oracle-nav-skill" if completed_first else "sibling-navigation-preparation-failure"
+    )
+    assert diagnostics.terminals == [(steps, "local_navigation_preparation_failure")]
+    evidence = runtime._last_navigation_preparation_failure
+    assert evidence is not None
+    assert evidence["failure"]["agent_id"] == 1
+    assert evidence["failure"]["search"]["path_queries"] == 2
+    assert evidence["failure"]["proves_physical_impossibility"] is False
+    assert evidence["invocations"]["1"] == invocations[1].as_dict()
+    assert evidence["simulator_steps"] == steps
+    body = {key: value for key, value in evidence.items() if key != "digest"}
+    assert (
+        evidence["digest"]
+        == "sha256:"
+        + hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        ).hexdigest()
+    )
+    path = tmp_path / "evidence" / f"navigation-preparation-failure-{steps}.json"
+    assert path.is_file() is not evidence_fault
+    if not evidence_fault:
+        assert json.loads(path.read_text()) == evidence
+
+
+@pytest.mark.parametrize("assigned_agent", [0, 1])
+def test_single_policy_preparation_failure_is_local_and_never_calls_gym(
+    tmp_path: Path, assigned_agent: int
+) -> None:
+    """A single Actor keeps its original model path, but an unusable command never moves."""
+    runtime, actor, agents = _single_idle_setup(tmp_path, assigned_agent_id=assigned_agent)
+    runtime._config.spatial_navigation_arrival = True
+    local = PreparedAction(assigned_agent, fail_at=1)
+    assert runtime._habitat_env is not None
+    runtime._habitat_env.current_episode = SimpleNamespace(scene_id="scene", episode_id="generic")
+    runtime._habitat_env.task = SimpleNamespace(
+        actions={f"agent_{assigned_agent}_oracle_nav_action": local}
+    )
+    runtime._runtime.update(
+        decode_navigation_action=lambda *_unused: {
+            "action": f"agent_{assigned_agent}_oracle_nav_action",
+            "action_args": {},
+        },
+        habitat_config=SimpleNamespace(
+            habitat=SimpleNamespace(simulator=SimpleNamespace(agents_order=["agent_0", "agent_1"]))
+        ),
+    )
+    gym = StepEnvironment(1)
+    gym.original_action_space = object()  # type: ignore[attr-defined]
+    gym.action_space = object()  # type: ignore[attr-defined]
+    goal = "north" if assigned_agent == 0 else "south"
+    invocation = CanonicalMobilityInvocation.from_request(_request("m", goal, "task"))
+    outcome = _single_idle_loop(runtime, actor, invocation, gym, lambda: False)
+    assert outcome.state == "FAILED"
+    assert outcome.terminal_basis == "local-navigation-preparation-failure"
+    assert gym.calls == local.moves == 0
+    assert actor.calls == agents[assigned_agent].llm_model.calls == 1
+    assert agents[1 - assigned_agent].llm_model.calls == 0
+    assert not local.pending
+
+
+def test_disabled_preparation_does_not_read_habitat_or_decode_the_command(tmp_path: Path) -> None:
+    """Legacy execution needs no preparation hooks, new imports, or world-state reads."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config.spatial_navigation_arrival = False
+    discard = runtime._prepare_navigation_step(object(), object(), object(), {}, 0)
+    discard()
+    assert not (tmp_path / "evidence/navigation-preparation-failure-0.json").exists()
+
+
+def test_successful_pair_uses_one_model_iteration_and_one_original_joint_step(
+    tmp_path: Path,
+) -> None:
+    """Preparation cannot add model iterations, target preparation, motion or simulator steps."""
+    runtime = LoopHarness(tmp_path, RecordingDiagnostics())
+    runtime._config.episode_id = "generic"
+    runtime._config.spatial_navigation_arrival = True
+    actor = PolicyActor()
+    runtime._actor = actor
+    actions = {f"agent_{agent}_oracle_nav_action": PreparedAction(agent) for agent in (0, 1)}
+    habitat = SimpleNamespace(
+        current_episode=SimpleNamespace(scene_id="scene", episode_id="generic"),
+        task=SimpleNamespace(actions=actions),
+        episode_over=True,
+        get_metrics=lambda: {"pddl_success": True},
+    )
+    runtime._habitat_env = habitat
+    runtime._runtime.update(
+        decode_navigation_action=lambda *_unused: {"action": tuple(actions), "action_args": {}},
+        habitat_config=SimpleNamespace(
+            habitat=SimpleNamespace(simulator=SimpleNamespace(agents_order=["agent_0", "agent_1"]))
+        ),
+    )
+    gym_calls: list[object] = []
+
+    def step(action: object) -> Any:
+        """Complete the one actual shared step; no settling step is needed."""
+        gym_calls.append(action)
+        for local in actions.values():
+            local.step()
+        return (
+            {"agent_0_has_finished_oracle_nav": [0], "agent_1_has_finished_oracle_nav": [0]},
+            0.0,
+            True,
+            {"pddl_success": True},
+        )
+
+    invocations = {
+        agent: CanonicalMobilityInvocation.from_request(_request("m", goal, f"task-{agent}"))
+        for agent, goal in enumerate(["north", "south"])
+    }
+    outcomes, steps, done, _ = runtime._pair_loop(
+        {},
+        {"episode_id": "generic"},
+        {},
+        invocations,
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        SimpleNamespace(original_action_space=object(), action_space=object(), step=step),
+        habitat,
+        lambda: False,
+        lambda *unused: None,
+    )
+    assert actor.calls == len(gym_calls) == steps == 1 and done
+    assert all(local.preparations == local.moves == 1 for local in actions.values())
+    assert all(outcome.state == "COMPLETED" for outcome in outcomes.values())
+    assert runtime._last_navigation_preparation_failure is None
+
+
+@pytest.mark.parametrize("steps", [0, 1])
+def test_reset_metric_is_not_a_final_outcome_after_preparation_failure(steps: int) -> None:
+    """Only a real physical step permits the existing terminal official metric path."""
+    calls: list[int] = []
+
+    def metrics() -> dict[str, bool]:
+        """Expose a misleading reset result to prove it is not promoted to benchmark truth."""
+        calls.append(1)
+        return {"pddl_success": False}
+
+    summary: dict[str, Any] = {
+        "identity": {"simulator_steps": steps},
+        "navigation_preparation_failure": {
+            "simulator_steps": steps,
+            "failed_before_gym_step": True,
+        },
+    }
+    shared_world_module._archive_official_metrics(SimpleNamespace(final_metrics=metrics), summary)
+    assert calls == ([1] if steps else [])
+    assert summary["official_metrics"] == ({"pddl_success": False} if steps else {})
+    assert ("official_pddl_success_unavailable_reason" in summary) is (steps == 0)
 
 
 class FakeTensor:

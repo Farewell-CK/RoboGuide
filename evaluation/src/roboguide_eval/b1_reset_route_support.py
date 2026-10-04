@@ -541,7 +541,13 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         load_document(run / "evidence/runtime-source-manifest.json"), "runtime sources"
     )
     geometry_enabled = document.get("schema_version") == _GEOMETRY_SCHEMA
-    spatial_arrival = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    navigation_preparation = (
+        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
+    )
+    spatial_arrival = (
+        navigation_preparation
+        or local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    )
     step_aware = (
         spatial_arrival
         or local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.4"
@@ -577,7 +583,9 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
     if _content_digest(local_how) != _content_digest(
         {
             "schema_version": (
-                "roboguide.habitat-local-how-profile/v0.5"
+                "roboguide.habitat-local-how-profile/v0.6"
+                if navigation_preparation
+                else "roboguide.habitat-local-how-profile/v0.5"
                 if spatial_arrival
                 else "roboguide.habitat-local-how-profile/v0.4"
                 if step_aware
@@ -597,6 +605,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
             **(
                 {"navigation_arrival_profile": "spatial-route-arrival/v0.1"}
                 if spatial_arrival
+                else {}
+            ),
+            **(
+                {"navigation_preparation_profile": "joint-navigation-preparation/v0.1"}
+                if navigation_preparation
                 else {}
             ),
         }
@@ -638,6 +651,14 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
                 "habitat_local_eaios.spatial_navigation_action",
             )
             if spatial_arrival
+            else ()
+        ),
+        *(
+            (
+                "habitat.gym.gym_wrapper",
+                "habitat_local_eaios.navigation_preparation",
+            )
+            if navigation_preparation
             else ()
         ),
         *(("habitat_local_eaios.navmesh_region",) if geometry_enabled else ()),

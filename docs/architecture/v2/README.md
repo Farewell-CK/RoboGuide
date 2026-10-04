@@ -567,8 +567,15 @@ PDDL 仍独立裁决物理终态。
 空间到达 Local How（[ADR-0064](../../decisions/0064-spatial-route-arrival-local-navigation.md)）
 是另一个明确声明、默认关闭的本地控制分支：三维接近选定导航点前继续跟随路径，
 之后才朝向原实体并报告本地完成。它保留原阈值、速度和执行预算，单次原 base action
-下发、无额外模型或 Gym step；找不到路径不伪造直线。Local How v0.5 与 action evidence
+下发、无额外模型或 Gym step；找不到路径不伪造直线。Local How v0.6 与 action evidence
 v0.4 明示与原生控制的区别，未改变官方谓词、Control 资源权威或 Orchestration 满足边界。
+
+启用该 profile 时，Local EAIOS 在联合 Gym step 前按厂商实际动作顺序准备导航目标、
+路径和控制指令（[ADR-0065](../../decisions/0065-joint-navigation-preparation.md)）。全部
+成功才进入一次原 step；预期的有界路径失败成为带 endpoint 和当前 attempt 的本地失败，
+不会让同一联合 step 的其他导航动作先移动。既有 Completed 事实保留。第一次物理 step
+前失败的官方执行结果保持 unavailable，reset 真值仅是诊断。准备初始化执行缓存，
+不是只读观察；它不新增 Control 路线权威，也不保证任意物理异常的原子回滚。
 
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
@@ -577,6 +584,11 @@ one Habitat reset -> original prepared observations -> assigned Stage2 execution
                                       (original / opt-in step-aware copy)
                                                         |
                                   original Oracle / opt-in spatial-route control
+                                                        |
+                                   opt-in selected joint navigation preparation
+                                      (failure -> attributed local outcome)
+                                                        |
+                                             one original Gym step
                                                         |
                                                official PDDL outcome
         |

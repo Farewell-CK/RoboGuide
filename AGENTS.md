@@ -229,6 +229,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   no extra model/action/Gym step and no external EMOS edit. Local How v0.5 and action
   evidence v0.4 disclose this change. Reset observation retains identical copied
   settings; bounded pre-motion decision diagnostics never become official truth.
+- Enabled spatial route arrival now uses Local How v0.6 joint navigation preparation
+  (ADR-0065): the vendor-decoded selected navigation actions prepare target/path/command
+  before the original Gym step. Expected bounded preparation failure prevents that step,
+  preserves Completed peers and retains exact canonical attempt attribution. Failure before
+  the first physical step has no official benchmark execution result; reset truth remains
+  diagnostic. Preparation initializes execution caches and may use the original target
+  helper; it is not a read-only or RNG-neutral observer, a global impossibility proof,
+  Control route authority or arbitrary simulator rollback. Disabled profiles retain their
+  legacy paths; historical Local How archives remain supported.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional

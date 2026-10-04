@@ -346,6 +346,69 @@ def test_spatial_arrival_archive_preserves_admission_and_official_authority(
     assert assess_b1_directory(run) == baseline
 
 
+def _prepared_navigation_archive(run: Path) -> dict[str, Any]:
+    """Freeze the new execution boundary independently of historical arrival profiles."""
+    document = _spatial_arrival_archive(run, geometry=True)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    profile.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.6",
+        navigation_preparation_profile="joint-navigation-preparation/v0.1",
+    )
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    for module in ("habitat.gym.gym_wrapper", "habitat_local_eaios.navigation_preparation"):
+        path = run / (module.rsplit(".", 1)[-1] + ".py")
+        path.write_text("# immutable preparation boundary producer fixture\n")
+        runtime["modules"][module] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    write_json(run / "evidence/local-how-profile.json", profile)
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(profile), runtime_sources_digest=_content_digest(runtime)
+    )
+    _save(run, document)
+    return _seal(document)
+
+
+def test_preparation_profile_preserves_population_and_official_authority(tmp_path: Path) -> None:
+    """The new Local How boundary cannot turn a bounded miss into an admission rule."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _prepared_navigation_archive(run)
+    assert preflight_reset_route_support(run, require_geometry=True) == document
+    assert assess_b1_directory(run) == baseline
+
+
+@pytest.mark.parametrize(
+    "fault", ["profile", "missing_decoder", "missing_source", "changed_source"]
+)
+def test_preparation_archive_resealed_identity_mismatch_is_rejected(
+    tmp_path: Path, fault: str
+) -> None:
+    """A recomputed digest cannot disguise an unrecognized or replaced preparation boundary."""
+    run = make_run(tmp_path)
+    document = _prepared_navigation_archive(run)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    if fault == "profile":
+        profile["navigation_preparation_profile"] = "unidentified-preparation"
+    elif fault == "missing_decoder":
+        del runtime["modules"]["habitat.gym.gym_wrapper"]
+    elif fault == "missing_source":
+        del runtime["modules"]["habitat_local_eaios.navigation_preparation"]
+    else:
+        (run / "navigation_preparation.py").write_text("# changed boundary source\n")
+    write_json(run / "evidence/local-how-profile.json", profile)
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(profile), runtime_sources_digest=_content_digest(runtime)
+    )
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
 @pytest.mark.parametrize(
     "fault",
     [

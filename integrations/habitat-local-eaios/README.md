@@ -240,10 +240,28 @@ straight-line fallback. Each invocation dispatches exactly one original base act
 
 This changes Local How control; the original/goal-region/step-aware classes retain
 their existing behavior when this flag is off. External EMOS and official PDDL are
-untouched. Local How v0.5 and selection v0.4 disclose the profile; B1 verifies exact
+untouched. Local How v0.6 and selection v0.4 disclose the profile; B1 verifies exact
 sources and continues accepting older archives. Optional diagnostics expose a bounded
 pre-base-action decision, not physical arrival or benchmark truth. See
 [ADR-0064](../../docs/decisions/0064-spatial-route-arrival-local-navigation.md).
+
+The enabled spatial controller now prepares every selected navigation command
+before the original joint Gym step, using the vendor's exact vector decoder and
+action order. Commands retain their episode, entity index and starting pose;
+dispatch consumes the prepared command once without repeating target/path queries.
+An expected bounded miss prevents that step entirely and records
+`navigation-preparation-failure-<step>.json` with canonical attempt attribution,
+original cause, search counters and a content digest. Already Completed peers are
+preserved. A failure before the first physical step leaves the official benchmark
+outcome unavailable; a reset predicate reading is diagnostic, not a final outcome.
+
+Preparation initializes the existing target/mesh caches and can run the original
+target helper; it is not RNG-neutral observation. Moving these calls ahead of
+motion is a disclosed Local How difference (`joint-navigation-preparation/v0.1`).
+It does not promise rollback for arbitrary Gym/physics faults or infer global
+unreachability. When the spatial flag is off, the legacy step path is unchanged.
+Historical profiles remain accepted. See
+[ADR-0065](../../docs/decisions/0065-joint-navigation-preparation.md).
 
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit

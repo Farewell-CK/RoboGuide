@@ -38,6 +38,7 @@ from .execution_progress import NavigationProgressPublisher, read_execution_prog
 from .execution_recovery import execution_recovery_profile
 from .idle_endpoint import PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .navigation_preparation import NavigationPreparationFailure
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
 from .reset_route_support import build_reset_route_support
@@ -335,13 +336,20 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 self._record_terminal_diagnostics(
                     habitat_env,
                     self._serial_steps,
-                    "serial_session_completed"
+                    "local_navigation_preparation_failure"
+                    if self._last_navigation_preparation_failure is not None
+                    else "serial_session_completed"
                     if outcome.state == "COMPLETED"
                     else "serial_session_failed",
                 )
                 terminal_recorded = True
             return outcome, {
                 "action_trace_collection": self._action_trace_stats(),
+                **(
+                    {"navigation_preparation_failure": self._last_navigation_preparation_failure}
+                    if self._last_navigation_preparation_failure is not None
+                    else {}
+                ),
                 "identity": {
                     "episode_id": original_config.episode_id,
                     "episode_reset_count": 1,
@@ -533,6 +541,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 session.finish(outcomes, steps, bool(identity["episode_terminated"]))
             return outcomes, {
                 "action_trace_collection": self._action_trace_stats(),
+                **(
+                    {"navigation_preparation_failure": self._last_navigation_preparation_failure}
+                    if self._last_navigation_preparation_failure is not None
+                    else {}
+                ),
                 "identity": identity,
                 "final_info": info,
                 **({"continuation": session.as_dict()} if session is not None else {}),
@@ -657,6 +670,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         completed_outcomes: dict[int, LocalExecutionOutcome] | None = None,
     ) -> tuple[dict[int, LocalExecutionOutcome], int, bool, dict[str, Any]]:
         """Drive the original joint policy loop with per-agent completion."""
+        self._last_navigation_preparation_failure = None
         steps = step_offset
         done = False
         info: dict[str, Any] = {}
@@ -671,6 +685,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         contract_restore: Callable[[], None] | None = None
         idle_binding: PassiveIdleBinding | None = None
         contract_failure: Stage2ContractViolation | None = None
+        navigation_failure: NavigationPreparationFailure | None = None
         cancelled = False
         try:
             torch = self._runtime["torch"]
@@ -741,8 +756,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 current_skills = self._current_skills(actor)
                 self._extend_skill_sequence(skill_sequence, current_skills)
                 env_action = action_data.env_actions.detach().cpu()[0].numpy()
-                exception_phase = "gym_env_step"
-                step_result = gym_env.step(env_action)
+                exception_phase = "navigation_preparation"
+                discard = self._prepare_navigation_step(
+                    env_action, gym_env, habitat_env, invocations, steps
+                )
+                try:
+                    exception_phase = "gym_env_step"
+                    step_result = gym_env.step(env_action)
+                finally:
+                    discard()
                 observations, done, info = self._gym_step_result(step_result)
                 steps += 1
                 self._retained_pair_observations = observations
@@ -873,6 +895,10 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         except Stage2ContractViolation as error:
             contract_failure = error
             termination_reason = "local_contract_failure"
+        except NavigationPreparationFailure as error:
+            navigation_failure = error
+            primary_error = error
+            termination_reason = "local_navigation_preparation_failure"
         except BaseException as error:
             primary_error = error
             termination_reason = f"execution_exception:{exception_phase}:{type(error).__name__}"
@@ -920,6 +946,32 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         )
                     else:
                         self._record_terminal_diagnostics(habitat_env, steps, termination_reason)
+        if navigation_failure is not None:
+            for agent_id in agent_ids:
+                if agent_id in outcomes:
+                    continue
+                is_offending_agent = agent_id == navigation_failure.agent_id
+                outcomes[agent_id] = self._pair_outcome(
+                    "FAILED",
+                    str(navigation_failure)
+                    if is_offending_agent
+                    else "shared episode stopped before motion after a sibling "
+                    "navigation preparation failure",
+                    invocations[agent_id],
+                    scene_id,
+                    steps,
+                    initials[agent_id],
+                    agent_id,
+                    skill_sequence,
+                    local_skill_completed=False,
+                    episode_terminated=bool(done or habitat_env.episode_over),
+                    terminal_basis=(
+                        "local-navigation-preparation-failure"
+                        if is_offending_agent
+                        else "sibling-navigation-preparation-failure"
+                    ),
+                )
+            return outcomes, steps, bool(done or habitat_env.episode_over), info
         if contract_failure is not None:
             for agent_id in agent_ids:
                 # A later joint-policy stop cannot erase an already observed
@@ -1376,6 +1428,28 @@ class NodeEndpoint:
         }
 
 
+def _archive_official_metrics(runtime: Any, summary: dict[str, Any]) -> None:
+    """Keep reset-only metrics separate from final benchmark execution evidence.
+
+    An attributed preparation failure before the first completed physical step
+    has no official execution outcome. Otherwise retain the existing official
+    metric path; neither a route miss nor local completion changes PDDL truth.
+    """
+    failure = summary.get("navigation_preparation_failure")
+    if (
+        isinstance(failure, dict)
+        and failure.get("failed_before_gym_step") is True
+        and failure.get("simulator_steps") == 0
+        and summary.get("identity", {}).get("simulator_steps") == 0
+    ):
+        summary["official_metrics"] = {}
+        summary["official_pddl_success_unavailable_reason"] = (
+            "local navigation preparation failed before the first physical Gym step"
+        )
+    else:
+        summary["official_metrics"] = runtime.final_metrics()
+
+
 class InProcessWorldService:
     """World service that drives a runtime on the caller's thread (tests)."""
 
@@ -1413,7 +1487,7 @@ class InProcessWorldService:
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Run one shared episode in-process."""
         outcomes, summary = self._runtime.execute_pair(invocations, cancellation_requested, running)
-        summary["official_metrics"] = self._runtime.final_metrics()
+        _archive_official_metrics(self._runtime, summary)
         return outcomes, summary
 
     def run_serial(
@@ -1428,7 +1502,7 @@ class InProcessWorldService:
         outcome, summary = self._runtime.execute_serial(
             invocation, agent_id, cancellation_requested, running, final_slot
         )
-        summary["official_metrics"] = self._runtime.final_metrics()
+        _archive_official_metrics(self._runtime, summary)
         return outcome, summary
 
     def resume_pair(
@@ -1439,7 +1513,7 @@ class InProcessWorldService:
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Continue only the stopped slots while retaining completed peers in the same world."""
         outcomes, summary = self._runtime.resume_pair(replacements, cancellation_requested, running)
-        summary["official_metrics"] = self._runtime.final_metrics()
+        _archive_official_metrics(self._runtime, summary)
         return outcomes, summary
 
     def shutdown(self) -> None:
@@ -1516,7 +1590,7 @@ def _child_world_process(
                         final_slot,
                     )
                     outcomes = {agent_id: outcome}
-                summary["official_metrics"] = runtime.final_metrics()
+                _archive_official_metrics(runtime, summary)
                 connection.send(("TERMINAL", (outcomes, summary)))
             except Exception as error:  # noqa: BLE001 - terminal failure for both nodes
                 connection.send(("WORLD_ERROR", str(error)))
@@ -2404,6 +2478,10 @@ class SharedWorldCoordinator:
         }
         if serial_task_outcomes is not None:
             summary_document["serial_task_outcomes"] = serial_task_outcomes
+        if "navigation_preparation_failure" in summary:
+            summary_document["navigation_preparation_failure"] = summary[
+                "navigation_preparation_failure"
+            ]
         if self._retain_stopped_session:
             summary_document["execution_segments"] = self._segment_history
             summary_document["continuation_archival"] = {
@@ -2423,7 +2501,8 @@ class SharedWorldCoordinator:
             summary_document["official_pddl_success"] = raw_pddl
         else:
             summary_document["official_pddl_success_unavailable_reason"] = (
-                "habitat metrics did not report a strict-bool pddl_success"
+                summary.get("official_pddl_success_unavailable_reason")
+                or "habitat metrics did not report a strict-bool pddl_success"
             )
         self._write_json("shared-world-summary.json", summary_document)
 

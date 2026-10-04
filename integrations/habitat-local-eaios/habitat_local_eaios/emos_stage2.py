@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -15,6 +16,11 @@ from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .navigation_preparation import (
+    NAVIGATION_PREPARATION_PROFILE,
+    NavigationPreparationFailure,
+    prepare_navigation_actions,
+)
 from .navmesh_profile import STEP_AWARE_PROFILE
 from .source_provenance import build_runtime_source_manifest
 from .spatial_navigation import SPATIAL_ARRIVAL_PROFILE
@@ -172,6 +178,7 @@ class EmosStage2Runtime:
         self._actor: Any | None = None
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
+        self._last_navigation_preparation_failure: dict[str, Any] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
     def initialize(self) -> None:
@@ -221,6 +228,10 @@ class EmosStage2Runtime:
                     step_aware=step_aware_enabled,
                     spatial_arrival=spatial_arrival_enabled,
                 )
+            if spatial_arrival_enabled:
+                from habitat.gym.gym_wrapper import (  # type: ignore[import-not-found]
+                    continuous_vector_action_to_hab_dict,
+                )
             if self._config.video_path is not None or self._config.live_preview_path is not None:
                 _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
@@ -266,11 +277,13 @@ class EmosStage2Runtime:
                 "transforms": transforms,
                 "habitat_config": config,
             }
+            if spatial_arrival_enabled:
+                self._runtime["decode_navigation_action"] = continuous_vector_action_to_hab_dict
             self._write_json(
                 "local-how-profile.json",
                 {
                     "schema_version": (
-                        "roboguide.habitat-local-how-profile/v0.5"
+                        "roboguide.habitat-local-how-profile/v0.6"
                         if spatial_arrival_enabled
                         else "roboguide.habitat-local-how-profile/v0.4"
                         if step_aware_enabled
@@ -298,7 +311,10 @@ class EmosStage2Runtime:
                         else {}
                     ),
                     **(
-                        {"navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE}
+                        {
+                            "navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE,
+                            "navigation_preparation_profile": NAVIGATION_PREPARATION_PROFILE,
+                        }
                         if spatial_arrival_enabled
                         else {}
                     ),
@@ -331,6 +347,8 @@ class EmosStage2Runtime:
                                 "habitat.tasks.rearrange.actions.actions",
                                 "habitat_local_eaios.spatial_navigation",
                                 "habitat_local_eaios.spatial_navigation_action",
+                                "habitat.gym.gym_wrapper",
+                                "habitat_local_eaios.navigation_preparation",
                             )
                             if spatial_arrival_enabled
                             else ()
@@ -421,6 +439,7 @@ class EmosStage2Runtime:
         cancellation_requested: Callable[[], bool],
     ) -> LocalExecutionOutcome:
         """Mirror the EMOS evaluator loop while preserving RoboGuide cancellation."""
+        self._last_navigation_preparation_failure = None
         self._last_policy_observations = observations
         torch = self._runtime["torch"]
         device = self._runtime["device"]
@@ -448,6 +467,7 @@ class EmosStage2Runtime:
         idle_binding: PassiveIdleBinding | None = None
         contract_restore: Callable[[], None] | None = None
         contract_failure: Stage2ContractViolation | None = None
+        navigation_failure: NavigationPreparationFailure | None = None
         try:
             idle_binding = install_passive_idle_agents(
                 actor, assignment, f"agent_{self._config.agent_id}"
@@ -485,7 +505,17 @@ class EmosStage2Runtime:
                 current_skills = self._current_skills(actor)
                 self._extend_skill_sequence(skill_sequence, current_skills)
                 env_action = action_data.env_actions.detach().cpu()[0].numpy()
-                step_result = gym_env.step(env_action)
+                discard = self._prepare_navigation_step(
+                    env_action,
+                    gym_env,
+                    habitat_env,
+                    {self._config.agent_id: invocation},
+                    step_offset + steps,
+                )
+                try:
+                    step_result = gym_env.step(env_action)
+                finally:
+                    discard()
                 observations, done, info = self._gym_step_result(step_result)
                 self._last_policy_observations = observations
                 steps += 1
@@ -562,6 +592,8 @@ class EmosStage2Runtime:
                     time.sleep(self._config.step_period_ms / 1_000)
         except Stage2ContractViolation as error:
             contract_failure = error
+        except NavigationPreparationFailure as error:
+            navigation_failure = error
         finally:
             try:
                 if contract_restore is not None:
@@ -578,6 +610,18 @@ class EmosStage2Runtime:
                 finally:
                     module.group_discussion = original_group_discussion
                     self._best_effort_flush_action_trace("Stage2 termination")
+        if navigation_failure is not None:
+            return self._outcome(
+                "FAILED",
+                str(navigation_failure),
+                invocation,
+                scene_id,
+                steps,
+                initial,
+                skill_sequence,
+                local_skill_completed=False,
+                terminal_basis="local-navigation-preparation-failure",
+            )
         if contract_failure is not None:
             return self._outcome(
                 "FAILED",
@@ -601,6 +645,62 @@ class EmosStage2Runtime:
             local_skill_completed=False,
             terminal_basis="step-budget-exhausted",
         )
+
+    def _prepare_navigation_step(
+        self,
+        env_action: Any,
+        gym_env: Any,
+        habitat_env: Any,
+        invocations: dict[int, CanonicalMobilityInvocation],
+        steps: int,
+    ) -> Callable[[], None]:
+        """Prepare actual selected Local How commands before the one original Gym step.
+
+        The default-off profile leaves the legacy path untouched. Expected
+        bounded path failures retain exact attempt attribution and cause; other
+        exceptions propagate unchanged. Evidence I/O cannot authorize movement
+        or replace a preparation failure. Target/mesh preparation is execution,
+        not a read-only observer or a route-feasibility authority.
+        """
+        if not getattr(self._config, "spatial_navigation_arrival", False):
+            return lambda: None
+        decoded = self._runtime["decode_navigation_action"](
+            gym_env.original_action_space, gym_env.action_space, env_action
+        )
+        agent_count = len(self._runtime["habitat_config"].habitat.simulator.agents_order)
+        try:
+            return prepare_navigation_actions(
+                habitat_env.task.actions, decoded, agent_ids=tuple(range(agent_count))
+            )
+        except NavigationPreparationFailure as error:
+            document = {
+                "schema_version": "roboguide.habitat-navigation-preparation-failure/v0.1",
+                "profile": NAVIGATION_PREPARATION_PROFILE,
+                "episode_id": str(habitat_env.current_episode.episode_id),
+                "scene_id": str(habitat_env.current_episode.scene_id),
+                "simulator_steps": steps,
+                "failed_before_gym_step": True,
+                "failure": error.as_dict(),
+                "invocations": {
+                    str(agent_id): invocation.as_dict()
+                    for agent_id, invocation in invocations.items()
+                },
+            }
+            document["digest"] = (
+                "sha256:"
+                + hashlib.sha256(
+                    json.dumps(
+                        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
+            self._last_navigation_preparation_failure = document
+            self._best_effort_write_json(
+                f"navigation-preparation-failure-{steps}.json",
+                document,
+                "pre-motion navigation failure",
+            )
+            raise
 
     def _observe_policy_step(
         self,

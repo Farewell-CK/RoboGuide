@@ -640,9 +640,16 @@ goal-region navigation。它细化独立导航网格的垂直分辨率，避免�
 要求前两个执行 profile 已明确启用。它在三维接近选定导航点前继续沿 waypoint 移动，
 接近后才朝向原实体并报告本地完成；不因 X/Z 重合就在不同楼层提前停止。保留原实体、
 能力、速度、阈值与技能/仿真预算，每次调用只下发一次原 base action，路径失败不伪造
-直线或成功。不编辑外部 EMOS；Local How v0.5 与 action evidence v0.4 明示控制差异，
+直线或成功。不编辑外部 EMOS；Local How v0.6 与 action evidence v0.4 明示控制差异，
 官方 PDDL 与 Mission satisfaction 仍独立判定。见
 [ADR-0064](docs/decisions/0064-spatial-route-arrival-local-navigation.md)。
+
+该 profile 在联合 Gym step 前，按实际动作顺序准备全部导航目标、路径和控制指令。
+有界路径失败时不进入该 step，保留具体 endpoint、Task/Role/attempt、搜索原因和已有
+完成记录；第一次物理 step 前失败的官方执行结果为 unavailable，reset 指标另作诊断。
+成功准备后仍只有一次原 Gym step 和每个动作一次原 base dispatch。准备会初始化原有
+目标/网格缓存，并非只读观察；不保证任意仿真异常可以回滚，也不证明路径全局不可达。
+版本与限制见 [ADR-0065](docs/decisions/0065-joint-navigation-preparation.md)。
 
 ## 三条核心语义链
 
