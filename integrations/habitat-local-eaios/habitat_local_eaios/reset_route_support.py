@@ -20,6 +20,7 @@ from .goal_region_navigation import (
     point3,
     select_goal_region_point,
 )
+from .navigation_preparation import NAVIGATION_PREPARATION_PROFILE
 from .navmesh_profile import STEP_AWARE_PROFILE, copied_agent_settings, settings_snapshot
 from .navmesh_region import (
     REGION_PROFILE,
@@ -253,11 +254,21 @@ def build_reset_route_support(
         not in {
             "roboguide.habitat-local-how-profile/v0.4",
             "roboguide.habitat-local-how-profile/v0.5",
+            "roboguide.habitat-local-how-profile/v0.6",
         }
     ):
         raise ValueError("route support has an unsupported navmesh resolution profile")
     geometry_enabled = local_how.get("reset_route_geometry_enabled") is True
-    spatial_arrival = local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    navigation_preparation = (
+        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
+    )
+    spatial_arrival = navigation_preparation or (
+        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
+    )
+    if navigation_preparation != (
+        local_how.get("navigation_preparation_profile") == NAVIGATION_PREPARATION_PROFILE
+    ) or ("navigation_preparation_profile" in local_how and not navigation_preparation):
+        raise ValueError("route support has an unsupported navigation preparation profile")
     if spatial_arrival != (
         local_how.get("navigation_arrival_profile") == SPATIAL_ARRIVAL_PROFILE
     ) or ("navigation_arrival_profile" in local_how and not spatial_arrival):

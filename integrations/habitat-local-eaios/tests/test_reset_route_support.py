@@ -170,6 +170,57 @@ def _sources() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str
     return semantic, matrix, profile, {"modules": {}}
 
 
+@pytest.mark.parametrize("version", ["v0.5", "v0.6"])
+def test_spatial_profile_producer_accepts_historical_and_prepared_execution(
+    monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    """The actual reset producer remains read-only under old and new spatial profiles."""
+    api = ModuleType("habitat_sim")
+    vars(api).update(vars(_api()))
+    monkeypatch.setitem(sys.modules, "habitat_sim", api)
+    env = _environment()
+    action_type = type(
+        "SpatialArrivalGoalRegionOracleNavDiffBaseAction", (GoalRegionOracleNavDiffBaseAction,), {}
+    )
+    action = action_type()
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    semantic, matrix, profile, sources = _sources()
+    profile.update(
+        schema_version=f"roboguide.habitat-local-how-profile/{version}",
+        navmesh_resolution_profile="step-preserving-cell-height/v0.1",
+        navigation_arrival_profile="spatial-route-arrival/v0.1",
+    )
+    if version == "v0.6":
+        profile["navigation_preparation_profile"] = "joint-navigation-preparation/v0.1"
+    before = dict(action._targets)
+    document = routes.build_reset_route_support(env, semantic, matrix, profile, sources)
+    assert document["scope_status"] == "available"
+    assert document["records"][0]["status"] == "supported"
+    assert document["identity"]["local_how_digest"] == preassignment_digest(profile)
+    assert action._targets == before and action.pathfinder is None
+    assert len(env.builds) == 1
+
+
+@pytest.mark.parametrize(
+    "version, profile",
+    [("v0.6", None), ("v0.6", "unrecognized"), ("v0.5", "joint-navigation-preparation/v0.1")],
+)
+def test_reset_producer_rejects_missing_or_cross_version_preparation(
+    version: str, profile: str | None
+) -> None:
+    """A schema revision cannot silently change or omit its execution profile."""
+    semantic, matrix, local_how, sources = _sources()
+    local_how.update(
+        schema_version=f"roboguide.habitat-local-how-profile/{version}",
+        navmesh_resolution_profile="step-preserving-cell-height/v0.1",
+        navigation_arrival_profile="spatial-route-arrival/v0.1",
+    )
+    if profile is not None:
+        local_how["navigation_preparation_profile"] = profile
+    with pytest.raises(ValueError, match="navigation preparation profile"):
+        routes.build_reset_route_support(object(), semantic, matrix, local_how, sources)
+
+
 def test_probe_preserves_live_action_settings_and_rng() -> None:
     """A static witness must not prime caches, move an agent, or consume RNG."""
     env = _environment()

@@ -380,6 +380,56 @@ def test_preparation_profile_preserves_population_and_official_authority(tmp_pat
     assert assess_b1_directory(run) == baseline
 
 
+def test_actual_producer_v06_archive_reaches_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise actual producer-to-consumer wiring across the startup archive boundary."""
+    root = Path(__file__).resolve().parents[2] / "integrations/habitat-local-eaios"
+    monkeypatch.syspath_prepend(str(root))
+    producer = importlib.import_module("habitat_local_eaios.reset_route_support")
+    run = make_run(tmp_path)
+    template = _prepared_navigation_archive(run)
+
+    class Probe:
+        """Supply deterministic world observations while executing the actual archive producer."""
+
+        step_aware = spatial_arrival = True
+
+        def __init__(self, environment: object, agent_id: int) -> None:
+            """Bind a copied observation to exactly one configured reset endpoint."""
+            del environment
+            self.agent_id = agent_id
+
+        def observe(self, destination: str) -> dict[str, Any]:
+            """Return geometry fields while production code binds archive identity and version."""
+            record = next(
+                row
+                for row in template["records"]
+                if row["agent_id"] == self.agent_id and row["destination"] == destination
+            )
+            return {
+                key: copy.deepcopy(value)
+                for key, value in record.items()
+                if key not in {"agent_id", "node_id", "destination", "region_analysis"}
+            }
+
+        def observe_region(self, observation: dict[str, Any], budget: object) -> dict[str, Any]:
+            """Keep optional region evidence separate from the production archive envelope."""
+            del observation, budget
+            return copy.deepcopy(template["records"][0]["region_analysis"])
+
+    monkeypatch.setattr(producer, "ResetRouteProbe", Probe)
+    document = producer.build_reset_route_support(
+        object(),
+        json.loads((run / "evidence/authoritative-semantic-evidence.json").read_text()),
+        json.loads((run / "evidence/preassignment-feasibility.json").read_text()),
+        json.loads((run / "evidence/local-how-profile.json").read_text()),
+        json.loads((run / "evidence/runtime-source-manifest.json").read_text()),
+    )
+    write_json(run / "evidence/reset-route-support.json", document)
+    assert preflight_reset_route_support(run, require_geometry=True) == document
+
+
 @pytest.mark.parametrize(
     "fault", ["profile", "missing_decoder", "missing_source", "changed_source"]
 )
