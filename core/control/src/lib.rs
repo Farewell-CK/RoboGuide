@@ -22,7 +22,9 @@ pub use coordination::CommittedPlan;
 pub use group::{CommittedGroupContinuation, GroupContinuationProposal};
 pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use initial_preferences::{InitialCandidatePreferences, MAX_INITIAL_PREFERENCE_AGE_MS};
+pub use matching::RoleCandidateDiagnostics;
 pub use matching::{CandidateSet, RoleCandidates};
+pub use node::CandidateExclusionReason;
 pub use proposal::AssignmentProposal;
 pub use reconciliation::{
     CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,

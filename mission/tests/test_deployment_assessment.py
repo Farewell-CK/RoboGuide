@@ -14,7 +14,13 @@ from typing import Any
 
 import pytest
 from mission.controller import HttpMissionController
-from mission.deployment_assessment import AssessedRole, InitialOperationAssessment, plan_body_digest
+from mission.deployment_assessment import (
+    DIAGNOSTIC_SCHEMA,
+    AssessedRole,
+    CandidateDiagnostics,
+    InitialOperationAssessment,
+    plan_body_digest,
+)
 from mission.models import JSONObject, MissionPlan
 from mission.recovery import FailureReason, FailureStage, RecoveryAction, RequestRecoveryEvidence
 from mission.requests import MissionRequestError, MissionRequestLifecycle
@@ -390,3 +396,49 @@ def test_recovery_schema_declares_assessment_and_preserves_legacy(tmp_path: Path
     document["schema_version"] = "roboguide.mission-request-recovery/v0.1"
     with pytest.raises(ValueError, match="declare its schema"):
         RequestRecoveryEvidence.from_json(document)
+
+
+def test_diagnostic_feedback_is_closed_bound_and_backward_compatible(tmp_path: Path) -> None:
+    """Counter partitions and exact slots are required; legacy evidence stays diagnostic-free."""
+    record = _engine(
+        tmp_path, FakeInterpreter([_assessment()]), FakePlanner(), AssessingController([])
+    ).create("deliver the declared payload")
+    assert record.plan is not None
+    original = feedback(record.plan)
+    role = original.roles[0]
+    report = CandidateDiagnostics(role.task_id, role.role_id, 3, 2, (("status_stale", 1),))
+    upgraded = replace(original, schema_version=DIAGNOSTIC_SCHEMA, candidate_diagnostics=(report,))
+    assert InitialOperationAssessment.from_json(upgraded.to_json()) == upgraded
+    assert InitialOperationAssessment.from_json(original.to_json()) == original
+    assert original.candidate_diagnostics == ()
+    schema = json.loads(
+        Path(
+            "contracts/mission/initial-operation-assessment-v0.2/assessment.schema.json"
+        ).read_text()
+    )
+    assert set(schema["properties"]) == set(upgraded.to_json())
+    assert set(schema["$defs"]["candidate_diagnostics"]["properties"]) == set(report.to_json())
+    with pytest.raises(ValueError, match="partition"):
+        replace(report, eligible_count=3)
+    with pytest.raises(ValueError, match="partition"):
+        replace(report, exclusions=(("invented_reason", 1),))
+    with pytest.raises(ValueError, match="disagree"):
+        replace(
+            upgraded, candidate_diagnostics=(replace(report, considered_count=2, eligible_count=1),)
+        )
+    detached = replace(report, task_id="foreign-task")
+    gap = replace(
+        upgraded,
+        decision="unavailable",
+        reason_code="current_candidates_unavailable",
+        checked_combinations=0,
+        roles=(),
+        candidate_diagnostics=(detached,),
+    )
+    assert not gap.matches_plan(record.plan)
+    raw = report.to_json()
+    raw["node_id"] = "private-executor"
+    with pytest.raises(ValueError, match="fields"):
+        CandidateDiagnostics.from_json(raw)
+    with pytest.raises(ValueError, match="v0.2"):
+        replace(upgraded, schema_version="roboguide.initial-operation-assessment/v0.1")

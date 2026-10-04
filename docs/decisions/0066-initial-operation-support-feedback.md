@@ -82,6 +82,16 @@ These are conformance checks, not physical execution or success-rate evidence.
 
 ## Limitations and future work
 
+The Controller now emits assessment v0.2; archived v0.1 remains readable.
+Bounded candidate diagnostics partition the query's registrations by the first
+failed shared Control predicate, with exact logical slot attribution and no
+Node/resource identities. Static support counts must agree with eligible counts.
+A zero paired combination explicitly records `endpoint_cardinality`; a rejected
+deployment contract remains a gap rather than a guessed placement subcause.
+This adds observations only. Eligibility, static evidence admission, reservation
+and benchmark rules are unchanged. Later healthy snapshots cannot rewrite the
+original exclusion evidence. See the [v0.2 contract](../../contracts/mission/initial-operation-assessment-v0.2/README.md).
+
 A static miss is scoped to the observed starting component and declared Local
 How. It is not proof that physical tasks are globally impossible or that dynamic
 motion could never connect components. Required preflight is a disclosed

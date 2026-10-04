@@ -27,7 +27,7 @@ pub(crate) fn unavailable(
     reason: &str,
 ) -> serde_json::Value {
     serde_json::json!({
-        "schema_version": "roboguide.initial-operation-assessment/v0.1",
+        "schema_version": "roboguide.initial-operation-assessment/v0.2",
         "mission_id": plan.goal().mission_id().as_str(),
         "plan_body_sha256": format!("sha256:{:x}", Sha256::digest(request_body)),
         "scope": "initial_static_world",
@@ -41,6 +41,8 @@ pub(crate) fn unavailable(
         "assessed_at_ms": now.as_millis(),
         "checked_combinations": 0,
         "roles": [],
+        "candidate_diagnostics": [],
+        "placement_failure": null,
     })
 }
 
@@ -84,6 +86,7 @@ pub(super) fn assess<S: ports::SharedNodeStateReader>(
         .expect("accepted Mission identity produces a valid group");
     let Ok(restrictions) = deployment.restrictions_for_plan(plan, &group) else {
         result["reason_code"] = serde_json::json!("deployment_placement_unavailable");
+        result["placement_failure"] = serde_json::json!("deployment_contract_unavailable");
         return result;
     };
     // These existing restrictions are checked on a private Control copy only.
@@ -99,6 +102,7 @@ pub(super) fn assess<S: ports::SharedNodeStateReader>(
             .is_err()
         {
             result["reason_code"] = serde_json::json!("deployment_placement_unavailable");
+            result["placement_failure"] = serde_json::json!("deployment_contract_unavailable");
             return result;
         }
     }
@@ -129,6 +133,21 @@ pub(super) fn assess<S: ports::SharedNodeStateReader>(
     let mut events = AssessmentEvents;
     let mut options = Vec::new();
     let mut roles = Vec::new();
+    let mut diagnostics = Vec::new();
+    for task in &roots {
+        let Ok(reports) =
+            matching.first_use_candidate_diagnostics(state, plan, task.requirement(), now)
+        else {
+            result["reason_code"] = serde_json::json!("unsupported_plan_scope");
+            return result;
+        };
+        for report in reports {
+            let mut report = serde_json::to_value(report).expect("flat Control counts serialize");
+            report["task_id"] = serde_json::json!(task.requirement().task_ref().task_id().as_str());
+            diagnostics.push(report);
+        }
+    }
+    result["candidate_diagnostics"] = serde_json::json!(diagnostics);
     for task in &roots {
         let role = &task.requirement().roles()[0];
         let intent = task
@@ -224,6 +243,7 @@ pub(super) fn assess<S: ports::SharedNodeStateReader>(
     result["checked_combinations"] = serde_json::json!(checked);
     if checked == 0 {
         result["reason_code"] = serde_json::json!("deployment_placement_unavailable");
+        result["placement_failure"] = serde_json::json!("endpoint_cardinality");
     } else {
         result["decision"] = serde_json::json!(if viable { "not_blocked" } else { "blocked" });
         result["reason_code"] = serde_json::json!(if viable {

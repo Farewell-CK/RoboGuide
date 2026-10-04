@@ -148,6 +148,51 @@ fn mission_matching_requires_independent_operation_support() {
     );
 }
 
+/// Diagnostics and actual matching share one predicate across health, time and contract faults.
+#[test]
+fn first_use_diagnostics_match_actual_eligibility_without_mutation() {
+    use crate::CandidateExclusionReason as Reason;
+    for (fault, expected) in [
+        ("healthy", None), ("operation", Some(Reason::OperationUnsupported)),
+        ("health", Some(Reason::HealthUnschedulable)), ("stale", Some(Reason::StatusStale)),
+        ("lease", Some(Reason::LeaseInactive)), ("liveness", Some(Reason::LivenessUnreachable)),
+        ("capability", Some(Reason::RoleContractUnavailable)),
+    ] {
+        let (plan, requirement, role_id) = operation_support_plan();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = RecordingEvents { records: Vec::new() };
+        let node = NodeId::new("node-a").unwrap();
+        control.register_node(&mut state, operation_support_node("node-a", if fault == "operation" { "inspect" } else { "relocate" }),
+            NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)), TimestampMs::new(0), &correlation(), &mut events).unwrap();
+        let now = if fault == "lease" { TimestampMs::new(16000) } else if fault == "stale" { TimestampMs::new(6000) } else { TimestampMs::new(0) };
+        if fault == "health" || fault == "lease" {
+            state.record_node_health(domain::NodeHealthObservation::new(node.clone(),
+                NodeStatus::new(if fault == "health" { NodeHealth::Offline } else { NodeHealth::Online }, now), now)).unwrap();
+        }
+        if fault == "liveness" {
+            state.record_node_liveness(&node, domain::NodeLivenessObservation::new(domain::NodeLiveness::Unreachable, now)).unwrap();
+        }
+        if fault == "capability" {
+            replace_operation_registration(&mut state, registration("node-a", CapabilityKind::Compute, "space-a"));
+        }
+        let before = serde_json::to_string(&control.checkpoint()).unwrap();
+        let event_count = events.records.len();
+        let report = control.first_use_candidate_diagnostics(&state, &plan, &requirement, now).unwrap().remove(0);
+        assert_eq!(report.considered_count, 1);
+        assert_eq!(report.eligible_count, usize::from(expected.is_none()), "{fault}");
+        assert_eq!(report.exclusions, expected.map(|reason| BTreeMap::from([(reason, 1)])).unwrap_or_default(), "{fault}");
+        assert_eq!(serde_json::to_string(&control.checkpoint()).unwrap(), before);
+        assert_eq!(events.records.len(), event_count);
+        let result = control.match_capabilities_for_mission(&state, &plan, &requirement, now, &correlation(), &mut events);
+        if expected.is_none() {
+            assert_eq!(result.unwrap().for_role(&role_id).unwrap().node_ids().len(), report.eligible_count);
+        } else {
+            assert!(matches!(result, Err(ControlError::NoCandidate(_))), "{fault}");
+        }
+    }
+}
+
 /// Proposal and Commit reject operation support removed after their preceding stage.
 #[test]
 fn proposal_and_commit_revalidate_current_operation_support() {

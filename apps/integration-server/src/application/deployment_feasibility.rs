@@ -1039,7 +1039,7 @@ mod tests {
             let result: serde_json::Value = serde_json::from_str(body).unwrap();
             assert_eq!(result["decision"], "blocked", "{result}");
             let schema: serde_json::Value = serde_json::from_str(include_str!(
-                "../../../../contracts/mission/initial-operation-assessment-v0.1/assessment.schema.json"
+                "../../../../contracts/mission/initial-operation-assessment-v0.2/assessment.schema.json"
             )).unwrap();
             assert_eq!(
                 result.as_object().unwrap().keys().collect::<Vec<_>>(),
@@ -1061,6 +1061,69 @@ mod tests {
         );
         assert_eq!(log.latest_sequence().unwrap(), before_sequence);
         assert!(log.load_checkpoint().unwrap().is_none());
+    }
+
+    /// Candidate shortage retains the exact query-time reason instead of later health guesses.
+    #[test]
+    fn initial_assessment_candidate_exclusions_are_query_bound() {
+        use ports::{SharedNodeStateReader, SharedNodeStateWriter};
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = assessment_fixture(directory.path(), [false; 4], true);
+        let body = plan_document(false, true).to_string();
+        let plan = orchestration::decode_mission_plan(&body).unwrap();
+        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let mut state = initial_cost_nodes(&mut control, &plan, &mut log);
+        let node = domain::NodeId::new("node-b").unwrap();
+        state
+            .record_node_health(domain::NodeHealthObservation::new(
+                node.clone(),
+                domain::NodeStatus::new(domain::NodeHealth::Offline, domain::TimestampMs::new(0)),
+                domain::TimestampMs::new(0),
+            ))
+            .unwrap();
+        let before = serde_json::to_string(&control.checkpoint()).unwrap();
+        let sequence = log.latest_sequence().unwrap();
+        let result = deployment.assess_initial_plan(
+            &plan,
+            &control,
+            &state,
+            domain::TimestampMs::new(0),
+            true,
+            body.as_bytes(),
+        );
+        assert_eq!(result["decision"], "unavailable");
+        assert_eq!(result["placement_failure"], "endpoint_cardinality");
+        for report in result["candidate_diagnostics"].as_array().unwrap() {
+            assert_eq!(report["considered_count"], 2);
+            assert_eq!(report["eligible_count"], 1);
+            assert_eq!(report["exclusions"]["health_unschedulable"], 1);
+        }
+        // A later healthy observation cannot rewrite the earlier reason.
+        state
+            .record_node_health(domain::NodeHealthObservation::new(
+                node,
+                domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(1)),
+                domain::TimestampMs::new(1),
+            ))
+            .unwrap();
+        let later = deployment.assess_initial_plan(
+            &plan,
+            &control,
+            &state,
+            domain::TimestampMs::new(1),
+            true,
+            body.as_bytes(),
+        );
+        assert_eq!(later["decision"], "not_blocked");
+        assert_eq!(result["candidate_diagnostics"][0]["eligible_count"], 1);
+        assert_eq!(
+            serde_json::to_string(&control.checkpoint()).unwrap(),
+            before
+        );
+        assert_eq!(log.latest_sequence().unwrap(), sequence);
+        assert_eq!(state.nodes().len(), 2);
+        assert!(!result.to_string().contains("node-a") && !result.to_string().contains("node-b"));
     }
 
     /// A recomputed digest cannot turn partial geometry or a different source into a miss.

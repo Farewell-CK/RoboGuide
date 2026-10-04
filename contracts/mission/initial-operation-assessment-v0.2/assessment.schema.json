@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RoboGuide Initial Operation Assessment v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mission_id",
+    "plan_body_sha256",
+    "scope",
+    "decision",
+    "reason_code",
+    "source_digest",
+    "world_snapshot_digest",
+    "local_how_digest",
+    "received_at_ms",
+    "expires_at_ms",
+    "assessed_at_ms",
+    "checked_combinations",
+    "roles",
+    "candidate_diagnostics",
+    "placement_failure"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.initial-operation-assessment/v0.2"
+    },
+    "mission_id": {
+      "$ref": "#/$defs/identity"
+    },
+    "plan_body_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "scope": {
+      "const": "initial_static_world"
+    },
+    "decision": {
+      "enum": [
+        "blocked",
+        "not_blocked",
+        "unavailable"
+      ]
+    },
+    "reason_code": {
+      "type": "string"
+    },
+    "source_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "world_snapshot_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "local_how_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "received_at_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "expires_at_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "assessed_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "checked_combinations": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16384
+    },
+    "roles": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/role"
+      }
+    },
+    "candidate_diagnostics": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/candidate_diagnostics"
+      }
+    },
+    "placement_failure": {
+      "enum": [
+        null,
+        "deployment_contract_unavailable",
+        "endpoint_cardinality"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "unavailable"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "checked_combinations": {
+            "const": 0
+          },
+          "reason_code": {
+            "enum": [
+              "source_unconfigured",
+              "source_expired",
+              "controller_restored",
+              "world_already_admitted",
+              "deployment_placement_unavailable",
+              "current_candidates_unavailable",
+              "unsupported_plan_scope"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "source_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "world_snapshot_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "local_how_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "received_at_ms": {
+            "type": "integer"
+          },
+          "expires_at_ms": {
+            "type": "integer"
+          },
+          "checked_combinations": {
+            "minimum": 1
+          },
+          "roles": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "blocked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason_code": {
+            "const": "scoped_static_support_shortage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "not_blocked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason_code": {
+            "const": "no_scoped_shortage"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 128
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "role_id",
+        "operation",
+        "witness_count",
+        "bounded_miss_count",
+        "scoped_disjoint_count",
+        "unknown_count"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/identity"
+        },
+        "role_id": {
+          "$ref": "#/$defs/identity"
+        },
+        "operation": {
+          "$ref": "#/$defs/identity"
+        },
+        "witness_count": {
+          "$ref": "#/$defs/count"
+        },
+        "bounded_miss_count": {
+          "$ref": "#/$defs/count"
+        },
+        "scoped_disjoint_count": {
+          "$ref": "#/$defs/count"
+        },
+        "unknown_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "candidate_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "role_id",
+        "considered_count",
+        "eligible_count",
+        "exclusions"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/identity"
+        },
+        "role_id": {
+          "$ref": "#/$defs/identity"
+        },
+        "considered_count": {
+          "$ref": "#/$defs/count"
+        },
+        "eligible_count": {
+          "$ref": "#/$defs/count"
+        },
+        "exclusions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registration_missing": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "health_unschedulable": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "status_stale": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "liveness_unreachable": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "lease_inactive": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "role_contract_unavailable": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "operation_unsupported": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "deployment_restriction": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "actor_contract_unavailable": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            }
+          }
+        }
+      }
+    }
+  }
+}
