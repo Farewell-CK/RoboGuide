@@ -79,12 +79,17 @@ class DeploymentRecoveryDecision:
             "replacement_plan",
         }:
             raise ValueError("deployment recovery decision fields are invalid")
+        plan = (
+            MissionPlan.from_json(value["replacement_plan"])
+            if value["replacement_plan"] is not None
+            else None
+        )
+        if plan is not None and value["replacement_plan"] != plan.to_json():
+            raise ValueError("deployment recovery proposal must be canonical")
         return cls(
             DeploymentRecoveryAction(value["action"]),
             value["explanation"],
-            MissionPlan.from_json(value["replacement_plan"])
-            if value["replacement_plan"] is not None
-            else None,
+            plan,
         )
 
 
@@ -120,7 +125,10 @@ class DeploymentRecoveryAttempt:
                 or not isinstance(json.loads(encoded), dict)
             ):
                 raise ValueError("deployment recovery document is invalid")
-        plan = MissionPlan.from_json(json.loads(self.input_plan_json))
+        document = json.loads(self.input_plan_json)
+        plan = MissionPlan.from_json(document)
+        if document != plan.to_json():
+            raise ValueError("deployment recovery input plan must be canonical")
         if (
             canonical_plan_digest(plan.to_json()) != self.input_plan_digest
             or not isinstance(self.assessment, InitialOperationAssessment)

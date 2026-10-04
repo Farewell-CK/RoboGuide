@@ -566,24 +566,40 @@ Local How、官方 benchmark authority 和 Formal admission 均保持各自权�
 Controller 首个 admission 前的初始世界，后续 Task、restore 和 recovery 不重用起点。
 全部部署组合均含完整 scoped disjoint 才返回 blocked；有限 miss 与 unknown 保留可能性。
 
-Request Engine 在显式配置要求下，将 blocked/unavailable 保存为部署就绪 hold；
-显式 retry 重新检查同一计划，不调用模型，不隐式重分工。query 中断不会变成重新
-deliberation 或一次模糊提交。not_blocked 也不是 route 或资源承诺，真实 submit 仍须
-通过 Control 当前条件；Formal population 与官方 benchmark authority 不变。
+Request Engine 在显式配置要求下，将 blocked/unavailable 保存为部署就绪 hold。
+默认零次模型恢复时，显式 retry 只重新检查同一计划。assessment v0.2 还投影当次查询
+真实 Control eligibility 的首个排除原因计数，区分健康、状态过期、lease、operation、
+Role contract 与部署候选条件；不输出 Node/Resource 标识，不从之后的健康快照猜原因。
+query 中断不会成为模糊提交。not_blocked 也不是 route 或资源承诺。
+
+独立、默认关闭的部署重检 agent（[ADR-0067](../../decisions/0067-bounded-mi-deployment-reconsideration.md)）
+复用 Responses Repairer 的新 request mode，基于相同冻结任务输入和精确计划反馈提议
+重查、完整修订草案或保持等待。原 Request 的次数/时限在调用前持久化；相同反馈、
+过期或变更的来源、重启、错误输出与提交不明均不能暗中增加重试预算。修订必须重新通过
+确定性校验、Reviewer、必要风险批准和 Control 预检；真实协作与完整目标仍保留。
+模型提议不选择执行器，也不执行物理恢复。正式提交后只走已有接纳对账与执行权威。
+新 observations v0.4 保存独立 session，公共 Request v0.4 和 MissionPlan 不变。
+Formal population 与官方 benchmark authority 保持独立。
 
 ```mermaid
 flowchart LR
-    MI[生产 MI 规划与审查] --> Q[可选 Controller 只读预检]
+    MI[生产 MI 规划与审查及必要批准] --> Q[可选 Controller 只读预检]
     E[冻结 reset 来源与当前 Control eligibility] --> Q
     Q -->|blocked / unavailable| H[Request durable hold]
     H -->|显式 retry 同一计划| Q
+    H -->|单独启用并持久化预算| R[MI Repairer 部署重检 agent]
+    R -->|recheck 同一计划| Q
+    R -->|revise_plan 完整草案| V[完整校验与新 Reviewer及必要批准]
+    V --> Q
+    R -->|wait 或预算来源不足| H
     Q -->|not_blocked| S[唯一 Mission submit]
     S --> C[Control Match Schedule Commit Bind]
     C --> X[Runtime Node Local EAIOS]
     X --> B[独立官方 benchmark 判定]
 ```
 
-这是已实现路径图，不表示模型会自动修复物理缺口，也不表示真实 Episode3 已成功。
+这是已实现且默认关闭的路径图；离线测试不证明模型未来遵循契约、物理缺口可修复或
+真实 Episode3 已成功。提交不明只查询原接纳证据，不返回模型改写或另一次 POST。
 
 默认关闭的 step-aware Local How（[ADR-0063](../../decisions/0063-step-aware-local-navmesh-resolution.md)）
 让执行动作与 reset observer 共用复制后的导航配置。只细化垂直体素，保留已声明的正台阶

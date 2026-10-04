@@ -221,11 +221,21 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   inventory. Complete scoped disjoint combinations may hold the reviewed
   Request under an explicitly enabled deployment readiness policy; bounded
   misses and unknowns never independently block. Explicit retry rechecks the
-  same plan, with no model regeneration, reservation or automatic reassignment.
+  same plan by default, with no model regeneration, reservation or automatic reassignment.
   Recovery evidence v0.2 durably fences interrupted queries. Attributable holds
   remain Formal system failures with benchmark unavailable. The neutral schema
-  lives in `contracts/mission/initial-operation-assessment-v0.1/`; public Request,
+  lives in `contracts/mission/initial-operation-assessment-v0.2/` (v0.1 archives remain readable); public Request,
   MissionPlan and Core authority are unchanged, and defaults remain off.
+- Optional pre-submission MI deployment reconsideration (ADR-0067) uses exact-plan
+  assessment v0.2 with bounded query-time exclusion counters, never live inventory.
+  The configured Responses Repairer proposes recheck, complete draft revision or
+  wait under durable, nonrenewable count/time bounds. Revisions re-enter full
+  validation, Reviewer, risk approval and Control preflight. Identical feedback,
+  source/context change, expiry and restart cannot renew calls; ambiguous submission
+  permits existing read-only reconciliation only. Immutable session v0.1 is carried
+  by observations v0.4 while public Request/MissionPlan stay unchanged; zero attempts
+  keeps the unchanged-plan path. This is not execution-time replanning or proof of
+  model semantic fidelity, physical feasibility or benchmark success.
 - Optional step-aware NavMesh resolution (ADR-0063) is a default-off Local How
   profile, separate from diagnostic observation. Active navigation and reset
   observation use identical copied settings; vertical cells may be refined to

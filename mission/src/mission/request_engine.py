@@ -13,7 +13,16 @@ from typing import Protocol, cast
 from mission.approval import ApprovalPolicy
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionControllerError, MissionPlanSubmitter, SubmissionReceipt
-from mission.deployment_assessment import InitialOperationAssessment
+from mission.deployment_assessment import DIAGNOSTIC_SCHEMA, InitialOperationAssessment
+from mission.deployment_recovery import (
+    MAX_ATTEMPTS,
+    MAX_DURATION_MS,
+    DeploymentRecoveryAction,
+    DeploymentRecoveryAttempt,
+    DeploymentRecoveryDecision,
+    DeploymentRecoverySession,
+    frozen_document,
+)
 from mission.grounding_context import (
     GroundingContextSnapshot,
     admitted_physical_entity_ids,
@@ -125,6 +134,8 @@ class MissionRequestEngine:
         prevalidation_recovery_attempts: int = 0,
         provider_identity: JSONObject | None = None,
         controller_preflight_enabled: bool = False,
+        max_deployment_recovery_attempts: int = 0,
+        deployment_recovery_timeout_ms: int = 900_000,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
@@ -153,6 +164,26 @@ class MissionRequestEngine:
         if not isinstance(controller_preflight_enabled, bool):
             raise MissionRequestError("controller preflight flag must be a Boolean")
         self._controller_preflight_enabled = controller_preflight_enabled
+        if (
+            type(max_deployment_recovery_attempts) is not int
+            or not 0 <= max_deployment_recovery_attempts <= MAX_ATTEMPTS
+        ):
+            raise MissionRequestError("deployment recovery attempts must be between 0 and 3")
+        if (
+            type(deployment_recovery_timeout_ms) is not int
+            or not 0 < deployment_recovery_timeout_ms <= MAX_DURATION_MS
+        ):
+            raise MissionRequestError("deployment recovery timeout is invalid")
+        if max_deployment_recovery_attempts and (
+            not controller_preflight_enabled
+            or reviewer is None
+            or not callable(getattr(repairer, "reconsider_deployment", None))
+        ):
+            raise MissionRequestError(
+                "deployment recovery requires preflight, Reviewer and a reconsideration port"
+            )
+        self._max_deployment_recovery_attempts = max_deployment_recovery_attempts
+        self._deployment_recovery_timeout_ms = deployment_recovery_timeout_ms
         self._grounding_reader = grounding_reader or EmptyMissionGroundingReader()
         self._identity_lock = threading.Lock()
         self._request_locks_guard = threading.Lock()
@@ -862,7 +893,7 @@ class MissionRequestEngine:
         if self._controller_preflight_enabled:
             record, assessment = self._assess_deployment(record, plan)
             if assessment is None or assessment.decision != "not_blocked":
-                return record
+                return self._recover_deployment_hold(record, assessment)
         record = self._update(
             record,
             lifecycle=MissionRequestLifecycle.SUBMITTING,
@@ -918,8 +949,9 @@ class MissionRequestEngine:
         """Observe initial support once; keep deployment holds outside semantic review.
 
         Explicit retry reevaluates the same approved plan and immutable context.
-        No automatic Provider call, new dialogue or Mission submission occurs on
-        blocked/unavailable feedback. Unknown candidates in a usable assessment
+        This query does not call a Provider, change dialogue or submit a Mission;
+        optional reconsideration is a separate, durably budgeted transition.
+        Unknown candidates in a usable assessment
         are allowed; not_blocked is neither feasibility nor admission evidence.
         """
         record = self._update(
@@ -974,6 +1006,203 @@ class MissionRequestEngine:
             recovery_evidence=recovery,
         )
         return record, assessment
+
+    def _recover_deployment_hold(
+        self, record: MissionRequestRecord, assessment: InitialOperationAssessment | None
+    ) -> MissionRequestRecord:
+        """Let MI propose one bounded next step, then re-enter ordinary Review and Control.
+
+        Time/count budgets are persisted before each model effect. A repeat reply,
+        expired source, unbound feedback or submission ambiguity cannot trigger
+        another call. Transport faults are recorded, never automatically retried.
+        """
+        if not self._max_deployment_recovery_attempts or assessment is None:
+            return record
+        plan = record.plan
+        context = self._require_grounding_context(record)
+        intent_assessment = record.assessment
+        if (
+            self._submission_attempted(record)
+            or plan is None
+            or intent_assessment is None
+            or assessment.schema_version != DIAGNOSTIC_SCHEMA
+            or assessment.reason_code
+            in {
+                "source_unconfigured",
+                "source_expired",
+                "controller_restored",
+                "world_already_admitted",
+            }
+            or any(
+                item is None
+                for item in (
+                    assessment.source_digest,
+                    assessment.world_snapshot_digest,
+                    assessment.local_how_digest,
+                )
+            )
+            or assessment.received_at_ms is None
+            or assessment.expires_at_ms is None
+            or not assessment.received_at_ms <= assessment.assessed_at_ms < assessment.expires_at_ms
+            or not 0 < assessment.expires_at_ms - assessment.received_at_ms <= 600_000
+            or not record.review_history
+            or not record.review_history[-1].review.approved
+            or record.review_history[-1].draft_digest != record.draft_digest
+            or record.review_history[-1].grounding_context_digest != context.context_digest
+        ):
+            return record
+        now = self._clock()
+        session = record.deployment_recovery or DeploymentRecoverySession(
+            record.request_id,
+            record.mission_id,
+            self._max_deployment_recovery_attempts,
+            now,
+            now + self._deployment_recovery_timeout_ms,
+        )
+        if (
+            len(session.attempts)
+            >= min(session.max_attempts, self._max_deployment_recovery_attempts)
+            or not session.started_at_ms <= now < session.expires_at_ms
+        ):
+            return self._update(
+                record, issues=(*record.issues, "deployment recovery count/time budget exhausted")
+            )
+        comparable = assessment.to_json()
+        comparable.pop("assessed_at_ms")
+        if session.attempts:
+            prior_attempt = session.attempts[-1]
+            if prior_attempt.grounding_context_digest != context.context_digest or any(
+                getattr(prior_attempt.assessment, field) != getattr(assessment, field)
+                for field in (
+                    "source_digest",
+                    "world_snapshot_digest",
+                    "local_how_digest",
+                    "received_at_ms",
+                    "expires_at_ms",
+                )
+            ):
+                return self._update(
+                    record,
+                    issues=(
+                        *record.issues,
+                        "deployment recovery context/source changed; recovery held",
+                    ),
+                )
+            previous = prior_attempt.assessment.to_json()
+            previous.pop("assessed_at_ms")
+            if previous == comparable:
+                return self._update(
+                    record, issues=(*record.issues, "unchanged deployment feedback; recovery held")
+                )
+        attempt = DeploymentRecoveryAttempt(
+            len(session.attempts) + 1,
+            frozen_document(plan.to_json()),
+            canonical_plan_digest(plan.to_json()),
+            context.context_digest,
+            assessment,
+            now,
+        )
+        session = replace(session, attempts=(*session.attempts, attempt))
+        record = self._update(
+            record, lifecycle=MissionRequestLifecycle.REPAIRING, deployment_recovery=session
+        )
+        raw: JSONObject | None = None
+        decision: DeploymentRecoveryDecision | None = None
+        error: Exception | None = None
+        try:
+            reconsider = getattr(self._repairer, "reconsider_deployment", None)
+            if not callable(reconsider):
+                raise MissionRequestError("deployment reconsideration port unavailable")
+            result = reconsider(
+                record.mission_id,
+                intent_assessment.grounded_intent(),
+                plan,
+                assessment,
+                self._capability_catalog,
+                context,
+                session,
+            )
+            if (
+                not isinstance(result, tuple)
+                or len(result) != 2
+                or not isinstance(result[0], DeploymentRecoveryDecision)
+                or not isinstance(result[1], dict)
+            ):
+                raise MissionRequestError("deployment reconsideration returned invalid evidence")
+            decision, raw = result
+            frozen_document(raw)
+            if (
+                decision.replacement_plan is not None
+                and decision.replacement_plan.mission.mission_id != record.mission_id
+            ):
+                raise MissionRequestError("deployment reconsideration changed Mission identity")
+        except Exception as failure:
+            error = failure
+            raw = None
+            observed = getattr(failure, "recovery_provider_output", None)
+            if isinstance(observed, dict):
+                try:
+                    frozen_document(observed)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    raw = observed
+            if isinstance(failure, RejectedPlanError | MissionIdentityError):
+                record = self._record_rejected_output(record, context, failure, "repairer")
+        finished = self._clock()
+        if finished < attempt.started_at_ms:
+            finished = attempt.started_at_ms
+            error = error or MissionRequestError(
+                "deployment recovery clock regressed; result not applied"
+            )
+        expired = finished >= session.expires_at_ms
+        attempt = replace(
+            attempt,
+            finished_at_ms=finished,
+            outcome="failed" if error else "expired" if expired else "decided",
+            decision=None if error else decision,
+            provider_output_json=frozen_document(raw) if raw is not None else None,
+            error_type=type(error).__name__ if error else None,
+        )
+        session = replace(session, attempts=(*session.attempts[:-1], attempt))
+        record = self._update(
+            record, lifecycle=MissionRequestLifecycle.BLOCKED, deployment_recovery=session
+        )
+        if error is not None:
+            return self._update(
+                record,
+                issues=(f"deployment reconsideration failed: {type(error).__name__}",),
+                failure_evidence=self._failure_evidence(
+                    record, "repairer", type(error).__name__, classify_failure(error)
+                ),
+            )
+        if expired or decision is None:
+            return self._update(record, issues=("deployment recovery time budget exhausted",))
+        if decision.action is DeploymentRecoveryAction.WAIT:
+            return self._update(record, issues=(assessment.reason_code, decision.explanation))
+        if decision.action is DeploymentRecoveryAction.RECHECK:
+            return self._submit(record)
+        replacement = decision.replacement_plan
+        if (
+            replacement is None
+            or canonical_plan_digest(replacement.to_json()) == record.draft_digest
+        ):
+            return self._update(
+                record, issues=("deployment reconsideration returned an unchanged draft",)
+            )
+        try:
+            record = self._record_draft(
+                record, intent_assessment, intent_assessment.grounded_intent(), replacement
+            )
+        except Exception as failure:
+            return self._update(
+                record,
+                issues=("deployment replacement failed deterministic admission",),
+                failure_evidence=self._failure_evidence(
+                    record, "draft_validation", str(failure), classify_failure(failure)
+                ),
+            )
+        return self._review_and_advance(record, intent_assessment.grounded_intent())
 
     def _reduce_submission_receipt(
         self, record: MissionRequestRecord, receipt: SubmissionReceipt
@@ -1073,10 +1302,14 @@ class MissionRequestEngine:
         rejected_drafts: tuple[RejectedDraftEvidence, ...] | None = None,
         recovery_evidence: RequestRecoveryEvidence | None | _Unset = _UNSET,
         admission_evidence: ControllerAdmissionEvidence | None | _Unset = _UNSET,
+        deployment_recovery: DeploymentRecoverySession | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
             record,
+            deployment_recovery=record.deployment_recovery
+            if isinstance(deployment_recovery, _Unset)
+            else deployment_recovery,
             dialogue=record.dialogue if dialogue is None else dialogue,
             lifecycle=record.lifecycle if lifecycle is None else lifecycle,
             assessment=(record.assessment if isinstance(assessment, _Unset) else assessment),
@@ -1285,10 +1518,26 @@ class MissionRequestEngine:
         for record in self._store.records():
             if record.lifecycle in transient:
                 if (
-                    record.lifecycle is MissionRequestLifecycle.SUBMITTING
-                    and record.recovery_evidence is not None
+                    record.recovery_evidence is not None
                     and record.recovery_evidence.stage is FailureStage.CONTROLLER_PREFLIGHT
                 ):
+                    session = record.deployment_recovery
+                    if (
+                        session is not None
+                        and session.attempts
+                        and session.attempts[-1].outcome == "pending"
+                    ):
+                        interrupted = replace(
+                            session.attempts[-1],
+                            outcome="interrupted",
+                            finished_at_ms=max(self._clock(), session.attempts[-1].started_at_ms),
+                        )
+                        record = self._update(
+                            record,
+                            deployment_recovery=replace(
+                                session, attempts=(*session.attempts[:-1], interrupted)
+                            ),
+                        )
                     issue = "Controller preflight interrupted by Mission Service restart"
                     self._update(
                         record,

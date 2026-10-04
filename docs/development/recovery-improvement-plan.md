@@ -6,6 +6,11 @@
 > 自动停滞策略、shared-world 独立 Role 停止/重试与执行期新版本 MI 计划仍待验证/设计。
 > 调查基线为 `dev@4dd8063219c3fb09def3aa698b2fceb6075454e1`。
 
+> 2026-10-04 更新：ADR-0067 已补齐默认关闭的提交前 MI 部署重检。新 assessment v0.2
+> 给出当次 Control 排除原因计数；Responses Repairer 在持久化预算内提议重查、修订
+> 或等待。修订重过 Reviewer、审批及 Control，不读取实时 Node inventory，不改变
+> 已提交计划。详见第 6 节；真实模型表现和物理效果仍须另外验证。
+
 ## 1. 先区分失败位置与执行权威
 
 “机器收到前出错”不是充分的安全重试条件。必须区分尚未提交的草案、已被 Control
@@ -98,6 +103,32 @@ skill budget exhausted、capability/feasibility failure、terminal-world budget 
 先补齐配对观测及 Provider 返回身份，冻结两臂配置，避免优化前后混用结果。随后按
 下发前分类 -> 只读进度观测 -> 有界本地恢复 -> 可靠停止后的 Control 恢复 -> MI 计划恢复推进。
 每阶段先 deterministic tests，再独立受控诊断，不按成功结果追加尝试。
+
+## 6. 已实现的提交前部署重检边界
+
+[ADR-0067](../decisions/0067-bounded-mi-deployment-reconsideration.md) 复用现有 Repairer
+增加 `deployment_recovery` 模式；普通语义 RepairPlan 路由不变。输入是当前已审查草案、
+同一冻结任务/grounding/catalog/policy/profile 和来源绑定的 assessment v0.2。
+输出只有 `recheck`、`revise_plan` 或 `wait_for_evidence`。候选排除计数来自当前 Matching
+的同一谓词，而不是从之后健康快照反推原因；反馈不携带具体 Node/Resource inventory。
+
+模型调用前保存 pending attempt、完整 input、digest 和原次数/时限。默认 0 次，显式
+启用最多 3 次，最长 900 秒；调用等待受剩余时限限制，迟到结果不应用，重启关闭 pending
+但不恢复预算。相同反馈、来源或 context 变更、过期及提交不明都阻止再次模型恢复。
+明确的新 dialogue 不重置 Request 预算，也不能把旧 context 当成新模型输入的证据。
+
+完整修订必须再经过既有确定性 admission、独立 Reviewer、必要的新 revision 风险批准
+和 Control 当前预检。没有自动合并 Actor、删除 Task、降低协作、创造能力或目标修正。
+无法给出有原任务/部署依据的修订时保留 hold。保存全量、有界原始模型输出和 canonical
+decision；新版 observations v0.4 的 session 由 restore 和 B1 provenance 检查。
+现有 Formal、semantic omission diagnostic 与官方 benchmark 规则保持独立。
+
+实现入口：`request_engine.py::_recover_deployment_hold`、
+`responses.py::ResponsesMissionRepairer.reconsider_deployment`、
+`core/control/src/matching.rs::first_use_candidate_diagnostics`；
+启动选项为 `ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS=0..3`。架构路径图已同步到
+[V2 当前部署视图](../architecture/v2/README.md)。离线回归覆盖 authority fence 和真实
+Responses 适配/规范化，并不证明模型会提出有效的任务组织，亦不证明 Episode3 已解决。
 
 通用验收必须覆盖重复故障去重、取消/完成竞态、旧 attempt 的迟到消息、Controller/Node
 重启、资源释放失败、局部与全 Group 释放区别、多个 Mission 隔离和恢复预算耗尽。

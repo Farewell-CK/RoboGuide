@@ -659,13 +659,26 @@ Controller 用现有 Control Matching 的私有副本检查受支持的初始组
 完整的静态不相交证据时，或所要求的预检不可用时，Request 显式 Blocked；有限搜索
 未找到与 unknown 本身不阻塞。该 hold 是声明的部署就绪策略，不是物理不可解证明。
 
-显式 retry 只重查同一份已审查计划和冻结 context，不重新调用模型；通过后才走原来的
+默认零次模型恢复时，显式 retry 只重查同一份已审查计划和冻结 context；通过后才走原来的
 唯一提交路径。中途重启恢复为可观察的 hold，不能偷偷重规划。真实预检失败仍计入
 Formal population 的系统失败，官方物理结果 unavailable。默认关闭，不改 Prompt、
 机器人能力、官方任务或控制动作；初次证据不用于后续顺序 Task、恢复或新的 world。
 Schema、开关、时限及未验证边界见
 [ADR-0066](docs/decisions/0066-initial-operation-support-feedback.md) 和
-[反馈契约](contracts/mission/initial-operation-assessment-v0.1/README.md)。
+[反馈契约 v0.2](contracts/mission/initial-operation-assessment-v0.2/README.md)。新反馈记录当次
+查询的首个 Control 排除原因计数，不暴露 Node/Resource inventory；之后健康不改写之前原因。
+
+`ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS=1..3` 可另外启用有界 MI 部署重检 agent，
+默认 `0`，要求上述 initial-support preflight 已开启。复用生产 Responses Repairer，在
+同一冻结任务/context/catalog/policy/profile 下，提议 `recheck`、`revise_plan` 或
+`wait_for_evidence`。调用前持久化原始次数和不续期的时限；相同反馈、来源变化、
+过期和重启不导致重复调用。修订必须重新通过完整校验、Reviewer、必要风险审批与
+Control 预检。不能删目标、伪造能力、降低真实合作需求或直接选择物理执行器。
+发生提交不明后只能接纳对账，不能返回模型重规划。Session 归档进入 observations v0.4，
+公共 Request/Plan 与 Formal/benchmark 规则不变。理论调用预算单独归档，不自动增加
+实验的 observation deadline。实现、版本及模型验证限制见
+[ADR-0067](docs/decisions/0067-bounded-mi-deployment-reconsideration.md) 和
+[恢复证据契约](contracts/mission/deployment-recovery-session-v0.1/README.md)。
 
 ## 三条核心语义链
 

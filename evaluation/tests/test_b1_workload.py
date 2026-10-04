@@ -58,6 +58,39 @@ def test_episode51_fixture_remains_a_valid_workload() -> None:
 
 
 @pytest.mark.parametrize(
+    ("attempts", "preflight", "accepted"),
+    [
+        ("0", "0", True),
+        ("2", "1", True),
+        ("1", "0", False),
+        ("4", "1", False),
+        ("true", "1", False),
+    ],
+)
+def test_reconsideration_launcher_gate_is_explicit_and_bounded(
+    attempts: str, preflight: str, accepted: bool
+) -> None:
+    """Execute the real gate; invalid options cannot reach workload parsing or SUT launch."""
+    script = RUNNER.read_text()
+    gate = script.split('INITIAL_SUPPORT_FLAG="', 1)[1].split("# The workload", 1)[0]
+    outcome = subprocess.run(
+        ["bash", "-c", 'INITIAL_SUPPORT_FLAG="' + gate],
+        env={
+            "ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS": attempts,
+            "ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT": preflight,
+            "ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES": "1",
+            "ROBOGUIDE_B1_RESET_ROUTE_SUPPORT": "1",
+            "ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY": "1",
+            "ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (outcome.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("episode_id", None),

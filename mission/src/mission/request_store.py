@@ -8,12 +8,14 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
+from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot
 from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
 from mission.submission_evidence import (
     COMPATIBLE_OBSERVATIONS_SCHEMAS,
+    DEPLOYMENT_OBSERVATIONS_SCHEMA,
     OBSERVATIONS_SCHEMA,
     ControllerAdmissionEvidence,
     ControllerSubmissionEvidence,
@@ -49,11 +51,21 @@ def _restore_record(document: object) -> MissionRequestRecord:
         and "recovery_evidence" not in observations
     ):
         raise MissionRequestError("v0.2 observations must declare recovery evidence availability")
-    if schema == OBSERVATIONS_SCHEMA and "admission_evidence" not in observations:
+    if (
+        schema in {OBSERVATIONS_SCHEMA, DEPLOYMENT_OBSERVATIONS_SCHEMA}
+        and "admission_evidence" not in observations
+    ):
         raise MissionRequestError("v0.3 observations must declare admission evidence availability")
+    if (schema == DEPLOYMENT_OBSERVATIONS_SCHEMA) != ("deployment_recovery" in observations):
+        raise MissionRequestError("deployment recovery observations must declare their schema")
     try:
         recovery_evidence = (
             RequestRecoveryEvidence.from_json(recovery) if recovery is not None else None
+        )
+        deployment_recovery = (
+            DeploymentRecoverySession.from_json(observations["deployment_recovery"])
+            if schema == DEPLOYMENT_OBSERVATIONS_SCHEMA
+            else None
         )
     except (ValueError, TypeError, KeyError) as error:
         raise MissionRequestError("invalid durable recovery evidence") from error
@@ -82,6 +94,7 @@ def _restore_record(document: object) -> MissionRequestRecord:
         admission_evidence=ControllerAdmissionEvidence.from_json(admission)
         if admission is not None
         else None,
+        deployment_recovery=deployment_recovery,
     )
 
 

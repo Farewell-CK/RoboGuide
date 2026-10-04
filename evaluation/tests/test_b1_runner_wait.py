@@ -268,6 +268,15 @@ def test_budget_follows_the_actual_run_configuration(tmp_path: Path) -> None:
     preflight = derive_wait_budget(mission, service)
     assert preflight.total_seconds == changed.total_seconds + 30
     assert preflight.components["controller_preflight"] == 30
+    service.write_text(
+        service.read_text()
+        + "max_deployment_recovery_attempts = 3\ndeployment_recovery_timeout_ms = 100000\n"
+    )
+    recovery = derive_wait_budget(mission, service)
+    assert recovery.components["deployment_reconsideration"] == 100
+    assert recovery.components["deployment_rereview"] == 360
+    assert recovery.components["controller_preflight"] == 120
+    assert recovery.total_seconds == preflight.total_seconds + 100 + 360 + 90
     with pytest.raises(WaitConfigurationError):
         derive_wait_budget(tmp_path / "missing.toml", service)
 

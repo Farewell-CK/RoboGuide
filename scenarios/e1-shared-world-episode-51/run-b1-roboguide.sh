@@ -205,6 +205,15 @@ trap finish_run EXIT
 INITIAL_PREFERENCES_PATH=""
 INITIAL_PREFERENCES_SOURCE=""
 INITIAL_SUPPORT_FLAG="${ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT:-0}"
+DEPLOYMENT_RECOVERY_ATTEMPTS="${ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS:-0}"
+case "$DEPLOYMENT_RECOVERY_ATTEMPTS" in
+    0|1|2|3) ;;
+    *) echo "deployment recovery attempts must be between 0 and 3" >&2; exit 1 ;;
+esac
+if [[ "$DEPLOYMENT_RECOVERY_ATTEMPTS" != 0 && "$INITIAL_SUPPORT_FLAG" != 1 ]]; then
+    echo "deployment recovery requires initial support assessment" >&2
+    exit 1
+fi
 if [[ "$INITIAL_SUPPORT_FLAG" != 0 && "$INITIAL_SUPPORT_FLAG" != 1 ]]; then
     echo "initial support assessment flag must be 0 or 1" >&2
     exit 1
@@ -262,6 +271,8 @@ if [[ "$INITIAL_SUPPORT_FLAG" == 1 ]]; then
     sed -i 's/^controller_preflight_enabled = false$/controller_preflight_enabled = true/' \
         "$RUN/mission-service-b1.toml"
 fi
+sed -i "s/^max_deployment_recovery_attempts = 0$/max_deployment_recovery_attempts = $DEPLOYMENT_RECOVERY_ATTEMPTS/" \
+    "$RUN/mission-service-b1.toml"
 
 clean_port 25060
 clean_port 28060

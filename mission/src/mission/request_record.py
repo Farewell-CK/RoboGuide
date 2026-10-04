@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
+from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
@@ -217,10 +218,31 @@ class MissionRequestRecord:
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
     recovery_evidence: RequestRecoveryEvidence | None = None
     admission_evidence: ControllerAdmissionEvidence | None = None
+    deployment_recovery: DeploymentRecoverySession | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
         recovery = self.recovery_evidence
+        session = self.deployment_recovery
+        if session is not None:
+            if session.request_id != self.request_id or session.mission_id != self.mission_id:
+                raise MissionRequestError("deployment recovery belongs to another request")
+            if (
+                session.attempts
+                and session.attempts[-1].outcome == "pending"
+                and (
+                    self.plan is None
+                    or session.attempts[-1].input_plan_digest != self.draft_digest
+                    or self.grounding_context is None
+                    or session.attempts[-1].grounding_context_digest
+                    != self.grounding_context.context_digest
+                    or self.submission_evidence is not None
+                    or self.admission_evidence is not None
+                )
+            ):
+                raise MissionRequestError(
+                    "pending deployment recovery is detached from current draft/context"
+                )
         if (
             recovery is not None
             and recovery.reason is FailureReason.SUBMISSION_RECONCILED
@@ -313,6 +335,7 @@ class MissionRequestRecord:
             self.rejected_drafts,
             self.recovery_evidence,
             self.admission_evidence,
+            self.deployment_recovery,
         )
 
     @classmethod

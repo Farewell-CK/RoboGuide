@@ -62,7 +62,11 @@ def build_engine(
             execution_profile=execution_profile,
             planning_profile=planning_profile,
         )
-        if reviewer is not None and planner_settings.max_repair_attempts > 0
+        if reviewer is not None
+        and (
+            planner_settings.max_repair_attempts > 0
+            or service_settings.max_deployment_recovery_attempts > 0
+        )
         else None
     )
     engine = MissionRequestEngine(
@@ -79,6 +83,8 @@ def build_engine(
         service_settings.approval_policy,
         prevalidation_recovery_attempts=planner_settings.prevalidation_recovery_attempts,
         controller_preflight_enabled=service_settings.controller_preflight_enabled,
+        max_deployment_recovery_attempts=service_settings.max_deployment_recovery_attempts,
+        deployment_recovery_timeout_ms=service_settings.deployment_recovery_timeout_ms,
         provider_identity={
             "provider": planner_settings.llm.model_provider,
             "model": planner_settings.llm.model,

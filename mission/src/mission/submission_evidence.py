@@ -12,16 +12,19 @@ from typing import TYPE_CHECKING, cast
 from mission.models import JSONObject
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only dependency keeps the modules acyclic
+    from mission.deployment_recovery import DeploymentRecoverySession
     from mission.recovery import RequestRecoveryEvidence
     from mission.rejected_draft import RejectedDraftEvidence
 
 SUBMISSION_EVIDENCE_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.3"
+DEPLOYMENT_OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.4"
 COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
     {
         "roboguide.mission-request-observations/v0.1",
         "roboguide.mission-request-observations/v0.2",
         OBSERVATIONS_SCHEMA,
+        DEPLOYMENT_OBSERVATIONS_SCHEMA,
     }
 )
 
@@ -127,7 +130,15 @@ class MissionRequestObservations:
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
     recovery_evidence: RequestRecoveryEvidence | None = None
     admission_evidence: ControllerAdmissionEvidence | None = None
+    deployment_recovery: DeploymentRecoverySession | None = None
     schema_version: str = OBSERVATIONS_SCHEMA
+
+    def __post_init__(self) -> None:
+        """Keep the object version and serialized version consistent with session availability."""
+        if self.deployment_recovery is not None:
+            object.__setattr__(self, "schema_version", DEPLOYMENT_OBSERVATIONS_SCHEMA)
+        elif self.schema_version == DEPLOYMENT_OBSERVATIONS_SCHEMA:
+            raise ValueError("v0.4 observations require a deployment recovery session")
 
     def to_json(self) -> JSONObject:
         """Bind the observations to the exact public request projection."""
@@ -138,4 +149,8 @@ class MissionRequestObservations:
         document["recovery_evidence"] = (
             self.recovery_evidence.to_json() if self.recovery_evidence is not None else None
         )
+        if self.deployment_recovery is not None:
+            document["deployment_recovery"] = self.deployment_recovery.to_json()
+        else:
+            document.pop("deployment_recovery")
         return document

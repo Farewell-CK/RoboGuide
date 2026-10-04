@@ -176,6 +176,7 @@ impl ControlPlane {
         timestamp: TimestampMs,
     ) -> Result<Vec<RoleCandidateDiagnostics>, ControlError> {
         if mission.goal().mission_id() != requirement.mission_id()
+            || mission.binding_semantics().requires_physical_entities()
             || self
                 .mission_binding_semantics(requirement.mission_id())
                 .is_some()
@@ -257,16 +258,15 @@ impl ControlPlane {
         if let Some(reason) = self.node_role_exclusion(state, node, role, timestamp) {
             return Some(reason);
         }
-        if let Some(actor) = role.actor_id() {
-            if self
+        if let Some(actor) = role.actor_id()
+            && (self
                 .actor_candidate_restriction(task.mission_id(), actor)
                 .is_some_and(|restriction| !restriction.allowed_nodes().contains(node))
                 || self
                     .actor_node_constraint(task.mission_id(), actor)
-                    .is_some_and(|constraint| constraint.node_id() != node)
-            {
-                return Some(crate::CandidateExclusionReason::DeploymentRestriction);
-            }
+                    .is_some_and(|constraint| constraint.node_id() != node))
+        {
+            return Some(crate::CandidateExclusionReason::DeploymentRestriction);
         }
         let registration = state
             .node(node)

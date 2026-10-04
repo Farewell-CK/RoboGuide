@@ -16,6 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from mission.deployment_recovery import DeploymentRecoverySession
 from mission.models import MissionPlan
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
@@ -40,6 +41,7 @@ COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
         OBSERVATIONS_SCHEMA,
         "roboguide.mission-request-observations/v0.2",
         "roboguide.mission-request-observations/v0.3",
+        "roboguide.mission-request-observations/v0.4",
     }
 )
 _DIGEST = re.compile(r"sha256:[a-f0-9]{64}$")
@@ -104,6 +106,7 @@ class ProvenanceFailure(StrEnum):
     MI_GENERATION_EVIDENCE_MISSING = "mi_generation_evidence_missing"
     MI_RUN_PLAN_DIGEST_MISMATCH = "mi_run_plan_digest_mismatch"
     MI_REVIEW_CONTEXT_MISMATCH = "mi_review_context_mismatch"
+    MI_DEPLOYMENT_RECOVERY_INVALID = "mi_deployment_recovery_invalid"
     PLAN_MISSING = "plan_missing"
     PLAN_DIGEST_MISMATCH = "plan_digest_mismatch"
     FINAL_REVIEW_MISMATCH = "final_review_mismatch"
@@ -262,19 +265,38 @@ def observed_request(request: Any, observations: Any) -> dict[str, Any]:
         or obs.get("request_id") != doc.get("request_id")
         or obs.get("mission_id") != doc.get("mission_id")
         or obs.get("request_record_digest") != plan_digest(doc)
+        or (
+            (obs.get("schema_version") == "roboguide.mission-request-observations/v0.4")
+            != ("deployment_recovery" in obs)
+        )
     ):
         return {
             key: value
             for key, value in doc.items()
-            if key not in {"submission_evidence", "failure_evidence", "admission_evidence"}
+            if key
+            not in {
+                "submission_evidence",
+                "failure_evidence",
+                "admission_evidence",
+                "deployment_recovery",
+            }
         }
     return {
         **doc,
         "submission_evidence": obs.get("submission_evidence"),
         "failure_evidence": obs.get("failure_evidence"),
         "recovery_evidence": obs.get("recovery_evidence"),
+        **(
+            {"deployment_recovery": obs.get("deployment_recovery")}
+            if obs.get("schema_version") == "roboguide.mission-request-observations/v0.4"
+            else {}
+        ),
         "admission_evidence": obs.get("admission_evidence")
-        if obs.get("schema_version") == "roboguide.mission-request-observations/v0.3"
+        if obs.get("schema_version")
+        in {
+            "roboguide.mission-request-observations/v0.3",
+            "roboguide.mission-request-observations/v0.4",
+        }
         else None,
     }
 
@@ -325,6 +347,27 @@ def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure
         failures.append(ProvenanceFailure.FINAL_REVIEW_MISMATCH)
         history = []
     context_digest = _object(request.get("grounding_context")).get("context_digest")
+    if "deployment_recovery" in request:
+        try:
+            session = DeploymentRecoverySession.from_json(request["deployment_recovery"])
+            approved_digests = {
+                _object(item).get("draft_digest")
+                for item in history
+                if _object(_object(item).get("review")).get("approved") is True
+            }
+            if (
+                session.request_id != request.get("request_id")
+                or session.mission_id != request.get("mission_id")
+                or any(
+                    item.grounding_context_digest != context_digest
+                    or item.input_plan_digest not in approved_digests
+                    for item in session.attempts
+                )
+                or (not early and any(item.outcome == "pending" for item in session.attempts))
+            ):
+                raise ValueError("deployment recovery is detached from review/context")
+        except (KeyError, TypeError, ValueError):
+            failures.append(ProvenanceFailure.MI_DEPLOYMENT_RECOVERY_INVALID)
     for item in history:
         review_context_digest = _object(item).get("grounding_context_digest")
         if (

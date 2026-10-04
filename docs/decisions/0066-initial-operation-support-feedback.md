@@ -48,11 +48,15 @@ addresses that distinction correctly.
    restarting deliberation or treating it as an ambiguous Mission submission.
 6. An explicit existing Request retry performs one new read-only assessment of
    the same reviewed plan/context. It does not call Interpreter, Planner,
-   Reviewer or Repairer. Passing preflight proceeds through the existing sole
+   Reviewer or Repairer by default. ADR-0067 separately opts into bounded,
+   reviewed model-proposed reconsideration without changing this default.
+   Passing preflight proceeds through the existing sole
    Mission POST and its admission/ambiguity fence. Disabling configuration
    cannot bypass a saved hold. Existing cancel remains available before submit.
 7. Recovery evidence v0.2 preserves the full response; outer observations v0.3
-   and public Request v0.4 remain unchanged. Legacy recovery v0.1 remains valid
+   and public Request v0.4 remain unchanged for this profile. ADR-0067 uses
+   observations v0.4 only when a separate deployment recovery session exists.
+   Legacy recovery v0.1 remains valid
    for old boundaries, but cannot encode preflight or conceal assessment fields.
    Exact current draft/context/body/slot checks reject detached feedback.
 8. B1 archives this reached boundary using the existing early-failure protocol.
@@ -70,8 +74,9 @@ addresses that distinction correctly.
 
 The Controller application owns the bounded assessment projection; Core still
 owns Matching, Schedule, Commit and Bind. MI's Request Engine owns the durable
-hold and explicit retry. Models receive no new input, live inventory or executor
-selection authority. The Local EAIOS, prompts, official goals, initial states,
+hold and explicit retry. Without ADR-0067 opt-in, models receive no new input;
+neither profile grants live inventory or executor selection authority. This slice
+leaves Local EAIOS, prompts, official goals, initial states,
 robot abilities, skill budgets and external EMOS code are unchanged.
 
 Deterministic checks cover joint shortages, retained candidates, unknown/bounded
@@ -101,6 +106,6 @@ operations: normal admission revalidates current Control facts and may still fai
 
 This change does not synthesize routes, reassign an Actor, add executors, change
 goals, reset a world or automatically rewrite a plan. Grounded reorganization of
-a held plan needs a separate semantic feedback design and execution authorization.
+a held plan uses the separately configured bounded proposal boundary in ADR-0067.
 Real validation of the opted-in profile is still required; this ADR does not
 claim Episode3 is solved or authorize bulk experiments.
