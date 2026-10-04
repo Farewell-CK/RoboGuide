@@ -549,6 +549,188 @@ pub(super) fn content_digest(body: &serde_json::Value) -> Result<String, String>
 mod tests {
     use super::*;
 
+    /// Load the synthetic, language-shared cases; these are not B1 experiment results.
+    fn support_regression_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../contracts/mission/initial-operation-assessment-v0.2/fixtures/regression-cases.json"
+        ))
+        .unwrap()
+    }
+
+    /// Keep the first and later serial Tasks separate without changing either exact intent.
+    fn support_regression_plan(
+        fixture: &serde_json::Value,
+        case: &serde_json::Value,
+    ) -> serde_json::Value {
+        let mut plan = fixture["plan"].clone();
+        if case["serial"] == true {
+            plan["mission"]["actors"] = serde_json::json!([{"id": "actor-a"}]);
+            plan["contexts"][1]["roles"][0]["actor"] = serde_json::json!("actor-a");
+            plan["tasks"][1]["depends_on"] = serde_json::json!([plan["tasks"][0]["id"]]);
+        }
+        plan
+    }
+
+    /// Construct source-bound observations from the fixed support matrix, not expected verdicts.
+    fn support_regression_deployment(
+        directory: &Path,
+        case: &serde_json::Value,
+    ) -> DeploymentFeasibility {
+        let matrix_path = directory.join("reset.json");
+        let mut matrix = snapshot(&matrix_path, true);
+        for (index, record) in matrix["records"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            record["destination"] = serde_json::json!(if index < 2 {
+                "landmark-a"
+            } else {
+                "landmark-b"
+            });
+        }
+        seal(&mut matrix);
+        std::fs::write(&matrix_path, matrix.to_string()).unwrap();
+        let mut deployment = DeploymentFeasibility::load(&matrix_path).unwrap();
+        let support = case["support"].as_array().unwrap();
+        let misses = std::array::from_fn(|index| support[index] == "static-disjoint");
+        let (mut source, mut projection) = geometry_preference_documents(&matrix, misses);
+        source["identity"]["local_how_digest"] =
+            serde_json::json!(format!("sha256:{}", "a".repeat(64)));
+        for (index, kind) in support.iter().enumerate() {
+            let record = &mut source["records"][index];
+            if kind == "witnessed" {
+                record["status"] = serde_json::json!("supported");
+                record["selection"] = serde_json::json!({"path_length_m": 1.5});
+                record["region_analysis"]["status"] = serde_json::json!("intersects");
+                projection["records"][index]["cost_micrometers"] = serde_json::json!(1_500_000);
+                projection["records"][index]["static_support"] = serde_json::json!("witnessed");
+            } else if kind == "unknown" {
+                record["status"] = serde_json::json!("unavailable");
+            } else {
+                assert!(kind == "bounded-miss" || kind == "static-disjoint");
+            }
+        }
+        seal(&mut source);
+        projection["source_digest"] = source["digest"].clone();
+        seal(&mut projection);
+        let source_path = directory.join("routes.json");
+        let projection_path = directory.join("preferences.json");
+        std::fs::write(&source_path, source.to_string()).unwrap();
+        std::fs::write(&projection_path, projection.to_string()).unwrap();
+        deployment
+            .configure_initial_preferences(
+                &projection_path,
+                &source_path,
+                domain::TimestampMs::new(0),
+                true,
+            )
+            .unwrap();
+        deployment.configure_initial_assessment().unwrap();
+        deployment
+    }
+
+    /// Freeze receive-time expiry in actual HTTP tests without wall-clock races.
+    struct AssessmentClock(domain::TimestampMs);
+
+    impl ports::Clock for AssessmentClock {
+        /// Return the one preregistered query time without renewing reset evidence.
+        fn now(&self) -> domain::TimestampMs {
+            self.0
+        }
+    }
+
+    /// Compare the neutral producer reply to shared consumer expectations and source identities.
+    fn assert_support_regression(
+        result: &serde_json::Value,
+        case: &serde_json::Value,
+        plan: &serde_json::Value,
+        directory: &Path,
+        body: &str,
+        now: domain::TimestampMs,
+    ) {
+        let expected = &case["expected"];
+        for key in [
+            "decision",
+            "reason_code",
+            "checked_combinations",
+            "placement_failure",
+        ] {
+            assert_eq!(result[key], expected[key], "case={}, {result}", case["id"]);
+        }
+        assert_eq!(result["mission_id"], plan["mission"]["id"]);
+        assert_eq!(
+            result["plan_body_sha256"],
+            format!("sha256:{:x}", Sha256::digest(body.as_bytes()))
+        );
+        assert_eq!(result["assessed_at_ms"], now.as_millis());
+        assert_eq!(result["received_at_ms"], 0);
+        assert_eq!(result["expires_at_ms"], 600_000);
+        for (filename, key) in [
+            ("preferences.json", "source_digest"),
+            ("reset.json", "world_snapshot_digest"),
+        ] {
+            let source: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(directory.join(filename)).unwrap()).unwrap();
+            assert_eq!(result[key], source["digest"]);
+        }
+        assert_eq!(
+            result["local_how_digest"],
+            format!("sha256:{}", "a".repeat(64))
+        );
+        let roles = result["roles"].as_array().unwrap();
+        let counts = expected["role_counts"].as_array().unwrap();
+        assert_eq!(roles.len(), counts.len());
+        for (index, role) in roles.iter().enumerate() {
+            assert_eq!(role["task_id"], plan["tasks"][index]["id"]);
+            assert_eq!(role["role_id"], "navigator");
+            assert_eq!(role["operation"], "mobility.navigate@v1");
+            for (count_index, key) in [
+                "witness_count",
+                "bounded_miss_count",
+                "scoped_disjoint_count",
+                "unknown_count",
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert_eq!(
+                    role[*key], counts[index][count_index],
+                    "case={}, {result}",
+                    case["id"]
+                );
+            }
+        }
+        let reports = result["candidate_diagnostics"].as_array().unwrap();
+        assert_eq!(reports.len(), counts.len());
+        for (index, report) in reports.iter().enumerate() {
+            assert_eq!(report["task_id"], plan["tasks"][index]["id"]);
+            assert_eq!(report["role_id"], "navigator");
+            for key in ["considered_count", "eligible_count", "exclusions"] {
+                assert_eq!(report[key], expected[key]);
+            }
+        }
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../contracts/mission/initial-operation-assessment-v0.2/assessment.schema.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            result.as_object().unwrap().keys().collect::<Vec<_>>(),
+            schema["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            result["schema_version"],
+            "roboguide.initial-operation-assessment/v0.2"
+        );
+        assert_eq!(result["scope"], "initial_static_world");
+        assert!(!result.to_string().contains("node-a") && !result.to_string().contains("node-b"));
+    }
+
     /// Freeze the original observation separately from its neutral cost projection.
     fn initial_route_document(
         matrix: &serde_json::Value,
@@ -977,90 +1159,109 @@ mod tests {
         );
     }
 
-    /// The real HTTP assessment leaves Mission, checkpoint and event authority untouched.
+    /// Shared positive/negative/unknown vectors cross real HTTP without changing Control authority.
     #[tokio::test]
     async fn initial_assessment_http_is_read_only_and_plan_bound() {
+        use ports::SharedNodeStateWriter;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let directory = tempfile::tempdir().unwrap();
-        let mut deployment = assessment_fixture(directory.path(), [false, true, false, true], true);
-        let clock = runtime::SystemMonotonicClock::new();
-        let now = ports::Clock::now(&clock);
-        deployment
-            .configure_initial_preferences(
-                &directory.path().join("preferences.json"),
-                &directory.path().join("routes.json"),
-                now,
-                true,
-            )
-            .unwrap();
-        let body = plan_document(false, true).to_string();
-        let plan = orchestration::decode_mission_plan(&body).unwrap();
-        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
-        let mut control = control::ControlPlane::new();
-        let state = initial_cost_nodes_at(&mut control, &plan, &mut log, now);
-        let before_sequence = log.latest_sequence().unwrap();
-        let controller = Arc::new(Mutex::new(ControllerState {
-            bridge: IntegrationRuntimeBridge::new(
-                control,
-                state,
-                log.clone(),
-                integration::GrpcNodeRouter::default(),
-            ),
-            orchestrator: MissionOrchestrator::new(),
-            mission_admissions: BTreeMap::new(),
-            verifier_seen: BTreeSet::new(),
-            verifier_source_digest: None,
-        }));
-        let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
-        let gate = Arc::new(Mutex::new(()));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = async {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            handle_http_connection(
-                &mut stream,
-                &controller,
-                &log,
-                &gate,
-                &clock,
-                Some(&deployment),
-                None,
-            )
+        let fixture = support_regression_fixture();
+        for case in fixture["cases"].as_array().unwrap() {
+            let directory = tempfile::tempdir().unwrap();
+            let deployment = support_regression_deployment(directory.path(), case);
+            let clock = AssessmentClock(domain::TimestampMs::new(
+                if case["condition"] == "expired" {
+                    600_000
+                } else {
+                    100
+                },
+            ));
+            let now = ports::Clock::now(&clock);
+            let document = support_regression_plan(&fixture, case);
+            let body = fixture["http_request_bodies"][if case["serial"] == true {
+                "serial"
+            } else {
+                "parallel"
+            }]
+            .as_str()
+            .unwrap()
+            .to_owned();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+                document
+            );
+            let plan = orchestration::decode_mission_plan(&body).unwrap();
+            let mut log =
+                state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+            let mut control = control::ControlPlane::new();
+            let mut state = initial_cost_nodes_at(&mut control, &plan, &mut log, now);
+            if case["condition"] == "endpoint_offline" {
+                state
+                    .record_node_health(domain::NodeHealthObservation::new(
+                        domain::NodeId::new("node-b").unwrap(),
+                        domain::NodeStatus::new(domain::NodeHealth::Offline, now),
+                        now,
+                    ))
+                    .unwrap();
+            }
+            let before_sequence = log.latest_sequence().unwrap();
+            let controller = Arc::new(Mutex::new(ControllerState {
+                bridge: IntegrationRuntimeBridge::new(
+                    control,
+                    state,
+                    log.clone(),
+                    integration::GrpcNodeRouter::default(),
+                ),
+                orchestrator: MissionOrchestrator::new(),
+                mission_admissions: BTreeMap::new(),
+                verifier_seen: BTreeSet::new(),
+                verifier_source_digest: None,
+            }));
+            let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
+            let gate = Arc::new(Mutex::new(()));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = async {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                handle_http_connection(
+                    &mut stream,
+                    &controller,
+                    &log,
+                    &gate,
+                    &clock,
+                    Some(&deployment),
+                    None,
+                )
+                .await
+                .unwrap();
+            };
+            let client = async {
+                let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+                stream.write_all(format!("POST /v1/missions/assess-initial-support HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                let mut reply = String::new();
+                stream.read_to_string(&mut reply).await.unwrap();
+                let (header, response_body) = reply.split_once("\r\n\r\n").unwrap();
+                assert!(header.starts_with("HTTP/1.1 200"));
+                let result: serde_json::Value = serde_json::from_str(response_body).unwrap();
+                assert_support_regression(&result, case, &document, directory.path(), &body, now);
+                println!(
+                    "initial-support-conformance {}",
+                    serde_json::json!({
+                        "case": case["id"], "request_body": body, "response": result,
+                    })
+                );
+            };
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(server, client)
+            })
             .await
             .unwrap();
-        };
-        let client = async {
-            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-            stream.write_all(format!("POST /v1/missions/assess-initial-support HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-            let mut reply = String::new();
-            stream.read_to_string(&mut reply).await.unwrap();
-            let (header, body) = reply.split_once("\r\n\r\n").unwrap();
-            assert!(header.starts_with("HTTP/1.1 200"));
-            let result: serde_json::Value = serde_json::from_str(body).unwrap();
-            assert_eq!(result["decision"], "blocked", "{result}");
-            let schema: serde_json::Value = serde_json::from_str(include_str!(
-                "../../../../contracts/mission/initial-operation-assessment-v0.2/assessment.schema.json"
-            )).unwrap();
             assert_eq!(
-                result.as_object().unwrap().keys().collect::<Vec<_>>(),
-                schema["properties"]
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .collect::<Vec<_>>()
+                server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
+                before
             );
-        };
-        tokio::time::timeout(Duration::from_secs(5), async {
-            tokio::join!(server, client)
-        })
-        .await
-        .unwrap();
-        assert_eq!(
-            server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
-            before
-        );
-        assert_eq!(log.latest_sequence().unwrap(), before_sequence);
-        assert!(log.load_checkpoint().unwrap().is_none());
+            assert_eq!(log.latest_sequence().unwrap(), before_sequence);
+            assert!(log.load_checkpoint().unwrap().is_none());
+        }
     }
 
     /// Candidate shortage retains the exact query-time reason instead of later health guesses.

@@ -25,3 +25,28 @@ and agreement between eligibility and static-support counts. JSON Schema alone
 cannot express those arithmetic or time relationships. Unknowns and bounded
 route misses still cannot independently block execution. Query-time facts do not
 become fresher because a later checkpoint shows healthy Nodes.
+
+`fixtures/regression-cases.json` freezes synthetic source matrices and expected
+neutral replies for both the actual Rust loopback HTTP assessment and Python
+Request Engine tests. Matrix order is destination then endpoint; count order is
+explicit in the fixture. The endpoint identities belong only to the producer's
+synthetic input; MI receives logical slots and counts. Neither these authored
+plans nor their synthetic submission receipts are B1 experiment results.
+Frozen HTTP bodies use the production Python encoding; both languages verify
+their exact plan meaning, and the Rust test emits each actual request/reply pair
+under `--nocapture` for independent consumer replay without rebinding its digest.
+
+The fixed cases distinguish witnesses, complete scoped misses, bounded search
+misses, unknowns, initial serial scope, expiry and current endpoint shortage.
+Identical per-Role counts can yield different joint decisions: complementary
+witnesses permit a combination, while one supporting endpoint for both parallel
+Actors leaves every deployment-compatible combination with a scoped miss.
+Unknowns do not independently block; they also do not erase a known miss in
+every combination. A serial assessment says nothing about a later Task's route.
+
+The producer checks exact body/source identity and no checkpoint, event or
+binding mutation. The consumer checks frozen goals, fresh Review attribution,
+bounded reconsideration and at most one submission. Existing recovery tests
+separately cover revised drafts, Review vetoes, restart and ambiguous submission.
+These checks prove protocol behavior, not real-model adherence, physical arrival
+or official benchmark success.

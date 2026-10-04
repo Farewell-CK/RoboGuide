@@ -1,0 +1,401 @@
+{
+  "fixture_version": "initial-support-regression/v0.1",
+  "purpose": "synthetic_conformance_not_benchmark",
+  "record_order": ["landmark-a/node-a", "landmark-a/node-b", "landmark-b/node-a", "landmark-b/node-b"],
+  "count_order": ["witness_count", "bounded_miss_count", "scoped_disjoint_count", "unknown_count"],
+  "http_request_bodies": {
+    "parallel": "{\"schema_version\":\"roboguide.mission-plan/v0.8\",\"mission\":{\"id\":\"mission-support-conformance\",\"objective\":\"Navigate to the two declared landmarks.\",\"actors\":[{\"id\":\"actor-a\"},{\"id\":\"actor-b\"}]},\"contexts\":[{\"id\":\"context-a\",\"roles\":[{\"id\":\"participant-a\",\"actor\":\"actor-a\"}],\"relations\":[],\"coupling_mode\":\"independent\",\"executor_constraints\":[]},{\"id\":\"context-b\",\"roles\":[{\"id\":\"participant-b\",\"actor\":\"actor-b\"}],\"relations\":[],\"coupling_mode\":\"independent\",\"executor_constraints\":[]}],\"tasks\":[{\"id\":\"navigate-a\",\"description\":\"Navigate to landmark-a.\",\"depends_on\":[],\"roles\":[{\"id\":\"navigator\",\"context_role\":\"participant-a\",\"requirements\":{\"capabilities\":[{\"contract\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"constraints\":[]}],\"resources\":[{\"kind\":\"space\",\"units\":1}]},\"execution_intent\":{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"objective\":\"Navigate to landmark-a.\",\"parameters\":{\"destination\":\"landmark-a\"}},\"resource_scope\":\"task\"}],\"context_id\":\"context-a\",\"coupling_mode\":\"independent\",\"timing\":{\"earliest_start_offset_ms\":0,\"latest_start_offset_ms\":null,\"completion_deadline_offset_ms\":null},\"satisfaction\":{\"expected_effect\":\"Local navigation to landmark-a completed.\",\"basis\":\"execution-report\",\"verifier\":null}},{\"id\":\"navigate-b\",\"description\":\"Navigate to landmark-b.\",\"depends_on\":[],\"roles\":[{\"id\":\"navigator\",\"context_role\":\"participant-b\",\"requirements\":{\"capabilities\":[{\"contract\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"constraints\":[]}],\"resources\":[{\"kind\":\"space\",\"units\":1}]},\"execution_intent\":{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"objective\":\"Navigate to landmark-b.\",\"parameters\":{\"destination\":\"landmark-b\"}},\"resource_scope\":\"task\"}],\"context_id\":\"context-b\",\"coupling_mode\":\"independent\",\"timing\":{\"earliest_start_offset_ms\":0,\"latest_start_offset_ms\":null,\"completion_deadline_offset_ms\":null},\"satisfaction\":{\"expected_effect\":\"Local navigation to landmark-b completed.\",\"basis\":\"execution-report\",\"verifier\":null}}]}",
+    "serial": "{\"schema_version\":\"roboguide.mission-plan/v0.8\",\"mission\":{\"id\":\"mission-support-conformance\",\"objective\":\"Navigate to the two declared landmarks.\",\"actors\":[{\"id\":\"actor-a\"}]},\"contexts\":[{\"id\":\"context-a\",\"roles\":[{\"id\":\"participant-a\",\"actor\":\"actor-a\"}],\"relations\":[],\"coupling_mode\":\"independent\",\"executor_constraints\":[]},{\"id\":\"context-b\",\"roles\":[{\"id\":\"participant-b\",\"actor\":\"actor-a\"}],\"relations\":[],\"coupling_mode\":\"independent\",\"executor_constraints\":[]}],\"tasks\":[{\"id\":\"navigate-a\",\"description\":\"Navigate to landmark-a.\",\"depends_on\":[],\"roles\":[{\"id\":\"navigator\",\"context_role\":\"participant-a\",\"requirements\":{\"capabilities\":[{\"contract\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"constraints\":[]}],\"resources\":[{\"kind\":\"space\",\"units\":1}]},\"execution_intent\":{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"objective\":\"Navigate to landmark-a.\",\"parameters\":{\"destination\":\"landmark-a\"}},\"resource_scope\":\"task\"}],\"context_id\":\"context-a\",\"coupling_mode\":\"independent\",\"timing\":{\"earliest_start_offset_ms\":0,\"latest_start_offset_ms\":null,\"completion_deadline_offset_ms\":null},\"satisfaction\":{\"expected_effect\":\"Local navigation to landmark-a completed.\",\"basis\":\"execution-report\",\"verifier\":null}},{\"id\":\"navigate-b\",\"description\":\"Navigate to landmark-b.\",\"depends_on\":[\"navigate-a\"],\"roles\":[{\"id\":\"navigator\",\"context_role\":\"participant-b\",\"requirements\":{\"capabilities\":[{\"contract\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"constraints\":[]}],\"resources\":[{\"kind\":\"space\",\"units\":1}]},\"execution_intent\":{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"objective\":\"Navigate to landmark-b.\",\"parameters\":{\"destination\":\"landmark-b\"}},\"resource_scope\":\"task\"}],\"context_id\":\"context-b\",\"coupling_mode\":\"independent\",\"timing\":{\"earliest_start_offset_ms\":0,\"latest_start_offset_ms\":null,\"completion_deadline_offset_ms\":null},\"satisfaction\":{\"expected_effect\":\"Local navigation to landmark-b completed.\",\"basis\":\"execution-report\",\"verifier\":null}}]}"
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-support-conformance",
+      "objective": "Navigate to the two declared landmarks.",
+      "actors": [
+        {
+          "id": "actor-a"
+        },
+        {
+          "id": "actor-b"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "context-a",
+        "roles": [
+          {
+            "id": "participant-a",
+            "actor": "actor-a"
+          }
+        ],
+        "relations": [],
+        "executor_constraints": [],
+        "coupling_mode": "independent"
+      },
+      {
+        "id": "context-b",
+        "roles": [
+          {
+            "id": "participant-b",
+            "actor": "actor-b"
+          }
+        ],
+        "relations": [],
+        "executor_constraints": [],
+        "coupling_mode": "independent"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "navigate-a",
+        "description": "Navigate to landmark-a.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "navigator",
+            "context_role": "participant-a",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Navigate to landmark-a.",
+              "parameters": {
+                "destination": "landmark-a"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "context-a",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Local navigation to landmark-a completed.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "navigate-b",
+        "description": "Navigate to landmark-b.",
+        "depends_on": [],
+        "roles": [
+          {
+            "id": "navigator",
+            "context_role": "participant-b",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Navigate to landmark-b.",
+              "parameters": {
+                "destination": "landmark-b"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "context_id": "context-b",
+        "coupling_mode": "independent",
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Local navigation to landmark-b completed.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "all_witnessed",
+      "support": ["witnessed", "witnessed", "witnessed", "witnessed"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [2, 0, 0, 0],
+          [2, 0, 0, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "complementary_witnesses",
+      "support": ["witnessed", "static-disjoint", "static-disjoint", "witnessed"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [1, 0, 1, 0],
+          [1, 0, 1, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "single_endpoint_support",
+      "support": ["witnessed", "static-disjoint", "witnessed", "static-disjoint"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "blocked",
+        "reason_code": "scoped_static_support_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [1, 0, 1, 0],
+          [1, 0, 1, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Blocked",
+        "reconsideration_calls": 1,
+        "submissions": 0
+      }
+    },
+    {
+      "id": "all_scoped_disjoint",
+      "support": ["static-disjoint", "static-disjoint", "static-disjoint", "static-disjoint"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "blocked",
+        "reason_code": "scoped_static_support_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [0, 0, 2, 0],
+          [0, 0, 2, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Blocked",
+        "reconsideration_calls": 1,
+        "submissions": 0
+      }
+    },
+    {
+      "id": "all_unknown",
+      "support": ["unknown", "unknown", "unknown", "unknown"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [0, 0, 0, 2],
+          [0, 0, 0, 2]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "all_bounded_misses",
+      "support": ["bounded-miss", "bounded-miss", "bounded-miss", "bounded-miss"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [0, 2, 0, 0],
+          [0, 2, 0, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "unknown_viable_combination",
+      "support": ["static-disjoint", "unknown", "unknown", "static-disjoint"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [0, 0, 1, 1],
+          [0, 0, 1, 1]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "known_gap_in_every_combination",
+      "support": ["static-disjoint", "unknown", "static-disjoint", "unknown"],
+      "serial": false,
+      "condition": "fresh",
+      "expected": {
+        "decision": "blocked",
+        "reason_code": "scoped_static_support_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [0, 0, 1, 1],
+          [0, 0, 1, 1]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Blocked",
+        "reconsideration_calls": 1,
+        "submissions": 0
+      }
+    },
+    {
+      "id": "serial_later_task_unassessed",
+      "support": ["witnessed", "static-disjoint", "static-disjoint", "static-disjoint"],
+      "serial": true,
+      "condition": "fresh",
+      "expected": {
+        "decision": "not_blocked",
+        "reason_code": "no_scoped_shortage",
+        "checked_combinations": 2,
+        "role_counts": [
+          [1, 0, 1, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 2,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Accepted",
+        "reconsideration_calls": 0,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "expired_positive_source",
+      "support": ["witnessed", "witnessed", "witnessed", "witnessed"],
+      "serial": false,
+      "condition": "expired",
+      "expected": {
+        "decision": "unavailable",
+        "reason_code": "source_expired",
+        "checked_combinations": 0,
+        "role_counts": [],
+        "considered_count": 0,
+        "eligible_count": 0,
+        "exclusions": {},
+        "placement_failure": null,
+        "request_lifecycle": "Blocked",
+        "reconsideration_calls": 0,
+        "submissions": 0
+      }
+    },
+    {
+      "id": "one_eligible_endpoint",
+      "support": ["witnessed", "witnessed", "witnessed", "witnessed"],
+      "serial": false,
+      "condition": "endpoint_offline",
+      "expected": {
+        "decision": "unavailable",
+        "reason_code": "deployment_placement_unavailable",
+        "checked_combinations": 0,
+        "role_counts": [
+          [1, 0, 0, 0],
+          [1, 0, 0, 0]
+        ],
+        "considered_count": 2,
+        "eligible_count": 1,
+        "exclusions": {
+          "health_unschedulable": 1
+        },
+        "placement_failure": "endpoint_cardinality",
+        "request_lifecycle": "Blocked",
+        "reconsideration_calls": 1,
+        "submissions": 0
+      }
+    }
+  ]
+}
