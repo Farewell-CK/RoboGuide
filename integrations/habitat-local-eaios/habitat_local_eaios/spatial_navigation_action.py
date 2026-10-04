@@ -9,6 +9,7 @@ disclosed; it never changes official goal evaluation or external EMOS files.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import habitat_sim  # type: ignore[import-not-found]
@@ -32,6 +33,19 @@ from .spatial_navigation import (
 )
 
 
+@dataclass(frozen=True)
+class PreparedNavigation:
+    """Retain one exact pre-motion command until its original action dispatch."""
+
+    episode_id: str
+    target_value: float
+    position: tuple[float, float, float]
+    forward: tuple[float, float, float]
+    velocity: tuple[float, float] | None
+    target_index: int | None
+    observation: dict[str, Any] | None
+
+
 @registry.register_task_action
 class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleNavDiffBaseAction):
     """Keep the exact target and ability while following spatial route arrival."""
@@ -45,6 +59,7 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
         """Clear local observation counters before the existing action reset."""
         self._roboguide_arrival_calls = 0
         self._roboguide_arrival_observation: dict[str, Any] | None = None
+        self._roboguide_prepared_navigation: PreparedNavigation | None = None
         return super().reset(*args, **kwargs)
 
     def _path_to_point(self, point: Any, pathfinder: Any = None) -> Any:
@@ -60,39 +75,47 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             raise GoalRegionResolutionError("spatial navigation active route exceeds its bounds")
         return points
 
-    def step(self, *args: Any, **kwargs: Any) -> None:
-        """Choose one original base velocity command without another actor or gym step.
+    def prepare_navigation_step(self, **kwargs: Any) -> None:
+        """Resolve this exact action once before any member of a joint step moves.
 
-        The existing finished sensor reads skill_done as before. Only spatial
-        arrival sets it; budget exhaustion still belongs to the original skill.
-        Unsupported motion profiles and missing routes fail before base motion.
+        This is Local How preparation, not a read-only diagnostic: it initializes
+        the same private mesh and target cache the original action would use.
+        It never dispatches motion, changes finished flags, calls a model or
+        steps Gym. The subsequent action consumes the prepared route decision
+        without repeating target selection or its route query.
         """
+        self.discard_prepared_navigation()
         episode_id = self._sim.ep_info.episode_id
         if self.ep_id != episode_id:
             self.ep_id = episode_id
             self.pathfinder = self._create_pathfinder(self.config)
-        self.skill_done = False
-        self._roboguide_arrival_observation = None
         raw_index = kwargs[self._action_arg_prefix + "oracle_nav_action"]
         value = float(raw_index[0])
         if not math.isfinite(value):
             raise GoalRegionResolutionError("spatial navigation target index is invalid")
+        base = self.cur_articulated_agent
+        position = point3(base.base_pos)
+        forward_world = point3(base.base_transformation.transform_vector([1.0, 0.0, 0.0]))
         if value <= 0 or value > len(self._poss_entities):
+            self._roboguide_prepared_navigation = PreparedNavigation(
+                episode_id, value, position, forward_world, None, None, None
+            )
             return
         target_index = int(value) - 1
         if value != int(value):
             raise GoalRegionResolutionError("spatial navigation target index is not integral")
         if self.prev_nav_done and target_index == self.prev_match_target_id:
+            self._roboguide_prepared_navigation = PreparedNavigation(
+                episode_id, value, position, forward_world, None, None, None
+            )
             return
         if self.motion_type not in {"base_velocity", "base_velocity_non_cylinder"}:
             raise GoalRegionResolutionError("spatial arrival requires differential-base motion")
         final_point, entity_point = self._get_target_for_idx(target_index)
         points = self._path_to_point(final_point)
-        base = self.cur_articulated_agent
-        world_forward = point3(base.base_transformation.transform_vector([1.0, 0.0, 0.0]))
-        forward = (world_forward[0], world_forward[2])
+        forward = (forward_world[0], forward_world[2])
         decision = spatial_navigation_decision(
-            position=point3(base.base_pos),
+            position=position,
             final_point=point3(final_point),
             entity_point=point3(entity_point),
             route_points=tuple(point3(point) for point in points),
@@ -100,21 +123,17 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             distance_threshold_m=float(self._config.dist_thresh),
             turn_threshold_radians=float(self._config.turn_thresh),
         )
-        self._roboguide_arrival_calls = getattr(self, "_roboguide_arrival_calls", 0) + 1
-        self._roboguide_arrival_observation = {
+        observation = {
             "profile": SPATIAL_ARRIVAL_PROFILE,
             "phase": "pre-base-action",
-            "action_invocations": self._roboguide_arrival_calls,
+            "action_invocations": getattr(self, "_roboguide_arrival_calls", 0) + 1,
             "branch": decision.branch,
             "distance_m": decision.distance_m,
             "horizontal_distance_m": decision.horizontal_distance_m,
             "vertical_distance_m": decision.vertical_distance_m,
         }
-        self.prev_nav_done = decision.branch == "arrived"
-        if self.prev_nav_done:
+        if decision.branch == "arrived":
             velocity = [0.0, 0.0]
-            self.skill_done = True
-            self.prev_match_target_id = target_index
         elif (
             decision.branch == "follow-route"
             and heading_error(forward, decision.direction) < self._config.turn_thresh
@@ -124,7 +143,54 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             velocity = OracleNavAction._compute_turn(
                 np.array(decision.direction), self._config.turn_velocity, np.array(forward)
             )
-        kwargs[self._action_arg_prefix + "base_vel"] = np.array(velocity)
+        self._roboguide_prepared_navigation = PreparedNavigation(
+            episode_id,
+            value,
+            position,
+            forward_world,
+            (float(velocity[0]), float(velocity[1])),
+            target_index,
+            observation,
+        )
+
+    def discard_prepared_navigation(self) -> None:
+        """Discard only the pending command; retain the original per-episode target cache."""
+        self._roboguide_prepared_navigation = None
+
+    def step(self, *args: Any, **kwargs: Any) -> None:
+        """Consume one exact prepared command and dispatch one original base action.
+
+        Direct callers may prepare here, preserving the standalone action path.
+        A changed episode, target or pose cannot consume a stale prepared command.
+        This does not make arbitrary simulator errors transactionally reversible.
+        """
+        prepared = getattr(self, "_roboguide_prepared_navigation", None)
+        if prepared is None:
+            self.prepare_navigation_step(**kwargs)
+            prepared = self._roboguide_prepared_navigation
+        self.discard_prepared_navigation()
+        assert prepared is not None
+        base = self.cur_articulated_agent
+        if (
+            prepared.episode_id != self._sim.ep_info.episode_id
+            or prepared.target_value
+            != float(kwargs[self._action_arg_prefix + "oracle_nav_action"][0])
+            or prepared.position != point3(base.base_pos)
+            or prepared.forward
+            != point3(base.base_transformation.transform_vector([1.0, 0.0, 0.0]))
+        ):
+            raise GoalRegionResolutionError("spatial navigation prepared command is stale")
+        self.skill_done = False
+        self._roboguide_arrival_observation = prepared.observation
+        if prepared.velocity is None:
+            return
+        assert prepared.observation is not None and prepared.target_index is not None
+        self._roboguide_arrival_calls = prepared.observation["action_invocations"]
+        self.prev_nav_done = prepared.observation["branch"] == "arrived"
+        if self.prev_nav_done:
+            self.skill_done = True
+            self.prev_match_target_id = prepared.target_index
+        kwargs[self._action_arg_prefix + "base_vel"] = np.array(prepared.velocity)
         if self.motion_type == "base_velocity":
             BaseVelAction.step(self, *args, **kwargs)
         else:

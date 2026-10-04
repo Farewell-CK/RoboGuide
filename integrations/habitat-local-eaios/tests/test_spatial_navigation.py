@@ -178,6 +178,7 @@ def _action_module(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, list[tu
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
     return module, commands
 
@@ -263,6 +264,41 @@ def test_route_failure_is_not_a_straight_line_or_a_local_completion(
     with pytest.raises(GoalRegionResolutionError, match="active route is unavailable"):
         action.step(agent_0_oracle_nav_action=[1])
     assert commands == [] and not action.skill_done
+
+
+def test_prepared_navigation_reuses_one_route_and_defers_motion_and_finished_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Separate preparation from dispatch without a second query or early completion."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module, arrival=True)
+    action.prepare_navigation_step(agent_0_oracle_nav_action=[1])
+    assert commands == [] and action.route_calls == 1 and not action.skill_done
+    action.step(agent_0_oracle_nav_action=[1])
+    assert commands == [("non-cylinder", [0.0, 0.0])]
+    assert action.route_calls == 1 and action.skill_done
+    assert action._roboguide_prepared_navigation is None
+
+
+@pytest.mark.parametrize("changed", ["position", "episode", "target"])
+def test_stale_prepared_navigation_cannot_dispatch_motion(
+    monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    """Fence a changed world or target instead of silently consuming a prior command."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module)
+    action.prepare_navigation_step(agent_0_oracle_nav_action=[1])
+    target = 1
+    if changed == "position":
+        action.cur_articulated_agent.base_pos = (1.0, 0.0, 0.0)
+    elif changed == "episode":
+        action._sim.ep_info.episode_id = "other"
+    else:
+        target = 2
+    with pytest.raises(GoalRegionResolutionError, match="prepared command is stale"):
+        action.step(agent_0_oracle_nav_action=[target])
+    assert commands == [] and action.route_calls == 1
+    assert action._roboguide_prepared_navigation is None
 
 
 @pytest.mark.parametrize("index", [float("nan"), 1.5])
