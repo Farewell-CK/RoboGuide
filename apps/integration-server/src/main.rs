@@ -417,6 +417,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("initial operation preferences disabled after Controller restore");
         }
     }
+    match std::env::var("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT").as_deref() {
+        Ok("1") => deployment_feasibility
+            .as_mut()
+            .ok_or("initial support assessment requires deployment feasibility")?
+            .configure_initial_assessment()?,
+        Ok("0") | Err(std::env::VarError::NotPresent) => {}
+        _ => return Err("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT must be 0 or 1".into()),
+    }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new(events);

@@ -3,7 +3,9 @@
 mod actor_placement;
 mod deployment_feasibility;
 mod dispatch;
+mod initial_operation_assessment;
 mod initial_operation_preferences;
+pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_assessment;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;

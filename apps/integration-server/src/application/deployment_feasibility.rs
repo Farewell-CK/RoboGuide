@@ -19,6 +19,8 @@ pub(crate) struct DeploymentFeasibility {
     pub(super) node_agents: BTreeMap<domain::NodeId, i64>,
     /// Optional startup ordering, separate from durable negative restrictions.
     initial_preferences: Option<super::initial_operation_preferences::InitialOperationPreferences>,
+    /// Explicit opt-in to read-only, initial-world support assessment.
+    assessment_enabled: bool,
 }
 
 impl DeploymentFeasibility {
@@ -306,6 +308,7 @@ impl DeploymentFeasibility {
             initial_positions: body["initial_agent_positions"].clone(),
             node_agents,
             initial_preferences: None,
+            assessment_enabled: false,
         })
     }
 
@@ -347,6 +350,40 @@ impl DeploymentFeasibility {
             .map(|source| source.for_plan(plan, control, state, now, correlation, events))
             .transpose()
             .map(Option::flatten)
+    }
+
+    /// Enables advisory preflight only with an attributed complete-geometry source.
+    pub(crate) fn configure_initial_assessment(&mut self) -> Result<(), String> {
+        self.initial_preferences
+            .as_ref()
+            .ok_or("initial support assessment requires initial operation preferences")?
+            .validate_assessment_source()?;
+        self.assessment_enabled = true;
+        Ok(())
+    }
+
+    /// Assesses the supplied plan without submitting it or persisting candidate facts.
+    pub(crate) fn assess_initial_plan<S: ports::SharedNodeStateReader>(
+        &self,
+        plan: &domain::MissionPlan,
+        control: &control::ControlPlane,
+        state: &S,
+        now: domain::TimestampMs,
+        pristine: bool,
+        request_body: &[u8],
+    ) -> serde_json::Value {
+        super::initial_operation_assessment::assess(
+            self,
+            self.initial_preferences
+                .as_ref()
+                .filter(|_| self.assessment_enabled),
+            plan,
+            control,
+            state,
+            now,
+            pristine,
+            request_body,
+        )
     }
 
     /// Derives candidate sets from exact accepted intents without choosing an assignment.
@@ -720,6 +757,312 @@ mod tests {
         }
     }
 
+    /// Build a separately enabled assessment over synthetic source-bound geometry.
+    fn assessment_fixture(
+        directory: &Path,
+        misses: [bool; 4],
+        fresh: bool,
+    ) -> DeploymentFeasibility {
+        let matrix_path = directory.join("reset.json");
+        let matrix = snapshot(&matrix_path, true);
+        let mut deployment = DeploymentFeasibility::load(&matrix_path).unwrap();
+        let (mut source, mut projection) = geometry_preference_documents(&matrix, misses);
+        source["identity"]["local_how_digest"] =
+            serde_json::json!(format!("sha256:{}", "a".repeat(64)));
+        seal(&mut source);
+        projection["source_digest"] = source["digest"].clone();
+        seal(&mut projection);
+        let source_path = directory.join("routes.json");
+        let projection_path = directory.join("preferences.json");
+        std::fs::write(&source_path, source.to_string()).unwrap();
+        std::fs::write(&projection_path, projection.to_string()).unwrap();
+        deployment
+            .configure_initial_preferences(
+                &projection_path,
+                &source_path,
+                domain::TimestampMs::new(0),
+                fresh,
+            )
+            .unwrap();
+        deployment.configure_initial_assessment().unwrap();
+        deployment
+    }
+
+    /// A joint scoped shortage is observable without filtering or committing a Node.
+    #[test]
+    fn initial_assessment_preserves_control_and_distinguishes_scoped_misses() {
+        for (misses, decision) in [
+            ([false, true, false, true], "blocked"),
+            ([true; 4], "blocked"),
+            ([false; 4], "not_blocked"),
+            ([true, false, false, true], "not_blocked"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let deployment = assessment_fixture(directory.path(), misses, true);
+            let body = plan_document(false, true).to_string();
+            let plan = orchestration::decode_mission_plan(&body).unwrap();
+            let mut log =
+                state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+            let mut control = control::ControlPlane::new();
+            let state = initial_cost_nodes(&mut control, &plan, &mut log);
+            let checkpoint = serde_json::to_string(&control.checkpoint()).unwrap();
+            let sequence = log.latest_sequence().unwrap();
+            let result = deployment.assess_initial_plan(
+                &plan,
+                &control,
+                &state,
+                domain::TimestampMs::new(0),
+                true,
+                body.as_bytes(),
+            );
+            assert_eq!(result["decision"], decision, "{result}");
+            assert_eq!(result["checked_combinations"], 2);
+            assert_eq!(result["roles"].as_array().unwrap().len(), 2);
+            assert_eq!(
+                result["plan_body_sha256"],
+                format!("sha256:{:x}", Sha256::digest(body.as_bytes()))
+            );
+            assert_eq!(
+                serde_json::to_string(&control.checkpoint()).unwrap(),
+                checkpoint
+            );
+            assert_eq!(log.latest_sequence().unwrap(), sequence);
+            assert!(control.actor_candidate_restrictions().next().is_none());
+            assert!(
+                !result.to_string().contains("node-a") && !result.to_string().contains("node-b")
+            );
+            if misses == [false; 4] {
+                assert!(
+                    result["roles"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|role| role["bounded_miss_count"] == 2)
+                );
+            }
+        }
+    }
+
+    /// Reset-only observations never authorize assessment after expiry, admission or restore.
+    #[test]
+    fn initial_assessment_lifetime_and_serial_scope_are_explicit() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = assessment_fixture(directory.path(), [false, false, true, true], true);
+        let body = plan_document(true, true).to_string();
+        let plan = orchestration::decode_mission_plan(&body).unwrap();
+        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let state = initial_cost_nodes(&mut control, &plan, &mut log);
+        let result = deployment.assess_initial_plan(
+            &plan,
+            &control,
+            &state,
+            domain::TimestampMs::new(0),
+            true,
+            body.as_bytes(),
+        );
+        assert_eq!(result["decision"], "not_blocked");
+        assert_eq!(result["roles"].as_array().unwrap().len(), 1);
+        assert_eq!(result["checked_combinations"], 2);
+        assert_eq!(
+            deployment.assess_initial_plan(
+                &plan,
+                &control,
+                &state,
+                domain::TimestampMs::new(600000),
+                true,
+                body.as_bytes()
+            )["reason_code"],
+            "source_expired"
+        );
+        assert_eq!(
+            deployment.assess_initial_plan(
+                &plan,
+                &control,
+                &state,
+                domain::TimestampMs::new(0),
+                false,
+                body.as_bytes()
+            )["reason_code"],
+            "world_already_admitted"
+        );
+        let restored = assessment_fixture(directory.path(), [false; 4], false);
+        assert_eq!(
+            restored.assess_initial_plan(
+                &plan,
+                &control,
+                &state,
+                domain::TimestampMs::new(0),
+                true,
+                body.as_bytes()
+            )["reason_code"],
+            "controller_restored"
+        );
+    }
+
+    /// Positive, unknown and disabled sources remain separate from scoped negative evidence.
+    #[test]
+    fn initial_assessment_source_categories_and_default_off_are_explicit() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut deployment = assessment_fixture(directory.path(), [false; 4], true);
+        let source_path = directory.path().join("routes.json");
+        let projection_path = directory.path().join("preferences.json");
+        let mut source: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&source_path).unwrap()).unwrap();
+        let mut projection: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&projection_path).unwrap()).unwrap();
+        for record in source["records"].as_array_mut().unwrap() {
+            record["status"] = serde_json::json!("unavailable");
+        }
+        source["records"][0]["status"] = serde_json::json!("supported");
+        source["records"][0]["selection"] = serde_json::json!({"path_length_m": 1.5});
+        seal(&mut source);
+        projection["records"][0]["cost_micrometers"] = serde_json::json!(1_500_000);
+        projection["records"][0]["static_support"] = serde_json::json!("witnessed");
+        projection["source_digest"] = source["digest"].clone();
+        seal(&mut projection);
+        std::fs::write(&source_path, source.to_string()).unwrap();
+        std::fs::write(&projection_path, projection.to_string()).unwrap();
+        let now = domain::TimestampMs::new(0);
+        deployment
+            .configure_initial_preferences(&projection_path, &source_path, now, true)
+            .unwrap();
+        let body = plan_document(false, true).to_string();
+        let plan = orchestration::decode_mission_plan(&body).unwrap();
+        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let state = initial_cost_nodes(&mut control, &plan, &mut log);
+        let result =
+            deployment.assess_initial_plan(&plan, &control, &state, now, true, body.as_bytes());
+        assert_eq!(result["decision"], "not_blocked");
+        let roles = result["roles"].as_array().unwrap();
+        assert_eq!(
+            roles
+                .iter()
+                .map(|role| role["witness_count"].as_u64().unwrap())
+                .sum::<u64>(),
+            1
+        );
+        assert_eq!(
+            roles
+                .iter()
+                .map(|role| role["unknown_count"].as_u64().unwrap())
+                .sum::<u64>(),
+            3
+        );
+        let empty = state::InMemorySharedNodeState::new();
+        assert_eq!(
+            deployment.assess_initial_plan(&plan, &control, &empty, now, true, body.as_bytes())["reason_code"],
+            "current_candidates_unavailable"
+        );
+        deployment.assessment_enabled = false;
+        assert_eq!(
+            deployment.assess_initial_plan(&plan, &control, &state, now, true, body.as_bytes())["reason_code"],
+            "source_unconfigured"
+        );
+        source["identity"]["local_how_digest"] = serde_json::Value::Null;
+        seal(&mut source);
+        projection["source_digest"] = source["digest"].clone();
+        seal(&mut projection);
+        std::fs::write(&source_path, source.to_string()).unwrap();
+        std::fs::write(&projection_path, projection.to_string()).unwrap();
+        deployment
+            .configure_initial_preferences(&projection_path, &source_path, now, true)
+            .unwrap();
+        assert!(
+            deployment
+                .configure_initial_assessment()
+                .unwrap_err()
+                .contains("Local How")
+        );
+    }
+
+    /// The real HTTP assessment leaves Mission, checkpoint and event authority untouched.
+    #[tokio::test]
+    async fn initial_assessment_http_is_read_only_and_plan_bound() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let directory = tempfile::tempdir().unwrap();
+        let mut deployment = assessment_fixture(directory.path(), [false, true, false, true], true);
+        let clock = runtime::SystemMonotonicClock::new();
+        let now = ports::Clock::now(&clock);
+        deployment
+            .configure_initial_preferences(
+                &directory.path().join("preferences.json"),
+                &directory.path().join("routes.json"),
+                now,
+                true,
+            )
+            .unwrap();
+        let body = plan_document(false, true).to_string();
+        let plan = orchestration::decode_mission_plan(&body).unwrap();
+        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let state = initial_cost_nodes_at(&mut control, &plan, &mut log, now);
+        let before_sequence = log.latest_sequence().unwrap();
+        let controller = Arc::new(Mutex::new(ControllerState {
+            bridge: IntegrationRuntimeBridge::new(
+                control,
+                state,
+                log.clone(),
+                integration::GrpcNodeRouter::default(),
+            ),
+            orchestrator: MissionOrchestrator::new(),
+            mission_admissions: BTreeMap::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: None,
+        }));
+        let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
+        let gate = Arc::new(Mutex::new(()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = async {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            handle_http_connection(
+                &mut stream,
+                &controller,
+                &log,
+                &gate,
+                &clock,
+                Some(&deployment),
+                None,
+            )
+            .await
+            .unwrap();
+        };
+        let client = async {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(format!("POST /v1/missions/assess-initial-support HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).await.unwrap();
+            let (header, body) = reply.split_once("\r\n\r\n").unwrap();
+            assert!(header.starts_with("HTTP/1.1 200"));
+            let result: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(result["decision"], "blocked", "{result}");
+            let schema: serde_json::Value = serde_json::from_str(include_str!(
+                "../../../../contracts/mission/initial-operation-assessment-v0.1/assessment.schema.json"
+            )).unwrap();
+            assert_eq!(
+                result.as_object().unwrap().keys().collect::<Vec<_>>(),
+                schema["properties"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<Vec<_>>()
+            );
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(server, client)
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(log.latest_sequence().unwrap(), before_sequence);
+        assert!(log.load_checkpoint().unwrap().is_none());
+    }
+
     /// A recomputed digest cannot turn partial geometry or a different source into a miss.
     #[test]
     fn initial_geometry_rejects_forged_projection_and_partial_negative() {
@@ -838,6 +1181,16 @@ mod tests {
         plan: &domain::MissionPlan,
         events: &mut state::SqliteEventLog,
     ) -> state::InMemorySharedNodeState {
+        initial_cost_nodes_at(control, plan, events, domain::TimestampMs::new(0))
+    }
+
+    /// Register source-relative facts in the same time domain as an HTTP query.
+    fn initial_cost_nodes_at(
+        control: &mut control::ControlPlane,
+        plan: &domain::MissionPlan,
+        events: &mut state::SqliteEventLog,
+        now: domain::TimestampMs,
+    ) -> state::InMemorySharedNodeState {
         let mut state = state::InMemorySharedNodeState::new();
         let contracts: Vec<domain::CapabilityContractRef> = plan
             .task_graph()
@@ -874,11 +1227,8 @@ mod tests {
                 .register_node(
                     &mut state,
                     registration,
-                    domain::NodeStatus::new(
-                        domain::NodeHealth::Online,
-                        domain::TimestampMs::new(0),
-                    ),
-                    domain::TimestampMs::new(0),
+                    domain::NodeStatus::new(domain::NodeHealth::Online, now),
+                    now,
                     &domain::CorrelationId::new("initial-policy").unwrap(),
                     events,
                 )

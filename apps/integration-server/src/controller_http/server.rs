@@ -172,6 +172,39 @@ pub(crate) async fn handle_http_connection(
                 ),
             }
         }
+        ("POST", "/v1/missions/assess-initial-support") => {
+            let plan = match decode_mission_plan(request_body) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let assessment = match deployment_feasibility {
+                Some(source) => source.assess_initial_plan(
+                    &plan,
+                    live.bridge.control(),
+                    live.bridge.state(),
+                    clock.now(),
+                    live.orchestrator.mission_ids().is_empty(),
+                    request_body.as_bytes(),
+                ),
+                None => unavailable_initial_assessment(
+                    &plan,
+                    request_body.as_bytes(),
+                    clock.now(),
+                    "source_unconfigured",
+                ),
+            };
+            ("200 OK", assessment)
+        }
         ("POST", "/v1/missions") => {
             let plan = match decode_mission_plan(request_body) {
                 Ok(plan) => plan,

@@ -40,7 +40,7 @@ fn check_route_source(
     costs: &BTreeMap<(String, String), BTreeMap<domain::NodeId, Option<u64>>>,
     disjoint: &BTreeSet<(String, String, domain::NodeId)>,
     geometry_enabled: bool,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let (source, digest) = load_body(path)?;
     let identity = source["identity"]
         .as_object()
@@ -182,24 +182,26 @@ fn check_route_source(
             }
         }
     }
-    Ok(())
+    Ok(source)
 }
 
 /// Startup-bound optional costs, never an eligibility filter or binding map.
 #[derive(Debug, Clone)]
 pub(crate) struct InitialOperationPreferences {
     /// Content identity of the neutral source projection.
-    digest: String,
+    pub(super) digest: String,
     /// Exact operation/destination costs per declared deployment endpoint.
-    costs: BTreeMap<(String, String), BTreeMap<domain::NodeId, Option<u64>>>,
+    pub(super) costs: BTreeMap<(String, String), BTreeMap<domain::NodeId, Option<u64>>>,
     /// Scoped static misses affect order only and never remove eligible Nodes.
-    disjoint: BTreeSet<(String, String, domain::NodeId)>,
+    pub(super) disjoint: BTreeSet<(String, String, domain::NodeId)>,
+    /// Validated original observations, not an eligibility or physical verdict source.
+    pub(super) route_source: serde_json::Value,
     /// Local source receive time, unchanged by Mission arrival.
-    received_at: domain::TimestampMs,
+    pub(super) received_at: domain::TimestampMs,
     /// Exclusive local expiry; checkpoint restore never renews it.
-    expires_at: domain::TimestampMs,
+    pub(super) expires_at: domain::TimestampMs,
     /// Only a fresh Controller process may consume the initial world.
-    enabled: bool,
+    pub(super) enabled: bool,
 }
 
 impl InitialOperationPreferences {
@@ -309,7 +311,7 @@ impl InitialOperationPreferences {
         {
             return Err("initial costs lack exact deployment intent/endpoint coverage".into());
         }
-        check_route_source(
+        let route_source = check_route_source(
             source_path,
             body["source_digest"].as_str().expect("checked digest"),
             feasibility,
@@ -326,10 +328,27 @@ impl InitialOperationPreferences {
             digest,
             costs,
             disjoint,
+            route_source,
             received_at,
             expires_at,
             enabled: fresh_controller,
         })
+    }
+
+    /// Checks the stronger feedback opt-in without granting negative matching authority.
+    pub(super) fn validate_assessment_source(&self) -> Result<(), String> {
+        if self.route_source["schema_version"] != "roboguide.deployment-reset-route-support/v0.2"
+            || !valid_prefixed_sha256(
+                self.route_source["identity"]["local_how_digest"]
+                    .as_str()
+                    .unwrap_or_default(),
+            )
+        {
+            return Err(
+                "initial assessment requires versioned geometry and Local How identity".into(),
+            );
+        }
+        Ok(())
     }
 
     /// Orders the first ready Task with bounded lookahead over the admitted profile.
