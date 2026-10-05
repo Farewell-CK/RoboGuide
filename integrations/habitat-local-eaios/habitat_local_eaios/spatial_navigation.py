@@ -13,7 +13,35 @@ from typing import Literal
 from .goal_region_navigation import GoalRegionResolutionError, Point3, point3
 
 SPATIAL_ARRIVAL_PROFILE = "spatial-route-arrival/v0.1"
+GOAL_AWARE_ARRIVAL_PROFILE = "live-reference-goal-region/v0.1"
+GOAL_AWARE_SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.6"
+GOAL_AWARE_POINT_RESOLVER = "official-any-at-live-arrival/v0.1"
 MAX_ROUTE_POINTS = 4096
+
+
+@dataclass(frozen=True)
+class NavigationGoalRegion:
+    """Actual reference and exact entity geometry; never an official verdict."""
+
+    reference_position: Point3
+    center: Point3
+    radius_m: float
+
+    def reference_distance(self) -> float:
+        """Validate finite geometry before checking local completion eligibility."""
+        if (
+            isinstance(self.radius_m, bool)
+            or not math.isfinite(self.radius_m)
+            or self.radius_m <= 0
+        ):
+            raise GoalRegionResolutionError("live goal-region radius is unavailable")
+        return math.dist(point3(self.reference_position), point3(self.center))
+
+    @property
+    def bound_m(self) -> float:
+        """Keep the existing selection margin separate from the official radius."""
+        self.reference_distance()
+        return self.radius_m - min(0.02, self.radius_m * 0.01)
 
 
 @dataclass(frozen=True)
@@ -25,6 +53,7 @@ class SpatialNavigationDecision:
     distance_m: float
     horizontal_distance_m: float
     vertical_distance_m: float
+    goal_reference_distance_m: float | None = None
 
 
 def heading_error(forward: tuple[float, float], direction: tuple[float, float]) -> float:
@@ -52,6 +81,7 @@ def spatial_navigation_decision(
     forward: tuple[float, float],
     distance_threshold_m: float,
     turn_threshold_radians: float,
+    goal_region: NavigationGoalRegion | None = None,
 ) -> SpatialNavigationDecision:
     """Continue the route until spatial arrival, then face the exact entity.
 
@@ -78,7 +108,11 @@ def spatial_navigation_decision(
     distance = math.dist(position, final_point)
     horizontal = math.hypot(delta[0], delta[2])
     vertical = abs(delta[1])
-    if distance < distance_threshold_m:
+    goal_distance = None if goal_region is None else goal_region.reference_distance()
+    goal_reached = goal_region is None or (
+        goal_distance is not None and goal_distance < goal_region.bound_m
+    )
+    if distance < distance_threshold_m and goal_reached:
         direction = (entity_point[0] - position[0], entity_point[2] - position[2])
         branch: Literal["follow-route", "face-entity", "arrived"] = (
             "arrived"
@@ -98,4 +132,6 @@ def spatial_navigation_decision(
             raise GoalRegionResolutionError("spatial navigation route has no planar waypoint")
         direction = (next_point[0] - position[0], next_point[2] - position[2])
         branch = "follow-route"
-    return SpatialNavigationDecision(branch, direction, distance, horizontal, vertical)
+    return SpatialNavigationDecision(
+        branch, direction, distance, horizontal, vertical, goal_distance
+    )

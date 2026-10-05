@@ -156,6 +156,43 @@ def test_projection_on_another_floor_cannot_bypass_official_3d_region() -> None:
     assert queried == []
 
 
+def test_live_arrival_can_route_to_a_thin_region_without_claiming_a_safe_stop_envelope() -> None:
+    """Admit a routed region point only for the explicitly guarded live controller."""
+    values: dict[str, Any] = {
+        "original_point": (0.0, 0.0, 0.0),
+        "goal_center": (0.0, 1.94, 0.0),
+        "reference_offset": (0.0, 0.0, 0.0),
+        "radius_m": 2.0,
+        "stop_radius_m": 0.5,
+        "navmesh_vertices": (),
+        "path_length": lambda _point: 3.0,
+    }
+    with pytest.raises(GoalRegionSearchMiss):
+        select_goal_region_point(**values)
+    selected = select_goal_region_point(**values, require_stop_envelope=False)
+    assert selected.reference_distance_m < 1.98
+    assert selected.estimated_stop_envelope_distance_m > 1.98
+    assert selected.point == (0.0, 0.0, 0.0)
+    assert selected.path_queries == 1
+
+
+@pytest.mark.parametrize("fault", ["no_route", "wrong_floor", "budget"])
+def test_live_arrival_point_selection_keeps_geometry_route_and_budget_checks(fault: str) -> None:
+    """A live stopping check does not authorize an unrouted or wrong-height candidate."""
+    with pytest.raises(GoalRegionResolutionError):
+        select_goal_region_point(
+            original_point=(0.0, 0.0, 0.0),
+            goal_center=(0.0, 4.0 if fault == "wrong_floor" else 1.94, 0.0),
+            reference_offset=(0.0, 0.0, 0.0),
+            radius_m=2.0,
+            stop_radius_m=0.5,
+            navmesh_vertices=(),
+            path_length=lambda _point: None if fault == "no_route" else 3.0,
+            require_stop_envelope=False,
+            max_path_queries=0 if fault == "budget" else 2,
+        )
+
+
 @pytest.mark.parametrize(
     ("vertices", "budget", "message"),
     [
@@ -296,10 +333,8 @@ def test_config_switches_only_expected_vendor_navigation_actions(
         _configure_goal_region_navigation(config, read_write, step_aware=step_aware)
 
 
-def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep repeated target queries fail-closed after the first resolution error."""
+def _adapter_action(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Load the actual target/route wrapper with only nonphysical vendor interfaces."""
 
     class FakeOracleAction:
         """Mimic the vendor action's original target cache for one entity."""
@@ -349,6 +384,7 @@ def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(
     vars(registry_stub)["registry"] = SimpleNamespace(register_task_action=register_task_action)
     oracle_stub = stubs["habitat.tasks.rearrange.actions.habitat_mas_actions"]
     vars(oracle_stub)["OracleNavDiffBaseAction"] = FakeOracleAction
+    vars(stubs["habitat_sim"])["ShortestPath"] = SimpleNamespace
     for name, stub in stubs.items():
         monkeypatch.setitem(sys.modules, name, stub)
     module_name = "habitat_local_eaios._goal_region_action_review_test"
@@ -364,10 +400,49 @@ def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(
         lambda _goal: {"kind": "predicate", "name": "any_at", "arguments": ["goal"]},
     )
 
-    action = module.GoalRegionOracleNavDiffBaseAction()
+    return module.GoalRegionOracleNavDiffBaseAction()
+
+
+def test_failed_goal_region_selection_cannot_reuse_vendor_cached_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep repeated target queries fail-closed after the first resolution error."""
+    action = _adapter_action(monkeypatch)
     with pytest.raises(GoalRegionResolutionError, match="navmesh is unavailable"):
         action._get_target_for_idx(0)
     with pytest.raises(GoalRegionResolutionError, match="previous goal-region selection failed"):
         action._get_target_for_idx(0)
     assert action.original_calls == 1
     assert action.navigation_selection_evidence()[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "envelope, points, distance, expected",
+    [
+        (True, ((0.0, 0.0, 0.0),), None, None),
+        (False, ((0.0, 0.0, 0.0),), 0.0, 0.0),
+        (False, ((0.02, 0.0, 0.0),), 0.0, None),
+        (False, ((0.0, 0.0, 0.0),), 0.1, None),
+        (False, (), None, None),
+    ],
+)
+def test_degenerate_route_requires_a_real_already_at_point_result(
+    monkeypatch: pytest.MonkeyPatch,
+    envelope: bool,
+    points: tuple[Point3, ...],
+    distance: float | None,
+    expected: float | None,
+) -> None:
+    """Allow a zero path only at its actual endpoint and preserve legacy one-point rejection."""
+    action = _adapter_action(monkeypatch)
+    action.require_stop_envelope = envelope
+
+    def found(path: Any) -> bool:
+        """Supply a found path without any world, model or fallback interface."""
+        path.points = points
+        if distance is not None:
+            path.geodesic_distance = distance
+        return True
+
+    action.pathfinder = SimpleNamespace(find_path=found)
+    assert action._path_length((0.0, 0.0, 0.0)) == expected

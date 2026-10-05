@@ -23,7 +23,11 @@ from .navigation_preparation import (
 )
 from .navmesh_profile import STEP_AWARE_PROFILE
 from .source_provenance import build_runtime_source_manifest
-from .spatial_navigation import SPATIAL_ARRIVAL_PROFILE
+from .spatial_navigation import (
+    GOAL_AWARE_ARRIVAL_PROFILE,
+    GOAL_AWARE_POINT_RESOLVER,
+    SPATIAL_ARRIVAL_PROFILE,
+)
 from .stage2_contract import (
     Stage2ActionAudit,
     Stage2ContractViolation,
@@ -40,6 +44,7 @@ def _configure_goal_region_navigation(
     *,
     step_aware: bool = False,
     spatial_arrival: bool = False,
+    goal_aware_arrival: bool = False,
 ) -> None:
     """Select the adapter-owned Oracle subclass before constructing Habitat.
 
@@ -49,7 +54,15 @@ def _configure_goal_region_navigation(
     """
     from .goal_region_action import GoalRegionOracleNavDiffBaseAction
 
-    if spatial_arrival:
+    if goal_aware_arrival:
+        if not spatial_arrival or not step_aware:
+            raise IntegrationError(
+                "goal-aware navigation arrival requires spatial navigation arrival"
+            )
+        from .spatial_navigation_action import LiveGoalArrivalGoalRegionOracleNavDiffBaseAction
+
+        action_name = LiveGoalArrivalGoalRegionOracleNavDiffBaseAction.__name__
+    elif spatial_arrival:
         if not step_aware:
             raise IntegrationError("spatial navigation arrival requires step-aware navmesh")
         from .spatial_navigation_action import SpatialArrivalGoalRegionOracleNavDiffBaseAction
@@ -221,12 +234,16 @@ class EmosStage2Runtime:
             spatial_arrival_enabled = bool(
                 getattr(self._config, "spatial_navigation_arrival", False)
             )
+            goal_aware_arrival_enabled = bool(
+                getattr(self._config, "goal_aware_navigation_arrival", False)
+            )
             if goal_region_enabled:
                 _configure_goal_region_navigation(
                     config,
                     read_write,
                     step_aware=step_aware_enabled,
                     spatial_arrival=spatial_arrival_enabled,
+                    goal_aware_arrival=goal_aware_arrival_enabled,
                 )
             if spatial_arrival_enabled:
                 from habitat.gym.gym_wrapper import (  # type: ignore[import-not-found]
@@ -283,7 +300,9 @@ class EmosStage2Runtime:
                 "local-how-profile.json",
                 {
                     "schema_version": (
-                        "roboguide.habitat-local-how-profile/v0.6"
+                        "roboguide.habitat-local-how-profile/v0.7"
+                        if goal_aware_arrival_enabled
+                        else "roboguide.habitat-local-how-profile/v0.6"
                         if spatial_arrival_enabled
                         else "roboguide.habitat-local-how-profile/v0.4"
                         if step_aware_enabled
@@ -292,7 +311,9 @@ class EmosStage2Runtime:
                         else "roboguide.habitat-local-how-profile/v0.2"
                     ),
                     "navigation_point_resolver": (
-                        "official-any-at-agent-navmesh/v0.1"
+                        GOAL_AWARE_POINT_RESOLVER
+                        if goal_aware_arrival_enabled
+                        else "official-any-at-agent-navmesh/v0.1"
                         if goal_region_enabled
                         else "original-emos-oracle"
                     ),
@@ -312,10 +333,19 @@ class EmosStage2Runtime:
                     ),
                     **(
                         {
-                            "navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE,
+                            "navigation_arrival_profile": (
+                                GOAL_AWARE_ARRIVAL_PROFILE
+                                if goal_aware_arrival_enabled
+                                else SPATIAL_ARRIVAL_PROFILE
+                            ),
                             "navigation_preparation_profile": NAVIGATION_PREPARATION_PROFILE,
                         }
                         if spatial_arrival_enabled
+                        else {}
+                    ),
+                    **(
+                        {"reset_route_probe_policy": "conservative-stop-envelope/v0.1"}
+                        if goal_aware_arrival_enabled
                         else {}
                     ),
                 },

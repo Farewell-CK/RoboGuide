@@ -22,8 +22,10 @@ from habitat_local_eaios.emos_stage2 import _configure_goal_region_navigation  #
 from habitat_local_eaios.goal_region_navigation import GoalRegionResolutionError  # noqa: E402
 from habitat_local_eaios.model import IntegrationError  # noqa: E402
 from habitat_local_eaios.spatial_navigation import (  # noqa: E402
+    GOAL_AWARE_ARRIVAL_PROFILE,
     MAX_ROUTE_POINTS,
     SPATIAL_ARRIVAL_PROFILE,
+    NavigationGoalRegion,
     SpatialNavigationDecision,
     spatial_navigation_decision,
 )
@@ -183,9 +185,13 @@ def _action_module(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, list[tu
     return module, commands
 
 
-def _action(module: ModuleType, *, arrival: bool = False) -> Any:
+def _action(module: ModuleType, *, arrival: bool = False, goal_aware: bool = False) -> Any:
     """Construct a real action over a bounded successful fake route and fixed velocities."""
-    action = module.SpatialArrivalGoalRegionOracleNavDiffBaseAction()
+    action = (
+        module.LiveGoalArrivalGoalRegionOracleNavDiffBaseAction()
+        if goal_aware
+        else module.SpatialArrivalGoalRegionOracleNavDiffBaseAction()
+    )
     final = (0.1, 0.0 if arrival else 3.0, 0.0)
     route = [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), final]
     action.route_calls = 0
@@ -207,12 +213,211 @@ def _action(module: ModuleType, *, arrival: bool = False) -> Any:
     )
     action.cur_articulated_agent = SimpleNamespace(
         base_pos=(0.0, 0.0, 0.0),
-        base_transformation=SimpleNamespace(transform_vector=lambda value: value),
+        base_transformation=SimpleNamespace(
+            transform_vector=lambda value: value, translation=(0.0, 0.0, 0.0)
+        ),
     )
     action.prev_nav_done = action.skill_done = False
     action.prev_match_target_id = -1
     action.motion_type = "base_velocity_non_cylinder"
+    if goal_aware:
+        action._poss_entities = [SimpleNamespace(name=name) for name in action._poss_entities]
+        action._roboguide_selections = {
+            index: {
+                "entity_id": entity.name,
+                "mode": "official_any_at_region",
+                "status": "selected",
+                "goal_center": target[1],
+                "official_robot_at_threshold_m": 2.0,
+            }
+            for index, (entity, target) in enumerate(
+                zip(action._poss_entities, action.targets, strict=True)
+            )
+        }
+        action._task = SimpleNamespace(
+            pddl_problem=SimpleNamespace(
+                sim_info=SimpleNamespace(
+                    robot_at_thresh=2.0,
+                    get_entity_pos=lambda entity: action.targets[
+                        action._poss_entities.index(entity)
+                    ][1],
+                )
+            )
+        )
     return action
+
+
+def test_live_reference_outside_goal_cannot_finish_at_a_nearby_selected_point() -> None:
+    """Continue moving when selected-point proximity would finish outside the goal."""
+    values: dict[str, Any] = {
+        "position": (-0.49, 0.0, 0.0),
+        "final_point": (0.0, 0.0, 0.0),
+        "entity_point": (0.0, 1.94, 0.0),
+        "route_points": ((-0.49, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    }
+    assert _decision(**values).branch == "arrived"
+    region = NavigationGoalRegion(values["position"], values["entity_point"], 2.0)
+    result = _decision(**values, goal_region=region)
+    assert result.branch == "follow-route"
+    assert result.goal_reference_distance_m is not None
+    assert result.goal_reference_distance_m > 2.0
+
+
+@pytest.mark.parametrize("reference", [(0.0, 2.5, 0.0), (3.0, 0.0, 0.0)])
+def test_actual_reference_is_not_substituted_with_the_base_position(reference: Any) -> None:
+    """Retain full 3D actual reference geometry even when the base appears near the goal."""
+    result = _decision(
+        final_point=(0.1, 0.0, 0.0),
+        entity_point=(0.3, 0.0, 0.0),
+        route_points=((0.0, 0.0, 0.0), (0.1, 0.0, 0.0)),
+        goal_region=NavigationGoalRegion(reference, (0.3, 0.0, 0.0), 2.0),
+    )
+    assert result.branch == "follow-route"
+
+
+@pytest.mark.parametrize("radius", [0.0, float("nan"), float("inf"), True])
+def test_missing_live_goal_geometry_cannot_downgrade_to_legacy_completion(radius: float) -> None:
+    """Unknown official geometry fails rather than skipping the opt-in stopping gate."""
+    with pytest.raises(GoalRegionResolutionError):
+        _decision(goal_region=NavigationGoalRegion((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), radius))
+
+
+def test_live_arrival_already_at_goal_needs_no_fabricated_route_segment() -> None:
+    """A successful one-point route can finish only when both live conditions hold."""
+    result = _decision(
+        final_point=(0.0, 0.0, 0.0),
+        entity_point=(0.0, 1.94, 0.0),
+        route_points=((0.0, 0.0, 0.0),),
+        goal_region=NavigationGoalRegion((0.0, 0.0, 0.0), (0.0, 1.94, 0.0), 2.0),
+    )
+    assert result.branch == "arrived"
+
+
+def test_live_action_preserves_commands_and_finishes_only_after_actual_region_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the real action with exact target, one dispatch and actual reference evidence."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module, arrival=True, goal_aware=True)
+    center = (0.1, 1.94, 0.0)
+    action.targets[0] = ((0.1, 0.0, 0.0), center)
+    action._roboguide_selections[0]["goal_center"] = center
+    action.cur_articulated_agent.base_pos = (-0.39, 0.0, 0.0)
+    action.cur_articulated_agent.base_transformation.translation = (-0.39, 0.0, 0.0)
+    action.step(agent_0_oracle_nav_action=[1])
+    assert commands == [("non-cylinder", [0.7, 0.0])]
+    assert not action.skill_done and action.route_calls == 1
+    evidence = action.navigation_arrival_evidence()
+    assert evidence["profile"] == GOAL_AWARE_ARRIVAL_PROFILE
+    assert evidence["goal_reference_within_local_bound"] is False
+    action.cur_articulated_agent.base_pos = (0.1, 0.0, 0.0)
+    action.cur_articulated_agent.base_transformation.translation = (0.1, 0.0, 0.0)
+    action.step(agent_0_oracle_nav_action=[1])
+    assert action.skill_done and action.prev_nav_done and action.route_calls == 2
+    assert commands[-1] == ("non-cylinder", [0.0, 0.0])
+    assert action.navigation_arrival_evidence()["goal_reference_distance_m"] == 1.94
+    assert action.navigation_selection_evidence()[0]["navigation_arrival_profile"] == (
+        GOAL_AWARE_ARRIVAL_PROFILE
+    )
+
+
+@pytest.mark.parametrize("fault", ["reference", "center", "radius", "missing_contract"])
+def test_live_prepared_geometry_changes_cannot_dispatch_or_complete(
+    monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    """Fence changes beyond the base pose between preparation and the original dispatch."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module, arrival=True, goal_aware=True)
+    action.prepare_navigation_step(agent_0_oracle_nav_action=[1])
+    if fault == "reference":
+        action.cur_articulated_agent.base_transformation.translation = (3.0, 0.0, 0.0)
+    elif fault == "center":
+        action.targets[0] = (action.targets[0][0], (3.0, 0.0, 0.0))
+    elif fault == "radius":
+        action._task.pddl_problem.sim_info.robot_at_thresh = 3.0
+    else:
+        action._roboguide_selections.clear()
+    with pytest.raises(GoalRegionResolutionError):
+        action.step(agent_0_oracle_nav_action=[1])
+    assert commands == [] and not action.skill_done
+
+
+def test_live_reference_read_failure_has_local_attribution_before_any_motion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read fault cannot escape preparation attribution or invent local completion."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module, arrival=True, goal_aware=True)
+
+    def unavailable(_entity: Any) -> Any:
+        """Represent a vendor geometry reader that cannot obtain current state."""
+        raise RuntimeError("geometry read failed")
+
+    action._task.pddl_problem.sim_info.get_entity_pos = unavailable
+    with pytest.raises(GoalRegionResolutionError, match="geometry is unavailable") as error:
+        action.prepare_navigation_step(agent_0_oracle_nav_action=[1])
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert commands == [] and not action.skill_done and action.route_calls == 0
+
+
+def test_live_arrival_reads_current_entity_geometry_without_replacing_the_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary target settling is read freshly; immutable target metadata is not rewritten."""
+    module, commands = _action_module(monkeypatch)
+    action = _action(module, arrival=True, goal_aware=True)
+    targets = list(action.targets)
+    current_center = (0.3, 0.01, 0.0)
+    action._task.pddl_problem.sim_info.get_entity_pos = lambda _entity: current_center
+    action.step(agent_0_oracle_nav_action=[1])
+    assert action.skill_done and commands == [("non-cylinder", [0.0, 0.0])]
+    assert action.targets == targets
+    assert action.navigation_arrival_evidence()["goal_center"] == list(current_center)
+
+
+def test_goal_aware_profile_is_default_off_and_requires_explicit_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Select the new registered class only with the complete deployment prerequisites."""
+    common: dict[str, Any] = {
+        "config_path": Path("neutral.yaml"),
+        "episode_id": "neutral",
+        "agent_id": 0,
+        "max_steps": 10,
+        "step_period_ms": 0,
+    }
+    assert CrabAgentBackendConfig(**common).goal_aware_navigation_arrival is False
+    with pytest.raises(IntegrationError, match="requires spatial"):
+        CrabAgentBackendConfig(**common, goal_aware_navigation_arrival=True)
+    module, _ = _action_module(monkeypatch)
+    stub = ModuleType("habitat_local_eaios.spatial_navigation_action")
+    vars(stub)["LiveGoalArrivalGoalRegionOracleNavDiffBaseAction"] = (
+        module.LiveGoalArrivalGoalRegionOracleNavDiffBaseAction
+    )
+    monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    actions = {"agent_0_oracle_nav_action": SimpleNamespace(type="OracleNavDiffBaseAction")}
+    config = SimpleNamespace(
+        habitat=SimpleNamespace(
+            task=SimpleNamespace(actions=actions),
+            simulator=SimpleNamespace(agents_order=["agent_0"]),
+        )
+    )
+
+    @contextmanager
+    def read_write(_config: Any) -> Iterator[None]:
+        """Expose only the temporary deployment configuration scope."""
+        yield
+
+    with pytest.raises(IntegrationError, match="requires spatial"):
+        _configure_goal_region_navigation(config, read_write, goal_aware_arrival=True)
+    assert actions["agent_0_oracle_nav_action"].type == "OracleNavDiffBaseAction"
+    _configure_goal_region_navigation(
+        config, read_write, step_aware=True, spatial_arrival=True, goal_aware_arrival=True
+    )
+    assert actions["agent_0_oracle_nav_action"].type == (
+        "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction"
+    )
+    assert module.LiveGoalArrivalGoalRegionOracleNavDiffBaseAction.require_stop_envelope is False
 
 
 @pytest.mark.parametrize(

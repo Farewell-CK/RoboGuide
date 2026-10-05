@@ -125,6 +125,11 @@ def _arguments() -> argparse.Namespace:
         help="shared backend: digest-bound Node capability snapshot",
     )
     parser.add_argument(
+        "--goal-aware-navigation-arrival",
+        action="store_true",
+        help="shared backend: require the actual reference inside the exact goal region to finish",
+    )
+    parser.add_argument(
         "--spatial-navigation-arrival",
         action="store_true",
         help="shared backend: require spatial arrival before facing the assigned entity",
@@ -188,6 +193,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         goal_region_navigation=arguments.goal_region_navigation,
         step_aware_navmesh=arguments.step_aware_navmesh,
         spatial_navigation_arrival=arguments.spatial_navigation_arrival,
+        goal_aware_navigation_arrival=arguments.goal_aware_navigation_arrival,
         reset_route_support=arguments.reset_route_support,
         reset_route_geometry=arguments.reset_route_geometry,
         retain_stopped_session=arguments.retain_stopped_session,
@@ -243,6 +249,8 @@ def main() -> None:
         raise SystemExit("step-aware navmesh requires goal-region navigation")
     if arguments.spatial_navigation_arrival and not arguments.step_aware_navmesh:
         raise SystemExit("spatial navigation arrival requires step-aware navmesh")
+    if arguments.goal_aware_navigation_arrival and not arguments.spatial_navigation_arrival:
+        raise SystemExit("goal-aware navigation arrival requires spatial navigation arrival")
     if arguments.retain_stopped_session and arguments.backend != "shared-emos-stage2":
         raise SystemExit("retained stopped sessions require the shared EMOS Stage2 backend")
     if arguments.reset_route_support and (

@@ -125,6 +125,7 @@ def select_goal_region_point(
     max_triangles: int = MAX_NAVMESH_TRIANGLES,
     max_geometry_seconds: float = MAX_GEOMETRY_SEARCH_SECONDS,
     clock: Callable[[], float] = time.perf_counter,
+    require_stop_envelope: bool = True,
 ) -> GoalRegionSelection:
     """Prefer a reachable original point, then search the agent's own navmesh.
 
@@ -134,13 +135,18 @@ def select_goal_region_point(
     Optional triangle indices must describe the same vertex export. Closest
     interior/edge points and centroids supplement vertices under count/time
     bounds, but each selected point still requires an actual path query and
-    the unchanged stop envelope. This is not an exhaustive feasibility test.
+    the stop envelope by default. An explicitly goal-aware controller may
+    instead admit a point inside the region and check the actual reference
+    before finishing; this option never grants that check to the legacy action.
+    The envelope estimate is still recorded. This is not an exhaustive feasibility test.
     Native export allocation/time is outside the Python search's hard bounds.
     Selection uses no RNG or simulator step. A bounded miss fails explicitly.
     """
     center = point3(goal_center)
     offset = point3(reference_offset)
     original = point3(original_point)
+    if not isinstance(require_stop_envelope, bool):
+        raise GoalRegionResolutionError("goal-region arrival policy is invalid")
     if not math.isfinite(radius_m) or radius_m <= 0:
         raise GoalRegionResolutionError("official any_at radius is unavailable")
     if not math.isfinite(stop_radius_m) or stop_radius_m < 0:
@@ -175,8 +181,10 @@ def select_goal_region_point(
         return math.hypot(vertical, horizontal + offset_horizontal + stop_radius_m)
 
     def admitted(candidate: Point3) -> bool:
-        """Require both the point and its estimated local stop envelope inside."""
-        return estimated_distance(candidate) < bound and stop_envelope(candidate) < bound
+        """Admit an exact region point under the explicitly selected arrival policy."""
+        return estimated_distance(candidate) < bound and (
+            not require_stop_envelope or stop_envelope(candidate) < bound
+        )
 
     queries = 0
     vertices_seen = 0

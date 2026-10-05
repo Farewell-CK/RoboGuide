@@ -39,6 +39,9 @@ from .semantic_evidence import _expression
 class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignore[misc]
     """Keep original Oracle control while changing only goal-point selection."""
 
+    require_stop_envelope = True
+    selection_schema = GOAL_REGION_SELECTION_SCHEMA
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize the original action and bounded per-episode audit state."""
         super().__init__(*args, **kwargs)
@@ -60,9 +63,18 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
         if not self.pathfinder.find_path(path):
             return None
         points = list(path.points)
-        if len(points) < 2 or math.dist(point3(points[-1]), point) > 0.05:
+        if self.require_stop_envelope and len(points) < 2:
+            return None
+        if not points or math.dist(point3(points[-1]), point) > 0.05:
             return None
         distance = float(path.geodesic_distance)
+        if len(points) == 1 and (
+            self.require_stop_envelope
+            or math.dist(point3(self.cur_articulated_agent.base_pos), point) > 1e-6
+            or math.dist(point3(points[0]), point) > 1e-6
+            or distance > 1e-6
+        ):
+            return None
         return distance if math.isfinite(distance) and distance >= 0 else None
 
     def _project_center(self, center: Point3) -> Point3 | None:
@@ -98,14 +110,14 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
             raise GoalRegionResolutionError("Oracle target entity has no exact name")
         if entity_name not in any_at_conjunct_names(_expression(problem.goal)):
             self._roboguide_selections[nav_to_target_idx] = {
-                "schema_version": GOAL_REGION_SELECTION_SCHEMA,
+                "schema_version": self.selection_schema,
                 "entity_id": entity_name,
                 "mode": "original_non_distance_goal",
                 "original_point": [float(value) for value in original_point],
             }
             return original_point, object_point
         record: dict[str, Any] = {
-            "schema_version": GOAL_REGION_SELECTION_SCHEMA,
+            "schema_version": self.selection_schema,
             "entity_id": entity_name,
             "mode": "official_any_at_region",
             "original_point": [float(value) for value in original_point],
@@ -115,6 +127,7 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
             "max_navmesh_triangles": MAX_NAVMESH_TRIANGLES,
             "max_geometry_search_seconds": MAX_GEOMETRY_SEARCH_SECONDS,
             "max_path_queries": MAX_PATH_QUERIES,
+            **({"stop_envelope_required": False} if not self.require_stop_envelope else {}),
         }
         self._roboguide_selections[nav_to_target_idx] = record
         started = time.perf_counter()
@@ -137,6 +150,7 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
                 navmesh_indices=self.pathfinder.build_navmesh_vertex_indices,
                 path_length=self._path_length,
                 project_center=self._project_center,
+                require_stop_envelope=self.require_stop_envelope,
             )
             self._targets[nav_to_target_idx] = (
                 np.asarray(selected.point),

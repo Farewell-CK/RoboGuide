@@ -26,8 +26,11 @@ from habitat.tasks.rearrange.actions.oracle_nav_action import (  # type: ignore[
 from .goal_region_action import StepAwareGoalRegionOracleNavDiffBaseAction
 from .goal_region_navigation import GOAL_REGION_SELECTION_SCHEMA, GoalRegionResolutionError, point3
 from .spatial_navigation import (
+    GOAL_AWARE_ARRIVAL_PROFILE,
+    GOAL_AWARE_SELECTION_SCHEMA,
     MAX_ROUTE_POINTS,
     SPATIAL_ARRIVAL_PROFILE,
+    NavigationGoalRegion,
     heading_error,
     spatial_navigation_decision,
 )
@@ -44,6 +47,8 @@ class PreparedNavigation:
     velocity: tuple[float, float] | None
     target_index: int | None
     observation: dict[str, Any] | None
+    goal_region: NavigationGoalRegion | None = None
+    selected_entity_point: tuple[float, float, float] | None = None
 
 
 @registry.register_task_action
@@ -54,6 +59,7 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
     pathfinder: Any
     prev_nav_done: bool
     prev_match_target_id: int
+    arrival_profile = SPATIAL_ARRIVAL_PROFILE
 
     def reset(self, *args: Any, **kwargs: Any) -> Any:
         """Clear local observation counters before the existing action reset."""
@@ -74,6 +80,10 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
         if not 0 < len(points) <= MAX_ROUTE_POINTS:
             raise GoalRegionResolutionError("spatial navigation active route exceeds its bounds")
         return points
+
+    def _arrival_goal(self, target_index: int, entity_point: Any) -> NavigationGoalRegion | None:
+        """Preserve legacy selected-point arrival without reading additional geometry."""
+        return None
 
     def prepare_navigation_step(self, **kwargs: Any) -> None:
         """Resolve this exact action once before any member of a joint step moves.
@@ -112,6 +122,7 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
         if self.motion_type not in {"base_velocity", "base_velocity_non_cylinder"}:
             raise GoalRegionResolutionError("spatial arrival requires differential-base motion")
         final_point, entity_point = self._get_target_for_idx(target_index)
+        goal_region = self._arrival_goal(target_index, entity_point)
         points = self._path_to_point(final_point)
         forward = (forward_world[0], forward_world[2])
         decision = spatial_navigation_decision(
@@ -122,15 +133,31 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             forward=forward,
             distance_threshold_m=float(self._config.dist_thresh),
             turn_threshold_radians=float(self._config.turn_thresh),
+            goal_region=goal_region,
         )
         observation = {
-            "profile": SPATIAL_ARRIVAL_PROFILE,
+            "profile": self.arrival_profile,
             "phase": "pre-base-action",
             "action_invocations": getattr(self, "_roboguide_arrival_calls", 0) + 1,
             "branch": decision.branch,
             "distance_m": decision.distance_m,
             "horizontal_distance_m": decision.horizontal_distance_m,
             "vertical_distance_m": decision.vertical_distance_m,
+            **(
+                {
+                    "goal_reference_position": list(goal_region.reference_position),
+                    "goal_center": list(goal_region.center),
+                    "goal_reference_distance_m": decision.goal_reference_distance_m,
+                    "official_radius_m": goal_region.radius_m,
+                    "local_arrival_bound_m": goal_region.bound_m,
+                    "goal_reference_within_local_bound": (
+                        decision.goal_reference_distance_m is not None
+                        and decision.goal_reference_distance_m < goal_region.bound_m
+                    ),
+                }
+                if goal_region is not None
+                else {}
+            ),
         }
         if decision.branch == "arrived":
             velocity = [0.0, 0.0]
@@ -151,6 +178,8 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             (float(velocity[0]), float(velocity[1])),
             target_index,
             observation,
+            goal_region,
+            point3(entity_point) if goal_region is not None else None,
         )
 
     def discard_prepared_navigation(self) -> None:
@@ -180,6 +209,13 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             != point3(base.base_transformation.transform_vector([1.0, 0.0, 0.0]))
         ):
             raise GoalRegionResolutionError("spatial navigation prepared command is stale")
+        if prepared.goal_region is not None and (
+            prepared.target_index is None
+            or prepared.selected_entity_point is None
+            or self._arrival_goal(prepared.target_index, prepared.selected_entity_point)
+            != prepared.goal_region
+        ):
+            raise GoalRegionResolutionError("live goal-region prepared geometry is stale")
         self.skill_done = False
         self._roboguide_arrival_observation = prepared.observation
         if prepared.velocity is None:
@@ -201,8 +237,8 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
         return [
             {
                 **record,
-                "schema_version": GOAL_REGION_SELECTION_SCHEMA,
-                "navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE,
+                "schema_version": getattr(self, "selection_schema", GOAL_REGION_SELECTION_SCHEMA),
+                "navigation_arrival_profile": self.arrival_profile,
             }
             for record in super().navigation_selection_evidence()
         ]
@@ -215,3 +251,54 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
             if observation is not None
             else {"_status": "unavailable", "reason": "no spatial navigation decision this action"}
         )
+
+
+@registry.register_task_action
+class LiveGoalArrivalGoalRegionOracleNavDiffBaseAction(
+    SpatialArrivalGoalRegionOracleNavDiffBaseAction
+):
+    """Admit region points and require actual reference proximity before completion.
+
+    This explicit Local How variant preserves the exact selected entity,
+    original base velocities, heading and budgets. It does not evaluate PDDL or
+    grant Mission satisfaction; the official metric retains that authority.
+    Unsupported or changed goal geometry fails before the original base dispatch.
+    """
+
+    require_stop_envelope = False
+    selection_schema = GOAL_AWARE_SELECTION_SCHEMA
+    arrival_profile = GOAL_AWARE_ARRIVAL_PROFILE
+
+    def _arrival_goal(self, target_index: int, entity_point: Any) -> NavigationGoalRegion:
+        """Fail with typed local attribution if required read-only geometry is unavailable."""
+        try:
+            return self._read_arrival_goal(target_index, entity_point)
+        except GoalRegionResolutionError:
+            raise
+        except Exception as error:
+            raise GoalRegionResolutionError("live goal-region geometry is unavailable") from error
+
+    def _read_arrival_goal(self, target_index: int, entity_point: Any) -> NavigationGoalRegion:
+        """Read the current exact target and actual PDDL reference without a state mutation."""
+        record = self._roboguide_selections.get(target_index)
+        entity = self._poss_entities[target_index]
+        if (
+            record is None
+            or record.get("mode") != "official_any_at_region"
+            or record.get("status") != "selected"
+            or record.get("entity_id") != getattr(entity, "name", None)
+        ):
+            raise GoalRegionResolutionError("live goal-region requires an exact distance goal")
+        info = self._task.pddl_problem.sim_info
+        center = point3(info.get_entity_pos(entity))
+        radius = float(info.robot_at_thresh)
+        if (
+            point3(entity_point) != point3(record["goal_center"])
+            or radius != record["official_robot_at_threshold_m"]
+        ):
+            raise GoalRegionResolutionError("live goal-region selected geometry changed")
+        goal = NavigationGoalRegion(
+            point3(self.cur_articulated_agent.base_transformation.translation), center, radius
+        )
+        goal.reference_distance()
+        return goal
