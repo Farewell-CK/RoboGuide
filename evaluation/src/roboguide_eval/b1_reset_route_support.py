@@ -541,8 +541,12 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         load_document(run / "evidence/runtime-source-manifest.json"), "runtime sources"
     )
     geometry_enabled = document.get("schema_version") == _GEOMETRY_SCHEMA
+    goal_aware_arrival = (
+        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.7"
+    )
     navigation_preparation = (
-        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
+        goal_aware_arrival
+        or local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
     )
     spatial_arrival = (
         navigation_preparation
@@ -583,7 +587,9 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
     if _content_digest(local_how) != _content_digest(
         {
             "schema_version": (
-                "roboguide.habitat-local-how-profile/v0.6"
+                "roboguide.habitat-local-how-profile/v0.7"
+                if goal_aware_arrival
+                else "roboguide.habitat-local-how-profile/v0.6"
                 if navigation_preparation
                 else "roboguide.habitat-local-how-profile/v0.5"
                 if spatial_arrival
@@ -593,7 +599,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
                 if geometry_enabled
                 else "roboguide.habitat-local-how-profile/v0.2"
             ),
-            "navigation_point_resolver": "official-any-at-agent-navmesh/v0.1",
+            "navigation_point_resolver": (
+                "official-any-at-live-arrival/v0.1"
+                if goal_aware_arrival
+                else "official-any-at-agent-navmesh/v0.1"
+            ),
             "official_success_authority": "habitat-pddl",
             "reset_route_support_enabled": True,
             **({"reset_route_geometry_enabled": True} if geometry_enabled else {}),
@@ -603,13 +613,24 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
                 else {}
             ),
             **(
-                {"navigation_arrival_profile": "spatial-route-arrival/v0.1"}
+                {
+                    "navigation_arrival_profile": (
+                        "live-reference-goal-region/v0.1"
+                        if goal_aware_arrival
+                        else "spatial-route-arrival/v0.1"
+                    )
+                }
                 if spatial_arrival
                 else {}
             ),
             **(
                 {"navigation_preparation_profile": "joint-navigation-preparation/v0.1"}
                 if navigation_preparation
+                else {}
+            ),
+            **(
+                {"reset_route_probe_policy": "conservative-stop-envelope/v0.1"}
+                if goal_aware_arrival
                 else {}
             ),
         }

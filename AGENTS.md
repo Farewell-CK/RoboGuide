@@ -251,6 +251,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   no extra model/action/Gym step and no external EMOS edit. Local How v0.5 and action
   evidence v0.4 disclose this change. Reset observation retains identical copied
   settings; bounded pre-motion decision diagnostics never become official truth.
+- Optional live-reference goal-region arrival (ADR-0068) is a separate default-off
+  Local How controller requiring the goal-region, step-aware and spatial profiles.
+  It admits an actual routed point inside the unchanged goal region and permits
+  local completion only when the actual PDDL reference is inside the existing local
+  margin plus original point/heading conditions. Original speeds, abilities and
+  budgets remain intact; missing/changed geometry fails before motion. Local How
+  v0.7 and selection v0.6 disclose the arm difference. Reset observation retains an
+  explicitly declared conservative stop-envelope probe; its bounded miss is never
+  an exclusion. Official PDDL and Orchestration satisfaction keep their authorities.
 - Enabled spatial route arrival now uses Local How v0.6 joint navigation preparation
   (ADR-0065): the vendor-decoded selected navigation actions prepare target/path/command
   before the original Gym step. Expected bounded preparation failure prevents that step,

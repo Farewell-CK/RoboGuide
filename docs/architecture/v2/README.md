@@ -625,13 +625,21 @@ v0.4 明示与原生控制的区别，未改变官方谓词、Control 资源权�
 前失败的官方执行结果保持 unavailable，reset 真值仅是诊断。准备初始化执行缓存，
 不是只读观察；它不新增 Control 路线权威，也不保证任意物理异常的原子回滚。
 
+另一个默认关闭的目标感知到达 profile
+（[ADR-0068](../../decisions/0068-live-reference-goal-region-arrival.md)）允许选择有真实路径的
+目标区域内落点，保留原停止范围估计作为证据。该控制分支必须读取机器人当前实际参考
+位置，只有其完整三维距离进入既有局部余量且原导航点/朝向条件均满足，才报告本地完成；
+否则继续沿路线接近。它不增加动作、模型或 Gym step，不改变原速度及技能/episode 预算。
+Local How v0.7 与动作证据 v0.6 明示该执行臂差异；reset observer 仍用明确披露的保守停止
+范围探测，未命中不排除 Node。官方联合 PDDL、Control 和 Orchestration 的权威保持不变。
+
 ```text
 one Habitat reset -> original prepared observations -> assigned Stage2 execution
                                                         |
                                            active agent NavMesh
                                       (original / opt-in step-aware copy)
                                                         |
-                                  original Oracle / opt-in spatial-route control
+                           original Oracle / opt-in spatial or live-goal arrival
                                                         |
                                    opt-in selected joint navigation preparation
                                       (failure -> attributed local outcome)

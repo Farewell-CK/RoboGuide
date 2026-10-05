@@ -371,6 +371,59 @@ def _prepared_navigation_archive(run: Path) -> dict[str, Any]:
     return _seal(document)
 
 
+def _live_arrival_archive(run: Path) -> dict[str, Any]:
+    """Freeze changed Local How identity while retaining the conservative diagnostic probe."""
+    document = _prepared_navigation_archive(run)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    profile.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.7",
+        navigation_point_resolver="official-any-at-live-arrival/v0.1",
+        navigation_arrival_profile="live-reference-goal-region/v0.1",
+        reset_route_probe_policy="conservative-stop-envelope/v0.1",
+    )
+    write_json(run / "evidence/local-how-profile.json", profile)
+    document["identity"]["local_how_digest"] = _content_digest(profile)
+    _save(run, document)
+    return _seal(document)
+
+
+def test_live_arrival_archive_keeps_original_formal_and_benchmark_authority(tmp_path: Path) -> None:
+    """Opting into a new stopping contract cannot change historical B1 population rules."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _live_arrival_archive(run)
+    assert preflight_reset_route_support(run, require_geometry=True) == document
+    assert assess_b1_directory(run) == baseline
+
+
+@pytest.mark.parametrize(
+    "fault", ["resolver", "arrival", "probe", "missing_probe", "downgrade", "source"]
+)
+def test_resealed_live_arrival_contract_mismatch_fails_closed(tmp_path: Path, fault: str) -> None:
+    """Resealing identity does not hide a changed or incomplete arrival implementation."""
+    run = make_run(tmp_path)
+    document = _live_arrival_archive(run)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    if fault in {"resolver", "arrival", "probe"}:
+        field = {
+            "resolver": "navigation_point_resolver",
+            "arrival": "navigation_arrival_profile",
+            "probe": "reset_route_probe_policy",
+        }[fault]
+        profile[field] = "unsupported-profile"
+    elif fault == "missing_probe":
+        del profile["reset_route_probe_policy"]
+    elif fault == "downgrade":
+        profile["schema_version"] = "roboguide.habitat-local-how-profile/v0.6"
+    else:
+        (run / "spatial_navigation_action.py").write_text("# changed live arrival source\n")
+    write_json(run / "evidence/local-how-profile.json", profile)
+    document["identity"]["local_how_digest"] = _content_digest(profile)
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
 def test_preparation_profile_preserves_population_and_official_authority(tmp_path: Path) -> None:
     """The new Local How boundary cannot turn a bounded miss into an admission rule."""
     run = make_run(tmp_path)

@@ -30,7 +30,11 @@ from .navmesh_region import (
     unknown_region,
 )
 from .preassignment_feasibility import preassignment_digest
-from .spatial_navigation import SPATIAL_ARRIVAL_PROFILE
+from .spatial_navigation import (
+    GOAL_AWARE_ARRIVAL_PROFILE,
+    GOAL_AWARE_POINT_RESOLVER,
+    SPATIAL_ARRIVAL_PROFILE,
+)
 
 RESET_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.1"
 GEOMETRY_ROUTE_SUPPORT_SCHEMA = "roboguide.deployment-reset-route-support/v0.2"
@@ -86,13 +90,19 @@ class ResetRouteProbe:
             "GoalRegionOracleNavDiffBaseAction",
             "StepAwareGoalRegionOracleNavDiffBaseAction",
             "SpatialArrivalGoalRegionOracleNavDiffBaseAction",
+            "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction",
         }:
             raise GoalRegionResolutionError("reset route probe requires the goal-region action")
         self.step_aware = action_type in {
             "StepAwareGoalRegionOracleNavDiffBaseAction",
             "SpatialArrivalGoalRegionOracleNavDiffBaseAction",
+            "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction",
         }
-        self.spatial_arrival = action_type == "SpatialArrivalGoalRegionOracleNavDiffBaseAction"
+        self.spatial_arrival = action_type in {
+            "SpatialArrivalGoalRegionOracleNavDiffBaseAction",
+            "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction",
+        }
+        self.goal_aware_arrival = action_type == "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction"
         if self.action.config.spawn_max_dist_to_obj != -1:
             raise GoalRegionResolutionError("randomized Oracle target placement is unsupported")
         sim = environment.sim
@@ -198,6 +208,9 @@ class ResetRouteProbe:
                 """Use the same deterministic agent-floor projection as the Local How resolver."""
                 return point3(self.pathfinder.snap_point((goal[0], start[1], goal[2])))
 
+            # This bounded reset probe intentionally retains conservative
+            # stop-envelope witnesses for every arrival profile. A miss is
+            # not evidence that the live-reference controller cannot arrive.
             selected = select_goal_region_point(
                 original_point=original,
                 goal_center=center,
@@ -241,9 +254,15 @@ def build_reset_route_support(
     identity = preassignment["identity"]
     if identity["semantic_evidence_digest"] != semantic["digest"]:
         raise ValueError("route support differs from reset semantic identity")
+    goal_aware_arrival = (
+        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.7"
+    )
+    resolver = (
+        GOAL_AWARE_POINT_RESOLVER if goal_aware_arrival else "official-any-at-agent-navmesh/v0.1"
+    )
     if (
         local_how.get("reset_route_support_enabled") is not True
-        or local_how.get("navigation_point_resolver") != "official-any-at-agent-navmesh/v0.1"
+        or local_how.get("navigation_point_resolver") != resolver
     ):
         raise ValueError("route support differs from active Local How profile")
     goals = sorted(any_at_conjunct_names(semantic["goal"]))
@@ -255,12 +274,14 @@ def build_reset_route_support(
             "roboguide.habitat-local-how-profile/v0.4",
             "roboguide.habitat-local-how-profile/v0.5",
             "roboguide.habitat-local-how-profile/v0.6",
+            "roboguide.habitat-local-how-profile/v0.7",
         }
     ):
         raise ValueError("route support has an unsupported navmesh resolution profile")
     geometry_enabled = local_how.get("reset_route_geometry_enabled") is True
     navigation_preparation = (
-        local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
+        goal_aware_arrival
+        or local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.6"
     )
     spatial_arrival = navigation_preparation or (
         local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.5"
@@ -269,10 +290,16 @@ def build_reset_route_support(
         local_how.get("navigation_preparation_profile") == NAVIGATION_PREPARATION_PROFILE
     ) or ("navigation_preparation_profile" in local_how and not navigation_preparation):
         raise ValueError("route support has an unsupported navigation preparation profile")
-    if spatial_arrival != (
-        local_how.get("navigation_arrival_profile") == SPATIAL_ARRIVAL_PROFILE
-    ) or ("navigation_arrival_profile" in local_how and not spatial_arrival):
+    arrival_profile = GOAL_AWARE_ARRIVAL_PROFILE if goal_aware_arrival else SPATIAL_ARRIVAL_PROFILE
+    if spatial_arrival != (local_how.get("navigation_arrival_profile") == arrival_profile) or (
+        "navigation_arrival_profile" in local_how and not spatial_arrival
+    ):
         raise ValueError("route support has an unsupported spatial arrival profile")
+    if (
+        goal_aware_arrival
+        and local_how.get("reset_route_probe_policy") != "conservative-stop-envelope/v0.1"
+    ) or ("reset_route_probe_policy" in local_how and not goal_aware_arrival):
+        raise ValueError("route support has an unsupported reset probe policy")
     geometry_budget = RegionBudget()
     endpoints = sorted({(item["agent_id"], item["node_id"]) for item in preassignment["records"]})
     records: list[dict[str, Any]] = []
@@ -293,6 +320,11 @@ def build_reset_route_support(
                 raise ValueError("route support resolution profile differs from the active action")
             if probe is not None and getattr(probe, "spatial_arrival", False) != spatial_arrival:
                 raise ValueError("route support spatial arrival differs from the active action")
+            if (
+                probe is not None
+                and getattr(probe, "goal_aware_arrival", False) != goal_aware_arrival
+            ):
+                raise ValueError("route support goal-aware arrival differs from the active action")
             for destination in goals:
                 observation = _empty_observation()
                 if probe is not None:

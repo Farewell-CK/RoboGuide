@@ -185,6 +185,13 @@ if [[ "${ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL:-0}" == 1 ]]; then
     fi
     GOAL_REGION_ARGS+=(--spatial-navigation-arrival)
 fi
+if [[ "${ROBOGUIDE_B1_GOAL_AWARE_NAVIGATION_ARRIVAL:-0}" == 1 ]]; then
+    if [[ "${ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL:-0}" != 1 ]]; then
+        echo "goal-aware arrival requires ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL=1" >&2
+        exit 1
+    fi
+    GOAL_REGION_ARGS+=(--goal-aware-navigation-arrival)
+fi
 if [[ "${ROBOGUIDE_B1_RESET_ROUTE_SUPPORT:-0}" == 1 ]]; then
     if [[ "${ROBOGUIDE_B1_GOAL_REGION_NAVIGATION:-0}" != 1 ]]; then
         echo "reset route support requires ROBOGUIDE_B1_GOAL_REGION_NAVIGATION=1" >&2

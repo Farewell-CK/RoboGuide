@@ -268,6 +268,24 @@ unreachability. When the spatial flag is off, the legacy step path is unchanged.
 Historical profiles remain accepted. See
 [ADR-0065](../../docs/decisions/0065-joint-navigation-preparation.md).
 
+`--goal-aware-navigation-arrival` is another default-off Local How profile,
+requiring all three navigation flags above. B1 uses
+`ROBOGUIDE_B1_GOAL_AWARE_NAVIGATION_ARRIVAL=1`. The resolver admits routed points
+inside the exact goal region without requiring the full legacy stop envelope.
+The controller then requires the actual PDDL reference position to be inside the
+same local margin before its original selected-point/heading checks can finish.
+When that position is still outside, it continues the actual route using original
+velocities and budgets. Missing geometry, changed goals or unusable routes fail
+before motion; the model-selected entity remains exact.
+
+Local How v0.7 and action selection v0.6 explicitly disclose this arm difference.
+The reset probe remains conservative under its declared
+`conservative-stop-envelope/v0.1` policy; a bounded probe miss is not an exclusion
+or an impossibility claim. Diagnostics record actual reference/center/distance and
+local bound before the base action. These are not official verdicts or evidence
+of subsequent residence. B1 verifies new profile/source identity and retains
+historical schemas. See [ADR-0068](../../docs/decisions/0068-live-reference-goal-region-arrival.md).
+
 The backend reports local skill completion, Habitat PDDL benchmark success, episode termination,
 and RoboGuide execution state as separate evidence. `COMPLETED` retains an explicit
 `terminal_basis`: either the Oracle navigation skill reached its own terminal measure, or Habitat

@@ -240,6 +240,56 @@ def test_probe_preserves_live_action_settings_and_rng() -> None:
     assert random.getstate() == rng_before
 
 
+def test_goal_aware_reset_probe_remains_conservative_and_does_not_prime_the_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A thinner reachable region remains a bounded probe miss, never a negative verdict."""
+    api = ModuleType("habitat_sim")
+    vars(api).update(vars(_api()))
+    monkeypatch.setitem(sys.modules, "habitat_sim", api)
+    env = _environment()
+    action_type = type(
+        "LiveGoalArrivalGoalRegionOracleNavDiffBaseAction", (GoalRegionOracleNavDiffBaseAction,), {}
+    )
+    action = action_type()
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    env.task.pddl_problem.sim_info.get_entity_pos = lambda _entity: (0.0, 1.94, 0.0)
+    env.sim.pathfinder.snap_point = lambda *_args: (0.0, 0.0, 0.0)
+    semantic, matrix, profile, sources = _sources()
+    profile.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.7",
+        navigation_point_resolver="official-any-at-live-arrival/v0.1",
+        navmesh_resolution_profile="step-preserving-cell-height/v0.1",
+        navigation_arrival_profile="live-reference-goal-region/v0.1",
+        navigation_preparation_profile="joint-navigation-preparation/v0.1",
+        reset_route_probe_policy="conservative-stop-envelope/v0.1",
+    )
+    before = dict(action._targets)
+    document = routes.build_reset_route_support(env, semantic, matrix, profile, sources)
+    assert document["scope_status"] == "available"
+    assert document["records"][0]["status"] == "not_found"
+    assert document["records"][0]["reason_code"] == "initial_candidates_exhausted"
+    assert document["identity"]["local_how_digest"] == preassignment_digest(profile)
+    assert action._targets == before and action.pathfinder is None
+
+
+@pytest.mark.parametrize("field", ["navigation_arrival_profile", "reset_route_probe_policy"])
+def test_goal_aware_reset_producer_rejects_incomplete_profile_identity(field: str) -> None:
+    """No resealed schema silently omits the changed arrival or conservative probe contract."""
+    semantic, matrix, profile, sources = _sources()
+    profile.update(
+        schema_version="roboguide.habitat-local-how-profile/v0.7",
+        navigation_point_resolver="official-any-at-live-arrival/v0.1",
+        navmesh_resolution_profile="step-preserving-cell-height/v0.1",
+        navigation_arrival_profile="live-reference-goal-region/v0.1",
+        navigation_preparation_profile="joint-navigation-preparation/v0.1",
+        reset_route_probe_policy="conservative-stop-envelope/v0.1",
+    )
+    del profile[field]
+    with pytest.raises(ValueError):
+        routes.build_reset_route_support(object(), semantic, matrix, profile, sources)
+
+
 def test_probe_miss_records_budget_not_physical_impossibility() -> None:
     """No initial-candidate path remains a bounded miss with exact counters."""
     env = _environment(found=False)
