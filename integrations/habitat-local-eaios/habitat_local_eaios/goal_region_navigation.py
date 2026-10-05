@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import math
+import operator
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from .triangle_geometry import closest_triangle_point
+
 Point3 = tuple[float, float, float]
 MAX_NAVMESH_VERTICES = 100_000
+MAX_NAVMESH_TRIANGLES = 200_000
 MAX_PATH_QUERIES = 256
+MAX_GEOMETRY_SEARCH_SECONDS = 2.0
+TRIANGLE_SEARCH_PROFILE = "vertices-and-triangle-interiors/v0.1"
+GOAL_REGION_SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.5"
 
 
 class GoalRegionResolutionError(RuntimeError):
@@ -41,6 +49,7 @@ class GoalRegionSelection:
     candidates_in_region: int
     path_queries: int
     search_truncated: bool
+    geometry_search: dict[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return JSON-safe evidence without claiming official goal truth."""
@@ -55,6 +64,7 @@ class GoalRegionSelection:
             "candidates_in_region": self.candidates_in_region,
             "path_queries": self.path_queries,
             "search_truncated": self.search_truncated,
+            **({"geometry_search": self.geometry_search.copy()} if self.geometry_search else {}),
         }
 
 
@@ -111,12 +121,21 @@ def select_goal_region_point(
     project_center: Callable[[Point3], Point3 | None] | None = None,
     max_vertices: int = MAX_NAVMESH_VERTICES,
     max_path_queries: int = MAX_PATH_QUERIES,
+    navmesh_indices: Sequence[object] | Callable[[], Sequence[object]] | None = None,
+    max_triangles: int = MAX_NAVMESH_TRIANGLES,
+    max_geometry_seconds: float = MAX_GEOMETRY_SEARCH_SECONDS,
+    clock: Callable[[], float] = time.perf_counter,
 ) -> GoalRegionSelection:
     """Prefer a reachable original point, then search the agent's own navmesh.
 
     The official radius is read from Habitat but is never changed here. The
     current base-to-PDDL-reference offset estimates the reference position at
     a candidate; only the official evaluator can decide actual predicate truth.
+    Optional triangle indices must describe the same vertex export. Closest
+    interior/edge points and centroids supplement vertices under count/time
+    bounds, but each selected point still requires an actual path query and
+    the unchanged stop envelope. This is not an exhaustive feasibility test.
+    Native export allocation/time is outside the Python search's hard bounds.
     Selection uses no RNG or simulator step. A bounded miss fails explicitly.
     """
     center = point3(goal_center)
@@ -126,7 +145,13 @@ def select_goal_region_point(
         raise GoalRegionResolutionError("official any_at radius is unavailable")
     if not math.isfinite(stop_radius_m) or stop_radius_m < 0:
         raise GoalRegionResolutionError("local Oracle stop radius is unavailable")
-    if max_vertices < 1 or max_path_queries < 1:
+    if (
+        max_vertices < 1
+        or max_path_queries < 1
+        or max_triangles < 1
+        or not math.isfinite(max_geometry_seconds)
+        or max_geometry_seconds <= 0
+    ):
         raise GoalRegionResolutionError("goal-region search budget is invalid")
     # The original Oracle stops within its own distance threshold from the
     # selected point. A point barely inside the official radius can therefore
@@ -156,6 +181,19 @@ def select_goal_region_point(
     queries = 0
     vertices_seen = 0
     candidates_seen = 0
+    geometry_search: dict[str, object] | None = (
+        {
+            "profile": TRIANGLE_SEARCH_PROFILE,
+            "max_vertices": max_vertices,
+            "max_triangles": max_triangles,
+            "max_geometry_seconds": max_geometry_seconds,
+            "triangles_seen": 0,
+            "triangle_candidates_in_region": 0,
+            "time_budget_exhausted": False,
+        }
+        if navmesh_indices is not None
+        else None
+    )
 
     def search_miss(message: str, reason: str, truncated: bool) -> GoalRegionSearchMiss:
         """Attach actual query counts to a miss, never infer exhaustive reachability."""
@@ -167,6 +205,7 @@ def select_goal_region_point(
                 "candidates_in_region": candidates_seen,
                 "path_queries": queries,
                 "search_truncated": truncated,
+                **({"geometry_search": geometry_search.copy()} if geometry_search else {}),
             },
         )
 
@@ -225,18 +264,80 @@ def select_goal_region_point(
                         False,
                     )
 
+    if queries >= max_path_queries:
+        raise search_miss("goal-region path-query budget exhausted", "path_query_budget", True)
+    started = clock()
     vertices = navmesh_vertices() if callable(navmesh_vertices) else navmesh_vertices
     if len(vertices) > max_vertices:
         raise search_miss("agent navmesh vertex budget exhausted", "vertex_budget", True)
-    vertices_seen = len(vertices)
     candidates: set[Point3] = set()
+    normalized: list[Point3 | None] = []
+
+    def exhausted_time() -> bool:
+        """Bound Python geometry work without pretending to cap native exports."""
+        return geometry_search is not None and clock() - started >= max_geometry_seconds
+
+    def add_candidate(candidate: Point3) -> None:
+        """Deduplicate admitted points before the independent route-query budget."""
+        if admitted(candidate) and candidate != original and candidate != projected:
+            candidates.add(candidate)
+
     for raw_vertex in vertices:
+        if exhausted_time():
+            break
+        vertices_seen += 1
         try:
             vertex = point3(raw_vertex)
         except GoalRegionResolutionError:
+            normalized.append(None)
             continue
-        if admitted(vertex) and vertex != original and vertex != projected:
-            candidates.add(vertex)
+        normalized.append(vertex)
+        add_candidate(vertex)
+    geometry_truncated = len(normalized) < len(vertices)
+    if navmesh_indices is not None and not geometry_truncated:
+        indices = navmesh_indices() if callable(navmesh_indices) else navmesh_indices
+        if len(indices) % 3:
+            raise GoalRegionResolutionError("agent navmesh triangle index layout is invalid")
+        if len(indices) // 3 > max_triangles:
+            raise search_miss("agent navmesh triangle budget exhausted", "triangle_budget", True)
+        reference_center = tuple(center[index] - offset[index] for index in range(3))
+        envelope_center = center[0], center[1] - offset[1], center[2]
+        interior: set[Point3] = set()
+        for position in range(0, len(indices), 3):
+            if exhausted_time():
+                geometry_truncated = True
+                break
+            triangle: list[Point3] = []
+            for value in indices[position : position + 3]:
+                try:
+                    index = operator.index(cast(Any, value))
+                except TypeError as error:
+                    raise GoalRegionResolutionError(
+                        "agent navmesh triangle index is invalid"
+                    ) from error
+                if isinstance(value, bool) or not 0 <= index < len(normalized):
+                    raise GoalRegionResolutionError("agent navmesh triangle index is invalid")
+                face_vertex = normalized[index]
+                if face_vertex is None:
+                    raise GoalRegionResolutionError("agent navmesh triangle vertex is invalid")
+                triangle.append(face_vertex)
+            first, second, third = triangle
+            points = (
+                closest_triangle_point(point3(reference_center), first, second, third),
+                closest_triangle_point(envelope_center, first, second, third),
+                point3(sum(vertex[index] for vertex in triangle) / 3 for index in range(3)),
+            )
+            for candidate in points:
+                candidate = point3(candidate)
+                if admitted(candidate) and candidate != original and candidate != projected:
+                    interior.add(candidate)
+                    add_candidate(candidate)
+            assert geometry_search is not None
+            geometry_search["triangles_seen"] = position // 3 + 1
+        assert geometry_search is not None
+        geometry_search["triangle_candidates_in_region"] = len(interior)
+    if geometry_search is not None:
+        geometry_search["time_budget_exhausted"] = geometry_truncated
     ordered = sorted(candidates, key=lambda candidate: (stop_envelope(candidate), candidate))
     candidates_seen += len(ordered)
     budget = max_path_queries - queries
@@ -249,6 +350,10 @@ def select_goal_region_point(
         if route is not None and math.isfinite(route) and route >= 0:
             successful.append((stop_envelope(candidate), route, candidate))
     if not successful:
+        if geometry_truncated:
+            raise search_miss(
+                "goal-region geometry time budget exhausted", "geometry_time_budget", True
+            )
         reason = (
             "goal-region path-query budget exhausted"
             if len(ordered) > budget
@@ -267,8 +372,9 @@ def select_goal_region_point(
         estimated_distance(candidate),
         envelope,
         route,
-        len(vertices),
-        len(ordered),
+        vertices_seen,
+        candidates_seen,
         queries,
-        len(ordered) > budget,
+        geometry_truncated or len(ordered) > budget,
+        geometry_search,
     )

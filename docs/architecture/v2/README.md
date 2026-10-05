@@ -532,6 +532,11 @@ Stage2 所选实体工具调用和官方目标的前提下，将该实体解析�
 部署启用该行为后与原生 EMOS 的 Local How 不同，对照实验必须记录这一差异。详见
 [`ADR-0051`](../../decisions/0051-goal-region-local-navigation.md)。
 
+当前解析器在原始点和投影点之外，有界检查 NavMesh 顶点、三角形内部最近点及重心，
+避免只检查顶点而遗漏内部可达落点。动作证据 v0.5 记录几何工作、路径预算与截断状态；
+所有候选仍须通过原有三维目标及停止范围检查。有限搜索未命中不证明物理任务不可能，
+也不改变 Control 的承诺、MI 的任务语义或官方成功判定。
+
 部署还可独立启用默认关闭的 reset route-support 观测。它在同一次实际 reset 后，用
 复制后的导航参数与隔离的 PathFinder 查询原始点和投影中心点，记录 `supported`、
 `not_found` 或 `unavailable`，并绑定 workload、起点、Local How 与实际模块/原生库摘要。

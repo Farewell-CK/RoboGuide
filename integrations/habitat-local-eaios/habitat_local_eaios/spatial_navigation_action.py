@@ -24,7 +24,7 @@ from habitat.tasks.rearrange.actions.oracle_nav_action import (  # type: ignore[
 )
 
 from .goal_region_action import StepAwareGoalRegionOracleNavDiffBaseAction
-from .goal_region_navigation import GoalRegionResolutionError, point3
+from .goal_region_navigation import GOAL_REGION_SELECTION_SCHEMA, GoalRegionResolutionError, point3
 from .spatial_navigation import (
     MAX_ROUTE_POINTS,
     SPATIAL_ARRIVAL_PROFILE,
@@ -201,7 +201,7 @@ class SpatialArrivalGoalRegionOracleNavDiffBaseAction(StepAwareGoalRegionOracleN
         return [
             {
                 **record,
-                "schema_version": "roboguide.habitat-goal-region-navigation/v0.4",
+                "schema_version": GOAL_REGION_SELECTION_SCHEMA,
                 "navigation_arrival_profile": SPATIAL_ARRIVAL_PROFILE,
             }
             for record in super().navigation_selection_evidence()

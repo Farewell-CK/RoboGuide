@@ -28,7 +28,9 @@ the three-dimensional goal region, the original Oracle's local stopping radius,
 and the active agent-specific pathfinder. If that point is unsuitable, it
 projects the official entity's X/Z onto the agent's current navmesh height and
 tests the agent-specific snapped point and route. A bounded, deterministic
-navmesh-vertex search remains a fallback. Candidates are ranked by their
+navmesh search remains a fallback. It inspects vertices and bounded closest
+points/centroids inside exported triangles, because an interior region can be
+reachable even when every vertex is outside the goal ball. Candidates are ranked by their
 estimated distance after the original Oracle could stop short of the physical
 navigation point. The current base-to-PDDL-reference offset is included in
 this estimate. A first controlled run found that a point inside the official
@@ -52,7 +54,7 @@ Core, MissionPlan, formal admission, or generic capability contract changes.
 This mode changes RoboGuide's physical action implementation relative to native
 EMOS. Comparative runs must pin and disclose it. It is opt-in for controlled
 diagnostics until its compatibility and physical behavior are established.
-The bounded vertex search can report no supported point despite another
+The bounded candidate search can report no supported point despite another
 unexamined reachable point; that is an explicit Local How failure, not evidence
 that the mission is semantically impossible. An official distance predicate may
 still be false after the local skill declares completion.
@@ -60,3 +62,15 @@ still be false after the local skill declares completion.
 Selection record v0.2 adds structured counters on bounded misses and checks
 the remaining query budget before a projected-center query. Exception messages
 and fail-closed propagation remain intact.
+
+Selection record v0.5 discloses `vertices-and-triangle-interiors/v0.1` and its
+limits: 100,000 vertices, 200,000 triangles, two seconds of Python geometry
+work and the existing 256-query route ceiling. A timed-out scan may retain an
+already checked positive path, marked truncated; without one it reports a
+bounded miss. Malformed topology fails as unavailable geometry. Vendor mesh
+export allocation/time is not a hard process bound. This search does not
+change the official radius, original stopping radius or the existing selection
+margin, and cannot establish physical impossibility from a miss. Original and
+projected successes keep their lazy path and avoid mesh enumeration. The
+reset observer still checks only its original/projected candidates and keeps
+its existing evidence schema and consumer semantics.

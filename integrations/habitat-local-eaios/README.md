@@ -162,8 +162,13 @@ selected `nav_to_obj` entity and the original Oracle control loop, but may
 choose a different physical navigation point inside the official 3D tolerance
 when the original point is not reachable or leaves too little margin for the
 original Oracle's stopping radius. It first tests the official entity X/Z on
-the agent's own navmesh height, then uses bounded vertex search. It uses
-bounded deterministic vertex and path queries, without simulator stepping or
+the agent's own navmesh height, then uses bounded vertex and triangle-interior
+search. Selection evidence v0.5 records the candidate policy and geometry
+limits (100,000 vertices, 200,000 triangles, two seconds of Python work),
+alongside the unchanged 256-path-query ceiling. Native array export allocation
+and time are not hard process bounds. Every accepted interior point still
+requires an actual agent-specific path and the unchanged stopping envelope.
+It uses deterministic geometry and path queries, without simulator stepping or
 random sampling. Unsupported action types fail at initialization; a qualifying
 goal with no proven route fails locally rather than using the original
 straight-line fallback. `evidence/local-how-profile.json` records the selected
@@ -182,7 +187,7 @@ simulator's active mesh is changed. Only deterministic original/projected-center
 candidates are tested, without the random safe-snap fallback or vertex scans.
 At most 128 records and 256 path queries are allowed. `supported` is a static
 witness; `not_found` covers only those initial candidates, and `unavailable`
-retains observation faults. The runtime's full vertex search can still find a
+retains observation faults. The runtime's fuller bounded search can still find a
 route that this probe missed. Total probe elapsed time and source/native-library
 digests are recorded; vendor navmesh build cost is not a hard time/memory cap.
 

@@ -18,8 +18,12 @@ from habitat.tasks.rearrange.actions.habitat_mas_actions import (  # type: ignor
 )
 
 from .goal_region_navigation import (
+    GOAL_REGION_SELECTION_SCHEMA,
+    MAX_GEOMETRY_SEARCH_SECONDS,
+    MAX_NAVMESH_TRIANGLES,
     MAX_NAVMESH_VERTICES,
     MAX_PATH_QUERIES,
+    TRIANGLE_SEARCH_PROFILE,
     GoalRegionResolutionError,
     GoalRegionSearchMiss,
     Point3,
@@ -29,8 +33,6 @@ from .goal_region_navigation import (
 )
 from .navmesh_profile import STEP_AWARE_PROFILE, copied_agent_settings, settings_snapshot
 from .semantic_evidence import _expression
-
-_SELECTION_SCHEMA = "roboguide.habitat-goal-region-navigation/v0.2"
 
 
 @registry.register_task_action
@@ -96,19 +98,22 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
             raise GoalRegionResolutionError("Oracle target entity has no exact name")
         if entity_name not in any_at_conjunct_names(_expression(problem.goal)):
             self._roboguide_selections[nav_to_target_idx] = {
-                "schema_version": _SELECTION_SCHEMA,
+                "schema_version": GOAL_REGION_SELECTION_SCHEMA,
                 "entity_id": entity_name,
                 "mode": "original_non_distance_goal",
                 "original_point": [float(value) for value in original_point],
             }
             return original_point, object_point
         record: dict[str, Any] = {
-            "schema_version": _SELECTION_SCHEMA,
+            "schema_version": GOAL_REGION_SELECTION_SCHEMA,
             "entity_id": entity_name,
             "mode": "official_any_at_region",
             "original_point": [float(value) for value in original_point],
             "goal_center": [float(value) for value in object_point],
             "max_navmesh_vertices": MAX_NAVMESH_VERTICES,
+            "candidate_search_profile": TRIANGLE_SEARCH_PROFILE,
+            "max_navmesh_triangles": MAX_NAVMESH_TRIANGLES,
+            "max_geometry_search_seconds": MAX_GEOMETRY_SEARCH_SECONDS,
             "max_path_queries": MAX_PATH_QUERIES,
         }
         self._roboguide_selections[nav_to_target_idx] = record
@@ -129,6 +134,7 @@ class GoalRegionOracleNavDiffBaseAction(OracleNavDiffBaseAction):  # type: ignor
                 radius_m=threshold,
                 stop_radius_m=float(self._config.dist_thresh),
                 navmesh_vertices=self.pathfinder.build_navmesh_vertices,
+                navmesh_indices=self.pathfinder.build_navmesh_vertex_indices,
                 path_length=self._path_length,
                 project_center=self._project_center,
             )
@@ -187,7 +193,7 @@ class StepAwareGoalRegionOracleNavDiffBaseAction(GoalRegionOracleNavDiffBaseActi
         return [
             {
                 **record,
-                "schema_version": "roboguide.habitat-goal-region-navigation/v0.3",
+                "schema_version": GOAL_REGION_SELECTION_SCHEMA,
                 "navmesh_resolution_profile": STEP_AWARE_PROFILE,
                 "active_navmesh_settings": (
                     dict(self._roboguide_mesh_settings)
