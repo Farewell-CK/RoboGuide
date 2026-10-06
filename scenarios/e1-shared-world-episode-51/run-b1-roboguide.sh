@@ -68,6 +68,8 @@ finish_run() {
         fi
     done
     uv run --project "$REPO" python -m roboguide_eval.b1_artifacts "$RUN" \
+        --controller-endpoint "http://127.0.0.1:${CONTROLLER_PORT}" \
+        --mission-endpoint "http://127.0.0.1:${MISSION_PORT}" \
         --request-id "$REQUEST_ID" --failure-owner "$owner" \
         --component "$component" --reason "$reason"
     local archive_code=$?
@@ -104,9 +106,9 @@ raise SystemExit(0 if isinstance(value, dict) and value.get("state") == sys.argv
 wait_nodes() {
     # Wait until the inventory contains both shared-world node ids.
     for _ in $(seq 1 120); do
-        if curl -sf http://127.0.0.1:28060/v1/inventory \
+        if curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory \
             | grep -q '"e1-shared-node-a"' \
-            && curl -sf http://127.0.0.1:28060/v1/inventory \
+            && curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory \
             | grep -q '"e1-shared-node-b"'; then
             return 0
         fi
@@ -120,7 +122,7 @@ wait_mission_terminal() {
     # Poll the mission (once it exists) to any terminal status.
     local output="$1" budget="$2"
     for _ in $(seq 1 "$budget"); do
-        curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$output" || true
+        curl -sf "http://127.0.0.1:${CONTROLLER_PORT}/v1/missions/$MISSION_ID" -o "$output" || true
         if python3 - "$output" <<'PYEOF'
 import json
 import sys
@@ -142,6 +144,9 @@ PYEOF
 
 mkdir -p "$RUN"
 RUN="$(cd "$RUN" && pwd)"
+# All endpoints are startup-owned; separate runs may use disjoint port sets.
+PORT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_ports)"
+eval "$PORT_ASSIGNMENTS"
 # Preserve existing archives and Harness-owned manifest/log files.
 if [[ -e "$RUN/b1-input-used.json" || -e "$RUN/controller.sqlite3" ]]; then
     echo "refusing to overwrite an existing B1 run: $RUN" >&2
@@ -254,9 +259,8 @@ if [[ ! -d "$EMOS_ROOT" ]]; then
     FAILURE_REASON=emos_checkout_missing
     exit 1
 fi
-for n in a b; do
-    sed "s|NODE_STATE_PLACEHOLDER|$RUN/node-state-$n|" "$SCENARIO/node-$n.toml" > "$RUN/node-$n.toml"
-done
+uv run --project "$REPO" python -m roboguide_eval.b1_ports \
+    --run "$RUN" --scenario "$SCENARIO" > "$RUN/deployment-ports.env"
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.recovery_deployment \
     --node "$RUN/node-a.toml" --node "$RUN/node-b.toml" \
@@ -270,10 +274,6 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
     habitat_local_eaios.spatial_feasibility \
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
     --output "$RUN/spatial-profile.json"
-sed -e "s|STATE_DB_PLACEHOLDER|$RUN/mission-service.sqlite3|" \
-    -e "s|SEMANTIC_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-semantic-evidence.json|" \
-    -e "s|PLANNING_WORLD_EVIDENCE_PLACEHOLDER|$RUN/evidence/authoritative-planning-world-evidence.json|" \
-    "$SCENARIO/mission-service-b1.toml" > "$RUN/mission-service-b1.toml"
 if [[ "$INITIAL_SUPPORT_FLAG" == 1 ]]; then
     sed -i 's/^controller_preflight_enabled = false$/controller_preflight_enabled = true/' \
         "$RUN/mission-service-b1.toml"
@@ -281,12 +281,12 @@ fi
 sed -i "s/^max_deployment_recovery_attempts = 0$/max_deployment_recovery_attempts = $DEPLOYMENT_RECOVERY_ATTEMPTS/" \
     "$RUN/mission-service-b1.toml"
 
-clean_port 25060
-clean_port 28060
-clean_port 28090
-clean_port 28100
-clean_port 28102
-clean_port 8070
+clean_port "${CONTROLLER_GRPC_PORT}"
+clean_port "${CONTROLLER_PORT}"
+clean_port "${ARTIFACT_PORT}"
+clean_port "${HABITAT_PORT}"
+clean_port "${HABITAT_PORT_B}"
+clean_port "${MISSION_PORT}"
 if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
     LIVE_VIEW_PORT="${ROBOGUIDE_B1_LIVE_VIEW_PORT:-28110}"
     clean_port "$LIVE_VIEW_PORT"
@@ -304,13 +304,13 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet MPLCONFIGDIR="$RUN/mpl" \
         PYTHONPATH="$REPO/integrations/habitat-local-eaios:$EMOS_ROOT/habitat-lab:$EMOS_ROOT/habitat-baselines:$EMOS_ROOT/habitat-mas" \
         "$HABITAT_PYTHON" -u -m habitat_local_eaios \
-        --port 28100 \
+        --port "${HABITAT_PORT}" \
         --backend shared-emos-stage2 \
         "${PROGRESS_ARGS[@]}" \
         "${GOAL_REGION_ARGS[@]}" \
         "${RETENTION_ARGS[@]}" \
         --subtask-mode natural-objective \
-        --port-b 28102 \
+        --port-b "${HABITAT_PORT_B}" \
         --state-db "$RUN/bridge-a.sqlite3" \
         --state-db-b "$RUN/bridge-b.sqlite3" \
         --agent-id 0 \
@@ -335,8 +335,8 @@ FAILURE_COMPONENT=local_eaios
 FAILURE_REASON=local_eaios_startup_failed
 # ONLINE is published only after the child writes authoritative semantic evidence.
 # Wait before MI freezes its one immutable grounding snapshot.
-wait_http http://127.0.0.1:28100/v1/health 240 ONLINE
-wait_http http://127.0.0.1:28102/v1/health 30 ONLINE
+wait_http http://127.0.0.1:${HABITAT_PORT}/v1/health 240 ONLINE
+wait_http http://127.0.0.1:${HABITAT_PORT_B}/v1/health 30 ONLINE
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.recovery_deployment \
     --snapshot "$RUN/recovery-deployment.json" --verify-live \
@@ -377,13 +377,13 @@ ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_SOURCE_PATH="$INITIAL_PREFERENCES_SOURCE
 ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH="$RUN/evidence/preassignment-feasibility.json" \
 ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH="$RUN/evidence/task-verifier-source.json" \
 ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH="$RUN/evidence/task-verifier-verdict.json" \
-"$SERVER" 127.0.0.1:25060 "$RUN/controller.sqlite3" 127.0.0.1:28060 \
-    127.0.0.1:28090 "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
+"$SERVER" 127.0.0.1:${CONTROLLER_GRPC_PORT} "$RUN/controller.sqlite3" 127.0.0.1:${CONTROLLER_PORT} \
+    127.0.0.1:${ARTIFACT_PORT} "$RUN/artifacts" >"$RUN/integration-server.log" 2>&1 &
 PIDS+=($!)
 COMPONENTS+=(controller)
 FAILURE_COMPONENT=controller
 FAILURE_REASON=controller_startup_failed
-wait_http http://127.0.0.1:28060/healthz 30
+wait_http http://127.0.0.1:${CONTROLLER_PORT}/healthz 30
 
 "$NODE" "$RUN/node-a.toml" >"$RUN/node-a.log" 2>&1 &
 PIDS+=($!)
@@ -394,7 +394,7 @@ COMPONENTS+=(node)
 FAILURE_COMPONENT=node
 FAILURE_REASON=node_registration_failed
 wait_nodes
-curl -sf http://127.0.0.1:28060/v1/inventory -o "$RUN/inventory.json"
+curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory -o "$RUN/inventory.json"
 
 # Production Mission Intelligence ingress (no static plan anywhere in this path).
 cd "$REPO"
@@ -408,7 +408,7 @@ PIDS+=($!)
 COMPONENTS+=(mission_service)
 FAILURE_COMPONENT=mission_service
 FAILURE_REASON=mission_service_startup_failed
-wait_http http://127.0.0.1:8070/healthz 120
+wait_http http://127.0.0.1:${MISSION_PORT}/healthz 120
 cd "$RUN"
 INSTRUCTION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["instruction"])' "$INPUT_JSON")
 FAILURE_REASON=mission_ingress_failed
@@ -447,7 +447,7 @@ PYEOF
 # continues; the runner never resubmits the instruction.
 MI_PID="${PIDS[${#PIDS[@]}-1]}"
 MI_WAIT_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
-    --submit-and-wait --endpoint http://127.0.0.1:8070 \
+    --submit-and-wait --endpoint http://127.0.0.1:${MISSION_PORT} \
     --instruction "$INSTRUCTION" \
     --budget-seconds "$MI_OBSERVATION_BUDGET_SECONDS" \
     --service-pid "$MI_PID" --store-path "$RUN/mission-service.sqlite3" \
@@ -462,7 +462,7 @@ REQUEST_ID=$(printf '%s\n' "$MI_WAIT_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["request_id"])' 2>/dev/null || echo "")
 if [[ -n "$REQUEST_ID" ]]; then
     echo "request_id=$REQUEST_ID" >> "$RUN/b1-timing.txt"
-    curl -sf "http://127.0.0.1:8070/v1/mission-requests/$REQUEST_ID" \
+    curl -sf "http://127.0.0.1:${MISSION_PORT}/v1/mission-requests/$REQUEST_ID" \
         -o "$RUN/b1-request-record.json" || true
     MISSION_ID=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["mission_id"])' \
         "$RUN/b1-request-record.json" 2>/dev/null || echo "")
@@ -482,7 +482,7 @@ case "$MI_OUTCOME" in
         FAILURE_REASON=""
         wait_mission_terminal "$RUN/mission.json" 1800
         sleep 3
-        curl -sf "http://127.0.0.1:28060/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
+        curl -sf "http://127.0.0.1:${CONTROLLER_PORT}/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
         ;;
     mi_terminal|awaiting_interaction)
         # Real MI terminal or interaction-required states are archived as
@@ -523,6 +523,6 @@ case "$MI_OUTCOME" in
         ;;
 esac
 # Event evidence is collected only by the bounded, completeness-checked EXIT collector.
-curl -sf http://127.0.0.1:28060/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
+curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/execution-attempts -o "$RUN/execution-attempts.json" || true
 
 # EXIT always collects observations, provenance and canonical B1 admission before cleanup.
