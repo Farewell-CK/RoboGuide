@@ -429,6 +429,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
   RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces
   persisted evidence; it never bypasses RoboGuide to call a simulator skill.
+  Its process-only `e1-batch` supervisor runs frozen external pair commands. Exclusive
+  lifetime-bound worker receipts forbid outcome retries after restart; SUT failures continue,
+  while source/evidence drift and three consecutive infrastructure pairs pause new dispatch.
+  The first measured pair gates optional two-worker capacity. Port isolation is deployment
+  configuration, never a Core or Mission semantic change. See `evaluation/docs/e1-batch.md`.
 - Optional B1 goal-geometry diagnostics read the terminal Habitat snapshot and its actual
   `robot_at_thresh` to compare the deployed 3D `any_at` result with a world-X/Z-only
   counterfactual. They require matching provenance and official terminal evidence, remain

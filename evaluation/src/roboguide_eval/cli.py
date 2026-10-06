@@ -103,6 +103,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     summarize.add_argument("--json", action="store_true", help="emit machine-readable JSON")
 
+    batch = subparsers.add_parser("e1-batch", help="supervise a frozen external-process pair queue")
+    batch.add_argument("action", choices=("start", "status", "resume", "stop"))
+    batch.add_argument("--manifest", type=Path, help="public frozen batch manifest for start")
+    batch.add_argument("--output", type=Path, required=True, help="private batch state directory")
+
     proxy = subparsers.add_parser(
         "proxy",
         help="run the local LLM accounting proxy (forwards to the real endpoint, records usage)",
@@ -531,7 +536,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _proxy(arguments)
     if arguments.command == "mission-front":
         return _mission_front(arguments)
+    if arguments.command == "e1-batch":
+        return _batch(arguments)
     return _summarize(arguments)
+
+
+def _batch(arguments: argparse.Namespace) -> int:
+    """Delegate durable pair supervision without loading simulator or credential-bearing configs."""
+    from roboguide_eval.e1_batch import batch_command
+
+    try:
+        result = batch_command(arguments.action, arguments.output, arguments.manifest)
+    except (OSError, ValueError) as error:
+        print(f"Batch operation failed: {type(error).__name__}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def _mission_front(arguments: argparse.Namespace) -> int:
