@@ -6,7 +6,12 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from roboguide_eval.b1_ports import PORT_DEFAULTS, deployment_ports, render_deployment_configs
+from roboguide_eval.b1_ports import (
+    PORT_DEFAULTS,
+    deployment_ports,
+    mission_observation_budget,
+    render_deployment_configs,
+)
 
 SCENARIO = Path(__file__).resolve().parents[2] / "scenarios/e1-shared-world-episode-51"
 
@@ -64,3 +69,23 @@ def test_launcher_observation_and_archival_use_configured_endpoints() -> None:
     for port in (25060, 28060, 28090, 28100, 28102, 8070):
         assert f"127.0.0.1:{port}" not in script
         assert f"clean_port {port}" not in script
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "86401", "3600;exit", "1.5"])
+def test_invalid_observation_budget_rejected(value: str) -> None:
+    """Unbounded or injectable waits fail before any SUT process starts."""
+    with pytest.raises(ValueError):
+        mission_observation_budget({"ROBOGUIDE_B1_MISSION_OBSERVATION_BUDGET_SECONDS": value})
+
+
+def test_slow_provider_observation_can_outlast_single_call() -> None:
+    """A long operation can be observed without extending its physical step budget."""
+    assert mission_observation_budget({}) == 1800
+    assert (
+        mission_observation_budget({"ROBOGUIDE_B1_MISSION_OBSERVATION_BUDGET_SECONDS": "18000"})
+        == 18000
+    )
+    script = (SCENARIO / "run-b1-roboguide.sh").read_text()
+    assert (
+        'wait_mission_terminal "$RUN/mission.json" "$MISSION_OBSERVATION_BUDGET_SECONDS"' in script
+    )

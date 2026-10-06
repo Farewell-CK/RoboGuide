@@ -228,6 +228,6 @@ wait_http http://unused/v1/health "$probe_budget" ONLINE
     assert (result.returncode == 0) is success
     assert int(counter.read_text(encoding="utf-8")) == len(responses)
     assert "timeout waiting" in result.stderr if not success else result.stderr == ""
-    for port, budget in ((28100, 240), (28102, 30)):
-        gate = f"wait_http http://127.0.0.1:{port}/v1/health {budget} ONLINE"
+    for variable, budget in (("HABITAT_PORT", 240), ("HABITAT_PORT_B", 30)):
+        gate = f"wait_http http://127.0.0.1:${{{variable}}}/v1/health {budget} ONLINE"
         assert script.index(gate) < script.index("# Production Mission Intelligence ingress")

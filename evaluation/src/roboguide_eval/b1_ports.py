@@ -70,6 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         ports = deployment_ports(os.environ)
+        budget = mission_observation_budget(os.environ)
         if (args.run is None) != (args.scenario is None):
             raise ValueError("run and scenario must be supplied together")
         if args.run is not None:
@@ -78,7 +79,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.exit(1, f"B1 deployment configuration invalid: {type(error).__name__}\n")
     for name, value in ports.items():
         print(f"{name}={value}")
+    print(f"MISSION_OBSERVATION_BUDGET_SECONDS={budget}")
     return 0
+
+
+def mission_observation_budget(environment: Mapping[str, str]) -> int:
+    """Bound the Runner wall wait separately from unchanged physical and model budgets."""
+    value = environment.get("ROBOGUIDE_B1_MISSION_OBSERVATION_BUDGET_SECONDS", "1800")
+    if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= 86400:
+        raise ValueError("mission observation budget must be an integer in 1..86400")
+    return int(value)
 
 
 if __name__ == "__main__":

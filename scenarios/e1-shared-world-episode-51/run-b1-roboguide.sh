@@ -480,7 +480,7 @@ case "$MI_OUTCOME" in
         FAILURE_OWNER=NONE
         FAILURE_COMPONENT=""
         FAILURE_REASON=""
-        wait_mission_terminal "$RUN/mission.json" 1800
+        wait_mission_terminal "$RUN/mission.json" "$MISSION_OBSERVATION_BUDGET_SECONDS"
         sleep 3
         curl -sf "http://127.0.0.1:${CONTROLLER_PORT}/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
         ;;

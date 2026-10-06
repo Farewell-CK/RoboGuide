@@ -234,7 +234,10 @@ def test_mission_wait_budget_is_separate_from_mi_budget() -> None:
     script = RUNNER.read_text(encoding="utf-8")
     accepted_branch = script.index("accepted)")
     assert script.index("wait_mission_terminal", accepted_branch) > accepted_branch
-    assert "1800" in script[accepted_branch : accepted_branch + 400]
+    assert (
+        '"$MISSION_OBSERVATION_BUDGET_SECONDS"' in script[accepted_branch : accepted_branch + 400]
+    )
+    assert '"$MI_OBSERVATION_BUDGET_SECONDS"' not in script[accepted_branch : accepted_branch + 400]
     # The observation budget (POST + polling) is distinct from the mission
     # execution wait, and the MI worst-case derivation is archived, not used.
     assert script.count("MI_OBSERVATION_BUDGET_SECONDS") >= 2
