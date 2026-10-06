@@ -433,20 +433,118 @@ def test_preparation_profile_preserves_population_and_official_authority(tmp_pat
     assert assess_b1_directory(run) == baseline
 
 
-def test_actual_producer_v06_archive_reaches_preflight(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _feedback_archive(run: Path, version: int) -> dict[str, Any]:
+    """Add exact feedback identity to supported navigation profiles without changing geometry."""
+    if version == 2:
+        document = _archive(run)
+    elif version == 3:
+        document = _geometry_archive(run)
+    elif version == 4:
+        document = _step_aware_archive(run, geometry=True)
+    elif version == 5:
+        document = _spatial_arrival_archive(run, geometry=True)
+    elif version == 6:
+        document = _prepared_navigation_archive(run)
+    else:
+        assert version == 7
+        document = _live_arrival_archive(run)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    profile["stage2_execution_feedback_profile"] = "observed-local-skill-feedback/v0.1"
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    source = run / "stage2_feedback.py"
+    source.write_text("# immutable observed skill feedback producer fixture\n")
+    runtime["modules"]["habitat_local_eaios.stage2_feedback"] = {
+        "path": str(source),
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+    }
+    write_json(run / "evidence/local-how-profile.json", profile)
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    document["identity"].update(
+        local_how_digest=_content_digest(profile), runtime_sources_digest=_content_digest(runtime)
+    )
+    _save(run, document)
+    return _seal(document)
+
+
+@pytest.mark.parametrize("version", [2, 3, 4, 5, 6, 7])
+def test_feedback_profile_preserves_navigation_and_population(tmp_path: Path, version: int) -> None:
+    """Recognize separately disclosed feedback on every supported historical navigation shape."""
+    run = make_run(tmp_path)
+    baseline = assess_b1_directory(run)
+    document = _feedback_archive(run, version)
+    assert preflight_reset_route_support(run, require_geometry=version >= 3) == document
+    assert assess_b1_directory(run) == baseline
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "unknown_profile",
+        "null_profile",
+        "missing_profile",
+        "missing_source",
+        "changed_source",
+        "invalid_path",
+        "unknown_field",
+        "stale_digest",
+    ],
+)
+def test_feedback_identity_mismatch_fails_closed(tmp_path: Path, fault: str) -> None:
+    """Resealing cannot hide unsupported feedback, missing sources, or unrelated profile fields."""
+    run = make_run(tmp_path)
+    document = _feedback_archive(run, 7)
+    profile = json.loads((run / "evidence/local-how-profile.json").read_text())
+    runtime = json.loads((run / "evidence/runtime-source-manifest.json").read_text())
+    if fault == "unknown_profile":
+        profile["stage2_execution_feedback_profile"] = "observed-local-skill-feedback/v99"
+    elif fault == "null_profile":
+        profile["stage2_execution_feedback_profile"] = None
+    elif fault == "missing_profile":
+        del profile["stage2_execution_feedback_profile"]
+    elif fault == "missing_source":
+        del runtime["modules"]["habitat_local_eaios.stage2_feedback"]
+    elif fault == "changed_source":
+        (run / "stage2_feedback.py").write_text("# changed feedback source\n")
+    elif fault == "invalid_path":
+        runtime["modules"]["habitat_local_eaios.stage2_feedback"]["path"] = "stage2_feedback.py"
+    elif fault == "unknown_field":
+        profile["undeclared_execution_policy"] = "unidentified"
+    else:
+        document["identity"]["local_how_digest"] = "sha256:" + "0" * 64
+    write_json(run / "evidence/local-how-profile.json", profile)
+    write_json(run / "evidence/runtime-source-manifest.json", runtime)
+    if fault != "stale_digest":
+        document["identity"].update(
+            local_how_digest=_content_digest(profile),
+            runtime_sources_digest=_content_digest(runtime),
+        )
+    _save(run, document)
+    with pytest.raises(ValueError):
+        preflight_reset_route_support(run, require_geometry=True)
+
+
+@pytest.mark.parametrize("version,feedback", [(6, False), (7, False), (6, True), (7, True)])
+def test_actual_prepared_producer_archive_reaches_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int, feedback: bool
 ) -> None:
     """Exercise actual producer-to-consumer wiring across the startup archive boundary."""
     root = Path(__file__).resolve().parents[2] / "integrations/habitat-local-eaios"
     monkeypatch.syspath_prepend(str(root))
     producer = importlib.import_module("habitat_local_eaios.reset_route_support")
     run = make_run(tmp_path)
-    template = _prepared_navigation_archive(run)
+    template = (
+        _feedback_archive(run, version)
+        if feedback
+        else _live_arrival_archive(run)
+        if version == 7
+        else _prepared_navigation_archive(run)
+    )
 
     class Probe:
         """Supply deterministic world observations while executing the actual archive producer."""
 
         step_aware = spatial_arrival = True
+        goal_aware_arrival = version == 7
 
         def __init__(self, environment: object, agent_id: int) -> None:
             """Bind a copied observation to exactly one configured reset endpoint."""

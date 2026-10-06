@@ -94,6 +94,12 @@ also digests the loaded feedback module. This is a disclosed RoboGuide arm
 difference from native EMOS's synthetic feedback, not an equivalent native arm.
 Historical logs and benchmark results remain unchanged.
 
+B1 reset-route preflight recognizes the exact feedback revision separately
+from the navigation version and verifies the declared module's bytes. The
+profile and source must occur together; unknown revisions, changed sources,
+unrelated fields and inconsistent digests fail closed. Historical archives
+without either declaration retain their original navigation validation.
+
 Offline regression establishes binding, result distinctions, original-method
 call counts, exception preservation and single/paired execution integration.
 It does not establish future model recovery behavior, physical reachability,

@@ -540,6 +540,13 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
     runtime = _object(
         load_document(run / "evidence/runtime-source-manifest.json"), "runtime sources"
     )
+    modules = _object(runtime.get("modules"), "runtime modules")
+    feedback_declared = "stage2_execution_feedback_profile" in local_how
+    if (
+        feedback_declared
+        and local_how["stage2_execution_feedback_profile"] != "observed-local-skill-feedback/v0.1"
+    ) or feedback_declared != ("habitat_local_eaios.stage2_feedback" in modules):
+        raise ValueError("reset route support execution feedback profile or source is invalid")
     geometry_enabled = document.get("schema_version") == _GEOMETRY_SCHEMA
     goal_aware_arrival = (
         local_how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.7"
@@ -633,6 +640,11 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
                 if goal_aware_arrival
                 else {}
             ),
+            **(
+                {"stage2_execution_feedback_profile": "observed-local-skill-feedback/v0.1"}
+                if feedback_declared
+                else {}
+            ),
         }
     ):
         raise ValueError("reset route support differs from active Local How profile")
@@ -656,7 +668,6 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
         expected_probe_profile
     ):
         raise ValueError("reset route support probe profile or bounds are invalid")
-    modules = _object(runtime.get("modules"), "runtime modules")
     for name in (
         "habitat.tasks.rearrange.actions.habitat_mas_actions",
         "habitat.tasks.rearrange.actions.oracle_nav_action",
@@ -688,6 +699,7 @@ def preflight_reset_route_support(run: Path, *, require_geometry: bool = False) 
             if step_aware or "habitat_local_eaios.navmesh_profile" in modules
             else ()
         ),
+        *(("habitat_local_eaios.stage2_feedback",) if feedback_declared else ()),
     ):
         module = _object(modules.get(name), "runtime module")
         if (
