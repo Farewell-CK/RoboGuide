@@ -22,14 +22,16 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 from .evidence_io import write_text_atomic
+from .model import CanonicalMobilityInvocation
+from .motion_diagnostics import MotionDiagnostics
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.5"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.6"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
@@ -430,6 +432,7 @@ class PhysicalDiagnostics:
         self._nav_current: dict[int, dict[str, Any]] = {}
         self._nav_last: dict[int, dict[str, Any]] = {}
         self._nav_restores: list[Callable[[], None]] = []
+        self._motion = MotionDiagnostics()
         self._step_writer = BufferedJsonlWriter(
             self._dir / "diagnostics-steps.jsonl",
             batch_records=write_batch_records,
@@ -501,10 +504,17 @@ class PhysicalDiagnostics:
             "step_observations": self._step_observations,
             "step_records_accepted": self._step_records_written,
             "writer": writer,
+            "motion_observation": self._motion.stats(),
         }
 
     def _write_unavailable_snapshot(
-        self, name: str, phase: str, error: Exception, step: int | None = None
+        self,
+        name: str,
+        phase: str,
+        error: Exception,
+        step: int | None = None,
+        *,
+        termination_reason: str | None = None,
     ) -> None:
         """Best-effort one unavailable snapshot after a top-level read failure."""
         try:
@@ -515,9 +525,15 @@ class PhysicalDiagnostics:
                 "schema_version": DIAGNOSTICS_SCHEMA,
                 "simulator_step": step,
             }
-            if phase == "terminal_world_state":
+            if phase in {"terminal_world_state", "stopped_world_state"}:
+                document["simulator_steps"] = step
+                document["termination_reason"] = termination_reason
                 document["collection_stats"] = self._collection_stats()
                 document["dropped_diagnostic_records"] = self._dropped_records
+                document["agents"] = {
+                    str(agent_id): {"local_motion": self._motion.boundary(agent_id)}
+                    for agent_id in self._agent_ids
+                }
             self._write_json(
                 name,
                 document,
@@ -708,6 +724,20 @@ class PhysicalDiagnostics:
                 _restore_instance_attribute(_action, "_path_to_point", _path)
 
             self._nav_restores.append(restore)
+            self._nav_restores.extend(self._motion.install(action, agent_id))
+
+    def bind_navigation_invocations(
+        self, invocations: Mapping[int, CanonicalMobilityInvocation]
+    ) -> None:
+        """Bind optional motion evidence to the supplied current canonical attempts."""
+        if not self._enabled:
+            return
+        try:
+            self._nav_current.clear()
+            self._nav_last.clear()
+            self._motion.bind(invocations)
+        except Exception:  # noqa: BLE001 - attribution is not dispatch authority
+            self._record_failure()
 
     def _navigation_observation(self, agent_id: int, step: int) -> dict[str, Any]:
         """Consume only calls made since the previous post-step sample."""
@@ -950,6 +980,7 @@ class PhysicalDiagnostics:
                     "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                     "rotation": _read(_rotation, sim, agent_id),
                     "oracle_navigation": self._navigation_observation(agent_id, step),
+                    "local_motion": self._motion.sample(agent_id, step),
                     "skill_state": skill_state,
                     "skill_exit_reason": self._skill_exit_reason(
                         skill_state, policy_input_finished
@@ -1027,6 +1058,7 @@ class PhysicalDiagnostics:
                             {"_status": _UNAVAILABLE, "reason": "no Oracle query observed"},
                         ),
                         "pending_oracle_navigation": self._nav_current.get(agent_id),
+                        "local_motion": self._motion.boundary(agent_id),
                     }
                     for agent_id in self._agent_ids
                 },
@@ -1041,7 +1073,7 @@ class PhysicalDiagnostics:
             self._write_json(name, document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
-            self._write_unavailable_snapshot(name, phase, error, steps)
+            self._write_unavailable_snapshot(name, phase, error, steps, termination_reason=reason)
         finally:
             if terminal:
                 self._restore_nav_probes()

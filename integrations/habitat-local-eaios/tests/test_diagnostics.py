@@ -24,6 +24,7 @@ from habitat_local_eaios.diagnostics import (  # noqa: E402
     create_physical_diagnostics,
     diagnostics_enabled,
 )
+from habitat_local_eaios.model import CanonicalMobilityInvocation  # noqa: E402
 
 
 class FakeVec:  # minimal numpy-like 1-D view supporting argmax/!=0.
@@ -365,6 +366,119 @@ def test_nav_probe_preserves_original_path_exception(tmp_path: Path) -> None:
     diagnostics.record_terminal(env, 0, "execution_exception:physical_pathfinder")
     terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
     assert terminal["termination_reason"] == "execution_exception:physical_pathfinder"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("broken_world", [False, True])
+def test_failed_motion_retains_pending_inputs_even_when_terminal_world_is_unreadable(
+    tmp_path: Path, enabled: bool, broken_world: bool
+) -> None:
+    """Preserve failed-step motion and the original exception without another physical call."""
+    env = FakeEnv([FakePredicate("target", False)], metrics={"pddl_success": False})
+    action = cast(Any, FakeOracleAction(False))
+    physical_error = RuntimeError("original motion failure")
+    calls: list[tuple[list[float], list[float]]] = []
+
+    def step_filter(start_pos: list[float], end_pos: list[float]) -> list[float]:
+        """Fail one actual filter call after receiving the exact unmodified inputs."""
+        calls.append((start_pos, end_pos))
+        raise physical_error
+
+    action.step_filter = step_filter
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), enabled, 3)
+    diagnostics.record_reset(env, None)
+    diagnostics.install_nav_probes(env)
+    diagnostics.bind_navigation_invocations(
+        {
+            0: CanonicalMobilityInvocation(
+                "mission",
+                "task",
+                "group",
+                "role",
+                "mobility.move@v1",
+                "Reach target",
+                {"destination": "target"},
+                ("space-test",),
+                attempt_id="attempt-1",
+            )
+        }
+    )
+    start, end = [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]
+    with pytest.raises(RuntimeError) as caught:
+        action.step_filter(start, end)
+    assert caught.value is physical_error
+    assert len(calls) == 1 and calls[0][0] is start and calls[0][1] is end
+
+    class BrokenWorld:
+        """Represent an inaccessible world after the original physical exception."""
+
+        @property
+        def sim(self) -> Any:
+            """Raise only on the optional final-world read."""
+            raise RuntimeError("world inaccessible")
+
+    diagnostics.record_terminal(
+        BrokenWorld() if broken_world else env, 0, "execution_exception:gym_env_step:RuntimeError"
+    )
+    assert action.step_filter is step_filter
+    if enabled:
+        terminal = json.loads((tmp_path / "evidence/diagnostics-terminal.json").read_text())
+        motion = terminal["agents"]["0"]["local_motion"]
+        pending = motion["pending_since_last_post_step"]
+        assert pending["invocation"]["attempt_id"] == "attempt-1"
+        assert pending["calls"][0]["requested_start"] == start
+        assert pending["calls"][0]["requested_end"] == end
+        assert pending["calls"][0]["exception_type"] == "RuntimeError"
+        assert pending["calls"][0]["returned_end"]["_status"] == "unavailable"
+        assert "simulator_step" not in pending
+        assert motion["last_post_step"]["_status"] == "unavailable"
+        if broken_world:
+            assert terminal["_status"] == "unavailable"
+            assert "official_metrics" not in terminal
+            assert terminal["termination_reason"] == "execution_exception:gym_env_step:RuntimeError"
+            assert terminal["simulator_steps"] == 0
+    else:
+        assert not (tmp_path / "evidence").exists()
+
+
+def test_successful_motion_stream_is_batched_and_survives_terminal_storage_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serialize actual calls using the existing bounded stream, independently of terminal I/O."""
+    env = FakeEnv([FakePredicate("target", False)])
+    action = cast(Any, FakeOracleAction(False))
+    action.step_filter = lambda start_pos, end_pos: end_pos
+    env.task.actions["agent_0_oracle_nav_action"] = action
+    diagnostics = PhysicalDiagnostics(tmp_path / "evidence", (0, 1), True, 3)
+    diagnostics.install_nav_probes(env)
+    start, end = [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]
+    assert action.step_filter(start, end) is end
+    diagnostics.record_step(
+        1,
+        ["nav_to_obj", "wait"],
+        FakeFlatAction([1.0, 0.0]),
+        env,
+        FakeActor([FakeSkill(1, 1000), FakeSkill(0, 1000)], ["nav_to_obj", "wait"]),
+        False,
+        {"pddl_success": False},
+        {},
+    )
+    assert not (tmp_path / "evidence/diagnostics-steps.jsonl").exists()
+
+    def fail_write(name: str, document: dict[str, Any]) -> None:
+        """Fail terminal snapshots without failing the independent JSONL stream flush."""
+        raise OSError("terminal storage unavailable")
+
+    monkeypatch.setattr(diagnostics, "_write_json", fail_write)
+    diagnostics.record_terminal(env, 1, "episode_done")
+    row = json.loads((tmp_path / "evidence/diagnostics-steps.jsonl").read_text())
+    filtered = row["agents"]["0"]["local_motion"]["calls"][0]
+    assert filtered["requested_start"] == start
+    assert filtered["requested_end"] == filtered["returned_end"] == end
+    assert diagnostics._motion.stats()["calls_observed"] == 1
+    assert action.step_filter(start, end) is end
+    assert diagnostics._motion.stats()["calls_observed"] == 1
 
 
 def test_terminal_semantic_floor_is_observed_or_explicitly_unavailable(

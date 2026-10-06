@@ -645,6 +645,10 @@ one Habitat reset -> original prepared observations -> assigned Stage2 execution
                                       (failure -> attributed local outcome)
                                                         |
                                              one original Gym step
+                                                        |---- optional v0.6 motion taps
+                                                        |     (original request / filter return /
+                                                        |      actual before-after base positions)
+                                                        |     -> bounded diagnostic archive only
                                                         |
                                                official PDDL outcome
         |
@@ -666,6 +670,13 @@ existing floor matrix -> Control Match -> Scheduler -> Proposal -> Commit -> Bin
                                              ^
                                   optional initial search order
 ```
+
+上述 motion taps 默认关闭，只包装已有的本地 step_filter/update_base 调用。
+原方法仍执行一次，观测不增加 PathFinder、碰撞、Gym 或模型调用。真实请求、过滤返回、
+更新前后位姿及失败step的pending记录独立保存；返回端点差异仅是诊断比较，不证明碰撞、
+到达或官方成功。数据绑定已有canonical Task/Role/attempt，顺序复用时不继承旧Task记录；
+读取到的action/mesh能力数值只说明部署导航模型，不能替代真实硬件能力认证。
+详见[本地导航证据指导](../../development/local-navigation-evidence.md)。
 
 ## 7. 对账与恢复
 

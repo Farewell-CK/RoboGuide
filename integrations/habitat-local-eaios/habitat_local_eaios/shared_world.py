@@ -260,6 +260,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         phase = "serial_reset"
         terminal_recorded = False
         try:
+            self._bind_navigation_diagnostics({agent_id: invocation})
             if self._prepared_observations is None:
                 raise IntegrationError("shared-world reset evidence is unavailable")
             if self._serial_agent_id is None:
@@ -653,6 +654,17 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         )
         return assess_spatial_feasibility(habitat_env, agent_id, invocation, profile)
 
+    def _bind_navigation_diagnostics(
+        self, invocations: dict[int, CanonicalMobilityInvocation]
+    ) -> None:
+        """Pass current serial or joint attempts to optional, non-authoritative evidence."""
+        try:
+            bind_diagnostics = getattr(self._diagnostics, "bind_navigation_invocations", None)
+            if callable(bind_diagnostics):
+                bind_diagnostics(invocations)
+        except Exception:  # noqa: BLE001 - diagnostic attribution cannot block execution
+            _LOG.exception("optional motion diagnostic attribution unavailable")
+
     def _pair_loop(
         self,
         observations: Any,
@@ -688,6 +700,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         navigation_failure: NavigationPreparationFailure | None = None
         cancelled = False
         try:
+            self._bind_navigation_diagnostics(invocations)
             torch = self._runtime["torch"]
             device = self._runtime["device"]
             batch = self._batch(observations)

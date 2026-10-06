@@ -688,6 +688,31 @@ def test_actor_exception_flushes_terminal_diagnostics_without_masking_error(
     assert runtime.action_trace_flushes == 1
 
 
+@pytest.mark.parametrize("binding_failure", [False, True])
+def test_pair_loop_optional_diagnostic_binding_cannot_block_original_actor(
+    tmp_path: Path, binding_failure: bool
+) -> None:
+    """The production loop passes existing invocation metadata but never grants it authority."""
+    diagnostics = RecordingDiagnostics()
+    calls: list[dict[int, CanonicalMobilityInvocation]] = []
+
+    def bind_navigation_invocations(invocations: dict[int, CanonicalMobilityInvocation]) -> None:
+        """Observe the real loop boundary and optionally fail only diagnostic binding."""
+        calls.append(invocations)
+        if binding_failure:
+            raise OSError("diagnostic binding failure")
+
+    cast(Any, diagnostics).bind_navigation_invocations = bind_navigation_invocations
+    runtime = LoopHarness(tmp_path, diagnostics)
+    gym = StepEnvironment(fail_at=3)
+    actor = PolicyActor(fail_at=1)
+    with pytest.raises(RuntimeError, match="actor failure sentinel"):
+        _run_failing_loop(runtime, actor, gym)
+    assert calls == [{}]
+    assert gym.calls == 0
+    assert diagnostics.terminals == [(0, "execution_exception:actor_act:RuntimeError")]
+
+
 @pytest.mark.parametrize("completed_first", [False, True])
 def test_joint_policy_cancel_stops_both_without_erasing_completed_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed_first: bool
@@ -2608,6 +2633,47 @@ def test_serial_runtime_retains_reset_observations_and_global_step_count(tmp_pat
         (2, "serial_session_completed")
     ]
     assert runtime._config == original_config
+
+
+@pytest.mark.parametrize("binding_failure", [False, True])
+def test_serial_tasks_bind_current_diagnostic_attempt_without_changing_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding_failure: bool
+) -> None:
+    """Each production serial segment binds its own Task before acting, with fail-soft evidence."""
+    runtime = SerialRuntimeHarness(tmp_path)
+    slots = [_slot("first", "participant"), _slot("next", "participant")]
+    invocations = [
+        replace(
+            CanonicalMobilityInvocation.from_request(_session_request("m", target, task, slots)),
+            attempt_id=f"attempt-{task}",
+        )
+        for task, target in (("first", "north"), ("next", "south"))
+    ]
+    bindings: list[dict[int, CanonicalMobilityInvocation]] = []
+
+    def bind_navigation_invocations(values: dict[int, CanonicalMobilityInvocation]) -> None:
+        """Observe the exact invocation at the production setup boundary, with optional failure."""
+        assert runtime.observation_inputs == list(range(len(bindings)))
+        bindings.append(dict(values))
+        if binding_failure:
+            raise OSError("diagnostic binding unavailable")
+
+    monkeypatch.setattr(
+        runtime._diagnostics,
+        "bind_navigation_invocations",
+        bind_navigation_invocations,
+        raising=False,
+    )
+    for index, value in enumerate(invocations):
+        outcome, _ = runtime.execute_serial(
+            value, 0, lambda: False, lambda agent, detail: None, index == 1
+        )
+        assert outcome.state == "COMPLETED" and outcome.destination == value.destination
+    assert bindings == [{0: invocations[0]}, {0: invocations[1]}]
+    assert runtime.observation_inputs == [0, 1]
+    assert cast(SerialGym, runtime._gym_env).resets == 1
+    assert cast(SerialGym, runtime._gym_env).steps == 2
+    assert cast(RecordingDiagnostics, runtime._diagnostics).persisted_steps == [1, 2]
 
 
 def test_serial_session_timeout_keeps_unfinished_topology_explicit(tmp_path: Path) -> None:

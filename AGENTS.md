@@ -432,7 +432,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   query result, and use exact read-only semantic-region containment for bases and goal entities.
   They never issue a second path query, choose a route, or alter official success;
   ambiguous or unsupported observations remain unavailable. Evaluation accepts
-  archived v0.4 and current v0.5 terminal geometry evidence.
+  archived v0.4/v0.5 and current v0.6 terminal geometry evidence. Diagnostics v0.6
+  additionally copy original step-filter requests/returns and base-update positions
+  through single-call, exception-isolated instance taps. Bounded per-step call
+  records retain exact supplied canonical attempt identity, explicit unavailable
+  fields/loss and pending failed-step evidence; they never prove collision,
+  arrival, route feasibility or benchmark success. Action/mesh scalars describe
+  the observed deployment navigation model, not hardware certification.
 - The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
   EMOS environment factory inside its workers, preserving the first returned reset with the
   existing bounded diagnostic reader. It never edits the external source, invokes another

@@ -410,7 +410,7 @@ not a model correctness or navigation-convergence guarantee. It adds no global
 RoboGuide authority, MissionPlan fields or new Habitat success rules.
 
 When `ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1`, `diagnostics-steps.jsonl` and
-`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.5`. The
+`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.6`. The
 initial and terminal snapshots include `goal_entity_positions`, read through
 Habitat's authoritative PDDL entity mapping at the corresponding world state.
 Each target is recorded independently; an unreadable target is marked
@@ -430,7 +430,34 @@ Oracle target selection and pathfinder call records the actual selected navigati
 point and `find_path` result once per original call. It does not issue a new path
 query or change the selected point, movement, or official metric. Ambiguous floors,
 unsupported action layouts and steps without an Oracle call remain unavailable.
-The optional B1 geometry sidecar accepts both v0.4 and v0.5 terminal snapshots.
+The v0.6 observer additionally taps the original step_filter and update_base
+methods. agents[agent_id].local_motion retains copied pre-call requested
+positions, the exact filter-returned position before caller mutation, and actual
+base positions before/after the original update. Each original method and
+PathFinder query still executes once, with unchanged arguments, return identity
+and exceptions. It does not add collision queries or infer that an unchanged
+base position proves collision or arrival. Differences between requested and
+returned endpoints are explicitly derived comparisons.
+
+The shared policy loop binds these records to the supplied canonical
+Mission/Task/Group/Role/attempt and destination. A new serial Task or continuation
+attempt clears previous-segment motion attribution. Native or legacy calls without
+that identity remain unavailable. Actual action and active-NavMesh capability
+scalars are read once per segment; they describe the deployment navigation model,
+not certified hardware limits. See [local navigation evidence guidance](../../docs/development/local-navigation-evidence.md).
+
+At most eight original method-call records per agent and post-step interval are
+retained. Extra calls still execute; dropped counts and call_records_complete
+expose evidence limits. No per-call serialization or disk write is added; the
+existing bounded 32-record JSONL batch, step limit and 64 KiB document cap remain.
+Observer overhead and loss appear in collection_stats.motion_observation.
+Stop/terminal snapshots retain both the last post-step sample and pending calls
+since that sample. A failed Gym step is not assigned an invented simulator step;
+pending motion remains available even when final world reads fail, storage permitting.
+Final cleanup restores the original instance overrides.
+
+The optional B1 geometry sidecar accepts v0.4, v0.5 and v0.6 terminal snapshots.
+Motion observations have no benchmark or admission authority.
 
 The shared-world deployment also accepts `roboguide.execution-session/v0.1`
 metadata derived from an accepted MissionPlan. Two independent Actors retain

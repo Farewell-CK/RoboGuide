@@ -62,7 +62,7 @@ def _evidence(agent_count: int = 2) -> tuple[dict[str, Any], ...]:
 
 
 @pytest.mark.parametrize("agent_count", [1, 2, 4])
-@pytest.mark.parametrize("terminal_schema", ["v0.4", "v0.5"])
+@pytest.mark.parametrize("terminal_schema", ["v0.4", "v0.5", "v0.6"])
 def test_horizontal_counterfactual_never_replaces_official_three_d_result(
     agent_count: int,
     terminal_schema: str,
@@ -91,6 +91,20 @@ def test_two_agents_can_jointly_satisfy_distinct_goal_locations() -> None:
     assert result["status"] == "available"
     assert result["reconstructed_three_d_goal"] is True
     assert result["horizontal_goal_counterfactual"] is True
+
+
+def test_motion_observation_never_replaces_official_goal_truth() -> None:
+    """New or unavailable motion data cannot turn an official failure into success."""
+    semantic, terminal, summary, verdict = _evidence()
+    terminal["schema_version"] = "roboguide.e1.physical-diagnostics/v0.6"
+    terminal["agents"]["0"]["local_motion"] = {
+        "last_post_step": {"success": True, "returned_end": [0.0, 2.3, 0.0]},
+        "pending_since_last_post_step": {"_status": "unavailable"},
+    }
+    result = assess_goal_geometry(semantic, terminal, summary, verdict)
+    assert result["status"] == "available"
+    assert result["official_pddl_success"] is False
+    assert result["reconstructed_three_d_goal"] is False
 
 
 @pytest.mark.parametrize(
