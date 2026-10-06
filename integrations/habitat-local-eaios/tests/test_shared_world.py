@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1016,6 +1017,8 @@ class ContractModel:
         self.violate_at = violate_at
         self.extra_tools_at = extra_tools_at
         self.calls = 0
+        self.selected_tool = "nav_to_obj"
+        self.requests: list[dict[str, Any]] = []
         self.model = "offline-model"
         self.chat_history: list[list[dict[str, Any]]] = []
         self.actions = [
@@ -1031,21 +1034,37 @@ class ContractModel:
 
     def chat(self, observation: str, crab_planning: bool = False) -> Any:
         """Return one raw selected tool without changing the fake simulator."""
-        del observation, crab_planning
+        del crab_planning
+        self.requests.append({"content": observation, "history": deepcopy(self.chat_history)})
         self.calls += 1
         target = "wrong-target" if self.calls == self.violate_at else self.target
+        arguments = {"target_obj": target} if self.selected_tool == "nav_to_obj" else {}
+        identity = f"call-{self.calls}"
         self.chat_history.append(
             [
                 {"role": "user", "content": "observation"},
                 {
                     "role": "assistant",
-                    "tool_calls": [{"name": "nav_to_obj"}]
+                    "tool_calls": [
+                        {
+                            "id": identity,
+                            "function": {
+                                "name": self.selected_tool,
+                                "arguments": json.dumps(arguments),
+                            },
+                        }
+                    ]
                     * (2 if self.calls == self.extra_tools_at else 1),
                 },
-                {"role": "tool", "content": "first action only"},
+                {
+                    "role": "tool",
+                    "tool_call_id": identity,
+                    "name": self.selected_tool,
+                    "content": "Success",
+                },
             ]
         )
-        return "nav_to_obj", {"target_obj": target}
+        return self.selected_tool, arguments
 
 
 class ContractAgent:
@@ -1117,6 +1136,120 @@ class SingleIdleContractLoopHarness(ContractLoopHarness):
     def _record_video(self, step: int, observations: Any, info: dict[str, Any]) -> None:
         """Omit recording while retaining the physical step observation boundary."""
         del step, observations, info
+
+
+def test_real_pair_loop_budget_feedback_does_not_mark_waiting_navigation_completed(
+    tmp_path: Path,
+) -> None:
+    """Budget feedback is truthful while Node outcome still requires local completion."""
+
+    class BudgetSkill:
+        """Expose the existing skill's false arrival and positive budget stop decision."""
+
+        _cur_skill_step = [1]
+        _max_skill_steps = 1
+
+        def _is_skill_done(self) -> list[bool]:
+            """Keep actual local arrival false independently of the budget."""
+            return [False]
+
+        def should_terminate(self, **kwargs: Any) -> Any:
+            """Run one original-shaped completion calculation before returning control."""
+            del kwargs
+            return (
+                [self._is_skill_done()[0] or self._cur_skill_step[0] >= self._max_skill_steps],
+                [False],
+                object(),
+            )
+
+    class BudgetActor(ContractActor):
+        """Select navigation once, then model-selected wait after the original budget exit."""
+
+        def act(self, *args: object, **kwargs: object) -> object:
+            """Keep one actor call and one model call per assigned endpoint in the fake loop."""
+            for policy in self._active_policies:
+                agent = policy._high_level_policy.llm_agent
+                if self.calls:
+                    agent.llm_model.selected_tool = "wait"
+                agent.chat("You have completed your previous action. Select your next action.")
+                if not self.calls:
+                    policy._skills[0].should_terminate(
+                        skill_name=["nav_to_obj"], batch_idx=[0], hl_wants_skill_term=[False]
+                    )
+            return PolicyActor.act(self, *args, **kwargs)
+
+    class BudgetHarness(ContractLoopHarness):
+        """Retain the production pair loop, contract hooks and outcome reduction."""
+
+        def _current_skills(self, actor: Any) -> list[str]:
+            """Read the actual selected tool without inventing navigation completion."""
+            return [
+                p._high_level_policy.llm_agent.llm_model.selected_tool
+                for p in actor._active_policies
+            ]
+
+    runtime = BudgetHarness(tmp_path, RecordingDiagnostics())
+    agents = [
+        ContractAgent(f"agent_{agent}", ContractModel(target, None))
+        for agent, target in enumerate(("north", "south"))
+    ]
+    actor = BudgetActor(agents)
+    for policy in actor._active_policies:
+        policy._skills[0] = BudgetSkill()
+    runtime._actor = actor
+    steps = 0
+
+    def gym_step(action: object) -> Any:
+        """The first endpoint reaches its local measure; the second never does."""
+        nonlocal steps
+        del action
+        steps += 1
+        return (
+            {"agent_0_has_finished_oracle_nav": [1], "agent_1_has_finished_oracle_nav": [0]},
+            0.0,
+            False,
+            {"pddl_success": False},
+        )
+
+    environment = SimpleNamespace(
+        episode_over=False,
+        current_episode=SimpleNamespace(scene_id="scene", episode_id="generic"),
+        get_metrics=lambda: {"pddl_success": False},
+        task=SimpleNamespace(actions={}),
+    )
+    runtime._config.episode_id = "generic"
+    runtime._habitat_env = environment
+    outcomes, _, _, _ = runtime._pair_loop(
+        {},
+        {"episode_id": "generic"},
+        {},
+        _retained_invocations(),
+        actor,
+        SimpleNamespace(masks_shape=(1,)),
+        SimpleNamespace(step=gym_step),
+        environment,
+        lambda: False,
+        lambda agent_id, detail: None,
+    )
+    assert steps == actor.calls == 3
+    assert [agent.llm_model.calls for agent in agents] == [3, 3]
+    assert outcomes[0].state == "COMPLETED" and outcomes[0].local_skill_completed is True
+    assert outcomes[1].state == "FAILED" and outcomes[1].local_skill_completed is False
+    assert outcomes[1].terminal_basis == "step-budget-exhausted"
+    received = json.loads(agents[1].llm_model.requests[1]["history"][0][-1]["content"])
+    assert received["status"] == "skill-budget-exhausted"
+    assert received["local_skill_completed"] is False
+    assert received["benchmark_goal_satisfied"] is None
+    completed = json.loads(agents[0].llm_model.requests[1]["history"][0][-1]["content"])
+    assert completed["status"] == "local-skill-completed"
+    summary = json.loads(
+        (tmp_path / "evidence" / "stage2-execution-feedback-audit.json").read_text()
+    )
+    assert summary["complete"] is True
+    assert summary["records_unavailable"] == summary["write_failures"] == 0
+    assert all(
+        "should_terminate" not in vars(policy._skills[0]) for policy in actor._active_policies
+    )
 
 
 class RetainedGym:

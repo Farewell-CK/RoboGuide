@@ -34,6 +34,7 @@ from .stage2_contract import (
     Stage2ExecutionContract,
     install_stage2_contract_guard,
 )
+from .stage2_feedback import FEEDBACK_PROFILE, Stage2ExecutionFeedback
 
 _LOG = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class EmosStage2Runtime:
         self._actor: Any | None = None
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
+        self._stage2_feedback: Stage2ExecutionFeedback | None = None
         self._last_navigation_preparation_failure: dict[str, Any] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
@@ -318,6 +320,7 @@ class EmosStage2Runtime:
                         else "original-emos-oracle"
                     ),
                     "official_success_authority": "habitat-pddl",
+                    "stage2_execution_feedback_profile": FEEDBACK_PROFILE,
                     "reset_route_support_enabled": bool(
                         getattr(self._config, "reset_route_support", False)
                     ),
@@ -363,6 +366,7 @@ class EmosStage2Runtime:
                         "habitat_baselines.rl.multi_agent.multi_llm_policy",
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.stage2_feedback",
                         "habitat_local_eaios.emos_stage2",
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",
@@ -549,6 +553,7 @@ class EmosStage2Runtime:
                 observations, done, info = self._gym_step_result(step_result)
                 self._last_policy_observations = observations
                 steps += 1
+                self._record_completed_physical_step()
                 progress.observe(habitat_env, current_skills[self._config.agent_id])
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
@@ -580,6 +585,7 @@ class EmosStage2Runtime:
                 } and (
                     _observation_true(observations, finished_key) or self._oracle_nav_finished()
                 ):
+                    self._record_local_skill_completion(self._config.agent_id)
                     return self._outcome(
                         "COMPLETED",
                         "original EMOS OracleNavPolicy reached its skill terminal measure",
@@ -836,6 +842,11 @@ class EmosStage2Runtime:
         ):
             raise IntegrationError("active Stage2 models must match committed execution contracts")
         audit = Stage2ActionAudit(self._evidence_dir(), self._previous_action_audit())
+        feedback_audit = Stage2ActionAudit(
+            self._evidence_dir(),
+            getattr(self, "_feedback_audit_summary", None),
+            execution_feedback=True,
+        )
 
         def record(document: dict[str, Any]) -> None:
             """Bind the action decision to the last completed simulator step and local time."""
@@ -845,17 +856,54 @@ class EmosStage2Runtime:
                 )
             )
 
-        restore_guard = install_stage2_contract_guard(agents, contracts, record)
+        def record_feedback(document: dict[str, Any]) -> None:
+            """Archive local observations separately from model-selected action admission."""
+            feedback_audit.record(
+                dict(
+                    document, completed_simulator_steps=completed_steps(), observed_unix=time.time()
+                )
+            )
+
+        feedback = Stage2ExecutionFeedback(contracts, record_feedback)
+        try:
+            feedback.install(self._actor._active_policies)
+            restore_guard = install_stage2_contract_guard(
+                agents, contracts, record, feedback=feedback
+            )
+        except BaseException:
+            feedback.close()
+            feedback_audit.close()
+            audit.close()
+            raise
+        self._stage2_feedback = feedback
 
         def restore() -> None:
             """Close per-call evidence and restore instance hooks on every exit."""
             try:
                 restore_guard()
             finally:
-                audit.close()
-                self._retain_action_audit(audit.summary)
+                try:
+                    feedback.close()
+                finally:
+                    self._stage2_feedback = None
+                    feedback_audit.close()
+                    self._feedback_audit_summary = feedback_audit.summary
+                    audit.close()
+                    self._retain_action_audit(audit.summary)
 
         return restore
+
+    def _record_local_skill_completion(self, agent_id: int) -> None:
+        """Forward an already-observed local completion without rereading sensors or truth."""
+        feedback = getattr(self, "_stage2_feedback", None)
+        if feedback is not None:
+            feedback.local_completion(f"agent_{agent_id}")
+
+    def _record_completed_physical_step(self) -> None:
+        """Advance only local feedback attribution after the existing successful Gym step."""
+        feedback = getattr(self, "_stage2_feedback", None)
+        if feedback is not None:
+            feedback.physical_step()
 
     def _previous_action_audit(self) -> dict[str, Any] | None:
         """Return prior segment accounting when the local world is intentionally retained."""

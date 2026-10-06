@@ -780,6 +780,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     discard()
                 observations, done, info = self._gym_step_result(step_result)
                 steps += 1
+                self._record_completed_physical_step()
                 self._retained_pair_observations = observations
                 for agent_id, publisher in progress.items():
                     publisher.observe(habitat_env, current_skills[agent_id])
@@ -819,6 +820,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         _observation_true(observations, finished_key)
                         or self._oracle_nav_finished_for(agent_id)
                     ):
+                        self._record_local_skill_completion(agent_id)
                         outcomes[agent_id] = self._pair_outcome(
                             "COMPLETED",
                             "original EMOS OracleNavPolicy reached its skill terminal "

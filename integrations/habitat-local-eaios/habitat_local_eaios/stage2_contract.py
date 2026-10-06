@@ -18,6 +18,7 @@ from typing import Any, NoReturn
 
 from .diagnostics import BufferedJsonlWriter
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .stage2_feedback import Stage2ExecutionFeedback
 
 _LOG = logging.getLogger(__name__)
 _MAX_RECORD_BYTES = 65_536
@@ -103,7 +104,13 @@ class Stage2ExecutionContract:
 class Stage2ActionAudit:
     """Stream bounded selected-tool evidence; I/O failure never permits a rejected action."""
 
-    def __init__(self, directory: Path, previous_summary: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        previous_summary: dict[str, Any] | None = None,
+        *,
+        execution_feedback: bool = False,
+    ) -> None:
         """Initialize append-only accounting for a new segment of one episode."""
         self._directory = directory
         self._previous_summary = previous_summary or {}
@@ -111,7 +118,10 @@ class Stage2ActionAudit:
         self._unavailable = 0
         self._closed = False
         self.summary: dict[str, Any] | None = None
-        self._writer = BufferedJsonlWriter(directory / "stage2-actions.jsonl", batch_records=1)
+        self._stem = "stage2-execution-feedback" if execution_feedback else "stage2-action"
+        self._record_schema = f"roboguide.{self._stem}/v0.1"
+        filename = f"{self._stem}.jsonl" if execution_feedback else "stage2-actions.jsonl"
+        self._writer = BufferedJsonlWriter(directory / filename, batch_records=1)
 
     def record(self, document: dict[str, Any]) -> None:
         """Freeze evidence before vendor mutation, bounding each record to 64 KiB."""
@@ -126,7 +136,7 @@ class Stage2ActionAudit:
             self._unavailable += 1
             frozen = {
                 "sequence": self._sequence,
-                "schema_version": "roboguide.stage2-action/v0.1",
+                "schema_version": self._record_schema,
                 "decision": document.get("decision"),
                 "evidence_status": "unavailable",
                 "reason": "action evidence is not bounded JSON",
@@ -164,7 +174,7 @@ class Stage2ActionAudit:
         records_dropped = int(previous.get("records_dropped", 0)) + stats["records_dropped"]
         write_failures = int(previous.get("write_failures", 0)) + stats["write_failures"]
         summary = {
-            "schema_version": "roboguide.stage2-action-audit/v0.1",
+            "schema_version": f"roboguide.{self._stem}-audit/v0.1",
             "records_seen": self._sequence,
             "records_unavailable": records_unavailable,
             "max_record_bytes": _MAX_RECORD_BYTES,
@@ -182,7 +192,7 @@ class Stage2ActionAudit:
         self.summary = summary
         try:
             self._directory.mkdir(parents=True, exist_ok=True)
-            (self._directory / "stage2-action-audit.json").write_text(
+            (self._directory / f"{self._stem}-audit.json").write_text(
                 json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         except Exception:  # noqa: BLE001 - evidence summary must be fail-soft
@@ -270,6 +280,7 @@ def _guard_agent(
     contract: Stage2ExecutionContract,
     peer_names: frozenset[str],
     record: Callable[[dict[str, Any]], None],
+    feedback: Stage2ExecutionFeedback | None,
 ) -> Callable[[], None]:
     """Wrap one agent instance, deferring its model lookup until lazy initialization."""
     original_chat = agent.chat
@@ -289,6 +300,8 @@ def _guard_agent(
 
         def guarded_model_chat(content: str, crab_planning: bool = False) -> Any:
             """Keep the original response intact and fence the selected execution tool."""
+            if not crab_planning and feedback is not None:
+                content = feedback.before_call(agent_name, model, content)
             history_length = _raw_history_length(model) if not crab_planning else None
             original_actions = getattr(model, "actions", _MISSING)
             if not crab_planning and contract.expected_destination is not None:
@@ -344,6 +357,8 @@ def _guard_agent(
                 _LOG.exception("Stage2 selected action evidence unavailable")
             if error is not None:
                 raise error
+            if feedback is not None:
+                feedback.admit(agent_name, model, action)
             return result
 
         model.chat = guarded_model_chat
@@ -365,6 +380,8 @@ def install_stage2_contract_guard(
     agents: Sequence[Any],
     contracts: Mapping[str, Stage2ExecutionContract],
     record: Callable[[dict[str, Any]], None],
+    *,
+    feedback: Stage2ExecutionFeedback | None = None,
 ) -> Callable[[], None]:
     """Bind all active agent instances without changing any vendor class or Prompt.
 
@@ -385,7 +402,9 @@ def install_stage2_contract_guard(
     peer_names = frozenset(contracts)
     try:
         for agent in agents:
-            callbacks.append(_guard_agent(agent, contracts[agent.name], peer_names, record))
+            callbacks.append(
+                _guard_agent(agent, contracts[agent.name], peer_names, record, feedback)
+            )
     except BaseException:
         for callback in reversed(callbacks):
             callback()

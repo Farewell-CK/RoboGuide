@@ -21,6 +21,7 @@ from habitat_local_eaios.model import IntegrationError  # noqa: E402
 from habitat_local_eaios.navmesh_profile import NAVMESH_FIELDS  # noqa: E402
 from habitat_local_eaios.preassignment_feasibility import preassignment_digest  # noqa: E402
 from habitat_local_eaios.shared_world import SharedEmosStage2Runtime  # noqa: E402
+from habitat_local_eaios.stage2_feedback import FEEDBACK_PROFILE  # noqa: E402
 
 
 class FakeSettings:
@@ -171,8 +172,9 @@ def _sources() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str
 
 
 @pytest.mark.parametrize("version", ["v0.5", "v0.6"])
+@pytest.mark.parametrize("feedback", [False, True])
 def test_spatial_profile_producer_accepts_historical_and_prepared_execution(
-    monkeypatch: pytest.MonkeyPatch, version: str
+    monkeypatch: pytest.MonkeyPatch, version: str, feedback: bool
 ) -> None:
     """The actual reset producer remains read-only under old and new spatial profiles."""
     api = ModuleType("habitat_sim")
@@ -192,6 +194,8 @@ def test_spatial_profile_producer_accepts_historical_and_prepared_execution(
     )
     if version == "v0.6":
         profile["navigation_preparation_profile"] = "joint-navigation-preparation/v0.1"
+    if feedback:
+        profile["stage2_execution_feedback_profile"] = FEEDBACK_PROFILE
     before = dict(action._targets)
     document = routes.build_reset_route_support(env, semantic, matrix, profile, sources)
     assert document["scope_status"] == "available"
