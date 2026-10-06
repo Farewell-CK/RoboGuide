@@ -563,6 +563,13 @@ Controlled deployment 只在 EMOS Stage1→Stage2 边界注入 Control 已 Commi
 idle policy 选择 EMOS 已有的 `WaitSkillPolicy`，执行段结束后恢复原始 agent；双 Actor
 分配仍各自使用原始 Stage2。适配器不改写模型已选动作，也不维护 prompt、重试或 skill
 dispatcher 副本。单 Actor 的 idle 策略与原生 EMOS 的模型决策路径不同，配对比较须归档。
+Controlled Stage2 的本地结果反馈由部署侧
+[`stage2_feedback.py`](integrations/habitat-local-eaios/habitat_local_eaios/stage2_feedback.py)
+提供：它将厂商模型提前写入的 `Success` receipt 替换为精确调用绑定的真实技能观测，区分
+完成、预算耗尽、策略中断和未知；不改写模型所选动作、不额外调用模型或仿真 step。
+下一次模型请求读取该反馈，替代无条件的完成声明；与原生 EMOS 的输入差异须归档。
+该 Local EAIOS 内部反馈不构成 Task satisfaction 或官方成功，见
+[`ADR-0069`](docs/decisions/0069-observed-local-skill-feedback.md)。
 Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
 作为四类独立证据记录，彼此不得推导。
 独立原生 EMOS 对照可显式使用

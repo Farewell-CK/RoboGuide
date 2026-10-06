@@ -520,6 +520,15 @@ EMOS 已有的 `WaitSkillPolicy`；执行段结束后恢复原始 agent 实例�
 原始 Stage2；idle policy 的激活和调用次数必须独立归档。该策略与原生 EMOS 允许未分配
 agent 自行调用模型选择 `wait` 的路径不同，比较实验应显式记录这一 arm 差异。
 
+Controlled Stage2 还通过 Local EAIOS 的执行期反馈桥接读取原始技能的实际终止结果，
+将模型客户端提前生成的 `Success` receipt 替换为精确 tool call/agent/invocation 绑定的
+完成、预算耗尽、策略中断或未知观测。原始完成方法只调用一次，已有 post-step 本地
+terminal measure 可以更新此前的 policy-input 观测；它不新增动作、仿真 step、模型调用、
+控制预算或官方谓词查询。模型下一次决策使用该反馈，所选动作仍须经过独立 Contract
+Guard。此环只属于 Local How，不能证明 Task/Mission satisfaction、改变 Control ownership
+或触发 MI 重规划；与原生 EMOS 的 synthetic receipt 路径不同，须在 arm 配置与证据中
+披露。详见 [`ADR-0069`](../../decisions/0069-observed-local-skill-feedback.md)。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。

@@ -180,6 +180,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   rejects wrong targets. Local skill
   completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
+  Controlled Stage2 uses deployment-owned observed local skill feedback (ADR-0069):
+  exact call/agent/invocation-bound receipts distinguish completion, budget expiry,
+  interruption and unknown rather than returning synthetic success before execution.
+  Original termination methods execute once; existing post-step local terminal facts
+  may supersede earlier policy-input evidence. This changes local model input, not
+  selected actions, robot abilities, simulator/model budgets or official truth.
+  It grants no Control, Task satisfaction or MI replanning authority and must be
+  disclosed separately from the original native EMOS feedback path.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and

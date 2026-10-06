@@ -396,8 +396,34 @@ one tool call; zero or multiple calls fail closed before CrabAgent dispatch.
 EMOS still selects the first tool when a response contains several; ignored tool
 proposals remain in the original chat history. `allowed` means admitted at the
 tool boundary, not physically executed or successful: another agent can reject
-the joint step. EMOS's existing synthetic tool-history `Success` receipt also
-does not prove physical success.
+the joint step.
+
+The controlled path supplies `observed-local-skill-feedback/v0.1` through the
+deployment-owned `stage2_feedback.py` (see [ADR-0069](../../docs/decisions/0069-observed-local-skill-feedback.md)).
+It replaces EMOS's prematurely generated `Success` tool receipt with an exact
+call/agent/invocation-bound pending result. Original termination methods run
+once; their returned completion, budget and high-level flags become distinct
+feedback. The loop's existing post-step local terminal measure can supersede a
+pre-step budget result. Wait completion does not mean navigation completion or
+peer delivery. Unavailable evidence stays unknown, and original exceptions
+propagate. The next original model request references that feedback instead of
+unconditionally saying the previous action completed. No action is rewritten,
+model call added, or skill/episode budget renewed.
+Completion inputs preceding the selected action's first actual Gym step remain
+unknown for that action. Actual completed steps update only a counter, without
+per-step JSON or I/O. The current model input also contains the feedback object
+so vendor history-window settings cannot hide it.
+
+`stage2-execution-feedback.jsonl` and `stage2-execution-feedback-audit.json`
+archive these observations separately from selected-action admission, retaining
+the original synthetic receipt and bounded completeness accounting. Pending
+state holds one action per assigned agent; JSON writing occurs at tool/skill
+boundaries. `benchmark_goal_satisfied` remains null, including after local
+completion. `local-how-profile.json` discloses the independently versioned
+`stage2_execution_feedback_profile`, and runtime source provenance hashes the
+loaded module. This changes model-input feedback in the RoboGuide arm; native
+EMOS keeps its original model client and synthetic receipts. No official
+metric, Formal admission rule, robot ability or physical path filter changes.
 
 Records stream at model-call frequency, one bounded record at a time (64 KiB
 maximum), rather than at simulator-step frequency. The existing episode budget
