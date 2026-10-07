@@ -434,6 +434,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   while source/evidence drift and three consecutive infrastructure pairs pause new dispatch.
   The first measured pair gates optional two-worker capacity. Port isolation is deployment
   configuration, never a Core or Mission semantic change. See `evaluation/docs/e1-batch.md`.
+  Explicit driver-owned HTTP continuation policies retain all Provider incidents and never add
+  client retries or prove success. Ordered owned-session termination lets B1 archive before
+  services stop; bounded accounting draining must precede final evidence sealing.
 - Optional B1 goal-geometry diagnostics read the terminal Habitat snapshot and its actual
   `robot_at_thresh` to compare the deployed 3D `any_at` result with a world-X/Z-only
   counterfactual. They require matching provenance and official terminal evidence, remain

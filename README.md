@@ -962,6 +962,7 @@ uv run pytest -q
 [`e1-batch`](evaluation/docs/e1-batch.md) 在冻结配置下监督独立的对照进程，支持后台启动、
 状态读取、暂停派发与恢复观察。它保留正式判定及 unavailable，普通任务失败不会停止队列；
 重启不会重跑已认领的任务。B1 的 HTTP/gRPC 端口可按运行隔离，默认端口保持兼容。
+允许继续的 Provider HTTP 错误仍逐次留证；受控停止先归档，再清理服务并等待采集器落盘。
 它不属于 Core、Runtime、Control Plane、State & Memory Plane 或 Local EAIOS，
 不修改 Proposal / Commit / Binding / Runtime 语义，也不 import 或复制
 EMOS/Habitat-MAS；外部系统只通过进程边界访问。第一版提供 ExperimentSpec 合同、

@@ -54,6 +54,7 @@ finish_run() {
     # Archive evidence before stopping our exact child processes, including early failures.
     local code=$? owner=NONE component="" reason="" index
     trap - EXIT
+    trap '' TERM INT
     set +e
     if [[ "$code" != 0 ]]; then
         owner="$FAILURE_OWNER"
@@ -80,6 +81,14 @@ finish_run() {
         exit "$archive_code"
     fi
     exit "$code"
+}
+
+stop_run() {
+    # External observation interruption is harness evidence, never an invented SUT failure.
+    FAILURE_OWNER=EXTERNAL_INFRA
+    FAILURE_COMPONENT=harness
+    FAILURE_REASON=runner_interrupted
+    exit "$1"
 }
 
 wait_http() {
@@ -214,6 +223,8 @@ if [[ "${ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY:-0}" == 1 ]]; then
     ROUTE_SUPPORT_CHECK_ARGS+=(--require-route-geometry)
 fi
 trap finish_run EXIT
+trap 'stop_run 143' TERM
+trap 'stop_run 130' INT
 INITIAL_PREFERENCES_PATH=""
 INITIAL_PREFERENCES_SOURCE=""
 INITIAL_SUPPORT_FLAG="${ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT:-0}"
@@ -446,14 +457,21 @@ PYEOF
 # fails MI: this run's request store recovers the identity and observation
 # continues; the runner never resubmits the instruction.
 MI_PID="${PIDS[${#PIDS[@]}-1]}"
-MI_WAIT_JSON="$(uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
+uv run --project "$REPO" python -m roboguide_eval.b1_runner_wait \
     --submit-and-wait --endpoint http://127.0.0.1:${MISSION_PORT} \
     --instruction "$INSTRUCTION" \
     --budget-seconds "$MI_OBSERVATION_BUDGET_SECONDS" \
     --service-pid "$MI_PID" --store-path "$RUN/mission-service.sqlite3" \
-    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2)" \
-    || MI_WAIT_EXIT=$? || true
-printf '%s\n' "$MI_WAIT_JSON" > "$RUN/mi-wait-outcome.json"
+    --log-path "$RUN/mi-wait-log.jsonl" --poll-interval-seconds 2 \
+    > "$RUN/mi-wait-outcome.json" &
+MI_OBSERVER_PID=$!
+AUX_PIDS+=("$MI_OBSERVER_PID")
+# Bash's builtin wait is interruptible, so TERM can archive while services stay alive.
+# The client still performs exactly one POST and retains its original request identity.
+wait "$MI_OBSERVER_PID" || MI_WAIT_EXIT=$?
+# A reaped observer no longer belongs in cleanup; its PID may be reused during execution.
+unset "AUX_PIDS[$((${#AUX_PIDS[@]}-1))]"
+MI_WAIT_JSON=$(cat "$RUN/mi-wait-outcome.json")
 MI_OUTCOME=$(printf '%s\n' "$MI_WAIT_JSON" \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])' 2>/dev/null || echo invalid_response)
 LIFECYCLE=$(printf '%s\n' "$MI_WAIT_JSON" \

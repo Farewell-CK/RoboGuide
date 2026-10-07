@@ -220,6 +220,7 @@ class AccountingProxyServer(ThreadingHTTPServer):
         self._sequence_lock = threading.Lock()
         self._sequence = 0
         self._record_lock = threading.RLock()
+        self._idle = threading.Condition(self._record_lock)
         self._records_written = 0
         self._records_dropped = 0
         self._write_failures = 0
@@ -297,6 +298,19 @@ class AccountingProxyServer(ThreadingHTTPServer):
         with self._record_lock:
             self._in_flight -= 1
             self._write_status()
+            self._idle.notify_all()
+
+    def wait_for_idle(self, timeout_seconds: float) -> bool:
+        """Boundedly drain already accepted calls after stopping new HTTP acceptance.
+
+        Callers stop their owned client and use ``shutdown()`` first. A timeout returns
+        false; it does not invent a response, cancel a model call or certify closure.
+        Body observers finish inside the handler before ``call_finished`` notifies us.
+        """
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("drain timeout must be finite and positive")
+        with self._idle:
+            return self._idle.wait_for(lambda: self._in_flight == 0, timeout=timeout_seconds)
 
     def server_close(self) -> None:
         """Mark graceful observation closure; a live or killed writer never proves completeness."""

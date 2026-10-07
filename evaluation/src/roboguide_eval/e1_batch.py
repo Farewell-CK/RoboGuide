@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
 
+from roboguide_eval.e1_attempt import terminate_owned_session
 from roboguide_eval.models import JSONObject, JSONValue
 from roboguide_eval.process import expand_environment_values
 
@@ -263,15 +264,8 @@ def _pump(source: BinaryIO, target: Path, secrets: tuple[bytes, ...]) -> None:
 
 
 def _terminate_owned(child: subprocess.Popen[bytes]) -> None:
-    """Stop this exact managed process session and give its archival trap time to finish."""
-    if child.poll() is not None:
-        return
-    os.killpg(child.pid, signal.SIGTERM)
-    try:
-        child.wait(timeout=45)
-    except subprocess.TimeoutExpired:
-        os.killpg(child.pid, signal.SIGKILL)
-        child.wait(timeout=10)
+    """Allow the driver its inner 120s archive and 60s capture drain before escalation."""
+    terminate_owned_session(child, grace_seconds=240)
 
 
 def _capture_log(

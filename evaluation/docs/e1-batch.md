@@ -40,6 +40,20 @@ manifest schema 为 `roboguide.e1.batch/v0.1`，字段如下：
 原始 admission verdict，不因普通系统失败移除。严格配对公平性由现有独立 validator 判断，
 监督器始终不宣称 strict fairness。
 
+外部 driver 可以显式冻结允许继续的 Provider HTTP 状态。`e1_attempt.provider_incidents`
+保留每次原始错误和 `requires_stop`，不发请求、不增加 SDK 重试，也不把错误改成成功。
+例如允许 502 时，原客户端完成自身重试；成功响应仍必须核对实际模型身份。最终调用失败时
+保留真实 SUT/Provider 结果和官方 unavailable，再继续下一组。凭据、模型身份、reset 与归档
+完整性的检查仍然有效。已暂停的严重错误批次不可清除原结果；修复后用新的续跑 manifest
+排除所有已认领 pair，并引用原批次与精确代码版本。
+
+受控停止先只向自己启动且负责子进程清理的 supervisor 发 TERM；外层 driver 有 240 秒
+完成其内部 120 秒归档与 60 秒采集排空，超出预算才强制停止仍存活的自有 session。
+不支持协作清理的原生 wrapper 保留原有 group-stop 路径。B1 的 TERM/INT trap 把外部中断归因 harness，保留
+原 EXIT 归档行为；MI 观察客户端在可中断的后台 `wait` 中运行，不新增 Mission Request。
+停止 HTTP 接收后，driver 还必须以明确预算调用 accounting `wait_for_idle`，等已经接受的
+响应及其 body observation 落盘后才能判定归档完整和计算最终摘要；超时只能记录不完整。
+
 `status.json` / `SUMMARY.json` 为派生状态，`jobs/<id>/receipt.json` 保存认领证据，
 `stdout.log` / `stderr.log` 流式脱敏，`result.json` 保存结果及日志关闭状态。
 文件写入使用原子替换和 fsync；日志失败单独归因 harness，并暂停后续派发。

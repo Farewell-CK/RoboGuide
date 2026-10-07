@@ -215,6 +215,39 @@ def test_proxy_shutdown_during_call_cannot_certify_a_prefix(
     assert status["in_flight"] == 0 and status["complete"] is True
 
 
+def test_drain_waits_for_actual_handler_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After shutdown, bounded draining waits for a real response before evidence is sealed."""
+    received, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(FakeProvider, "request_received", received)
+    monkeypatch.setattr(FakeProvider, "release_response", release)
+    with proxy_pair(tmp_path, b'{"model":"actual"}') as (proxy, port):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending = pool.submit(post, port, {"model": "m"})
+            try:
+                assert received.wait(timeout=5)
+                proxy.shutdown()
+                assert proxy.wait_for_idle(0.01) is False
+                drain = pool.submit(proxy.wait_for_idle, 5)
+                assert not drain.done()
+            finally:
+                release.set()
+            assert pending.result(timeout=5) == b'{"model":"actual"}'
+            assert drain.result(timeout=5) is True
+        proxy.server_close()
+        assert proxy.recording_status()["complete"] is True
+        assert len(read_accounting_log(proxy.config.log_path)) == 1
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+def test_invalid_drain_budget_is_rejected(tmp_path: Path, timeout: float) -> None:
+    """Evidence draining has an explicit finite positive time budget."""
+    with proxy_pair(tmp_path, b'{"model":"actual"}') as (proxy, _port):
+        with pytest.raises(ValueError, match="drain timeout"):
+            proxy.wait_for_idle(timeout)
+
+
 def test_deeply_nested_metadata_cannot_change_provider_output(tmp_path: Path) -> None:
     """A parser recursion limit degrades observation, rather than causing an SDK retry."""
     response = b"[" * 2000 + b"0" + b"]" * 2000
