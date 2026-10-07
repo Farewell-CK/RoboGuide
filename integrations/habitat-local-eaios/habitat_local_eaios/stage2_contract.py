@@ -17,13 +17,18 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from .diagnostics import BufferedJsonlWriter
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    CanonicalMobilityInvocation,
+    CanonicalRelocationInvocation,
+    IntegrationError,
+)
 from .stage2_feedback import Stage2ExecutionFeedback
 
 _LOG = logging.getLogger(__name__)
 _MAX_RECORD_BYTES = 65_536
 _MISSING = object()
 _NAVIGATION_OPERATIONS = frozenset({"mobility.move@v1", "mobility.navigate@v1"})
+_RELOCATION_OPERATIONS = frozenset({"object.relocate@v1"})
 
 
 class Stage2ContractViolation(IntegrationError):
@@ -37,44 +42,99 @@ class Stage2ContractViolation(IntegrationError):
         super().__init__(f"Stage2 local execution contract failed for {agent_name}: {reason}")
 
 
+@dataclass
+class RelocationExecutionState:
+    """Track only actions admitted by one relocation attempt."""
+
+    phase: str = "before_pick"
+
+
 @dataclass(frozen=True)
 class Stage2ExecutionContract:
-    """Bind one agent's navigation authority to a committed invocation digest."""
+    """Bind one agent's local tool authority to a committed invocation digest."""
 
     operation: str
     expected_destination: str | None
     invocation_digest: str | None
+    expected_object: str | None = None
+    expected_source: str | None = None
 
     @classmethod
-    def for_invocation(cls, invocation: CanonicalMobilityInvocation) -> Stage2ExecutionContract:
-        """Freeze the canonical destination without interpreting its entity spelling."""
-        if invocation.operation not in _NAVIGATION_OPERATIONS:
-            raise IntegrationError(f"no Stage2 execution profile for {invocation.operation!r}")
-        return cls(invocation.operation, invocation.destination, invocation.request_key())
+    def for_invocation(
+        cls, invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation
+    ) -> Stage2ExecutionContract:
+        """Freeze the exact semantic fields required by the operation profile."""
+        if invocation.operation in _NAVIGATION_OPERATIONS:
+            if not isinstance(invocation, CanonicalMobilityInvocation):
+                raise IntegrationError("navigation invocation has an incompatible type")
+            return cls(invocation.operation, invocation.destination, invocation.request_key())
+        if invocation.operation in _RELOCATION_OPERATIONS:
+            if not isinstance(invocation, CanonicalRelocationInvocation):
+                raise IntegrationError("relocation invocation has an incompatible type")
+            return cls(
+                invocation.operation,
+                invocation.destination,
+                invocation.request_key(),
+                invocation.object_ref,
+                invocation.source,
+            )
+        raise IntegrationError(f"no Stage2 execution profile for {invocation.operation!r}")
 
     @classmethod
     def idle(cls) -> Stage2ExecutionContract:
         """Allow only non-physical actions for an agent with no committed work."""
         return cls("unassigned", None, None)
 
+    @property
+    def is_relocation(self) -> bool:
+        """Return whether this contract admits the object-relocation profile."""
+        return self.operation in _RELOCATION_OPERATIONS
+
     def as_dict(self) -> dict[str, object]:
         """Expose the immutable semantic binding beside each action decision."""
-        return {
-            "profile": "emos-navigation/v0.1",
+        result: dict[str, object] = {
+            "profile": "emos-relocation/v0.1" if self.is_relocation else "emos-navigation/v0.1",
             "operation": self.operation,
             "expected_destination": self.expected_destination,
             "invocation_digest": self.invocation_digest,
         }
+        if self.is_relocation:
+            result["expected_object"] = self.expected_object
+            result["expected_source"] = self.expected_source
+        return result
 
-    def validate(self, agent_name: str, action: object, peer_names: frozenset[str]) -> None:
-        """Reject unauthorized targets, physical tools, or malformed tool arguments."""
-        if not isinstance(action, dict) or set(action) != {"name", "arguments"}:
-            self._fail(agent_name, action, "selected action requires exactly name and arguments")
-        name, arguments = action["name"], action["arguments"]
-        if not isinstance(name, str) or name not in {"nav_to_obj", "wait", "send_request"}:
+    def validate(
+        self,
+        agent_name: str,
+        action: object,
+        peer_names: frozenset[str],
+        state: RelocationExecutionState | None = None,
+    ) -> None:
+        """Reject unauthorized or malformed tools before CrabAgent dispatch."""
+        if self.is_relocation:
+            self._validate_relocation(agent_name, action, peer_names, state)
+            return
+        self._validate_navigation(agent_name, action, peer_names)
+
+    def advance(self, action: object, state: RelocationExecutionState) -> None:
+        """Advance relocation state only after the selected action was admitted."""
+        if not self.is_relocation:
+            return
+        if not isinstance(action, dict):
+            return
+        name = action.get("name")
+        if name == "pick":
+            state.phase = "holding"
+        elif name == "place":
+            state.phase = "placed"
+
+    def _validate_navigation(
+        self, agent_name: str, action: object, peer_names: frozenset[str]
+    ) -> None:
+        """Validate the existing navigation-only tool profile."""
+        name, arguments = self._shape(agent_name, action)
+        if name not in {"nav_to_obj", "wait", "send_request"}:
             self._fail(agent_name, action, "tool is not authorized by this execution profile")
-        if not isinstance(arguments, dict):
-            self._fail(agent_name, action, "raw tool arguments must be an object")
         if name == "nav_to_obj":
             if self.expected_destination is None:
                 self._fail(agent_name, action, "unassigned agent cannot navigate")
@@ -83,17 +143,105 @@ class Stage2ExecutionContract:
             if arguments["target_obj"] != self.expected_destination:
                 self._fail(agent_name, action, "target does not match canonical destination")
         elif name == "wait":
-            # The raw wait tool takes no arguments; CrabAgent later maps it to ["500"].
             if arguments:
                 self._fail(agent_name, action, "wait accepts no tool arguments")
         else:
-            if set(arguments) != {"request", "target_agent"}:
-                self._fail(agent_name, action, "send_request requires request and target_agent")
-            target, request = arguments["target_agent"], arguments["request"]
-            if not isinstance(request, str) or not request.strip():
-                self._fail(agent_name, action, "peer request must be non-empty text")
-            if not isinstance(target, str) or target not in peer_names or target == agent_name:
-                self._fail(agent_name, action, "peer request target is not another active agent")
+            self._validate_send_request(agent_name, action, arguments, peer_names)
+
+    def _validate_relocation(
+        self,
+        agent_name: str,
+        action: object,
+        peer_names: frozenset[str],
+        state: RelocationExecutionState | None,
+    ) -> None:
+        """Validate an exact relocation workflow and its current phase."""
+        if state is None:
+            state = RelocationExecutionState()
+        name, arguments = self._shape(agent_name, action)
+        if name not in {
+            "nav_to_obj",
+            "pick",
+            "place",
+            "reset_arm",
+            "wait",
+            "send_request",
+        }:
+            self._fail(agent_name, action, "tool is not authorized by this relocation profile")
+        if name == "wait":
+            if arguments:
+                self._fail(agent_name, action, "wait accepts no tool arguments")
+            return
+        if name == "send_request":
+            self._validate_send_request(agent_name, action, arguments, peer_names)
+            return
+        if name == "reset_arm":
+            if arguments:
+                self._fail(agent_name, action, "reset_arm accepts no tool arguments")
+            if state.phase == "holding":
+                self._fail(agent_name, action, "reset_arm is not allowed while holding the object")
+            return
+        if name == "nav_to_obj":
+            if set(arguments) != {"target_obj"}:
+                self._fail(agent_name, action, "nav_to_obj requires exactly target_obj")
+            if state.phase == "before_pick":
+                expected = self.expected_object
+            elif state.phase == "holding":
+                expected = self.expected_destination
+            else:
+                self._fail(agent_name, action, "navigation is not allowed after placement")
+            if expected is None or arguments["target_obj"] != expected:
+                self._fail(agent_name, action, "navigation target does not match relocation phase")
+            return
+        if name == "pick":
+            if state.phase != "before_pick":
+                self._fail(agent_name, action, "pick is only allowed before the object is held")
+            if set(arguments) != {"target_obj"} or arguments["target_obj"] != self.expected_object:
+                self._fail(agent_name, action, "pick target does not match canonical object")
+            return
+        if state.phase != "holding":
+            self._fail(agent_name, action, "place requires the object to be held")
+        if set(arguments) != {"target_obj", "target_location"}:
+            self._fail(agent_name, action, "place requires exactly target_obj and target_location")
+        if (
+            arguments["target_obj"] != self.expected_object
+            or arguments["target_location"] != self.expected_destination
+        ):
+            self._fail(agent_name, action, "place object or destination does not match relocation")
+
+    @staticmethod
+    def _shape(agent_name: str, action: object) -> tuple[str, dict[str, object]]:
+        """Require the raw action envelope before interpreting any tool fields."""
+        if not isinstance(action, dict) or set(action) != {"name", "arguments"}:
+            Stage2ExecutionContract._fail(
+                agent_name, action, "selected action requires exactly name and arguments"
+            )
+        name, arguments = action["name"], action["arguments"]
+        if not isinstance(name, str) or not isinstance(arguments, dict):
+            Stage2ExecutionContract._fail(
+                agent_name, action, "raw tool name and arguments have invalid types"
+            )
+        return name, arguments
+
+    @staticmethod
+    def _validate_send_request(
+        agent_name: str,
+        action: object,
+        arguments: dict[str, object],
+        peer_names: frozenset[str],
+    ) -> None:
+        """Validate a peer message without allowing arbitrary local tool payloads."""
+        if set(arguments) != {"request", "target_agent"}:
+            Stage2ExecutionContract._fail(
+                agent_name, action, "send_request requires request and target_agent"
+            )
+        target, request = arguments["target_agent"], arguments["request"]
+        if not isinstance(request, str) or not request.strip():
+            Stage2ExecutionContract._fail(agent_name, action, "peer request must be non-empty text")
+        if not isinstance(target, str) or target not in peer_names or target == agent_name:
+            Stage2ExecutionContract._fail(
+                agent_name, action, "peer request target is not another active agent"
+            )
 
     @staticmethod
     def _fail(agent_name: str, action: object, reason: str) -> NoReturn:
@@ -275,6 +423,56 @@ def _bound_navigation_tools(actions: object, destination: str) -> list[dict[str,
     return offered
 
 
+def _bound_relocation_tools(
+    actions: object, object_ref: str, destination: str
+) -> list[dict[str, Any]]:
+    """Bind the original EMOS relocation arguments to exact semantic identities."""
+    if not isinstance(actions, list) or not all(isinstance(action, dict) for action in actions):
+        raise IntegrationError("Stage2 model tool declarations are unavailable")
+    offered = deepcopy(actions)
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for action in offered:
+        name = action.get("name")
+        if isinstance(name, str):
+            by_name.setdefault(name, []).append(action)
+    required_tools = ("nav_to_obj", "pick", "place")
+    if any(len(by_name.get(name, [])) != 1 for name in required_tools):
+        raise IntegrationError("Stage2 relocation tool declarations are ambiguous")
+
+    def bind_string_enum(name: str, field: str, value: str) -> None:
+        """Restrict one required string argument to the committed semantic identity."""
+        action = by_name[name][0]
+        parameters = action.get("parameters")
+        properties = parameters.get("properties") if isinstance(parameters, dict) else None
+        target = properties.get(field) if isinstance(properties, dict) else None
+        required = parameters.get("required") if isinstance(parameters, dict) else None
+        if (
+            not isinstance(target, dict)
+            or target.get("type") != "string"
+            or not isinstance(required, list)
+            or field not in required
+            or (
+                "enum" in target
+                and (not isinstance(target["enum"], list) or value not in target["enum"])
+            )
+        ):
+            raise IntegrationError(f"Stage2 relocation {name} schema cannot bind committed {field}")
+        target["enum"] = [value]
+
+    bind_string_enum("nav_to_obj", "target_obj", object_ref)
+    bind_string_enum("pick", "target_obj", object_ref)
+    bind_string_enum("place", "target_obj", object_ref)
+    bind_string_enum("place", "target_location", destination)
+    reset = by_name.get("reset_arm", [])
+    if reset:
+        if len(reset) != 1:
+            raise IntegrationError("Stage2 relocation reset_arm declaration is ambiguous")
+        parameters = reset[0].get("parameters")
+        if not isinstance(parameters, dict) or parameters.get("type") != "object":
+            raise IntegrationError("Stage2 relocation reset_arm schema is invalid")
+    return offered
+
+
 def _guard_agent(
     agent: Any,
     contract: Stage2ExecutionContract,
@@ -286,6 +484,7 @@ def _guard_agent(
     original_chat = agent.chat
     previous_chat = vars(agent).get("chat", _MISSING)
     agent_name = agent.name
+    relocation_state = RelocationExecutionState() if contract.is_relocation else None
 
     def guarded_chat(observation: str) -> Any:
         """Validate raw model output before CrabAgent transforms or dispatches it."""
@@ -304,14 +503,23 @@ def _guard_agent(
                 content = feedback.before_call(agent_name, model, content)
             history_length = _raw_history_length(model) if not crab_planning else None
             original_actions = getattr(model, "actions", _MISSING)
-            if not crab_planning and contract.expected_destination is not None:
-                model.actions = _bound_navigation_tools(
-                    original_actions, contract.expected_destination
-                )
+            bound_actions = not crab_planning and contract.expected_destination is not None
+            if bound_actions:
+                if contract.is_relocation:
+                    if contract.expected_object is None or contract.expected_destination is None:
+                        raise IntegrationError("relocation contract is missing semantic bindings")
+                    model.actions = _bound_relocation_tools(
+                        original_actions, contract.expected_object, contract.expected_destination
+                    )
+                else:
+                    destination = contract.expected_destination
+                    if destination is None:
+                        raise IntegrationError("navigation contract is missing destination")
+                    model.actions = _bound_navigation_tools(original_actions, destination)
             try:
                 result = original_model_chat(content, crab_planning=crab_planning)
             finally:
-                if not crab_planning and contract.expected_destination is not None:
+                if bound_actions:
                     _restore_attribute(model, "actions", original_actions)
             if crab_planning:
                 return result
@@ -338,7 +546,7 @@ def _guard_agent(
                     raise Stage2ContractViolation(
                         agent_name, action, "execution model must return an action tuple"
                     )
-                contract.validate(agent_name, action, peer_names)
+                contract.validate(agent_name, action, peer_names, relocation_state)
             except Stage2ContractViolation as violation:
                 error = violation
             document = {
@@ -359,6 +567,8 @@ def _guard_agent(
                 raise error
             if feedback is not None:
                 feedback.admit(agent_name, model, action)
+            if relocation_state is not None:
+                contract.advance(action, relocation_state)
             return result
 
         model.chat = guarded_model_chat

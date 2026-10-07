@@ -14,6 +14,7 @@ SUPPORTED_OPERATION = "mobility.navigate@v1"
 # The shared-world Local EAIOS executes both canonical navigation operations with the
 # same original EMOS Stage2 stack; the MI organization may emit either one.
 SUPPORTED_OPERATIONS = ("mobility.navigate@v1", "mobility.move@v1")
+RELOCATION_OPERATION = "object.relocate@v1"
 EXECUTION_SESSION_SCHEMA = "roboguide.execution-session/v0.1"
 
 
@@ -244,6 +245,190 @@ class CanonicalMobilityInvocation:
             self.as_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class CanonicalRelocationInvocation:
+    """Validated semantic object relocation request at the Local EAIOS boundary.
+
+    The operation carries only object, source, and destination identities. It
+    deliberately does not carry pick/place tool names, coordinates, robot
+    selectors, or other Local How details. The deployment adapter owns the
+    mapping from this semantic request to its configured skill workflow.
+    """
+
+    mission_id: str
+    task_id: str
+    group_id: str
+    role_id: str
+    operation: str
+    objective: str
+    parameters: dict[str, ScalarValue]
+    resource_ids: tuple[str, ...]
+    execution_session: ExecutionSessionMetadata | None = None
+    attempt_id: str | None = None
+
+    @classmethod
+    def from_request(cls, request: object) -> CanonicalRelocationInvocation:
+        """Validate an exact relocation invocation without accepting Local How fields."""
+        invocation = _parse_invocation(
+            request,
+            {RELOCATION_OPERATION},
+            {
+                "object",
+                "source",
+                "destination",
+            },
+        )
+        parameters = invocation["parameters"]
+        if not isinstance(parameters, dict):
+            raise IntegrationError("relocation parameters are unavailable")
+        mission_id = _non_empty_string(invocation["mission_id"], "mission_id")
+        task_id = _non_empty_string(invocation["task_id"], "task_id")
+        group_id = _non_empty_string(invocation["group_id"], "group_id")
+        role_id = _non_empty_string(invocation["role_id"], "role_id")
+        operation = _non_empty_string(invocation["operation"], "operation")
+        objective = _non_empty_string(invocation["objective"], "objective")
+        raw_resources = invocation["resource_ids"]
+        if not isinstance(raw_resources, tuple) or not all(
+            isinstance(item, str) for item in raw_resources
+        ):
+            raise IntegrationError("relocation resource_ids are unavailable")
+        resources = raw_resources
+        raw_session = invocation["execution_session"]
+        session = (
+            ExecutionSessionMetadata.from_json(raw_session, mission_id, group_id, task_id, role_id)
+            if raw_session is not None
+            else None
+        )
+        raw_attempt_id = invocation["attempt_id"]
+        attempt_id = (
+            _non_empty_string(raw_attempt_id, "attempt_id") if raw_attempt_id is not None else None
+        )
+        return cls(
+            mission_id=mission_id,
+            task_id=task_id,
+            group_id=group_id,
+            role_id=role_id,
+            operation=operation,
+            objective=objective,
+            parameters=parameters,
+            resource_ids=resources,
+            execution_session=session,
+            attempt_id=attempt_id,
+        )
+
+    @property
+    def object_ref(self) -> str:
+        """Return the exact semantic object identity bound to this attempt."""
+        value = self.parameters["object"]
+        if not isinstance(value, str):
+            raise IntegrationError("parameters.object must be a string")
+        return value
+
+    @property
+    def source(self) -> str:
+        """Return the exact semantic source identity bound to this attempt."""
+        value = self.parameters["source"]
+        if not isinstance(value, str):
+            raise IntegrationError("parameters.source must be a string")
+        return value
+
+    @property
+    def destination(self) -> str:
+        """Return the exact semantic destination identity bound to this attempt."""
+        value = self.parameters["destination"]
+        if not isinstance(value, str):
+            raise IntegrationError("parameters.destination must be a string")
+        return value
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a stable transport-neutral representation for durable evidence."""
+        result: dict[str, object] = {
+            "group_id": self.group_id,
+            "mission_id": self.mission_id,
+            "objective": self.objective,
+            "operation": self.operation,
+            "parameters": dict(self.parameters),
+            "resource_ids": list(self.resource_ids),
+            "role_id": self.role_id,
+            "task_id": self.task_id,
+        }
+        if self.execution_session is not None:
+            result["execution_session"] = self.execution_session.as_dict()
+        if self.attempt_id is not None:
+            result["attempt_id"] = self.attempt_id
+        return result
+
+    def request_key(self) -> str:
+        """Derive the idempotency key for this exact relocation invocation."""
+        encoded = json.dumps(
+            self.as_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+def _parse_invocation(
+    request: object, allowed_operations: set[str], parameter_names: set[str]
+) -> dict[str, object]:
+    """Parse shared canonical identity fields for one exact operation profile."""
+    body = _string_object(request, "request")
+    if set(body) != {"invocation"}:
+        raise IntegrationError("execute request must contain only invocation")
+    invocation = _string_object(body["invocation"], "invocation")
+    expected = {
+        "mission_id",
+        "task_id",
+        "group_id",
+        "role_id",
+        "operation",
+        "objective",
+        "parameters",
+        "resource_ids",
+    }
+    if not expected.issubset(invocation) or set(invocation) - expected - {
+        "execution_session",
+        "attempt_id",
+    }:
+        raise IntegrationError("canonical invocation fields do not match the contract")
+    operation = _non_empty_string(invocation["operation"], "operation")
+    if operation not in allowed_operations:
+        raise IntegrationError(f"unsupported canonical operation {operation!r}")
+    parameters = _parameters(invocation["parameters"])
+    if set(parameters) != parameter_names:
+        raise IntegrationError(f"{operation} requires exactly {sorted(parameter_names)} parameters")
+    for name in parameter_names:
+        _non_empty_string(parameters[name], f"parameters.{name}")
+    resources = _string_list(invocation["resource_ids"], "resource_ids")
+    if len(set(resources)) != len(resources):
+        raise IntegrationError("resource_ids contains duplicates")
+    mission_id = _non_empty_string(invocation["mission_id"], "mission_id")
+    task_id = _non_empty_string(invocation["task_id"], "task_id")
+    group_id = _non_empty_string(invocation["group_id"], "group_id")
+    role_id = _non_empty_string(invocation["role_id"], "role_id")
+    session = (
+        ExecutionSessionMetadata.from_json(
+            invocation["execution_session"], mission_id, group_id, task_id, role_id
+        )
+        if "execution_session" in invocation
+        else None
+    )
+    return {
+        "mission_id": mission_id,
+        "task_id": task_id,
+        "group_id": group_id,
+        "role_id": role_id,
+        "operation": operation,
+        "objective": _non_empty_string(invocation["objective"], "objective"),
+        "parameters": parameters,
+        "resource_ids": tuple(resources),
+        "execution_session": session,
+        "attempt_id": (
+            _non_empty_string(invocation["attempt_id"], "attempt_id")
+            if "attempt_id" in invocation
+            else None
+        ),
+    }
 
 
 def _string_object(value: object, field: str) -> dict[str, object]:

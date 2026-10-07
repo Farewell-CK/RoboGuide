@@ -1,0 +1,282 @@
+"""Deterministic object-relocation invocation and Stage2 guard tests."""
+
+from __future__ import annotations
+
+import sys
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+INTEGRATION_ROOT = Path(__file__).parents[1]
+if str(INTEGRATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(INTEGRATION_ROOT))
+
+from habitat_local_eaios.model import (  # noqa: E402
+    CanonicalRelocationInvocation,
+    IntegrationError,
+)
+from habitat_local_eaios.stage2_contract import (  # noqa: E402
+    RelocationExecutionState,
+    Stage2ContractViolation,
+    Stage2ExecutionContract,
+    install_stage2_contract_guard,
+)
+
+
+def _request(**parameters: Any) -> dict[str, Any]:
+    """Build a generic relocation request without benchmark-specific identities."""
+    values = {
+        "object": "object:sample",
+        "source": "receptacle:source",
+        "destination": "receptacle:destination",
+    }
+    values.update(parameters)
+    return {
+        "invocation": {
+            "mission_id": "mission-relocation",
+            "task_id": "task-relocation",
+            "group_id": "group-relocation",
+            "role_id": "role-relocation",
+            "operation": "object.relocate@v1",
+            "objective": "Move the selected object to the selected destination.",
+            "parameters": values,
+            "resource_ids": ["slot-relocation"],
+        }
+    }
+
+
+def _invocation() -> CanonicalRelocationInvocation:
+    """Return one exact relocation invocation for all contract tests."""
+    return CanonicalRelocationInvocation.from_request(_request())
+
+
+def _contract() -> Stage2ExecutionContract:
+    """Bind the generic relocation request to a local execution profile."""
+    return Stage2ExecutionContract.for_invocation(_invocation())
+
+
+def _action(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the raw tool envelope before CrabAgent transforms it."""
+    return {"name": name, "arguments": arguments or {}}
+
+
+def test_relocation_invocation_round_trips_and_binds_digest() -> None:
+    """The parser preserves exact object/source/destination semantics and identity."""
+    invocation = _invocation()
+    restored = CanonicalRelocationInvocation.from_request({"invocation": invocation.as_dict()})
+    assert restored == invocation
+    assert restored.object_ref == "object:sample"
+    assert restored.source == "receptacle:source"
+    assert restored.destination == "receptacle:destination"
+    assert restored.request_key()
+    contract = Stage2ExecutionContract.for_invocation(invocation)
+    assert contract.as_dict()["profile"] == "emos-relocation/v0.1"
+    assert contract.as_dict()["expected_source"] == "receptacle:source"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"parameters": {"object": "object:sample", "destination": "receptacle:destination"}},
+        {
+            "parameters": {
+                "object": "object:sample",
+                "source": "receptacle:source",
+                "destination": "receptacle:destination",
+                "extra": "local-how",
+            }
+        },
+        {
+            "parameters": {
+                "object": None,
+                "source": "receptacle:source",
+                "destination": "receptacle:destination",
+            }
+        },
+        {"resource_ids": ["slot-relocation", "slot-relocation"]},
+        {"operation": "mobility.move@v1"},
+    ],
+)
+def test_relocation_invocation_rejects_inexact_transport(mutation: dict[str, Any]) -> None:
+    """Missing, extra, null, duplicate, and wrong operation fields fail closed."""
+    request = deepcopy(_request())
+    request["invocation"].update(mutation)
+    with pytest.raises(IntegrationError):
+        CanonicalRelocationInvocation.from_request(request)
+
+
+def test_relocation_contract_accepts_only_ordered_semantic_workflow() -> None:
+    """A valid relocation sequence advances state only after each admitted action."""
+    contract = _contract()
+    state = RelocationExecutionState()
+    peers = frozenset({"agent-0"})
+    sequence = [
+        _action("reset_arm"),
+        _action("nav_to_obj", {"target_obj": "object:sample"}),
+        _action("pick", {"target_obj": "object:sample"}),
+        _action("nav_to_obj", {"target_obj": "receptacle:destination"}),
+        _action(
+            "place",
+            {"target_obj": "object:sample", "target_location": "receptacle:destination"},
+        ),
+        _action("reset_arm"),
+    ]
+    phases = ["before_pick", "before_pick", "holding", "holding", "placed", "placed"]
+    for action, phase in zip(sequence, phases, strict=True):
+        contract.validate("agent-0", action, peers, state)
+        contract.advance(action, state)
+        assert state.phase == phase
+
+
+def test_relocation_contract_rejects_wrong_or_out_of_order_actions() -> None:
+    """Wrong identities and invalid phases fail without changing the execution state."""
+    contract = _contract()
+    peers = frozenset({"agent-0"})
+    cases = [
+        (_action("pick", {"target_obj": "object:other"}), "canonical object"),
+        (
+            _action(
+                "place",
+                {
+                    "target_obj": "object:sample",
+                    "target_location": "receptacle:destination",
+                },
+            ),
+            "held",
+        ),
+        (_action("nav_to_obj", {"target_obj": "receptacle:destination"}), "phase"),
+    ]
+    for action, message in cases:
+        state = RelocationExecutionState()
+        with pytest.raises(Stage2ContractViolation, match=message):
+            contract.validate("agent-0", action, peers, state)
+        assert state.phase == "before_pick"
+    state = RelocationExecutionState("holding")
+    with pytest.raises(Stage2ContractViolation, match="reset_arm"):
+        contract.validate("agent-0", _action("reset_arm"), peers, state)
+    assert state.phase == "holding"
+
+
+class _FakeModel:
+    """Return scripted raw tool choices and preserve offered schemas."""
+
+    def __init__(self, response: Any) -> None:
+        """Create an offline model with original EMOS-like relocation tools."""
+        self.response = response
+        self.planning_stage = False
+        self.code_execution = False
+        self.chat_history: list[list[dict[str, Any]]] = []
+        self.offered_actions: list[dict[str, Any]] | None = None
+        self.actions = [
+            {
+                "name": "nav_to_obj",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"target_obj": {"type": "string"}},
+                    "required": ["target_obj"],
+                },
+            },
+            {
+                "name": "pick",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"target_obj": {"type": "string"}},
+                    "required": ["target_obj"],
+                },
+            },
+            {
+                "name": "place",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_obj": {"type": "string"},
+                        "target_location": {"type": "string"},
+                    },
+                    "required": ["target_obj", "target_location"],
+                },
+            },
+            {"name": "reset_arm", "parameters": {"type": "object", "properties": {}}},
+            {"name": "wait", "parameters": {"type": "object", "properties": {}}},
+        ]
+
+    def chat(self, content: str, crab_planning: bool = False) -> Any:
+        """Emit one raw tool call and record the schema seen by the provider."""
+        del content
+        self.offered_actions = deepcopy(self.actions)
+        if crab_planning:
+            return "planning"
+        name, arguments = self.response
+        self.chat_history.append(
+            [
+                {"role": "user", "content": "observation"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {"name": name, "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "content": "selected", "tool_call_id": "call-1", "name": name},
+            ]
+        )
+        return name, arguments
+
+
+class _FakeAgent:
+    """Capture whether a raw selected action reaches the vendor dispatcher."""
+
+    def __init__(self, response: Any) -> None:
+        """Create one agent with no physical side effects."""
+        self.name = "agent-0"
+        self.llm_model = _FakeModel(response)
+        self.dispatched: list[Any] = []
+
+    def chat(self, observation: str) -> Any:
+        """Mirror the dispatch boundary used by CrabAgent."""
+        result = self.llm_model.chat(observation)
+        self.dispatched.append(result)
+        return result
+
+
+def test_relocation_guard_binds_tools_and_rejects_wrong_action_before_dispatch() -> None:
+    """The guard exposes exact enums and blocks a wrong model-selected destination."""
+    agent = _FakeAgent(("nav_to_obj", {"target_obj": "receptacle:wrong"}))
+    restore = install_stage2_contract_guard([agent], {"agent-0": _contract()}, lambda row: None)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="relocation phase"):
+            agent.chat("observation")
+    finally:
+        restore()
+    assert agent.dispatched == []
+    assert agent.llm_model.offered_actions is not None
+    offered = {item["name"]: item for item in agent.llm_model.offered_actions}
+    assert offered["nav_to_obj"]["parameters"]["properties"]["target_obj"]["enum"] == [
+        "object:sample"
+    ]
+    assert offered["place"]["parameters"]["properties"]["target_location"]["enum"] == [
+        "receptacle:destination"
+    ]
+
+
+def test_relocation_schema_failure_does_not_reach_provider_or_mutate_tools() -> None:
+    """An incomplete relocation schema fails before Provider invocation and restores actions."""
+    agent = _FakeAgent(("pick", {"target_obj": "object:sample"}))
+    original = deepcopy(agent.llm_model.actions)
+    agent.llm_model.actions = [
+        action for action in agent.llm_model.actions if action["name"] != "place"
+    ]
+    missing = deepcopy(agent.llm_model.actions)
+    restore = install_stage2_contract_guard([agent], {"agent-0": _contract()}, lambda row: None)
+    try:
+        with pytest.raises(IntegrationError, match="tool declarations"):
+            agent.chat("observation")
+    finally:
+        restore()
+    assert agent.llm_model.chat_history == []
+    assert agent.dispatched == []
+    assert agent.llm_model.actions == missing
+    assert original != missing
