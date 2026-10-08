@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .evidence_io import write_text_atomic
-from .model import CanonicalMobilityInvocation
+from .model import CanonicalInvocation
 
 if TYPE_CHECKING:
     from .store import StoredExecution
@@ -40,7 +40,7 @@ class NavigationProgressPublisher:
     def __init__(
         self,
         directory: Path | None,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         agent_id: int,
         *,
         clock_ns: Callable[[], int] = time.monotonic_ns,

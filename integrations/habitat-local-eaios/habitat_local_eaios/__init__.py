@@ -6,6 +6,7 @@ from .model import (
     CanonicalMobilityInvocation,
     CanonicalRelocationInvocation,
     IntegrationError,
+    parse_canonical_invocation,
 )
 from .process_backend import HabitatProcessBackend
 from .store import ExecutionStore
@@ -13,6 +14,7 @@ from .store import ExecutionStore
 __all__ = [
     "CanonicalMobilityInvocation",
     "CanonicalRelocationInvocation",
+    "parse_canonical_invocation",
     "ExecutionStore",
     "HabitatBackendConfig",
     "HabitatLocalAdapter",

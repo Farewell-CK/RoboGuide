@@ -368,6 +368,23 @@ class CanonicalRelocationInvocation:
         return hashlib.sha256(encoded).hexdigest()
 
 
+CanonicalInvocation = CanonicalMobilityInvocation | CanonicalRelocationInvocation
+
+
+def parse_canonical_invocation(request: object) -> CanonicalInvocation:
+    """Parse one supported invocation without allowing an operation type to drift."""
+    body = _string_object(request, "request")
+    invocation = _string_object(body.get("invocation"), "invocation")
+    operation = invocation.get("operation")
+    if operation in SUPPORTED_OPERATIONS:
+        return CanonicalMobilityInvocation.from_request(request)
+    if operation == RELOCATION_OPERATION:
+        return CanonicalRelocationInvocation.from_request(request)
+    if isinstance(operation, str):
+        raise IntegrationError(f"unsupported canonical operation {operation!r}")
+    raise IntegrationError("canonical invocation operation is missing")
+
+
 def _parse_invocation(
     request: object, allowed_operations: set[str], parameter_names: set[str]
 ) -> dict[str, object]:

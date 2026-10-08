@@ -16,6 +16,7 @@ if str(INTEGRATION_ROOT) not in sys.path:
 
 from habitat_local_eaios import (  # noqa: E402
     CanonicalMobilityInvocation,
+    CanonicalRelocationInvocation,
     ExecutionStore,
     HabitatLocalAdapter,
     IntegrationError,
@@ -35,9 +36,13 @@ class ControlledBackend:
     def initialize(self) -> None:
         """Accept initialization without external Habitat dependencies."""
 
+    def supported_operations(self) -> tuple[str, ...]:
+        """Advertise the navigation operation covered by this fake backend."""
+        return ("mobility.navigate@v1",)
+
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation,
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
@@ -80,6 +85,26 @@ def _request() -> dict[str, object]:
             "objective": "Navigate the Habitat robot to the semantic target.",
             "parameters": {"destination": "any_targets|0"},
             "resource_ids": ["habitat-navigation-slot"],
+        }
+    }
+
+
+def _relocation_request() -> dict[str, object]:
+    """Build a generic relocation invocation for unsupported-operation admission tests."""
+    return {
+        "invocation": {
+            "mission_id": "mission-relocation",
+            "task_id": "relocate-object",
+            "group_id": "group-relocation",
+            "role_id": "manipulator",
+            "operation": "object.relocate@v1",
+            "objective": "Move one object to one declared destination.",
+            "parameters": {
+                "object": "object:sample",
+                "source": "receptacle:source",
+                "destination": "receptacle:destination",
+            },
+            "resource_ids": ["manipulation-slot"],
         }
     }
 
@@ -224,3 +249,29 @@ def test_initialization_failure_closes_backend(tmp_path: Path) -> None:
             initialization_timeout_s=1.0,
         )
     assert backend.closed
+
+
+def test_navigation_backend_rejects_relocation_before_acceptance(tmp_path: Path) -> None:
+    """An endpoint advertises only navigation and refuses relocation before queueing work."""
+    adapter, backend = _adapter(tmp_path)
+    try:
+        readiness = adapter.readiness()
+        assert readiness["operations"] == ["mobility.navigate@v1"]
+        with pytest.raises(IntegrationError, match="does not support 'object.relocate@v1'"):
+            adapter.accept(_relocation_request())
+        assert adapter._store.all_executions() == []
+        assert not backend.started.is_set()
+    finally:
+        adapter.close()
+
+
+def test_store_round_trips_relocation_without_executing_it(tmp_path: Path) -> None:
+    """The durable store preserves relocation identity for a future capable backend."""
+    store = ExecutionStore(tmp_path / "relocation.sqlite3")
+    invocation = CanonicalRelocationInvocation.from_request(_relocation_request())
+    execution, created = store.create_or_get(invocation)
+    assert created is True
+    restored = store.get(execution["execution_id"])
+    assert restored is not None
+    assert isinstance(restored["invocation"], CanonicalRelocationInvocation)
+    assert restored["invocation"].destination == "receptacle:destination"

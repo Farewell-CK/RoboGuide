@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from .backend import LocalExecutionOutcome
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import CanonicalInvocation, IntegrationError, parse_canonical_invocation
 
 TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 
@@ -20,7 +20,7 @@ class StoredExecution(TypedDict):
 
     execution_id: str
     request_key: str
-    invocation: CanonicalMobilityInvocation
+    invocation: CanonicalInvocation
     state: str
     detail: str
     cancel_requested: bool
@@ -66,9 +66,7 @@ class ExecutionStore:
                 (now,),
             )
 
-    def create_or_get(
-        self, invocation: CanonicalMobilityInvocation
-    ) -> tuple[StoredExecution, bool]:
+    def create_or_get(self, invocation: CanonicalInvocation) -> tuple[StoredExecution, bool]:
         """Create one idempotent accepted local handle or return its existing row."""
         request_key = invocation.request_key()
         invocation_json = json.dumps(
@@ -229,7 +227,7 @@ class ExecutionStore:
             outcome = None if outcome_raw is None else json.loads(str(outcome_raw))
         except json.JSONDecodeError as error:
             raise IntegrationError("local execution store contains invalid JSON") from error
-        invocation = CanonicalMobilityInvocation.from_request({"invocation": raw_invocation})
+        invocation = parse_canonical_invocation({"invocation": raw_invocation})
         if outcome is not None and not isinstance(outcome, dict):
             raise IntegrationError("local execution outcome is not an object")
         normalized_outcome = (

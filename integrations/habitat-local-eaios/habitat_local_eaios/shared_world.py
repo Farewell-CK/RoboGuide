@@ -37,7 +37,12 @@ from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher, read_execution_progress
 from .execution_recovery import execution_recovery_profile
 from .idle_endpoint import PassiveIdleBinding, install_passive_idle_agents
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    CanonicalInvocation,
+    CanonicalMobilityInvocation,
+    IntegrationError,
+    parse_canonical_invocation,
+)
 from .navigation_preparation import NavigationPreparationFailure
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
@@ -1337,12 +1342,17 @@ class NodeEndpoint:
         return {
             "detail": self._coordinator.readiness_detail(),
             "operation": "mobility.navigate@v1",
+            "operations": ["mobility.move@v1", "mobility.navigate@v1"],
             "state": "READY" if healthy else "UNAVAILABLE",
         }
 
     def accept(self, request: object) -> dict[str, object]:
         """Durably accept one exact invocation without starting simulator work."""
-        invocation = CanonicalMobilityInvocation.from_request(request)
+        invocation = parse_canonical_invocation(request)
+        if not isinstance(invocation, CanonicalMobilityInvocation):
+            raise IntegrationError(
+                f"shared-world navigation endpoint does not support {invocation.operation!r}"
+            )
         with self._lock:
             key = invocation.request_key()
             if key in self._known_keys:
@@ -2119,7 +2129,9 @@ class SharedWorldCoordinator:
             if (
                 record is None
                 or record["state"] != "ACCEPTED"
-                or not session.can_replace(endpoint.agent_id, record["invocation"])
+                or not session.can_replace(
+                    endpoint.agent_id, _require_mobility_invocation(record["invocation"])
+                )
                 or endpoint.agent_id in self._replacement_entries
                 or self._retained_pair_entries[endpoint.agent_id][0] is not endpoint
             ):
@@ -2265,7 +2277,7 @@ class SharedWorldCoordinator:
         record = store.get(execution_id)
         if record is None or record["state"] != "ACCEPTED":
             return
-        invocation = record["invocation"]
+        invocation = _require_mobility_invocation(record["invocation"])
         session = invocation.execution_session
         slot = (invocation.task_id, invocation.role_id)
         if (
@@ -2363,7 +2375,7 @@ class SharedWorldCoordinator:
                         _LOG.warning("serial verifier evidence lost a retained Task invocation")
                         latest = {}
                         break
-                    value = arrival["invocation"]
+                    value = _require_mobility_invocation(arrival["invocation"])
                     latest[(value.task_id, value.role_id)] = value
                 if latest:
                     self._publish_verifier_verdict_best_effort(summary, list(latest.values()))
@@ -2413,7 +2425,7 @@ class SharedWorldCoordinator:
             if execution is None:
                 raise IntegrationError("paired execution disappeared before the episode")
             handles[endpoint.agent_id] = str(execution["execution_id"])
-            invocations[endpoint.agent_id] = execution["invocation"]
+            invocations[endpoint.agent_id] = _require_mobility_invocation(execution["invocation"])
 
         def cancellation_requested() -> bool:
             """Observe either node's cancellation between shared steps."""
@@ -2625,6 +2637,13 @@ class SharedWorldCoordinator:
         if invocation.attempt_id is not None:
             document["attempt_id"] = invocation.attempt_id
         return document
+
+
+def _require_mobility_invocation(invocation: CanonicalInvocation) -> CanonicalMobilityInvocation:
+    """Narrow shared-world lifecycle code to its currently supported navigation profile."""
+    if not isinstance(invocation, CanonicalMobilityInvocation):
+        raise IntegrationError(f"shared-world lifecycle does not support {invocation.operation!r}")
+    return invocation
 
 
 def _receive_message(connection: Any) -> tuple[str, Any]:

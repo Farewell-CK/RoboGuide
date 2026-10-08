@@ -10,7 +10,12 @@ from multiprocessing.process import BaseProcess
 from typing import Any
 
 from .backend import HabitatBackendConfig, LocalExecutionOutcome
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    SUPPORTED_OPERATIONS,
+    CanonicalMobilityInvocation,
+    CanonicalRelocationInvocation,
+    IntegrationError,
+)
 
 _POLL_INTERVAL_S = 0.02
 _SHUTDOWN_TIMEOUT_S = 30.0
@@ -64,9 +69,13 @@ class HabitatProcessBackend:
                 raise IntegrationError("Habitat simulator process exited during initialization")
         raise IntegrationError("Habitat simulator process initialization timed out")
 
+    def supported_operations(self) -> tuple[str, ...]:
+        """Advertise the operation support of the configured child backend."""
+        return SUPPORTED_OPERATIONS
+
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation,
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
@@ -146,7 +155,9 @@ def _run_habitat_process(
                 return
             if kind == "CANCEL":
                 continue
-            if kind != "EXECUTE" or not isinstance(payload, CanonicalMobilityInvocation):
+            if kind != "EXECUTE" or not isinstance(
+                payload, (CanonicalMobilityInvocation, CanonicalRelocationInvocation)
+            ):
                 connection.send(("EXECUTION_FAILED", "invalid simulator process command"))
                 continue
             cancelled = False

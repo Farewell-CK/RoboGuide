@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .execution_progress import NavigationProgressPublisher
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    SUPPORTED_OPERATIONS,
+    CanonicalInvocation,
+    CanonicalMobilityInvocation,
+    IntegrationError,
+)
 
 
 @dataclass(frozen=True)
@@ -122,9 +127,12 @@ class MobilityBackend(Protocol):
     def initialize(self) -> None:
         """Establish and validate the real Local EAIOS execution environment."""
 
+    def supported_operations(self) -> tuple[str, ...]:
+        """Return operation identifiers implemented by this backend instance."""
+
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
@@ -154,6 +162,10 @@ class HabitatMobilityBackend:
         self._episode: Any | None = None
         self._numpy: Any | None = None
         self._agent_count = 0
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Advertise only the navigation operations implemented by this backend."""
+        return SUPPORTED_OPERATIONS
 
     def initialize(self) -> None:
         """Load the configured real scene and pin one deterministic Habitat episode."""
@@ -194,11 +206,13 @@ class HabitatMobilityBackend:
 
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
         """Resolve a semantic PDDL entity, step Oracle navigation, and observe its terminal fact."""
+        if not isinstance(invocation, CanonicalMobilityInvocation):
+            raise IntegrationError(f"navigation backend cannot execute {invocation.operation!r}")
         habitat_env, episode, numpy = self._require_initialized()
         try:
             habitat_env.episodes = [episode]

@@ -16,7 +16,12 @@ from typing import Any
 
 from .backend import HabitatBackendConfig, LocalExecutionOutcome
 from .emos_stage2 import EmosStage2Runtime, format_stage2_subtask
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    SUPPORTED_OPERATIONS,
+    CanonicalInvocation,
+    CanonicalMobilityInvocation,
+    IntegrationError,
+)
 from .spatial_feasibility import FloorTransitionProfile
 
 SUBTASK_MODES = ("natural-objective", "entity-grounded")
@@ -89,6 +94,10 @@ class CrabAgentMobilityBackend:
         self._config = config
         self._runtime: EmosStage2Runtime | None = None
 
+    def supported_operations(self) -> tuple[str, ...]:
+        """Advertise only operations wired to this backend's execution lifecycle."""
+        return SUPPORTED_OPERATIONS
+
     def initialize(self) -> None:
         """Create the persistent simulator and official EMOS policy once."""
         if self._runtime is not None:
@@ -99,11 +108,15 @@ class CrabAgentMobilityBackend:
 
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         cancellation_requested: Any,
         running: Any,
     ) -> LocalExecutionOutcome:
         """Execute one committed semantic assignment through original Stage2."""
+        if not isinstance(invocation, CanonicalMobilityInvocation):
+            raise IntegrationError(
+                f"EMOS navigation backend cannot execute {invocation.operation!r}"
+            )
         if self._runtime is None:
             raise IntegrationError("EMOS Stage2 backend is not initialized")
         return self._runtime.execute(invocation, cancellation_requested, running)

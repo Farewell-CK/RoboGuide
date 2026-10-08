@@ -11,7 +11,11 @@ from pathlib import Path
 from .backend import MobilityBackend
 from .execution_progress import read_execution_progress
 from .execution_recovery import execution_recovery_profile
-from .model import SUPPORTED_OPERATION, CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    SUPPORTED_OPERATION,
+    IntegrationError,
+    parse_canonical_invocation,
+)
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
 LOG = logging.getLogger("roboguide.habitat_local_eaios")
@@ -43,6 +47,7 @@ class HabitatLocalAdapter:
         self._scheduled_execution_ids: set[str] = set()
         self._initialization_error: str | None = None
         self._readiness_detail = "Habitat backend initialization pending"
+        self._supported_operations: tuple[str, ...] = ()
         self._worker = threading.Thread(
             target=self._run_worker,
             name="habitat-local-eaios",
@@ -75,16 +80,24 @@ class HabitatLocalAdapter:
     def readiness(self) -> dict[str, object]:
         """Report exact operation readiness from the initialized persistent backend."""
         healthy = self._initialization_error is None and self._worker.is_alive()
+        operations = self._supported_operations or (SUPPORTED_OPERATION,)
         return {
             "detail": self._readiness_detail,
-            "operation": SUPPORTED_OPERATION,
+            "operation": operations[0] if len(operations) == 1 else None,
+            "operations": list(operations),
             "state": "READY" if healthy else "UNAVAILABLE",
         }
 
     def accept(self, request: object) -> dict[str, object]:
         """Durably accept one exact invocation without starting simulator work."""
-        invocation = CanonicalMobilityInvocation.from_request(request)
+        invocation = parse_canonical_invocation(request)
         with self._submit_lock:
+            if invocation.operation not in self._supported_operations:
+                supported = ", ".join(self._supported_operations) or "none"
+                raise IntegrationError(
+                    f"local Habitat backend does not support {invocation.operation!r}; "
+                    f"supported operations: {supported}"
+                )
             active = self._store.active_execution()
             if active is not None:
                 if active["request_key"] == invocation.request_key():
@@ -157,6 +170,11 @@ class HabitatLocalAdapter:
         try:
             backend = self._backend_factory()
             backend.initialize()
+            advertised = getattr(backend, "supported_operations", None)
+            operations = tuple(advertised()) if callable(advertised) else (SUPPORTED_OPERATION,)
+            if not operations or len(set(operations)) != len(operations):
+                raise IntegrationError("Habitat backend advertised invalid operation support")
+            self._supported_operations = operations
             self._readiness_detail = backend.readiness_detail()
         except Exception as error:
             if backend is not None:
