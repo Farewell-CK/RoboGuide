@@ -1954,6 +1954,7 @@ class SharedWorldCoordinator:
         return {
             "schema_version": _START_ADMISSION_SCHEMA,
             "episode_scope": "one-official-shared-episode",
+            "supported_operations": list(self.supported_operations()),
             "required_distinct_endpoint_assignments": 2,
             "required_distinct_endpoint_assignments_applies_to": "two_actor_concurrent",
             "sequential_endpoint_reuse_supported": True,

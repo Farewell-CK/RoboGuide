@@ -2643,6 +2643,11 @@ def test_shared_world_readiness_reports_runtime_operations(tmp_path: Path) -> No
         assert readiness["operation"] == "mobility.navigate@v1"
         assert readiness["operations"] == ["mobility.navigate@v1", "mobility.move@v1"]
         assert coordinator.supported_operations() == runtime.supported_operations()
+        contract = coordinator.deployment_contract()
+        assert contract["supported_operations"] == [
+            "mobility.navigate@v1",
+            "mobility.move@v1",
+        ]
     finally:
         coordinator.shutdown()
 
