@@ -64,6 +64,20 @@ def test_known_fetch_profile_advertises_single_floor_mobility() -> None:
         }
 
 
+def test_configured_readiness_routes_resolve_to_declared_canonical_operations() -> None:
+    """Every checked-in Habitat node binds one readiness route to its declared operation."""
+    for path in _SPOT_PROFILES + _FETCH_PROFILES:
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        declared = {str(profile["contract"]) for profile in document["capability_profiles"]}
+        assert declared
+        for profile in document["capability_profiles"]:
+            contract = str(profile["contract"])
+            route = str(profile["readiness"]["step"]["operation"]["path"])
+            assert route == f"/v1/capabilities/{contract.rsplit('@', 1)[0]}"
+        operations = {str(operation["operation"]) for operation in document["operations"]}
+        assert operations <= declared
+
+
 def test_catalog_plan_and_stage2_guard_keep_distinct_authorities() -> None:
     """A checked-in MissionPlan binds each canonical destination without inferring placement."""
     plan_path = _ROOT / "scenarios/e1-shared-world-episode-51/mission-plan.json"

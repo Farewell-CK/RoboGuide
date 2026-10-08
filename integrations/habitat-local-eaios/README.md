@@ -18,7 +18,9 @@ remain Local How.
 The loopback-only HTTP facade implements the existing declarative Node workflow routes:
 
 - `GET /v1/health`
-- `GET /v1/capabilities/mobility.navigate`
+- `GET /v1/capabilities/<operation>` (for example `/v1/capabilities/mobility.navigate`;
+  the bridge maps the legacy route to the unique canonical operation such as
+  `mobility.navigate@v1` and reports `UNAVAILABLE` for unsupported operations)
 - `GET /v1/executions/progress` (empty unless explicitly configured)
 - `GET /v1/executions/recovery-support` (read-only deployment declaration)
 - `POST /v1/executions`
