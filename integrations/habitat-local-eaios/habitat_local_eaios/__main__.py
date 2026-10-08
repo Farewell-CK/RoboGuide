@@ -231,6 +231,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         coordinator,
         progress_directory=arguments.progress_directory,
         retain_stopped_session=arguments.retain_stopped_session,
+        enable_relocation=arguments.enable_relocation,
     )
     endpoint_b = NodeEndpoint(
         "node-b",
@@ -239,6 +240,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         coordinator,
         progress_directory=arguments.progress_directory,
         retain_stopped_session=arguments.retain_stopped_session,
+        enable_relocation=arguments.enable_relocation,
     )
     server_a = HabitatBridgeServer((arguments.host, arguments.port), endpoint_a)
     server_b = HabitatBridgeServer((arguments.host, arguments.port_b), endpoint_b)

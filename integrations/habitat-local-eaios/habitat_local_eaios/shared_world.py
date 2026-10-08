@@ -1477,8 +1477,11 @@ class NodeEndpoint:
         *,
         progress_directory: Path | None = None,
         retain_stopped_session: bool = False,
+        enable_relocation: bool = False,
     ) -> None:
         """Bind one durable store and agent mapping to the shared coordinator."""
+        if enable_relocation and retain_stopped_session:
+            raise IntegrationError("relocation does not support retained cancellation continuation")
         if retain_stopped_session and not coordinator._retain_stopped_session:
             raise IntegrationError(
                 "endpoint continuation declaration does not match its coordinator"
@@ -1489,6 +1492,7 @@ class NodeEndpoint:
         self._coordinator = coordinator
         self._progress_directory = progress_directory
         self._retain_stopped_session = retain_stopped_session
+        self._enable_relocation = enable_relocation
         self._lock = threading.RLock()
         self._scheduled: set[str] = set()
         self._known_keys: dict[str, str] = {
@@ -1605,7 +1609,9 @@ class NodeEndpoint:
     def recovery_support(self) -> dict[str, object]:
         """Return frozen deployment facts; joint continuation never implies isolated stopping."""
         return execution_recovery_profile(
-            shared_world=True, retain_stopped_session=self._retain_stopped_session
+            shared_world=True,
+            retain_stopped_session=self._retain_stopped_session,
+            enable_relocation=self._enable_relocation,
         )
 
     @staticmethod

@@ -32,13 +32,14 @@ class ForbiddenWorld:
         raise AssertionError(f"recovery support must not query world dependency: {name}")
 
 
-def _endpoint(tmp_path: Path) -> NodeEndpoint:
+def _endpoint(tmp_path: Path, enable_relocation: bool = False) -> NodeEndpoint:
     """Create an endpoint without starting any worker or owning a physical world."""
     return NodeEndpoint(
         "arbitrary-node",
         3,
         ExecutionStore(tmp_path / "store.sqlite3"),
         cast(SharedWorldCoordinator, ForbiddenWorld()),
+        enable_relocation=enable_relocation,
     )
 
 
@@ -58,13 +59,19 @@ def test_profile_has_exact_operation_identity_and_never_claims_retry(shared_worl
     assert execution_recovery_profile(shared_world=shared_world) != profile
 
 
-def test_registration_matches_shared_endpoint_readonly_support(tmp_path: Path) -> None:
+@pytest.mark.parametrize("enable_relocation", [False, True])
+def test_registration_matches_shared_endpoint_readonly_support(
+    tmp_path: Path, enable_relocation: bool
+) -> None:
     """Both actual Node configs declare the same exact owner/op facts as the HTTP adapter."""
-    endpoint = _endpoint(tmp_path)
+    endpoint = _endpoint(tmp_path, enable_relocation)
     before = endpoint.store().all_executions()
     observed = endpoint.recovery_support()
     for node in ("node-a", "node-b"):
-        path = ROOT.parents[1] / f"scenarios/e1-shared-world-episode-51/{node}.toml"
+        scenario = (
+            "e1-shared-world-relocation" if enable_relocation else "e1-shared-world-episode-51"
+        )
+        path = ROOT.parents[1] / f"scenarios/{scenario}/{node}.toml"
         config = tomllib.loads(path.read_text(encoding="utf-8"))
         owner = next(
             system for system in config["local_systems"] if system["id"] == "habitat-local-eaios"
@@ -118,9 +125,12 @@ def test_cli_continuation_is_default_off_and_rejects_standalone_mode(
     assert not (tmp_path / "state.sqlite3").exists()
 
 
-def test_http_support_read_does_not_observe_or_mutate_world(tmp_path: Path) -> None:
+@pytest.mark.parametrize("enable_relocation", [False, True])
+def test_http_support_read_does_not_observe_or_mutate_world(
+    tmp_path: Path, enable_relocation: bool
+) -> None:
     """Return declaration facts without health queries, execution or physical side effects."""
-    endpoint = _endpoint(tmp_path)
+    endpoint = _endpoint(tmp_path, enable_relocation)
     server = HabitatBridgeServer(("127.0.0.1", 0), endpoint)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -137,3 +147,16 @@ def test_http_support_read_does_not_observe_or_mutate_world(tmp_path: Path) -> N
         server.server_close()
         thread.join(timeout=2)
     assert not thread.is_alive()
+
+
+def test_relocation_never_declares_retained_manipulation_continuation() -> None:
+    """The opt-in operation is visible but gains neither Role stop nor continuation permission."""
+    profile = execution_recovery_profile(shared_world=True, enable_relocation=True)
+    operations = cast(list[dict[str, Any]], profile["operations"])
+    assert {entry["operation"]["name"] for entry in operations} == {"move", "navigate", "relocate"}
+    assert all(entry["stop_scope"] == "execution-group" for entry in operations)
+    assert all(entry["continuation"] == "unsupported" for entry in operations)
+    with pytest.raises(ValueError, match="relocation"):
+        execution_recovery_profile(
+            shared_world=True, enable_relocation=True, retain_stopped_session=True
+        )

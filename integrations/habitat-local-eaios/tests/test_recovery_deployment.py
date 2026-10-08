@@ -53,6 +53,34 @@ def test_default_off_preserves_source_bytes_and_facts(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("retain", [False, True])
+def test_relocation_profile_preserves_unsupported_continuation(
+    tmp_path: Path, retain: bool
+) -> None:
+    """Three-operation registration stays exact; enabling unsupported manipulation retry fails."""
+    paths = [tmp_path / f"node-{suffix}.toml" for suffix in ("a", "b")]
+    for path, suffix in zip(paths, ("a", "b"), strict=True):
+        path.write_bytes(
+            (
+                ROOT.parents[1] / f"scenarios/e1-shared-world-relocation/node-{suffix}.toml"
+            ).read_bytes()
+        )
+    before = [path.read_bytes() for path in paths]
+    snapshot = tmp_path / "deployment.json"
+    if retain:
+        with pytest.raises(IntegrationError, match="relocation"):
+            prepare_deployment(paths, snapshot, True)
+        assert not snapshot.exists()
+    else:
+        prepare_deployment(paths, snapshot, False)
+        frozen = json.loads(snapshot.read_bytes())
+        assert all(
+            node["profile"] == execution_recovery_profile(shared_world=True, enable_relocation=True)
+            for node in frozen["nodes"]
+        )
+    assert [path.read_bytes() for path in paths] == before
+
+
 def test_opt_in_changes_only_exact_operation_owner_metadata(tmp_path: Path) -> None:
     """Resources, floor facts, workflows and endpoints retain their complete original values."""
     paths = _copies(tmp_path)

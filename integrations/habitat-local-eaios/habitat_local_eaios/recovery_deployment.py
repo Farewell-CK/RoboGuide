@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from .evidence_io import write_text_atomic
 from .execution_recovery import execution_recovery_profile
-from .model import SUPPORTED_OPERATIONS, IntegrationError
+from .model import RELOCATION_OPERATION, SUPPORTED_OPERATIONS, IntegrationError
 
 SCHEMA = "roboguide.habitat-recovery-deployment/v0.1"
 METADATA_KEY = "roboguide.execution-recovery"
@@ -32,10 +32,11 @@ def _owner(config: dict[str, Any]) -> dict[str, Any]:
     operations = config.get("operations", [])
     if not isinstance(operations, list) or any(not isinstance(item, dict) for item in operations):
         raise IntegrationError("recovery deployment operations must be an array of declarations")
-    selected = [item for item in operations if item.get("operation") in SUPPORTED_OPERATIONS]
-    if len(selected) != len(SUPPORTED_OPERATIONS) or {
-        item.get("operation") for item in selected
-    } != set(SUPPORTED_OPERATIONS):
+    supported = set(SUPPORTED_OPERATIONS)
+    if any(item.get("operation") == RELOCATION_OPERATION for item in operations):
+        supported.add(RELOCATION_OPERATION)
+    selected = [item for item in operations if item.get("operation") in supported]
+    if len(selected) != len(supported) or {item.get("operation") for item in selected} != supported:
         raise IntegrationError("recovery deployment needs exact supported operation coverage")
     owners = {item.get("owner") for item in selected}
     systems = config.get("local_systems", [])
@@ -71,8 +72,15 @@ def render_node_config(text: str, retain_stopped_session: bool) -> str:
         raise IntegrationError(
             "recovery deployment source declaration is missing or invalid"
         ) from failure
-    defaults = execution_recovery_profile(shared_world=True)
-    retained = execution_recovery_profile(shared_world=True, retain_stopped_session=True)
+    relocation = any(item.get("operation") == RELOCATION_OPERATION for item in config["operations"])
+    if relocation and retain_stopped_session:
+        raise IntegrationError("relocation does not support retained cancellation continuation")
+    defaults = execution_recovery_profile(shared_world=True, enable_relocation=relocation)
+    retained = (
+        execution_recovery_profile(shared_world=True, retain_stopped_session=True)
+        if not relocation
+        else defaults
+    )
     if current not in (defaults, retained):
         raise IntegrationError("recovery deployment source declaration is unsupported")
     desired = retained if retain_stopped_session else defaults

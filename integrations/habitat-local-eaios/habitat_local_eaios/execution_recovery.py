@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from .model import SUPPORTED_OPERATIONS
+from .model import RELOCATION_OPERATION, SUPPORTED_OPERATIONS
 
 RECOVERY_PROFILE_SCHEMA = "roboguide.local-execution-recovery/v0.1"
 
 
 def execution_recovery_profile(
-    *, shared_world: bool, retain_stopped_session: bool = False
+    *, shared_world: bool, retain_stopped_session: bool = False, enable_relocation: bool = False
 ) -> dict[str, object]:
     """Declare actual joint stop and explicitly enabled retained-world continuation.
 
@@ -19,8 +19,13 @@ def execution_recovery_profile(
     Normal Control-owned next-Task serial execution remains a separate ability.
     This function never reads simulator state, calls a model or changes execution.
     """
+    if enable_relocation and retain_stopped_session:
+        raise ValueError("relocation does not support retained cancellation continuation")
     operations: list[dict[str, object]] = []
-    for canonical in SUPPORTED_OPERATIONS:
+    supported = (
+        (*SUPPORTED_OPERATIONS, RELOCATION_OPERATION) if enable_relocation else SUPPORTED_OPERATIONS
+    )
+    for canonical in supported:
         namespace_name, version = canonical.rsplit("@", 1)
         namespace, name = namespace_name.rsplit(".", 1)
         operations.append(
