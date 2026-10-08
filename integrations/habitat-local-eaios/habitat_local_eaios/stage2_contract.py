@@ -313,6 +313,10 @@ class Stage2ActionAudit:
             }
         self._writer.append(frozen)
 
+    def note_unavailable_record(self) -> None:
+        """Fence completeness after a caller-observed archival fault outside normal accounting."""
+        self._unavailable += 1
+
     def close(self) -> None:
         """Save bounded completeness accounting without masking execution outcomes."""
         if self._closed:

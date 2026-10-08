@@ -11,9 +11,10 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Sequence
 from typing import Any
 
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import CanonicalInvocation, IntegrationError
 
 SOURCE_SCHEMA = "roboguide.task-verifier-source/v0.1"
 VERDICT_SCHEMA = "roboguide.task-verifier-verdict/v0.1"
@@ -98,7 +99,7 @@ def build_task_verifier_source(semantic: object) -> dict[str, Any]:
 def build_task_verifier_verdict(
     source: dict[str, Any],
     official_metrics: object,
-    invocations: list[CanonicalMobilityInvocation],
+    invocations: Sequence[CanonicalInvocation],
     *,
     source_observed_at_ms: int | None = None,
 ) -> dict[str, Any] | None:

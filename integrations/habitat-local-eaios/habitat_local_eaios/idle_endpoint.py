@@ -1,9 +1,11 @@
-"""Scoped passive policy for shared-world agents without a Control assignment.
+"""Scoped passive policy for unassigned or locally completed shared-world endpoints.
 
 The joint EMOS actor still advances every configured low-level policy. An
 unassigned endpoint uses EMOS' existing WaitSkillPolicy, without asking a model
 to invent an action for a Task it does not own. Assigned endpoints retain the
-original CrabAgent, model, high-level policy, and action guard.
+original CrabAgent, model, high-level policy, and action guard until observed
+operation completion. Relocation may then use the original wait skill while
+its sibling continues; no selected model action is changed.
 """
 
 from __future__ import annotations
@@ -89,6 +91,12 @@ class PassiveIdleBinding:
 
     assigned_agent_name: str
     replacements: tuple[tuple[Any, Any, PassiveIdleAgent], ...]
+    mode: str = "passive-unassigned-endpoints"
+
+    def activate(self) -> None:
+        """Apply the prevalidated local idle policy without another model decision."""
+        for high_level, _, passive in self.replacements:
+            high_level.llm_agent = passive
 
     @property
     def idle_names(self) -> frozenset[str]:
@@ -98,9 +106,13 @@ class PassiveIdleBinding:
     def evidence(self) -> dict[str, object]:
         """Record the deployment decision and bounded per-segment counters."""
         return {
-            "schema_version": "roboguide.shared-world-idle-policy/v0.1",
+            "schema_version": (
+                "roboguide.shared-world-idle-policy/v0.2"
+                if self.mode == "passive-completed-endpoint"
+                else "roboguide.shared-world-idle-policy/v0.1"
+            ),
             "assigned_agent_name": self.assigned_agent_name,
-            "mode": "passive-unassigned-endpoints",
+            "mode": self.mode,
             "idle_agents": [passive.as_dict() for _, _, passive in self.replacements],
         }
 
@@ -153,6 +165,39 @@ def install_passive_idle_agents(
         pending.append((high_level, original, PassiveIdleAgent(original.name)))
 
     binding = PassiveIdleBinding(assigned_agent_name, tuple(pending))
-    for high_level, _, passive in binding.replacements:
-        high_level.llm_agent = passive
+    binding.activate()
     return binding
+
+
+def prepare_completed_idle_agent(actor: Any, agent_name: str) -> PassiveIdleBinding:
+    """Validate a future post-place idle transition before executing relocation.
+
+    Only an observed original place completion may activate the returned binding.
+    The passive policy then selects the original wait skill, preserving physical
+    placement while other endpoints continue. No model-selected action is edited.
+    """
+    policies = [
+        policy
+        for policy in actor._active_policies
+        if getattr(policy._high_level_policy.llm_agent, "name", None) == agent_name
+    ]
+    if len(policies) != 1:
+        raise IntegrationError("completed endpoint does not have one exact Stage2 policy")
+    policy = policies[0]
+    high_level = policy._high_level_policy
+    original = high_level.llm_agent
+    wait_index = getattr(policy, "_name_to_idx", {}).get("wait")
+    if (
+        isinstance(original, PassiveIdleAgent)
+        or not isinstance(wait_index, int)
+        or getattr(high_level, "_skill_name_to_idx", {}).get("wait") != wait_index
+        or type(getattr(policy, "_skills", {}).get(wait_index)) is not _original_wait_skill_type()
+    ):
+        raise IntegrationError("completed EMOS endpoint lacks its original wait skill")
+    passive = PassiveIdleAgent(agent_name)
+    passive.init_agent("", "", "Nothing to do")
+    return PassiveIdleBinding(
+        agent_name,
+        ((high_level, original, passive),),
+        mode="passive-completed-endpoint",
+    )

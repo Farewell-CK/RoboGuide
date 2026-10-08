@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from .backend import LocalExecutionOutcome
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import CanonicalInvocation, CanonicalMobilityInvocation, IntegrationError
 
 MAX_CONTINUATIONS = 16
 SESSION_STATE_SCHEMA = "roboguide.shared-world-continuation/v0.1"
@@ -27,12 +28,16 @@ class RetainedWorldSession:
 
     def __init__(
         self,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         max_steps: int,
         *,
         continuations: int = 0,
     ) -> None:
         """Freeze complete supported topology before any continuation may be admitted."""
+        if any(
+            not isinstance(value, CanonicalMobilityInvocation) for value in invocations.values()
+        ):
+            raise IntegrationError("retained continuation supports navigation invocations only")
         sessions = [invocation.execution_session for invocation in invocations.values()]
         if (
             not invocations
@@ -76,11 +81,12 @@ class RetainedWorldSession:
             agent for agent, outcome in self.outcomes.items() if outcome.state == "CANCELLED"
         )
 
-    def can_replace(self, agent_id: int, invocation: CanonicalMobilityInvocation) -> bool:
+    def can_replace(self, agent_id: int, invocation: CanonicalInvocation) -> bool:
         """Reject changed intent, completed slots, reused attempts and exhausted budgets."""
         original = self.invocations.get(agent_id)
         return bool(
-            agent_id in self.pending_agents
+            isinstance(invocation, CanonicalMobilityInvocation)
+            and agent_id in self.pending_agents
             and self.steps < self.max_steps
             and self.continuations < MAX_CONTINUATIONS
             and original is not None
@@ -89,7 +95,7 @@ class RetainedWorldSession:
             and _intent(invocation) == _intent(original)
         )
 
-    def resume(self, replacements: dict[int, CanonicalMobilityInvocation]) -> None:
+    def resume(self, replacements: Mapping[int, CanonicalInvocation]) -> None:
         """Admit the complete cancelled set atomically, retaining completed effects and budget."""
         if (
             not replacements

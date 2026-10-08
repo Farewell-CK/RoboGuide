@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -1395,7 +1395,7 @@ class RetainedRuntimeHarness(SingleIdleContractLoopHarness):
         cast(RecordingVideo, self._video).steps.append(step)
 
     def _pair_arguments(
-        self, text_context: dict[str, Any], invocations: dict[int, CanonicalMobilityInvocation]
+        self, text_context: dict[str, Any], invocations: Mapping[int, CanonicalInvocation]
     ) -> dict[str, Any]:
         """Use fresh vendor-shaped argument objects while preserving each frozen target."""
         del text_context
@@ -2770,6 +2770,8 @@ def test_lone_assignment_waits_then_fails_closed(tmp_path: Path) -> None:
             "execution_id": response["execution_id"],
             "group_id": "group",
             "mission_id": "m",
+            "operation": "mobility.navigate@v1",
+            "parameters": {"destination": "any_targets|0"},
             "resource_ids": ["slot"],
             "role_id": "role",
             "task_id": "t",

@@ -19,7 +19,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ from .model import (
     SUPPORTED_OPERATIONS,
     CanonicalInvocation,
     CanonicalMobilityInvocation,
+    CanonicalRelocationInvocation,
     IntegrationError,
     canonical_operation_from_route,
     parse_canonical_invocation,
@@ -89,18 +90,28 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         self._serial_session: RetainedWorldSession | None = None
 
     def supported_operations(self) -> tuple[str, ...]:
-        """Advertise only operations implemented by the shared navigation lifecycle."""
-        if bool(getattr(self._config, "enable_relocation", False)):
+        """Advertise opted-in relocation only after actual Stage2 capability validation."""
+        self._validate_relocation_profile()
+        return super().supported_operations()
+
+    def _validate_relocation_profile(self) -> None:
+        """Reject navigation-only extensions and unbound manipulation continuation."""
+        if not bool(getattr(self._config, "enable_relocation", False)):
+            return
+        if any(
+            bool(getattr(self._config, name, False))
+            for name in ("retain_stopped_session", "goal_region_navigation")
+        ):
             raise IntegrationError(
-                "shared-world deployment does not support object.relocate@v1; "
-                "its lifecycle remains navigation-only"
+                "shared relocation does not support retained cancellation continuation "
+                "or the any_at goal-region navigation profile"
             )
-        return SUPPORTED_OPERATIONS
 
     def initialize(self) -> None:
         """Reset once, then publish evidence from that same world before readiness."""
         if getattr(self, "_prepared_observations", None) is not None:
             return
+        self._validate_relocation_profile()
         super().initialize()
         _, habitat_env, _, _ = self._require_initialized()
         config = self._config
@@ -231,13 +242,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
 
     def execute_serial(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         agent_id: int,
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
         final_slot: bool,
     ) -> tuple[LocalExecutionOutcome, dict[str, Any]]:
         """Continue one Actor's tasks in the same reset world with fresh Stage2 subtasks."""
+        self._validate_relocation_profile()
+        self._require_operation_support(invocation)
         gym_env, habitat_env, actor, access = self._require_initialized()
         if agent_id not in self._agent_ids:
             raise IntegrationError("serial assignment uses an unconfigured endpoint")
@@ -440,7 +453,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
 
     def execute_pair(
         self,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
         *,
@@ -452,6 +465,10 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         committed by its RoboGuide Node.  ``running`` publishes per-agent
         RUNNING facts after the single episode reset.
         """
+        self._validate_relocation_profile()
+        self._validate_pair_objects(invocations)
+        for invocation in invocations.values():
+            self._require_operation_support(invocation)
         gym_env, habitat_env, actor, access = self._require_initialized()
         agent_ids = self._agent_ids
         retained = bool(getattr(self._config, "retain_stopped_session", False))
@@ -585,16 +602,27 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
 
     def resume_pair(
         self,
-        replacements: dict[int, CanonicalMobilityInvocation],
+        replacements: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Continue a stopped Group in its original world, never an isolated Role retry."""
         return self.execute_pair(replacements, cancellation_requested, running, _continuation=True)
 
+    @staticmethod
+    def _validate_pair_objects(invocations: Mapping[int, CanonicalInvocation]) -> None:
+        """Reject concurrent ownership of one relocation object before policy execution."""
+        objects = [
+            invocation.object_ref
+            for invocation in invocations.values()
+            if isinstance(invocation, CanonicalRelocationInvocation)
+        ]
+        if len(set(objects)) != len(objects):
+            raise IntegrationError("concurrent relocation assignments share one canonical object")
+
     def _admit_pair_spatial_feasibility(
         self,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         habitat_env: Any,
     ) -> None:
         """Record both reset-state checks and reject explicit floor conflicts."""
@@ -628,7 +656,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
     def _admit_spatial_feasibility(
         self,
         agent_id: int,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         habitat_env: Any,
     ) -> None:
         """Record one serial reset-state check before allowing Stage2 to act."""
@@ -658,10 +686,20 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
     def _spatial_record(
         self,
         agent_id: int,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         habitat_env: Any,
     ) -> dict[str, object]:
         """Assess one invocation using startup-frozen deployment capability facts."""
+        if isinstance(invocation, CanonicalRelocationInvocation):
+            return {
+                "agent_id": agent_id,
+                "operation": invocation.operation,
+                "object": invocation.object_ref,
+                "source": invocation.source,
+                "destination": invocation.destination,
+                "status": "unknown",
+                "reason": "navigation floor observer does not assess relocation feasibility",
+            }
         config = self._config
         profile = (
             config.spatial_capability_for(agent_id)
@@ -670,14 +708,18 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         )
         return assess_spatial_feasibility(habitat_env, agent_id, invocation, profile)
 
-    def _bind_navigation_diagnostics(
-        self, invocations: dict[int, CanonicalMobilityInvocation]
-    ) -> None:
+    def _bind_navigation_diagnostics(self, invocations: Mapping[int, CanonicalInvocation]) -> None:
         """Pass current serial or joint attempts to optional, non-authoritative evidence."""
         try:
             bind_diagnostics = getattr(self._diagnostics, "bind_navigation_invocations", None)
             if callable(bind_diagnostics):
-                bind_diagnostics(invocations)
+                bind_diagnostics(
+                    {
+                        agent: invocation
+                        for agent, invocation in invocations.items()
+                        if isinstance(invocation, CanonicalMobilityInvocation)
+                    }
+                )
         except Exception:  # noqa: BLE001 - diagnostic attribution cannot block execution
             _LOG.exception("optional motion diagnostic attribution unavailable")
 
@@ -686,7 +728,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         observations: Any,
         text_context: dict[str, Any],
         assignment: dict[str, Any],
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         actor: Any,
         access: Any,
         gym_env: Any,
@@ -737,7 +779,11 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             initials = {agent_id: self._agent_position_for(agent_id) for agent_id in agent_ids}
             progress = {
                 agent_id: NavigationProgressPublisher(
-                    getattr(self._config, "progress_directory", None), invocation, agent_id
+                    getattr(self._config, "progress_directory", None)
+                    if isinstance(invocation, CanonicalMobilityInvocation)
+                    else None,
+                    invocation,
+                    agent_id,
                 )
                 for agent_id, invocation in invocations.items()
             }
@@ -837,6 +883,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         or self._oracle_nav_finished_for(agent_id)
                     ):
                         self._record_local_skill_completion(agent_id)
+                        if isinstance(invocations.get(agent_id), CanonicalRelocationInvocation):
+                            continue
                         outcomes[agent_id] = self._pair_outcome(
                             "COMPLETED",
                             "original EMOS OracleNavPolicy reached its skill terminal "
@@ -852,6 +900,25 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                             terminal_basis="oracle-nav-skill",
                         )
                         terminal_bases[agent_id] = "oracle-nav-skill"
+                for agent_id in agent_ids:
+                    if (
+                        agent_id not in outcomes
+                        and isinstance(invocations.get(agent_id), CanonicalRelocationInvocation)
+                        and self._operation_completed(agent_id)
+                    ):
+                        outcomes[agent_id] = self._pair_outcome(
+                            "COMPLETED",
+                            "original EMOS place skill completed the relocation workflow",
+                            invocations[agent_id],
+                            scene_id,
+                            steps,
+                            initials[agent_id],
+                            agent_id,
+                            skill_sequence,
+                            local_skill_completed=True,
+                            episode_terminated=bool(done or habitat_env.episode_over),
+                            terminal_basis="relocation-place-skill",
+                        )
                 if done:
                     pddl_success = bool(info.get("pddl_success", False))
                     for agent_id in agent_ids:
@@ -875,7 +942,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                             outcomes[agent_id] = self._pair_outcome(
                                 "FAILED",
                                 "Habitat episode terminated before the assigned shared "
-                                "navigation completed",
+                                "operation completed",
                                 invocations[agent_id],
                                 scene_id,
                                 steps,
@@ -926,6 +993,25 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         except Stage2ContractViolation as error:
             contract_failure = error
             termination_reason = "local_contract_failure"
+            for agent_id in agent_ids:
+                if (
+                    agent_id not in outcomes
+                    and isinstance(invocations.get(agent_id), CanonicalRelocationInvocation)
+                    and self._operation_completed(agent_id)
+                ):
+                    outcomes[agent_id] = self._pair_outcome(
+                        "COMPLETED",
+                        "original EMOS place skill completed before the sibling failure",
+                        invocations[agent_id],
+                        scene_id,
+                        steps,
+                        initials[agent_id],
+                        agent_id,
+                        skill_sequence,
+                        local_skill_completed=True,
+                        episode_terminated=bool(done or habitat_env.episode_over),
+                        terminal_basis="relocation-place-skill",
+                    )
         except NavigationPreparationFailure as error:
             navigation_failure = error
             primary_error = error
@@ -1161,7 +1247,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
     def _pair_arguments(
         self,
         text_context: dict[str, Any],
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
     ) -> dict[str, Any]:
         """Translate both committed assignments into EMOS Stage1's output type."""
         from habitat_mas.utils import AgentArguments  # type: ignore[import-not-found]
@@ -1214,7 +1300,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         self,
         state: str,
         detail: str,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         scene_id: str,
         steps: int,
         initial: tuple[float, float, float],
@@ -1260,6 +1346,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         policy = policies[index] if index < len(policies) else None
         agent = getattr(policy, "_high_level_policy", None)
         agent = getattr(agent, "llm_agent", None)
+        agent = getattr(self, "_stage2_accounting_agents", {}).get(f"agent_{agent_id}", agent)
         model = getattr(agent, "llm_model", None)
         if model is None:
             return {
@@ -1376,10 +1463,6 @@ class NodeEndpoint:
             raise IntegrationError(
                 f"shared-world deployment does not support {invocation.operation!r}; "
                 f"supported operations: {supported}"
-            )
-        if not isinstance(invocation, CanonicalMobilityInvocation):
-            raise IntegrationError(
-                f"shared-world navigation lifecycle cannot execute {invocation.operation!r}"
             )
         with self._lock:
             key = invocation.request_key()
@@ -1540,7 +1623,7 @@ class InProcessWorldService:
 
     def run_pair(
         self,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
@@ -1551,7 +1634,7 @@ class InProcessWorldService:
 
     def run_serial(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         agent_id: int,
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
@@ -1566,7 +1649,7 @@ class InProcessWorldService:
 
     def resume_pair(
         self,
-        replacements: dict[int, CanonicalMobilityInvocation],
+        replacements: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
@@ -1647,7 +1730,9 @@ def _child_world_process(
                     if not isinstance(payload, tuple) or len(payload) != 3:
                         raise IntegrationError("serial command requires one invocation and slot")
                     invocation, agent_id, final_slot = payload
-                    if not isinstance(invocation, CanonicalMobilityInvocation):
+                    if not isinstance(
+                        invocation, (CanonicalMobilityInvocation, CanonicalRelocationInvocation)
+                    ):
                         raise IntegrationError("serial command invocation is invalid")
                     outcome, summary = runtime.execute_serial(
                         invocation,
@@ -1733,7 +1818,7 @@ class ProcessWorldService:
 
     def run_pair(
         self,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
@@ -1742,7 +1827,7 @@ class ProcessWorldService:
 
     def resume_pair(
         self,
-        replacements: dict[int, CanonicalMobilityInvocation],
+        replacements: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
@@ -1752,7 +1837,7 @@ class ProcessWorldService:
     def _run_pair_command(
         self,
         kind: str,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
@@ -1784,7 +1869,7 @@ class ProcessWorldService:
 
     def run_serial(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         agent_id: int,
         cancellation_requested: Callable[[], bool],
         running: Callable[[int, str], None],
@@ -1912,13 +1997,15 @@ class SharedWorldCoordinator:
         self._arrival_log = evidence_dir / "assignment-arrival.jsonl"
         self._worker.start()
 
-    def record_arrival(self, node_name: str, invocation: CanonicalMobilityInvocation) -> None:
+    def record_arrival(self, node_name: str, invocation: CanonicalInvocation) -> None:
         """Persist one assignment-arrival timestamp for benchmark evidence."""
         record = {
             "node": node_name,
             "mission_id": invocation.mission_id,
             "task_id": invocation.task_id,
             "destination": invocation.destination,
+            "operation": invocation.operation,
+            "parameters": dict(invocation.parameters),
             "execution_session_digest": (
                 invocation.execution_session.digest
                 if invocation.execution_session is not None
@@ -1976,7 +2063,7 @@ class SharedWorldCoordinator:
             ),
         }
 
-    def can_accept(self, endpoint: NodeEndpoint, invocation: CanonicalMobilityInvocation) -> bool:
+    def can_accept(self, endpoint: NodeEndpoint, invocation: CanonicalInvocation) -> bool:
         """Admit only an unused episode or the next slot of its exact serial session."""
         with self._condition:
             if self._closing.is_set() or self._initialization_error is not None:
@@ -2182,7 +2269,7 @@ class SharedWorldCoordinator:
                 record is None
                 or record["state"] != "ACCEPTED"
                 or not session.can_replace(
-                    endpoint.agent_id, _require_mobility_invocation(record["invocation"])
+                    endpoint.agent_id, _require_supported_invocation(record["invocation"])
                 )
                 or endpoint.agent_id in self._replacement_entries
                 or self._retained_pair_entries[endpoint.agent_id][0] is not endpoint
@@ -2320,6 +2407,12 @@ class SharedWorldCoordinator:
             return "assignments belong to different Mission or execution Group identities"
         if (left.task_id, left.role_id) == (right.task_id, right.role_id):
             return "assignments duplicate one logical Task/Role slot"
+        if (
+            isinstance(left, CanonicalRelocationInvocation)
+            and isinstance(right, CanonicalRelocationInvocation)
+            and left.object_ref == right.object_ref
+        ):
+            return "concurrent relocation assignments share one canonical object"
         return None
 
     def _execute_serial(self, entry: tuple[NodeEndpoint, str]) -> None:
@@ -2329,7 +2422,7 @@ class SharedWorldCoordinator:
         record = store.get(execution_id)
         if record is None or record["state"] != "ACCEPTED":
             return
-        invocation = _require_mobility_invocation(record["invocation"])
+        invocation = _require_supported_invocation(record["invocation"])
         session = invocation.execution_session
         slot = (invocation.task_id, invocation.role_id)
         if (
@@ -2420,14 +2513,14 @@ class SharedWorldCoordinator:
                     summary,
                     serial_task_outcomes=self._serial_outcomes,
                 )
-                latest: dict[tuple[str, str], CanonicalMobilityInvocation] = {}
+                latest: dict[tuple[str, str], CanonicalInvocation] = {}
                 for arrival_endpoint, arrival_id in self._serial_arrivals:
                     arrival = arrival_endpoint.store().get(arrival_id)
                     if arrival is None:
                         _LOG.warning("serial verifier evidence lost a retained Task invocation")
                         latest = {}
                         break
-                    value = _require_mobility_invocation(arrival["invocation"])
+                    value = _require_supported_invocation(arrival["invocation"])
                     latest[(value.task_id, value.role_id)] = value
                 if latest:
                     self._publish_verifier_verdict_best_effort(summary, list(latest.values()))
@@ -2471,13 +2564,13 @@ class SharedWorldCoordinator:
         complete_pair = list(self._retained_pair_entries.values()) if continuation else pair
         endpoints = {endpoint.agent_id: endpoint for endpoint, _ in complete_pair}
         handles: dict[int, str] = {}
-        invocations: dict[int, CanonicalMobilityInvocation] = {}
+        invocations: dict[int, CanonicalInvocation] = {}
         for endpoint, execution_id in complete_pair:
             execution = endpoint.store().get(execution_id)
             if execution is None:
                 raise IntegrationError("paired execution disappeared before the episode")
             handles[endpoint.agent_id] = str(execution["execution_id"])
-            invocations[endpoint.agent_id] = _require_mobility_invocation(execution["invocation"])
+            invocations[endpoint.agent_id] = _require_supported_invocation(execution["invocation"])
 
         def cancellation_requested() -> bool:
             """Observe either node's cancellation between shared steps."""
@@ -2605,7 +2698,7 @@ class SharedWorldCoordinator:
     def _publish_verifier_verdict_best_effort(
         self,
         summary: dict[str, Any],
-        invocations: list[CanonicalMobilityInvocation],
+        invocations: Sequence[CanonicalInvocation],
     ) -> None:
         """Publish exact official-goal evidence before local terminal visibility."""
         try:
@@ -2684,6 +2777,8 @@ class SharedWorldCoordinator:
                 "resource_ids": list(invocation.resource_ids),
                 "role_id": invocation.role_id,
                 "task_id": invocation.task_id,
+                "operation": invocation.operation,
+                "parameters": dict(invocation.parameters),
             }
         )
         if invocation.attempt_id is not None:
@@ -2726,9 +2821,9 @@ def _parse_ready_payload(payload: object) -> tuple[str, tuple[str, ...]]:
     return detail, operations
 
 
-def _require_mobility_invocation(invocation: CanonicalInvocation) -> CanonicalMobilityInvocation:
-    """Narrow shared-world lifecycle code to its currently supported navigation profile."""
-    if not isinstance(invocation, CanonicalMobilityInvocation):
+def _require_supported_invocation(invocation: CanonicalInvocation) -> CanonicalInvocation:
+    """Retain only canonical invocation classes admitted by the operation-aware ingress."""
+    if not isinstance(invocation, (CanonicalMobilityInvocation, CanonicalRelocationInvocation)):
         raise IntegrationError(f"shared-world lifecycle does not support {invocation.operation!r}")
     return invocation
 

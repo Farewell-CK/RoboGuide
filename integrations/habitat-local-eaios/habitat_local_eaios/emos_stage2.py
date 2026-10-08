@@ -14,7 +14,12 @@ from .backend import LocalExecutionOutcome, _observation_true, habitat_config_ov
 from .diagnostics import BufferedJsonlWriter
 from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher
-from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
+from .idle_endpoint import (
+    PassiveIdleAgent,
+    PassiveIdleBinding,
+    install_passive_idle_agents,
+    prepare_completed_idle_agent,
+)
 from .model import (
     RELOCATION_OPERATION,
     SUPPORTED_OPERATIONS,
@@ -216,6 +221,7 @@ class EmosStage2Runtime:
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
         self._stage2_feedback: Stage2ExecutionFeedback | None = None
+        self._stage2_accounting_agents: dict[str, Any] = {}
         self._relocation_capability: dict[str, object] | None = None
         self._last_navigation_preparation_failure: dict[str, Any] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
@@ -406,6 +412,9 @@ class EmosStage2Runtime:
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
                         "habitat_local_eaios.stage2_feedback",
+                        "habitat_local_eaios.idle_endpoint",
+                        "habitat_local_eaios.relocation_capability",
+                        "habitat_local_eaios.stage2_contract",
                         "habitat_local_eaios.emos_stage2",
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",
@@ -442,6 +451,7 @@ class EmosStage2Runtime:
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
         """Run the assigned agent's original Stage2 path and keep peers passive."""
+        self._require_operation_support(invocation)
         gym_env, habitat_env, actor, access = self._require_initialized()
         try:
             habitat_env.episodes = [self._episode]
@@ -486,6 +496,12 @@ class EmosStage2Runtime:
                 raise IntegrationError("relocation capability readiness is unavailable")
             operations.append(RELOCATION_OPERATION)
         return tuple(operations)
+
+    def _require_operation_support(self, invocation: CanonicalInvocation) -> None:
+        """Fence direct runtime entry as well as endpoint ingress on actual readiness."""
+        if isinstance(invocation, CanonicalRelocationInvocation):
+            if invocation.operation not in self.supported_operations():
+                raise IntegrationError("object.relocate@v1 is not enabled in this Stage2 runtime")
 
     def readiness_detail(self) -> str:
         """Describe the pinned original EMOS Stage2 execution environment."""
@@ -540,10 +556,12 @@ class EmosStage2Runtime:
         action_lengths = actor.policy_action_space_shape_lens
         steps = 0
         step_offset = self._policy_step_offset()
-        progress = NavigationProgressPublisher(
-            getattr(self._config, "progress_directory", None), invocation, self._config.agent_id
-        )
         is_relocation = isinstance(invocation, CanonicalRelocationInvocation)
+        progress = NavigationProgressPublisher(
+            None if is_relocation else getattr(self._config, "progress_directory", None),
+            invocation,
+            self._config.agent_id,
+        )
         skill_sequence: list[str] = []
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
@@ -934,16 +952,25 @@ class EmosStage2Runtime:
             if contract.is_relocation
         }
 
+        completed_idle_bindings: dict[str, PassiveIdleBinding] = {}
+        activated_idle_names: set[str] = set()
+
         def complete_relocation_action(agent_name: str, action_name: str, succeeded: bool) -> None:
             """Apply only definite local-skill evidence to the execution-scoped phase."""
             state = relocation_states.get(agent_name)
             if state is not None:
                 state.complete(action_name, succeeded)
+                if action_name == "place" and succeeded and agent_name not in activated_idle_names:
+                    completed_idle_bindings[agent_name].activate()
+                    activated_idle_names.add(agent_name)
 
         feedback = Stage2ExecutionFeedback(
             contracts, record_feedback, completion=complete_relocation_action
         )
         try:
+            completed_idle_bindings = {
+                name: prepare_completed_idle_agent(self._actor, name) for name in relocation_states
+            }
             feedback.install(self._actor._active_policies)
             restore_guard = install_stage2_contract_guard(
                 agents,
@@ -958,6 +985,7 @@ class EmosStage2Runtime:
             audit.close()
             raise
         self._stage2_feedback = feedback
+        self._stage2_accounting_agents = {agent.name: agent for agent in agents}
 
         def restore() -> None:
             """Close per-call evidence and restore instance hooks on every exit."""
@@ -968,6 +996,18 @@ class EmosStage2Runtime:
                     feedback.close()
                 finally:
                     self._stage2_feedback = None
+                    self._stage2_accounting_agents = {}
+                    for name in sorted(activated_idle_names):
+                        binding = completed_idle_bindings[name]
+                        try:
+                            record_feedback(
+                                dict(binding.evidence(), event="completed-endpoint-passive")
+                            )
+                        except Exception:  # noqa: BLE001 - idle evidence cannot alter execution
+                            feedback_audit.note_unavailable_record()
+                            _LOG.exception("completed endpoint idle evidence unavailable")
+                        finally:
+                            binding.restore()
                     feedback_audit.close()
                     self._feedback_audit_summary = feedback_audit.summary
                     audit.close()
@@ -1116,6 +1156,8 @@ class EmosStage2Runtime:
             if actor is None
             else [policy._high_level_policy.llm_agent for policy in actor._active_policies]
         )
+        accounting = getattr(self, "_stage2_accounting_agents", {})
+        agents = [accounting.get(getattr(agent, "name", None), agent) for agent in agents]
         models = sorted(
             {
                 str(agent.llm_model.model)
