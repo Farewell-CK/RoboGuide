@@ -16,6 +16,8 @@ from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import (
+    RELOCATION_OPERATION,
+    SUPPORTED_OPERATIONS,
     CanonicalInvocation,
     CanonicalRelocationInvocation,
     IntegrationError,
@@ -26,6 +28,7 @@ from .navigation_preparation import (
     prepare_navigation_actions,
 )
 from .navmesh_profile import STEP_AWARE_PROFILE
+from .relocation_capability import inspect_relocation_capability
 from .source_provenance import build_runtime_source_manifest
 from .spatial_navigation import (
     GOAL_AWARE_ARRIVAL_PROFILE,
@@ -213,6 +216,7 @@ class EmosStage2Runtime:
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
         self._stage2_feedback: Stage2ExecutionFeedback | None = None
+        self._relocation_capability: dict[str, object] | None = None
         self._last_navigation_preparation_failure: dict[str, Any] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
@@ -307,6 +311,21 @@ class EmosStage2Runtime:
             self._episode = episode
             self._actor = actor
             self._agent_access = access
+            if bool(getattr(self._config, "enable_relocation", False)):
+                capability = inspect_relocation_capability(actor._active_policies)
+                self._relocation_capability = capability.as_dict()
+                self._write_json("relocation-readiness.json", self._relocation_capability)
+                if not capability.ready:
+                    gym_env.close()
+                    self._gym_env = None
+                    self._habitat_env = None
+                    self._episode = None
+                    self._actor = None
+                    self._agent_access = None
+                    raise IntegrationError(
+                        "relocation profile is enabled but Stage2 capability is unavailable: "
+                        + capability.detail
+                    )
             self._runtime = {
                 "apply_transforms": apply_obs_transforms_batch,
                 "batch_obs": batch_obs,
@@ -457,6 +476,16 @@ class EmosStage2Runtime:
             raise
         except Exception as error:
             raise IntegrationError(f"original EMOS Stage2 execution failed: {error}") from error
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Return operations proven by this loaded Stage2 deployment profile."""
+        operations = list(SUPPORTED_OPERATIONS)
+        if bool(getattr(self._config, "enable_relocation", False)):
+            capability = self._relocation_capability
+            if capability is None or capability.get("ready") is not True:
+                raise IntegrationError("relocation capability readiness is unavailable")
+            operations.append(RELOCATION_OPERATION)
+        return tuple(operations)
 
     def readiness_detail(self) -> str:
         """Describe the pinned original EMOS Stage2 execution environment."""

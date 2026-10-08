@@ -24,6 +24,7 @@ from habitat_local_eaios.emos_stage2 import (  # noqa: E402
     _make_episode_gym_environment,
 )
 from habitat_local_eaios.model import (  # noqa: E402
+    RELOCATION_OPERATION,
     CanonicalMobilityInvocation,
     IntegrationError,
 )
@@ -371,3 +372,23 @@ def test_wrapper_source_has_no_reimplemented_policy_loop() -> None:
     assert "MAX_CONSECUTIVE_INVALID_OUTPUTS" not in source
     assert "_dispatch_nav" not in source
     assert "_step_wait" not in source
+
+
+def test_relocation_operation_requires_explicit_ready_profile(tmp_path: Path) -> None:
+    """Navigation remains the default and relocation is exposed only after readiness evidence."""
+    navigation = EmosStage2Runtime(_config(tmp_path))
+    assert RELOCATION_OPERATION not in navigation.supported_operations()
+    enabled = CrabAgentBackendConfig(
+        config_path=Path("habitat.yaml"),
+        episode_id="51",
+        agent_id=0,
+        max_steps=100,
+        step_period_ms=0,
+        evidence_dir=tmp_path / "relocation-evidence",
+        enable_relocation=True,
+    )
+    runtime = EmosStage2Runtime(enabled)
+    with pytest.raises(IntegrationError, match="readiness"):
+        runtime.supported_operations()
+    runtime._relocation_capability = {"ready": True}
+    assert RELOCATION_OPERATION in runtime.supported_operations()

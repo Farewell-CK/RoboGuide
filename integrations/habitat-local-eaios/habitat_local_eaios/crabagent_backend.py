@@ -17,9 +17,11 @@ from typing import Any
 from .backend import HabitatBackendConfig, LocalExecutionOutcome
 from .emos_stage2 import EmosStage2Runtime, format_stage2_subtask
 from .model import (
+    RELOCATION_OPERATION,
     SUPPORTED_OPERATIONS,
     CanonicalInvocation,
     CanonicalMobilityInvocation,
+    CanonicalRelocationInvocation,
     IntegrationError,
 )
 from .spatial_feasibility import FloorTransitionProfile
@@ -43,6 +45,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     reset_route_support: bool = False
     reset_route_geometry: bool = False
     retain_stopped_session: bool = False
+    enable_relocation: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
@@ -95,8 +98,14 @@ class CrabAgentMobilityBackend:
         self._runtime: EmosStage2Runtime | None = None
 
     def supported_operations(self) -> tuple[str, ...]:
-        """Advertise only operations wired to this backend's execution lifecycle."""
-        return SUPPORTED_OPERATIONS
+        """Advertise only operations confirmed by the initialized local runtime."""
+        if self._runtime is None:
+            return SUPPORTED_OPERATIONS
+        advertised = getattr(self._runtime, "supported_operations", None)
+        operations = tuple(advertised()) if callable(advertised) else SUPPORTED_OPERATIONS
+        if self._config.enable_relocation and RELOCATION_OPERATION not in operations:
+            raise IntegrationError("relocation profile is enabled but Stage2 is not ready")
+        return operations
 
     def initialize(self) -> None:
         """Create the persistent simulator and official EMOS policy once."""
@@ -113,9 +122,11 @@ class CrabAgentMobilityBackend:
         running: Any,
     ) -> LocalExecutionOutcome:
         """Execute one committed semantic assignment through original Stage2."""
-        if not isinstance(invocation, CanonicalMobilityInvocation):
+        if not isinstance(invocation, (CanonicalMobilityInvocation, CanonicalRelocationInvocation)):
+            raise IntegrationError(f"EMOS backend cannot execute {invocation.operation!r}")
+        if invocation.operation not in self.supported_operations():
             raise IntegrationError(
-                f"EMOS navigation backend cannot execute {invocation.operation!r}"
+                f"EMOS backend does not support {invocation.operation!r} in this deployment"
             )
         if self._runtime is None:
             raise IntegrationError("EMOS Stage2 backend is not initialized")
