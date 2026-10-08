@@ -36,7 +36,7 @@ base = {}
 driver = "http"
 id = "habitat-http"
 local_system = "habitat-local-eaios"
-endpoint = "http://127.0.0.1:28101"
+endpoint = "http://127.0.0.1:28100"
 timeout_ms = 5000
 
 [[capability_profiles]]

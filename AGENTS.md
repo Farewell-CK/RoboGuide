@@ -203,7 +203,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   fail explicitly. Navigation-only floor/progress evidence remains unknown for relocation;
   declared source identity does not prove actual source placement. Local completion, official
   PDDL, Task satisfaction and Formal admission stay separate. Task3 registration and episode-start
-  source evidence are implemented and offline-tested; real physical preflight remains pending. See
+  source evidence and generic B1 runner wiring are implemented and offline-tested; real physical
+  preflight remains pending. The explicit relocation deployment freezes original Habitat config
+  and budget, run-local Node/MI profiles and fresh reset sources before the one production MI
+  request. Prepare-only mode starts no service or world; relocation recovery is group-stop with
+  unsupported continuation, never silently inherited navigation repeat support. See
   `docs/extensions/habitat-relocation-profile.md`; no Core contract or vendor source is changed.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected

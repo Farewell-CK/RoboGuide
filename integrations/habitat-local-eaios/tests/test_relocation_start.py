@@ -467,6 +467,161 @@ def test_neutral_sources_reach_frozen_grounding(tmp_path: Path) -> None:
     assert restored.object_sources[0].source_entity_id == start["objects"][0]["source_entity_id"]
 
 
+def preflight_run(tmp_path: Path) -> Path:
+    """Freeze a fake reset through production builders and exact run-local registration files."""
+    from habitat_local_eaios.planning_world_evidence import (
+        build_authoritative_planning_world_evidence,
+    )
+    from habitat_local_eaios.relocation_capability import RelocationCapabilityEvidence
+
+    run = tmp_path / "run-offline"
+    evidence = run / "evidence"
+    evidence.mkdir(parents=True)
+    for suffix in ("a", "b"):
+        (run / f"node-{suffix}.toml").write_bytes((SCENARIO / f"node-{suffix}.toml").read_bytes())
+    profile = build_relocation_profile(((0, run / "node-a.toml"), (1, run / "node-b.toml")))
+    (run / "relocation-registration-profile.json").write_text(json.dumps(profile))
+    environment, semantic = relocation_world(tmp_path)
+    start = build_relocation_start(
+        environment, semantic, seed=40, registration_digest=profile["digest"], agent_ids=(0, 1)
+    )
+    planning = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="run-offline",
+        episode_id="offline",
+        reset_goal_geometry=True,
+        object_sources=planning_object_sources(start, semantic),
+    )
+    frozen = {
+        "schema": "roboguide.e1.b1-input/v0.1",
+        "episode_id": "offline",
+        "seed": 40,
+        "scene_id": "scene",
+        "dataset_revision": semantic["identity"]["dataset_revision"],
+        "dataset_sha256": semantic["identity"]["dataset_sha256"],
+        "instruction": "Put both declared objects at their declared destinations.",
+    }
+    (run / "b1-input-used.json").write_text(json.dumps(frozen))
+    for name, document in (
+        ("authoritative-semantic-evidence.json", semantic),
+        ("relocation-episode-start.json", start),
+        ("authoritative-planning-world-evidence.json", planning),
+        ("relocation-readiness.json", RelocationCapabilityEvidence(True, "observed", 2).as_dict()),
+        ("relocation-registration-profile-used.json", profile),
+    ):
+        (evidence / name).write_text(json.dumps(document))
+    return run
+
+
+def test_runner_preflight_binds_actual_sources_without_changing_evidence(tmp_path: Path) -> None:
+    """Readiness and exact MI source bindings are checked before MI, without physical actions."""
+    from habitat_local_eaios.relocation_preflight import preflight_relocation
+
+    run = preflight_run(tmp_path)
+    before = {path: path.read_bytes() for path in (run / "evidence").iterdir()}
+    result = preflight_relocation(run)
+    assert result["valid"] is True
+    assert result["simulator_steps"] == 0 and result["reset_count"] == 1
+    assert result["identity"]["run_id"] == "run-offline"
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "seed",
+        "scene_id",
+        "episode_id",
+        "dataset_revision",
+        "dataset_sha256",
+        "run",
+        "registration",
+        "readiness",
+        "policy_count",
+        "float-count",
+        "missing",
+        "planning-source",
+        "planning-schema",
+        "digest",
+        "oversize",
+        "float-step",
+    ],
+)
+def test_runner_preflight_rejects_wrong_reset_sources(tmp_path: Path, mutation: str) -> None:
+    """Rehashed artifacts cannot substitute stale sources, wrong identity or unavailable skills."""
+    from habitat_local_eaios.relocation_preflight import preflight_relocation
+
+    run = preflight_run(tmp_path)
+    if mutation in {"seed", "scene_id", "episode_id", "dataset_revision", "dataset_sha256"}:
+        path = run / "b1-input-used.json"
+        frozen = json.loads(path.read_bytes())
+        frozen[mutation] = 41 if mutation == "seed" else "wrong"
+        path.write_text(json.dumps(frozen))
+    else:
+        name = (
+            "relocation-episode-start.json"
+            if mutation in {"run", "float-step"}
+            else "relocation-registration-profile-used.json"
+            if mutation == "registration"
+            else "relocation-readiness.json"
+            if mutation in {"readiness", "policy_count", "float-count", "missing"}
+            else "authoritative-planning-world-evidence.json"
+        )
+        path = run / "evidence" / name
+        document = json.loads(path.read_bytes())
+        if mutation == "missing":
+            path.unlink()
+        elif mutation == "oversize":
+            path.write_bytes(b" " * (MAX_ARTIFACT_BYTES + 1))
+        else:
+            if mutation == "run":
+                document["identity"]["run_id"] = "previous-run"
+            elif mutation == "registration":
+                document["agents"][0]["robot_type"] = "SpotRobot"
+            elif mutation == "readiness":
+                document["ready"] = False
+            elif mutation == "policy_count":
+                document["policy_count"] = 1
+            elif mutation == "float-count":
+                document["policy_count"] = 2.0
+            elif mutation == "float-step":
+                document["simulator_steps"] = 0.0
+            elif mutation == "planning-source":
+                document["object_sources"][0]["source_entity_id"] = "object:0"
+            elif mutation == "planning-schema":
+                document["schema_version"] = "roboguide.authoritative-planning-world-evidence/v0.2"
+                del document["object_sources"]
+            if "digest" in document:
+                document["digest"] = (
+                    "sha256:" + "0" * 64
+                    if mutation == "digest"
+                    else _digest({key: value for key, value in document.items() if key != "digest"})
+                )
+            path.write_text(json.dumps(document))
+    with pytest.raises(IntegrationError):
+        preflight_relocation(run)
+
+
+def test_preflight_cli_preserves_failure_and_original_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed local gate writes explicit harness evidence without fabricating benchmark truth."""
+    from habitat_local_eaios.relocation_preflight import main
+
+    run = preflight_run(tmp_path)
+    path = run / "evidence/relocation-readiness.json"
+    path.write_text("{}")
+    before = (run / "evidence/relocation-episode-start.json").read_bytes()
+    monkeypatch.setattr(sys, "argv", ["relocation_preflight", "--run", str(run)])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 1
+    failure = json.loads((run / "relocation-preflight.json").read_bytes())
+    assert failure["valid"] is False
+    assert "pddl_success" not in failure
+    assert (run / "evidence/relocation-episode-start.json").read_bytes() == before
+
+
 @pytest.mark.parametrize("incomplete", [False, True])
 def test_shared_initialization_records_one_reset_before_ready(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, incomplete: bool

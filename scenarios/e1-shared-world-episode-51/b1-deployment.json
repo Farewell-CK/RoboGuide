@@ -1,0 +1,6 @@
+{
+  "schema_version": "roboguide.e1.b1-deployment/v0.1",
+  "habitat_config": "habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml",
+  "max_steps": 3000,
+  "enable_relocation": false
+}

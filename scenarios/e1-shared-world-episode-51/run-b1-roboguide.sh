@@ -10,8 +10,10 @@
 # Usage: run-b1-roboguide.sh <run-dir-abs-or-rel> [input-json]
 set -euo pipefail
 
-SCENARIO="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$SCENARIO/../.." && pwd)"
+SCRIPT_SCENARIO="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$SCRIPT_SCENARIO/../.." && pwd)"
+SCENARIO="${ROBOGUIDE_B1_SCENARIO:-$SCRIPT_SCENARIO}"
+SCENARIO="$(cd "$SCENARIO" && pwd)"
 DEFAULT_EMOS_ROOT="$(dirname "$REPO")/emos-baseline"
 EMOS_ROOT="${ROBOGUIDE_EMOS_ROOT:-$DEFAULT_EMOS_ROOT}"
 HABITAT_ENV="${ROBOGUIDE_HABITAT_CONDA_ENV:-habitat}"
@@ -28,6 +30,12 @@ GOAL_REGION_ARGS=()
 ROUTE_SUPPORT_CHECK_ARGS=()
 PROGRESS_ARGS=()
 RETENTION_ARGS=()
+RELOCATION_ARGS=()
+PREPARE_ONLY="${ROBOGUIDE_B1_PREPARE_ONLY:-0}"
+case "$PREPARE_ONLY" in
+    0|1) ;;
+    *) echo "ROBOGUIDE_B1_PREPARE_ONLY must be 0 or 1" >&2; exit 1 ;;
+esac
 case "${ROBOGUIDE_B1_RETAIN_STOPPED_SESSION:-0}" in
     0) ;;
     1) RETENTION_ARGS=(--retain-stopped-session) ;;
@@ -113,12 +121,14 @@ raise SystemExit(0 if isinstance(value, dict) and value.get("state") == sys.argv
 }
 
 wait_nodes() {
-    # Wait until the inventory contains both shared-world node ids.
+    # Observe both exact configured Node identities, independent of the deployment's robot types.
     for _ in $(seq 1 120); do
         if curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory \
-            | grep -q '"e1-shared-node-a"' \
-            && curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory \
-            | grep -q '"e1-shared-node-b"'; then
+            | python3 -c '
+import json, sys
+nodes = json.load(sys.stdin)["nodes"]
+raise SystemExit(0 if {sys.argv[1], sys.argv[2]} <= {n["node_id"] for n in nodes} else 1)
+' "$NODE_A_ID" "$NODE_B_ID"; then
             return 0
         fi
         sleep 1
@@ -222,9 +232,11 @@ if [[ "${ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY:-0}" == 1 ]]; then
     GOAL_REGION_ARGS+=(--reset-route-geometry)
     ROUTE_SUPPORT_CHECK_ARGS+=(--require-route-geometry)
 fi
-trap finish_run EXIT
-trap 'stop_run 143' TERM
-trap 'stop_run 130' INT
+if [[ "$PREPARE_ONLY" == 0 ]]; then
+    trap finish_run EXIT
+    trap 'stop_run 143' TERM
+    trap 'stop_run 130' INT
+fi
 INITIAL_PREFERENCES_PATH=""
 INITIAL_PREFERENCES_SOURCE=""
 INITIAL_SUPPORT_FLAG="${ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT:-0}"
@@ -260,16 +272,20 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
+DEPLOYMENT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_deployment \
+    --run "$RUN" --scenario "$SCENARIO" --emos-root "$EMOS_ROOT")" \
+    || { FAILURE_REASON=invalid_b1_deployment; exit 1; }
+eval "$DEPLOYMENT_ASSIGNMENTS"
+if [[ "$RELOCATION_ENABLED" == 1 && ( ${#GOAL_REGION_ARGS[@]} != 0 \
+    || ${#RETENTION_ARGS[@]} != 0 ) ]]; then
+    FAILURE_REASON=unsupported_relocation_profile_combination
+    echo "$FAILURE_REASON" >&2
+    exit 1
+fi
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source "$RUN" \
     || { FAILURE_REASON=planning_world_source_declaration_failed; exit 1; }
-if [[ ! -x "$SERVER" || ! -x "$NODE" || ! -f "$MISSION_CONFIG" ]]; then
-    FAILURE_REASON=required_sut_binary_missing
-    exit 1
-fi
-if [[ ! -d "$EMOS_ROOT" ]]; then
-    FAILURE_REASON=emos_checkout_missing
-    exit 1
-fi
+cp "$MISSION_CONFIG" "$RUN/mission-config-used.toml"
+MISSION_CONFIG="$RUN/mission-config-used.toml"
 uv run --project "$REPO" python -m roboguide_eval.b1_ports \
     --run "$RUN" --scenario "$SCENARIO" > "$RUN/deployment-ports.env"
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
@@ -277,20 +293,39 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" pyt
     --node "$RUN/node-a.toml" --node "$RUN/node-b.toml" \
     --snapshot "$RUN/recovery-deployment.json" "${RETENTION_ARGS[@]}" \
     || { FAILURE_REASON=recovery_deployment_configuration_invalid; exit 1; }
-for n in a b; do
-    "$NODE" --validate "$RUN/node-$n.toml" > "$RUN/node-conformance-$n.json" \
-        || { FAILURE_REASON=node_configuration_invalid; exit 1; }
-done
-PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.spatial_feasibility \
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
     --output "$RUN/spatial-profile.json"
+if [[ "$RELOCATION_ENABLED" == 1 ]]; then
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.relocation_deployment \
+        --node "0=$RUN/node-a.toml" --node "1=$RUN/node-b.toml" \
+        --output "$RUN/relocation-registration-profile.json" \
+        || { FAILURE_REASON=relocation_registration_invalid; exit 1; }
+    RELOCATION_ARGS=(--enable-relocation --relocation-profile "$RUN/relocation-registration-profile.json")
+fi
 if [[ "$INITIAL_SUPPORT_FLAG" == 1 ]]; then
     sed -i 's/^controller_preflight_enabled = false$/controller_preflight_enabled = true/' \
         "$RUN/mission-service-b1.toml"
 fi
 sed -i "s/^max_deployment_recovery_attempts = 0$/max_deployment_recovery_attempts = $DEPLOYMENT_RECOVERY_ATTEMPTS/" \
     "$RUN/mission-service-b1.toml"
+
+# This offline boundary prepares the real command's files and exits without
+# touching ports, starting a process, reading credentials or submitting MI.
+if [[ "$PREPARE_ONLY" == 1 ]]; then
+    echo "B1 deployment prepared; no SUT component started: $RUN"
+    exit 0
+fi
+if [[ ! -x "$SERVER" || ! -x "$NODE" ]]; then
+    FAILURE_REASON=required_sut_binary_missing
+    exit 1
+fi
+for n in a b; do
+    "$NODE" --validate "$RUN/node-$n.toml" > "$RUN/node-conformance-$n.json" \
+        || { FAILURE_REASON=node_configuration_invalid; exit 1; }
+done
 
 clean_port "${CONTROLLER_GRPC_PORT}"
 clean_port "${CONTROLLER_PORT}"
@@ -320,6 +355,7 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         "${PROGRESS_ARGS[@]}" \
         "${GOAL_REGION_ARGS[@]}" \
         "${RETENTION_ARGS[@]}" \
+        "${RELOCATION_ARGS[@]}" \
         --subtask-mode natural-objective \
         --port-b "${HABITAT_PORT_B}" \
         --state-db "$RUN/bridge-a.sqlite3" \
@@ -330,11 +366,10 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         --evidence-dir "$RUN/evidence" \
         --spatial-profile "$RUN/spatial-profile.json" \
         --run-id "$(basename "$RUN")" \
-        --habitat-config \
-            "$EMOS_ROOT/habitat-baselines/habitat_baselines/config/multi_rearrange/llm_spot_fetch_mobility.yaml" \
+        --habitat-config "$HABITAT_CONFIG" \
         --episode-id "$EPISODE_ID" \
         --seed "$SEED" \
-        --max-steps 3000 \
+        --max-steps "$MAX_STEPS" \
         --step-period-ms 20 \
         "${VIDEO_ARGS[@]}" \
         "${LIVE_VIEW_ARGS[@]}"
@@ -356,11 +391,17 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" pyt
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
     "$RUN" --check-artifact \
     || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
-PYTHONPATH="$REPO/integrations/habitat-local-eaios" python3 -m \
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.spatial_feasibility \
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
     --output "$RUN/spatial-profile.json" --verify-sources \
     || { FAILURE_REASON=spatial_profile_source_mismatch; exit 1; }
+if [[ "$RELOCATION_ENABLED" == 1 ]]; then
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.relocation_preflight --run "$RUN" \
+        || { FAILURE_OWNER=EXTERNAL_INFRA; FAILURE_COMPONENT=harness; \
+             FAILURE_REASON=relocation_reset_evidence_invalid; exit 1; }
+fi
 uv run --project "$REPO" python -m roboguide_eval.b1_deployment_feasibility "$RUN" \
     || { FAILURE_REASON=preassignment_feasibility_unavailable; exit 1; }
 if [[ "${#ROUTE_SUPPORT_CHECK_ARGS[@]}" != 0 ]]; then

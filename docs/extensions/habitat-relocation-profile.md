@@ -1,7 +1,7 @@
 # Habitat Local EAIOS 搬运操作执行 Profile
 
 本页记录已实现并经过离线验证的 adapter 路径。Task3 部署注册和实际初始物体来源证据
-已经实现并通过 deterministic tests；真实物理预检尚待完成，不能将本页或测试当作批量
+与通用 B1 runner 接线已经实现并通过 deterministic tests；真实物理预检尚待完成，不能将本页或测试当作批量
 实验已就绪的证明。
 
 ## Canonical What 与本地 How
@@ -66,6 +66,10 @@ unknown/不发布，不能把到 destination 的距离当作整个搬运过程�
 
 ```mermaid
 flowchart LR
+  D[Frozen B1 input 与显式部署声明] --> R[一次真实 reset 与技能 readiness]
+  R --> P[新 run 的 neutral 来源与官方语义证据]
+  P --> I[生产 Interpreter / Planner / Reviewer / Repairer]
+  I --> C
   C[Control 已承诺的 canonical object/source/destination] --> E[Node 与 Execution Session]
   E --> G[本地精确工具契约]
   G --> M[原始 Stage2 模型选择]
@@ -107,6 +111,28 @@ child entry / parent relay；没有加载 Habitat 或调用 Provider。
 官方联合目标成立或成功率提高。进入固定小规模预检前还需用实际部署文件生成并核对
 registration profile，审查冻结输入和 episode-start evidence，并取得真实物理预检授权；
 保留原生 EMOS arm 与 controlled guard/feedback/idle 之间的差异，不改动历史结果。
+
+## B1 部署接线与离线准备
+
+[`relocation runner`](../../scenarios/e1-shared-world-relocation/README.md) 复用现有 B1 入口，
+通过严格版本化 `b1-deployment.json` 选择原始 `llm_height_man.yaml`、4,000 steps 和显式
+搬运开关。导航部署仍使用原始 Spot/Fetch 配置和 3,000 steps；没有按 episode 硬编码分工。
+配置的 Node ID 用于等待真实注册，不能从其他 Node 的诊断文本中误认注册完成。
+
+新 run 保存 `b1-deployment-used.json`、`mission-config-used.toml`、run-local execution/planning
+profile、registration snapshot 和现有 planning-source requirement。`PREPARE_ONLY=1` 在这些
+文件准备完成后退出，早于端口访问、Conda、任何服务、reset 或 Provider 调用。它不是正式
+运行，不生成 admission 或 benchmark 成绩，也不能复用该目录启动后续执行。
+
+正常执行在实际 ONLINE 后、Controller/MI 前检查 `relocation-preflight.json`：精确
+run/episode/scene/dataset/seed、一次 reset 的 step-zero 状态、真实技能 readiness、实际使用
+的 Node snapshot 与发给 MI 的初始来源引用必须一致。检查失败保留原始证据，以 harness
+证据检查失败明确归档；启动过程自身失败仍沿用既有 SUT failure 归因。两者均不伪造
+`pddl_success` 或改动 Formal population 规则。
+
+共享 endpoint 的只读恢复声明现覆盖导航和搬运三个操作，与真实部署文件一致；搬运保持
+`execution-group` / `unsupported`。声明读取不调用世界、模型或 RNG，开启 cancelled-world
+continuation 的不支持组合在启动阶段拒绝。这不授予新的 recovery permission。
 
 运行期模块同时在部署的 Python 3.9.23 中验证了实际导入、canonical session round-trip、
 契约阶段转换和 CLI help；这不加载仿真。运行期 type alias 使用 `typing.Union`，不能依靠

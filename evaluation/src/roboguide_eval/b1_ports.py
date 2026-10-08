@@ -59,6 +59,13 @@ def render_deployment_configs(run: Path, scenario: Path, ports: Mapping[str, int
             "PLANNING_WORLD_EVIDENCE_PLACEHOLDER",
             str(run / "evidence/authoritative-planning-world-evidence.json"),
         )
+        for placeholder, filename in (
+            ("EXECUTION_PROFILE_PLACEHOLDER", "execution-profile.json"),
+            ("PLANNING_PROFILE_PLACEHOLDER", "planning-profile.json"),
+        ):
+            if placeholder in text:
+                (run / filename).write_bytes((scenario / filename).read_bytes())
+                text = text.replace(placeholder, str(run / filename))
         (run / target).write_text(text, encoding="utf-8")
 
 

@@ -1,0 +1,6 @@
+{
+  "schema_version": "roboguide.e1.b1-deployment/v0.1",
+  "habitat_config": "habitat-baselines/habitat_baselines/config/multi_rearrange/llm_height_man.yaml",
+  "max_steps": 4000,
+  "enable_relocation": true
+}

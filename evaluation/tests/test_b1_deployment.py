@@ -1,0 +1,205 @@
+"""Exercise actual B1 deployment preparation without a Provider or a simulator."""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import subprocess
+import tomllib
+from pathlib import Path
+from typing import Any
+
+import pytest
+from mission.config import load_settings
+from mission.service_config import load_service_settings
+from roboguide_eval.b1_deployment import MAX_DECLARATION_BYTES, load_deployment
+
+ROOT = Path(__file__).resolve().parents[2]
+NAVIGATION = ROOT / "scenarios/e1-shared-world-episode-51"
+RELOCATION = ROOT / "scenarios/e1-shared-world-relocation"
+
+
+def offline_environment(tmp_path: Path) -> dict[str, str]:
+    """Use original-shaped config paths and tripwires forbidding network/SUT startup."""
+    emos = tmp_path / "emos"
+    for scenario in (NAVIGATION, RELOCATION):
+        declaration = load_deployment(scenario)
+        config = emos / declaration.habitat_config
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("# Offline path fixture only; not an executable Habitat configuration.\n")
+    commands = tmp_path / "tripwires"
+    commands.mkdir()
+    for name in ("curl", "conda", "ss"):
+        command = commands / name
+        command.write_text('#!/bin/bash\nprintf "forbidden component invoked\\n" >&2\nexit 99\n')
+        command.chmod(0o755)
+    environment = {key: value for key, value in os.environ.items() if key != "OPENAI_API_KEY"}
+    for key in tuple(environment):
+        if key.startswith("ROBOGUIDE_B1_") or key.startswith("ROBOGUIDE_MISSION_"):
+            del environment[key]
+    environment.update(
+        ROBOGUIDE_EMOS_ROOT=str(emos),
+        ROBOGUIDE_B1_PREPARE_ONLY="1",
+        PATH=str(commands) + os.pathsep + environment["PATH"],
+    )
+    return environment
+
+
+def prepare(
+    tmp_path: Path, scenario: Path, overrides: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run the maintained shell entry through its real offline preparation boundary."""
+    environment = offline_environment(tmp_path)
+    environment.update(overrides or {})
+    frozen = tmp_path / "frozen.json"
+    frozen.write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    run = tmp_path / "run"
+    result = subprocess.run(
+        ["bash", str(scenario / "run-b1-roboguide.sh"), str(run), str(frozen)],
+        env=environment,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    return result, run
+
+
+@pytest.mark.parametrize("scenario", [NAVIGATION, RELOCATION])
+def test_real_runner_prepares_the_selected_deployment(tmp_path: Path, scenario: Path) -> None:
+    """Actual preparation freezes config, ports, resources and MI sources without SUT calls."""
+    result, run = prepare(tmp_path, scenario)
+    assert result.returncode == 0, result.stderr
+    declaration = load_deployment(scenario)
+    used = json.loads((run / "b1-deployment-used.json").read_bytes())
+    assert used["declaration"]["max_steps"] == declaration.max_steps
+    assert used["declaration"]["enable_relocation"] is declaration.enable_relocation
+    assert used["habitat_config_path"].endswith(declaration.habitat_config)
+    for suffix, port in (("a", 28100), ("b", 28102)):
+        node = tomllib.loads((run / f"node-{suffix}.toml").read_text())
+        assert node["connections"][0]["endpoint"] == f"http://127.0.0.1:{port}"
+        assert node["node_id"] in used["node_ids"]
+    service = tomllib.loads((run / "mission-service-b1.toml").read_text())["service"]
+    assert service["grounding_planning_world_evidence_required"] is True
+    assert "PLACEHOLDER" not in (run / "mission-service-b1.toml").read_text()
+    assert (run / "mission-config-used.toml").exists()
+    assert not (run / "b1-request-record.json").exists()
+    assert not (run / "shared-bridge.log").exists()
+    assert not (run / "controller.sqlite3").exists()
+    if declaration.enable_relocation:
+        profile = json.loads((run / "relocation-registration-profile.json").read_bytes())
+        assert [agent["robot_type"] for agent in profile["agents"]] == [
+            "FetchRobot",
+            "StretchRobot",
+        ]
+        assert all(agent["resource"]["capacity"] == 1 for agent in profile["agents"])
+        assert Path(service["execution_profile_path"]) == run / "execution-profile.json"
+        assert Path(service["planning_profile_path"]) == run / "planning-profile.json"
+        loaded = load_service_settings(run / "mission-service-b1.toml", repository_root=ROOT)
+        assert loaded.execution_profile_path == run / "execution-profile.json"
+        assert loaded.grounding_planning_world_evidence_required is True
+        settings = load_settings(run / "mission-config-used.toml", repository_root=ROOT)
+        assert settings.llm.model == "gpt-6.1-sol"
+        assert settings.review_enabled is True
+    else:
+        assert not (run / "relocation-registration-profile.json").exists()
+
+
+def test_relocation_custom_ports_reach_every_workflow(tmp_path: Path) -> None:
+    """The relocation templates use the same noncascading transport mapping as navigation."""
+    result, run = prepare(
+        tmp_path,
+        RELOCATION,
+        {"ROBOGUIDE_B1_HABITAT_PORT": "38101", "ROBOGUIDE_B1_HABITAT_PORT_B": "38102"},
+    )
+    assert result.returncode == 0, result.stderr
+    for suffix, port in (("a", 38101), ("b", 38102)):
+        text = (run / f"node-{suffix}.toml").read_text()
+        assert f"127.0.0.1:{port}" in text
+        assert "127.0.0.1:28100" not in text
+        assert "127.0.0.1:28102" not in text
+
+
+@pytest.mark.parametrize("flag", ["GOAL_REGION_NAVIGATION", "RETAIN_STOPPED_SESSION"])
+def test_unsupported_relocation_profiles_fail_before_start(tmp_path: Path, flag: str) -> None:
+    """Manipulation cannot silently inherit navigation-only or cancellation continuation modes."""
+    result, run = prepare(tmp_path, RELOCATION, {"ROBOGUIDE_B1_" + flag: "1"})
+    assert result.returncode != 0
+    assert "unsupported_relocation_profile_combination" in result.stderr
+    assert not (run / "shared-bridge.log").exists()
+
+
+def test_existing_archive_is_preserved(tmp_path: Path) -> None:
+    """A second preparation cannot overwrite the frozen workload or a historical manifest."""
+    result, run = prepare(tmp_path, RELOCATION)
+    assert result.returncode == 0, result.stderr
+    before = {
+        name: (run / name).read_bytes()
+        for name in ("b1-input-used.json", "b1-deployment-used.json")
+    }
+    result = subprocess.run(
+        ["bash", str(RELOCATION / "run-b1-roboguide.sh"), str(run), str(tmp_path / "frozen.json")],
+        env={**os.environ, "ROBOGUIDE_B1_PREPARE_ONLY": "1"},
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode != 0 and "refusing to overwrite" in result.stderr
+    assert {name: (run / name).read_bytes() for name in before} == before
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", "wrong"),
+        ("max_steps", True),
+        ("max_steps", 0),
+        ("max_steps", 100001),
+        ("enable_relocation", "true"),
+        ("habitat_config", "../escape.yaml"),
+        ("habitat_config", "/absolute.yaml"),
+        ("habitat_config", "cmd\n.yaml"),
+        ("unknown_field", "invented"),
+    ],
+)
+def test_invalid_deployment_declaration_fails_closed(
+    tmp_path: Path, field: str, value: Any
+) -> None:
+    """Invalid deployment fields cannot become launch flags or alter the task contract."""
+    document = json.loads((RELOCATION / "b1-deployment.json").read_bytes())
+    document[field] = value
+    (tmp_path / "b1-deployment.json").write_text(json.dumps(document))
+    with pytest.raises(ValueError):
+        load_deployment(tmp_path)
+
+
+def test_declaration_read_is_bounded(tmp_path: Path) -> None:
+    """Oversize declarations fail before unbounded parsing or launch."""
+    (tmp_path / "b1-deployment.json").write_bytes(b" " * (MAX_DECLARATION_BYTES + 1))
+    with pytest.raises(ValueError, match="byte budget"):
+        load_deployment(tmp_path)
+
+
+def test_node_wait_uses_actual_inventory_identity(tmp_path: Path) -> None:
+    """An unrelated Node ID appearing in diagnostics cannot satisfy the registration barrier."""
+    source = (NAVIGATION / "run-b1-roboguide.sh").read_text()
+    function = source[source.index("wait_nodes() {") : source.index("\nwait_mission_terminal() {")]
+    inventory = tmp_path / "inventory.json"
+    # Use shell function substitution to feed a deterministic HTTP response into the real barrier.
+    fixture = (
+        "CONTROLLER_PORT=1 NODE_A_ID=a NODE_B_ID=b\ncurl() { cat "
+        + shlex.quote(str(inventory))
+        + "; }\n"
+    )
+    fixture += 'seq() { printf "1\\n"; }\nsleep() { :; }\n' + function + "\nwait_nodes\n"
+    for nodes, accepted in (
+        ([{"node_id": "a"}, {"node_id": "b"}], True),
+        ([{"node_id": "a", "detail": "b"}], False),
+    ):
+        inventory.write_text(json.dumps({"nodes": nodes}))
+        result = subprocess.run(["bash", "-c", fixture], capture_output=True, check=False)
+        assert (result.returncode == 0) is accepted
