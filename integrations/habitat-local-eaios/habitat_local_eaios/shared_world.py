@@ -1499,7 +1499,7 @@ class InProcessWorldService:
     def __init__(self, runtime: Any) -> None:
         """Retain the runtime double that owns the shared world."""
         self._runtime = runtime
-        self._supported_operations = SUPPORTED_OPERATIONS
+        self._supported_operations: tuple[str, ...] = SUPPORTED_OPERATIONS
         self._start_requested = False
 
     def start(self) -> str:
@@ -1671,7 +1671,7 @@ class ProcessWorldService:
         self._connection: Any = None
         self._process: Any = None
         self._ready_detail = "shared world process is not initialized"
-        self._supported_operations = SUPPORTED_OPERATIONS
+        self._supported_operations: tuple[str, ...] = SUPPORTED_OPERATIONS
         self._ready = False
         self._start_requested = False
 
