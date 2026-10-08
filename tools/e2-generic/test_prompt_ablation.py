@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from run_prompt_ablation import load_manifest, profile_summary
+from run_prompt_ablation import (
+    load_manifest,
+    matching_resume_config,
+    profile_summary,
+    run_port_offset,
+    unused_attempt_path,
+)
 
 
 class PromptAblationTests(unittest.TestCase):
@@ -43,6 +50,42 @@ class PromptAblationTests(unittest.TestCase):
         summary = profile_summary(records, "fair")
         self.assertEqual(summary["machine_verdicts"], 1)
         self.assertEqual(summary["success_rate"], 0.5)
+
+    def test_each_run_uses_a_disjoint_port_offset(self) -> None:
+        """A just-closed prior service cannot block the next paired run."""
+        self.assertEqual(
+            [run_port_offset(700, 100, index) for index in range(1, 7)],
+            [
+                700,
+                800,
+                900,
+                1000,
+                1100,
+                1200,
+            ],
+        )
+
+    def test_attempt_paths_never_overwrite_prior_evidence(self) -> None:
+        """A resume creates a new console filename when the original exists."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "console.log"
+            root.write_text("old", encoding="utf-8")
+            self.assertEqual(unused_attempt_path(root).name, "console.resume-01.log")
+
+    def test_resume_rejects_changed_scientific_inputs(self) -> None:
+        """Changing model or task inputs is not a valid continuation."""
+        frozen = {
+            "coherent_commit": "a",
+            "manifest_sha256": "b",
+            "config_sha256": "c",
+            "model": "gpt-6.1-sol",
+            "review_model": "gpt-6.1-sol",
+            "execution_order": "sequential paired AB/BA/AB",
+        }
+        matching_resume_config(frozen, dict(frozen))
+        changed = dict(frozen, model="different")
+        with self.assertRaisesRegex(ValueError, "model"):
+            matching_resume_config(frozen, changed)
 
 
 if __name__ == "__main__":
