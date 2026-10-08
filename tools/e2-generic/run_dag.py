@@ -24,7 +24,7 @@ from coherent_local_eaios.generic_bridge import (
     load_task_data,
     read_graph_database,
 )
-from dag_policy import objective_text, validate_plan
+from dag_policy import DAG_PROFILES, PROMPT_PROFILES, objective_text, validate_plan
 from run_task import (
     catalog_for,
     git,
@@ -63,6 +63,84 @@ def local_executions(database: Path) -> list[dict[str, Any]]:
         ]
 
 
+def mission_executions(rows: list[dict[str, Any]], mission_id: str) -> list[dict[str, Any]]:
+    """Return compact, decoded local outcomes owned by one Mission."""
+    results = []
+    for row in rows:
+        invocation = json.loads(str(row["invocation_json"]))
+        if invocation.get("mission_id") != mission_id:
+            continue
+        raw_outcome = row.get("local_outcome_json")
+        outcome = None if raw_outcome is None else json.loads(str(raw_outcome))
+        if isinstance(outcome, dict):
+            outcome = {
+                key: outcome[key]
+                for key in (
+                    "guard",
+                    "primitive_executed",
+                    "step_count_unchanged",
+                    "step_before",
+                    "transition",
+                    "error_type",
+                    "error",
+                    "evidence_file",
+                )
+                if key in outcome
+            }
+        results.append(
+            {
+                "execution_id": row["execution_id"],
+                "mission_id": invocation["mission_id"],
+                "task_id": invocation["task_id"],
+                "operation": invocation["operation"],
+                "parameters": invocation["parameters"],
+                "state": row["state"],
+                "detail": row["detail"],
+                "local_outcome": outcome,
+            }
+        )
+    return results
+
+
+def planner_feedback(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Bound replanning context to structured facts instead of concatenated log text."""
+    fields = (
+        "segment",
+        "mission_id",
+        "steps_before",
+        "steps_after",
+        "controller_status",
+        "planned_actions",
+        "goal",
+        "execution_outcomes",
+        "controller_execution_attempts",
+        "recovery_decision",
+        "failure",
+    )
+    return [{key: row[key] for key in fields if key in row} for row in records]
+
+
+def controller_diagnostics(api: str) -> dict[str, Any]:
+    """Read Controller-owned evidence without changing lifecycle state."""
+    evidence: dict[str, Any] = {}
+    for route in ("events", "execution-attempts"):
+        status, body = http_json("GET", f"{api}/v1/{route}")
+        evidence[route] = {"http_status": status, "body": body}
+    return evidence
+
+
+def controller_attempts(api: str, mission_id: str) -> list[dict[str, Any]]:
+    """Read and filter Controller-owned physical attempt history for one Mission."""
+    status, body = http_json("GET", f"{api}/v1/execution-attempts")
+    if status != 200 or not isinstance(body, dict) or not isinstance(body.get("attempts"), list):
+        raise RuntimeError("Controller execution-attempt history is unavailable or malformed")
+    return [
+        cast(dict[str, Any], attempt)
+        for attempt in body["attempts"]
+        if isinstance(attempt, dict) and attempt.get("mission_id") == mission_id
+    ]
+
+
 def run(args: argparse.Namespace) -> int:
     """Run bounded planning segments and preserve artifacts even on infrastructure failure."""
     repo, output = args.repo.resolve(), args.output.resolve()
@@ -88,6 +166,8 @@ def run(args: argparse.Namespace) -> int:
     final_steps = 0
     reason = "planning segment budget exhausted"
     controller_completed = False
+    controller_cancelled_after_goal = False
+    post_goal_primitive_guarded = False
     api = f"http://127.0.0.1:{ports[1]}"
     database = output / "coherent-generic.sqlite3"
     json_write(output / "run-command.json", {"argv": sys.argv})
@@ -117,7 +197,9 @@ def run(args: argparse.Namespace) -> int:
         runtime_config.write_text(config, encoding="utf-8")
         binary_root = args.binary_root.resolve()
         provenance = {
-            "mode": "multi-task-serial-dag",
+            "mode": "multi-task-dag",
+            "prompt_profile": args.prompt_profile,
+            "dag_profile": args.dag_profile,
             "public_task": f"{args.env}/task{args.task}",
             "roboguide_commit": git(repo, "rev-parse", "HEAD"),
             "roboguide_status": git(repo, "status", "--short"),
@@ -250,8 +332,10 @@ def run(args: argparse.Namespace) -> int:
                     args.task,
                     task,
                     contexts,
-                    records,
+                    planner_feedback(records),
                     max_steps - final_steps,
+                    prompt_profile=args.prompt_profile,
+                    dag_profile=args.dag_profile,
                 ),
                 encoding="utf-8",
             )
@@ -273,7 +357,7 @@ def run(args: argparse.Namespace) -> int:
                 "--public-task",
                 f"{args.env}/task{args.task}",
                 "--adapter-scope",
-                "serial multi-task DAG with runtime primitive validation",
+                f"{args.dag_profile} multi-task DAG with runtime primitive validation",
             ]
             record: dict[str, Any] = {
                 "segment": number,
@@ -298,7 +382,13 @@ def run(args: argparse.Namespace) -> int:
             plan = json.loads(plan_bytes)
             try:
                 ordered = validate_plan(
-                    plan, mission_id, args.env, args.task, contexts, max_steps - final_steps
+                    plan,
+                    mission_id,
+                    args.env,
+                    args.task,
+                    contexts,
+                    max_steps - final_steps,
+                    dag_profile=args.dag_profile,
                 )
             except (ValueError, KeyError, TypeError) as error:
                 record["failure"] = f"plan admission failed: {error}"
@@ -318,38 +408,124 @@ def run(args: argparse.Namespace) -> int:
                 break
             deadline = time.monotonic() + args.execution_timeout
             mission: dict[str, Any] = {}
+            goal_cancel: dict[str, Any] | None = None
             while time.monotonic() < deadline:
                 if any(p.poll() is not None for p in processes):
                     raise RuntimeError("owned runtime process exited during Mission")
                 _, mission_body = http_json("GET", api + f"/v1/missions/{mission_id}")
                 mission = cast(dict[str, Any], mission_body)
+                live_graph, live_steps = read_graph_database(database)
+                live_goal = goal_status(task, live_graph)
+                if (
+                    live_goal["passed"]
+                    and goal_cancel is None
+                    and mission.get("status") not in {"Completed", "Cancelled"}
+                ):
+                    cancel_status, cancel_body = http_json(
+                        "POST", api + f"/v1/missions/{mission_id}/cancel"
+                    )
+                    goal_cancel = {
+                        "reason": "official task_goal became true before Mission termination",
+                        "steps_at_request": live_steps,
+                        "goal": live_goal,
+                        "http_status": cancel_status,
+                        "body": cancel_body,
+                    }
+                    json_write(segment / "goal-cancel-request.json", goal_cancel)
                 if mission.get("status") in {"Completed", "Failed", "Cancelled"}:
                     break
                 time.sleep(0.25)
             json_write(segment / "mission.json", mission)
             graph, final_steps = read_graph_database(database)
+            all_local_executions = local_executions(database)
+            current_executions = mission_executions(all_local_executions, mission_id)
+            current_controller_attempts = controller_attempts(api, mission_id)
+            local_terminal = bool(current_executions) and all(
+                row["state"] in {"COMPLETED", "FAILED", "CANCELLED"} for row in current_executions
+            )
+            controller_attempts_terminal = bool(current_controller_attempts) and all(
+                row.get("status") in {"Completed", "Failed", "Cancelled"}
+                for row in current_controller_attempts
+            )
+            current_goal = goal_status(task, graph)
+            post_goal_primitive_guarded = any(
+                row["state"] == "CANCELLED"
+                and isinstance(row["local_outcome"], dict)
+                and row["local_outcome"].get("guard") == "official-goal-already-satisfied"
+                for row in current_executions
+            )
             record.update(
                 {
                     "controller_status": mission.get("status"),
                     "steps_after": final_steps,
                     "planned_actions": ordered,
-                    "goal": goal_status(task, graph),
-                    "local_executions": local_executions(database),
+                    "goal": current_goal,
+                    "goal_cancel_request": goal_cancel,
+                    "execution_outcomes": current_executions,
+                    "controller_execution_attempts": current_controller_attempts,
                 }
             )
+            controller_completed = mission.get("status") == "Completed"
+            controller_cancelled_after_goal = bool(
+                mission.get("status") == "Cancelled"
+                and goal_cancel is not None
+                and goal_cancel["http_status"] == 202
+                and current_goal["passed"]
+            )
+            if current_goal["passed"] and (
+                controller_completed
+                or controller_cancelled_after_goal
+                or post_goal_primitive_guarded
+            ):
+                record["recovery_decision"] = {
+                    "eligible": False,
+                    "reason": (
+                        "official goal reached; Controller completed/cancelled the Mission or "
+                        "the adapter recorded a non-mutating post-goal guard"
+                    ),
+                }
+                reason = ""
+            elif controller_completed:
+                record["recovery_decision"] = {
+                    "eligible": True,
+                    "reason": "completed observation segment; replan from fresh graph",
+                }
+                reason = "completed segment did not satisfy official goal"
+            elif (
+                mission.get("status") == "Failed"
+                and local_terminal
+                and controller_attempts_terminal
+            ):
+                record["recovery_decision"] = {
+                    "eligible": True,
+                    "reason": (
+                        "Controller reported failure and both Controller and local attempts "
+                        "are terminal; "
+                        "replan through Planner, Reviewer, and Repairer from preserved graph"
+                    ),
+                }
+                reason = "terminal execution failure; structured replanning budget exhausted"
+            else:
+                record["recovery_decision"] = {
+                    "eligible": False,
+                    "reason": (
+                        "execution authority is ambiguous or cancellation was not goal-triggered"
+                    ),
+                }
+                reason = f"controller {mission.get('status')}; unsafe to start another Mission"
+            if not record["recovery_decision"]["eligible"] or current_goal["passed"]:
+                record["runtime_diagnostics_file"] = "runtime-diagnostics.json"
+                json_write(segment / "runtime-diagnostics.json", controller_diagnostics(api))
+            elif mission.get("status") == "Failed":
+                record["runtime_diagnostics_file"] = "runtime-diagnostics.json"
+                json_write(segment / "runtime-diagnostics.json", controller_diagnostics(api))
             records.append(record)
             json_write(segment / "result.json", record)
             json_write(output / "segments.json", records)
-            controller_completed = mission.get("status") == "Completed"
-            if not controller_completed:
-                # Do not begin another Mission while failed/ambiguous execution may retain bindings.
-                reason = f"controller {mission.get('status')}; inspect local execution evidence"
+            if reason == "":
                 break
-            if record["goal"]["passed"]:
-                reason = ""
+            if not record["recovery_decision"]["eligible"]:
                 break
-            reason = "completed segment did not satisfy official goal; segment budget exhausted"
-            # A completed observation segment is the only execution event enabling replanning.
     except Exception as error:
         reason = f"{type(error).__name__}: {error}"
         json_write(output / "runner-error.json", {"error": reason})
@@ -370,19 +546,25 @@ def run(args: argparse.Namespace) -> int:
             graph, final_steps = read_graph_database(database)
             json_write(output / "local-executions.json", local_executions(database))
         check = goal_status(task, graph) if task and graph else {"passed": False}
-        success = bool(check["passed"]) and controller_completed
+        success = bool(check["passed"]) and (
+            controller_completed or controller_cancelled_after_goal or post_goal_primitive_guarded
+        )
         requests = list(output.glob("segments/*/planning/llm/*-request.json"))
         responses = [
             json.loads(p.read_text())
             for p in output.glob("segments/*/planning/llm/*-response.json")
         ]
         verdict = {
-            "mode": "multi-task-serial-dag",
+            "mode": "multi-task-dag",
+            "prompt_profile": args.prompt_profile,
+            "dag_profile": args.dag_profile,
             "public_task": f"{args.env}/task{args.task}",
             "success": success,
             "failure_reason": None if success else reason,
             "official_goal_check": check,
             "controller_completed": controller_completed,
+            "controller_cancelled_after_goal": controller_cancelled_after_goal,
+            "post_goal_primitive_guarded": post_goal_primitive_guarded,
             "primitive_steps": final_steps,
             "planning_segments": len(records),
             "model_calls": len(requests),
@@ -412,6 +594,8 @@ def main() -> int:
     parser.add_argument("--max-segments", type=int, default=3)
     parser.add_argument("--port-offset", type=int, default=0)
     parser.add_argument("--execution-timeout", type=int, default=180)
+    parser.add_argument("--prompt-profile", choices=PROMPT_PROFILES, default="fair")
+    parser.add_argument("--dag-profile", choices=DAG_PROFILES, default="serial")
     args = parser.parse_args()
     if args.max_segments < 1 or args.execution_timeout < 1:
         parser.error("budgets must be positive")

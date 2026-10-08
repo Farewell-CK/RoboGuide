@@ -6,7 +6,7 @@ import copy
 import unittest
 from typing import Any
 
-from dag_policy import validate_plan
+from dag_policy import objective_text, validate_plan
 
 
 class DagPolicyTests(unittest.TestCase):
@@ -67,6 +67,36 @@ class DagPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_plan(self.plan, "test", "env0", 1, self.contexts, 2)
 
+    def test_partial_order_accepts_independent_roots(self) -> None:
+        """The controlled scheduler profile admits current actions on distinct robots."""
+        second = copy.deepcopy(self.plan["tasks"][1])
+        second["depends_on"] = []
+        second["roles"][0]["execution_intent"]["operation"]["name"] = "agent-10-primitive"
+        second["roles"][0]["requirements"]["capabilities"][0]["contract"]["name"] = (
+            "agent-10-primitive"
+        )
+        second["roles"][0]["execution_intent"]["parameters"].update(
+            {"agent_id": 10, "agent_class": "robot arm", "action": "[grab] <cup>(11)"}
+        )
+        self.contexts[10] = {
+            "agent_class": "robot arm",
+            "available_actions": ["[grab] <cup>(11)"],
+        }
+        self.plan["tasks"] = [self.plan["tasks"][0], second]
+        ordered = validate_plan(
+            self.plan, "test", "env0", 1, self.contexts, 2, dag_profile="partial-order"
+        )
+        self.assertEqual({item["agent_id"] for item in ordered}, {9, 10})
+
+    def test_partial_order_rejects_one_robot_twice_in_frontier(self) -> None:
+        """Concurrent-ready Tasks may not claim the same robot resource."""
+        self.plan["tasks"][1]["depends_on"] = []
+        self.contexts[9]["available_actions"].append("[land_on] <table>(10)")
+        with self.assertRaises(ValueError):
+            validate_plan(
+                self.plan, "test", "env0", 1, self.contexts, 2, dag_profile="partial-order"
+            )
+
     def test_budget_rejected(self) -> None:
         """A whole submitted plan must fit the remaining execution budget."""
         with self.assertRaises(ValueError):
@@ -83,6 +113,21 @@ class DagPolicyTests(unittest.TestCase):
         self.contexts[9]["available_actions"] = []
         with self.assertRaises(ValueError):
             validate_plan(self.plan, "test", "env0", 1, self.contexts, 2)
+
+    def test_fair_prompt_omits_private_graph_transitions(self) -> None:
+        """The main comparison prompt excludes implementation-level relation mutations."""
+        contexts = {
+            9: {
+                **self.contexts[9],
+                "observation": {"nodes": [], "edges": []},
+            }
+        }
+        task = {"goal_instruction": ["land"], "task_goal": {"on_<drone>(9)_<table>(10)": [1]}}
+        fair = objective_text("env0", 1, task, contexts, [], 2, prompt_profile="fair")
+        informed = objective_text("env0", 1, task, contexts, [], 2, prompt_profile="informed")
+        self.assertNotIn("ON to ABOVE", fair)
+        self.assertIn("ON to ABOVE", informed)
+        self.assertIn("earliest action expected to establish every goal predicate", fair)
 
 
 if __name__ == "__main__":

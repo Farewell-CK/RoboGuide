@@ -1,7 +1,8 @@
 # E2 protocol: long-horizon heterogeneous collaboration
 
-Status: frozen for controlled development slices E2-S0 and E2-S1. Autonomous
-planning and formal comparison remain pending.
+Status: frozen for controlled development slices E2-S0C and E2-S1. Autonomous
+graph planning is under development; autonomous physical E2-S0A and formal comparison remain
+pending. A fixed physical macro must never be labeled E2-S0A.
 
 ## Question and claims
 
@@ -11,14 +12,16 @@ feedback, and final goal verification.
 
 The experiment separates three claims:
 
-1. `E2-S0 physical`: one validated Dog–Drone–Arm plan traverses the production
+1. `E2-S0C physical controlled`: one validated Dog–Drone–Arm plan traverses the production
    RoboGuide control and Node Protocol path and establishes the physical goal.
 2. `E2-S1 graph controlled`: one public COHERENT task is split into tasks assigned
    to distinct embodiment nodes with dependency-gated handoffs.
-3. `E2-Full` (pending): natural language is converted to a MissionPlan without a
+3. `E2-S0A physical autonomous` (blocked): natural language is converted into individually
+   observable and cancellable physical robot operations rather than one fixed plan macro.
+4. `E2-Full` (pending): natural language is converted to a MissionPlan without a
    hand-authored plan and compared with PEFA under the same task and goal rules.
 
-S0 and S1 are controlled execution results. They must not be reported as autonomous
+S0C and S1 are controlled execution results. They must not be reported as autonomous
 planning or as evidence that RoboGuide outperforms PEFA.
 
 ## Frozen task identity
@@ -29,7 +32,8 @@ scene, task index, or goal is a different trial.
 
 | Slice | Backend | Frozen task | Robots | Plan length |
 | --- | --- | --- | --- | --- |
-| E2-S0 | OmniGibson / Isaac Sim physical | `Merom_1_int_Task1` | `aliengo_0`, `quadrotor_0`, `franka_0` | 9 text actions / 21 physical skills |
+| E2-S0C | OmniGibson / Isaac Sim physical | `Merom_1_int_Task1` | `aliengo_0`, `quadrotor_0`, `franka_0` | fixed 9 text actions / measured 21 physical skills |
+| E2-S0A | OmniGibson / Isaac Sim physical | pending | Dog, Drone, Arm | blocked until primitive physical interfaces exist |
 | E2-S1 | Original COHERENT graph environment | public `env4/task17` | robot arm 23, robot dog 24, quadrotor 25 | 13 graph actions (paper GT) |
 
 Development tasks and repetitions are labeled separately from frozen test tasks.
@@ -63,9 +67,15 @@ original COHERENT actions:
 Every action is checked against embodiment-specific preconditions before calling the
 original `Get_env_info.step`. Phase order is durable and fail-closed.
 
-Physical E2-S0 maps only `coherent.execute-plan@v1` to the startup-approved existing
+Physical E2-S0C maps only `coherent.execute-plan@v1` to the startup-approved existing
 runner. Paths, poses, low-level motion, grasp control, flight control, and immediate
 safety remain Local How. Unsupported cancellation returns an explicit rejection.
+
+E2-S0A may be enabled only after the physical backend exposes, for every selected robot, a
+semantic-operation contract, live observation/state retrieval, per-operation terminal evidence,
+cancellation semantics, and an independent final-goal checker. The readiness manifest and gate in
+`scenarios/e2-coherent-minimal/` currently fail closed. The planner or adapter may not select a
+hidden fixed action list and call that autonomous execution.
 
 ## Completion semantics
 
@@ -84,9 +94,13 @@ four phases and exactly 13 steps, and these original goal relations exist:
 - `INSIDE(bottle of milk 35, basket 29)`;
 - `ON(quadrotor 25, swing table 16)`.
 
-E2-S0 succeeds only when all 9 text actions and all 21 required physical skills
+E2-S0C succeeds only when all 9 text actions and all 21 required physical skills
 finish, all three physical agents execute, the runner exits successfully, and the
 independent final pose/container goal checker passes without manual correction.
+
+E2-S0A has no success result yet. It additionally requires model-generated operation-level tasks,
+Controller-visible dispatch and completion for each relevant robot operation, replanning from
+actual physical feedback, and the same independent physical goal check.
 
 ## Budgets
 

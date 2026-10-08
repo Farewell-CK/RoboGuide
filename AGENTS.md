@@ -211,10 +211,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Commit, Bind, and a real Node workflow precede the original `Get_env_info.step` transition.
   The adapter contains no task route or multi-action macro. Only the official `task_goal` relation
   check establishes benchmark success, and invalid plans or exhausted budgets remain failures.
-- `tools/e2-generic/run_dag.py` is the optional multi-task serial-DAG experiment runner. It submits
-  whole unedited model-generated plans to the unchanged Controller and retains the same per-action
-  adapter boundary. Fresh planning is allowed after a completed observation segment; failed or
-  ambiguous execution terminates the run. It owns experiment budgets and evidence, not Core recovery.
+- `tools/e2-generic/run_dag.py` is the optional multi-task experiment runner. Its default serial
+  profile submits whole unedited model-generated plans to the unchanged Controller and retains the
+  same per-action adapter boundary; a separate partial-order profile is for controlled scheduler
+  studies only. Fresh planning is allowed after a completed observation segment or a failed Mission
+  only when both Controller and local attempts are terminal. Ambiguous execution terminates the
+  run. Official-goal
+  early termination uses the Controller Mission-cancel route, with a non-mutating adapter goal guard
+  as a race-safe backstop. The runner owns experiment budgets and evidence, not Core recovery.
+- The generic E2 prompt defaults to `fair`, which may state public task-independent PEFA action and
+  embodiment rules but must not expose simulator-internal relation mutations. `informed` is a
+  development-only profile and its evidence must remain labeled separately.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
@@ -386,6 +393,7 @@ uv run python tools/quality/check_python_function_docs.py integrations/coherent-
 bash -n scenarios/e2-coherent-minimal/run-controlled.sh
 bash -n scenarios/e2-coherent-graph/run-controlled.sh
 python -m json.tool scenarios/e2-coherent-graph/mission-plan.json >/dev/null
+python scenarios/e2-coherent-minimal/verify-autonomous-readiness.py --expect blocked
 git diff --check
 ```
 

@@ -540,7 +540,7 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 配置声明的 Local EAIOS endpoint。
 
 [`integrations/coherent-local-eaios/`](integrations/coherent-local-eaios/) 与
-[`scenarios/e2-coherent-minimal/`](scenarios/e2-coherent-minimal/) 构成 E2-S0 受控实验切片。
+[`scenarios/e2-coherent-minimal/`](scenarios/e2-coherent-minimal/) 构成 E2-S0C 受控实验切片。
 固定 MissionPlan 仍经过正式 Controller 的 Match / Schedule / Commit / Bind、Node Protocol 与
 `roboguide-node`，再由部署侧 bridge 把 startup-approved
 `coherent.execute-official-task@v1` 映射到既有 COHERENT physical runner。Bridge 使用 SQLite
@@ -548,7 +548,9 @@ local handle 去重，并且只有 COHERENT 原始进程成功、物理技能全
 才上报 `COMPLETED`；命令接收、技能结束与任务目标成立保持为三类不同证据。当前切片把一份已知
 正确的 Trio 文本计划作为单个 canonical operation 执行，用于证明控制链路和证据链，不代表
 Dog / Drone / Arm 已分别由 RoboGuide 调度，也不代表 PEFA 或 Mission Intelligence 对比已经完成。
-取消尚不受支持时，adapter 明确拒绝而不伪报成功。
+取消尚不受支持时，adapter 明确拒绝而不伪报成功。物理自主切片 E2-S0A 仍被机器可读的
+readiness gate 标记为 `BLOCKED`：需要逐机器语义操作、实时观测、逐操作终态证据、
+取消语义和反馈重规划全部就绪，否则固定脚本不得冒充自主规划。
 
 [`scenarios/e2-coherent-graph/`](scenarios/e2-coherent-graph/) 是后续 E2-S1 图级受控切片：
 它选用论文公开 `env4/task17`，将 13 步正确计划拆为 Arm 装载、Drone 降低、Dog 装载、
@@ -568,9 +570,11 @@ Node 和原始 `Get_env_info.step`。adapter 不包含 task17 路线或正确动
 官方 `task_goal` 图关系判定。固定随机十任务清单和顺序批运行器也保存在该目录。
 
 同目录的 `run_dag.py` 支持一次生成多步依赖计划，再由现有 Controller 连续调度。
-完成探索段后可用新观测规划后续段；执行失败或状态不明时保留证据并终止。
-该模式使用独立端口，保持原始 adapter、Core 与 Mission Intelligence 源码不变。
-它采用串行依赖链以匹配图级步数口径，暂不衡量并行调度收益。
+完成探索段或所有本地 attempt 已终态的失败段后，可把结构化执行结果交给新一轮
+Planner / Reviewer / Repairer；状态不明时仍停止。官方目标中途成立时，运行器请求
+Controller 取消剩余 Mission，adapter 在每个 primitive 执行前再做一次非修改性 goal guard。
+该模式使用独立端口，保持 Core 与 Mission Intelligence 源码不变。主对比默认用
+`fair + serial`；`informed` 提示和 `partial-order` 调度是分开的开发/受控条件。
 
 ## 三条核心语义链
 

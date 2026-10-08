@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import importlib
@@ -11,6 +12,7 @@ import sqlite3
 import sys
 import threading
 import time
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -122,7 +124,7 @@ class PrimitiveStore:
         database.parent.mkdir(parents=True, exist_ok=True)
         self.database = database
         self.lock = threading.RLock()
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS executions (
@@ -150,7 +152,7 @@ class PrimitiveStore:
     def create_or_get(self, invocation: PrimitiveInvocation) -> tuple[dict[str, object], bool]:
         """Create a handle or return the prior handle for an identical request."""
         key = invocation.request_key()
-        with self.lock, self._connect() as connection:
+        with self.lock, self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM executions WHERE request_key=?", (key,)
             ).fetchone()
@@ -178,7 +180,7 @@ class PrimitiveStore:
 
     def get(self, execution_id: str) -> dict[str, object] | None:
         """Read one durable primitive execution."""
-        with self.lock, self._connect() as connection:
+        with self.lock, self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM executions WHERE execution_id=?", (execution_id,)
             ).fetchone()
@@ -186,7 +188,7 @@ class PrimitiveStore:
 
     def graph_state(self) -> tuple[dict[str, object], int]:
         """Read a detached graph and the number of applied primitives."""
-        with self.lock, self._connect() as connection:
+        with self.lock, self._connection() as connection:
             row = connection.execute("SELECT * FROM graph_state WHERE singleton=1").fetchone()
             if row is None:
                 raise IntegrationError("durable graph state is missing")
@@ -196,6 +198,12 @@ class PrimitiveStore:
         """Move an accepted execution to running."""
         self._transition(execution_id, "ACCEPTED", "RUNNING", "primitive started", None)
 
+    def cancel_before_execution(
+        self, execution_id: str, detail: str, outcome: dict[str, object]
+    ) -> None:
+        """Persist a terminal guard decision without mutating graph state or step count."""
+        self._transition(execution_id, "ACCEPTED", "CANCELLED", detail, outcome)
+
     def complete(
         self,
         execution_id: str,
@@ -204,7 +212,7 @@ class PrimitiveStore:
         outcome: dict[str, object],
     ) -> None:
         """Atomically commit the new graph and terminal local execution fact."""
-        with self.lock, self._connect() as connection:
+        with self.lock, self._connection() as connection:
             state = connection.execute(
                 "SELECT step_count FROM graph_state WHERE singleton=1"
             ).fetchone()
@@ -254,7 +262,7 @@ class PrimitiveStore:
         outcome: dict[str, object] | None,
     ) -> None:
         """Apply one guarded execution-only transition."""
-        with self.lock, self._connect() as connection:
+        with self.lock, self._connection() as connection:
             row = connection.execute(
                 "SELECT state FROM executions WHERE execution_id=?", (execution_id,)
             ).fetchone()
@@ -277,6 +285,16 @@ class PrimitiveStore:
         connection = sqlite3.connect(str(self.database), timeout=30.0)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @contextlib.contextmanager
+    def _connection(self) -> Generator[sqlite3.Connection]:
+        """Commit or roll back one transaction and always release its file handle."""
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _decode(row: sqlite3.Row) -> dict[str, object]:
@@ -362,8 +380,28 @@ class CoherentPrimitiveAdapter:
     def _execute(self, execution_id: str, invocation: PrimitiveInvocation) -> None:
         """Validate one current official action, apply it, and save raw evidence."""
         try:
-            self.store.mark_running(execution_id)
             graph, step_count = self.store.graph_state()
+            goal = goal_status(self.config.task_data, graph)
+            if goal["passed"]:
+                guard_outcome: dict[str, object] = {
+                    "guard": "official-goal-already-satisfied",
+                    "primitive_executed": False,
+                    "step_count_unchanged": step_count,
+                    "goal": goal,
+                }
+                self.config.evidence_dir.mkdir(parents=True, exist_ok=True)
+                evidence = self.config.evidence_dir / f"goal-guard-{execution_id}.json"
+                evidence.write_text(
+                    json.dumps(guard_outcome, indent=2, sort_keys=True), encoding="utf-8"
+                )
+                guard_outcome["evidence_file"] = str(evidence)
+                self.store.cancel_before_execution(
+                    execution_id,
+                    "official task goal already satisfied; overshoot primitive was not executed",
+                    guard_outcome,
+                )
+                return
+            self.store.mark_running(execution_id)
             parameters = invocation.parameters
             if (
                 parameters["env"] != self.config.env_name
@@ -606,9 +644,11 @@ def _available_actions(
     actions: list[str] = []
 
     def unary(verb: str, item: dict[str, object]) -> str:
+        """Render one canonical single-target COHERENT primitive."""
         return f"[{verb}] <{item['class_name']}>({item['id']})"
 
     def binary(verb: str, item: dict[str, object], target: dict[str, object]) -> str:
+        """Render one canonical placement primitive with its relation word."""
         separator = " into " if verb == "putinto" else " on "
         return (
             f"[{verb}] <{item['class_name']}>({item['id']}){separator}"
@@ -634,14 +674,12 @@ def _available_actions(
             item_states = cast(list[object], item["states"])
             if held is None:
                 if (
-                    ("CONTAINERS" in properties or item.get("class_name") == "door")
-                    and "CLOSED" in item_states
-                ):
+                    "CONTAINERS" in properties or item.get("class_name") == "door"
+                ) and "CLOSED" in item_states:
                     actions.append(unary("open", item))
                 if (
-                    ("CONTAINERS" in properties or item.get("class_name") == "door")
-                    and "OPEN" in item_states
-                ):
+                    "CONTAINERS" in properties or item.get("class_name") == "door"
+                ) and "OPEN" in item_states:
                     actions.append(unary("close", item))
                 if "GRABABLE" in properties:
                     actions.append(unary("grab", item))
