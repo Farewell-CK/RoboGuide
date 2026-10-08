@@ -84,6 +84,11 @@ def _arguments() -> argparse.Namespace:
         help="CrabAgent backends only: natural-objective (Protocol B) or entity-grounded",
     )
     parser.add_argument(
+        "--enable-relocation",
+        action="store_true",
+        help="opt in only when loaded EMOS action/skill readiness proves object relocation support",
+    )
+    parser.add_argument(
         "--evidence-dir",
         type=Path,
         default=None,
@@ -197,6 +202,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         reset_route_support=arguments.reset_route_support,
         reset_route_geometry=arguments.reset_route_geometry,
         retain_stopped_session=arguments.retain_stopped_session,
+        enable_relocation=arguments.enable_relocation,
         progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
@@ -243,6 +249,11 @@ def main() -> None:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
+    if arguments.enable_relocation and arguments.backend not in {
+        "emos-crabagent",
+        "shared-emos-stage2",
+    }:
+        raise SystemExit("relocation readiness requires an EMOS Stage2 backend")
     if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
         raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
     if arguments.step_aware_navmesh and not arguments.goal_region_navigation:
@@ -285,6 +296,7 @@ def main() -> None:
             evidence_dir=arguments.evidence_dir,
             run_id=arguments.run_id,
             goal_region_navigation=arguments.goal_region_navigation,
+            enable_relocation=arguments.enable_relocation,
         )
         backend_class: type = CrabAgentMobilityBackend
     else:
