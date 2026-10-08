@@ -42,6 +42,7 @@ from .model import (
     CanonicalInvocation,
     CanonicalMobilityInvocation,
     IntegrationError,
+    canonical_operation_from_route,
     parse_canonical_invocation,
 )
 from .navigation_preparation import NavigationPreparationFailure
@@ -1346,15 +1347,24 @@ class NodeEndpoint:
         """Report shared-world health for this endpoint."""
         return self._coordinator.health()
 
-    def readiness(self) -> dict[str, object]:
+    def readiness(self, operation: str | None = None) -> dict[str, object]:
         """Report exact operation readiness for this endpoint."""
         healthy = self._coordinator.runtime_ready()
         operations = self._coordinator.supported_operations()
+        requested = (
+            canonical_operation_from_route(operation, operations) if operation is not None else None
+        )
+        supported = requested is None or requested in operations
+        detail = self._coordinator.readiness_detail()
+        if requested is not None and not supported:
+            detail = f"operation {operation!r} is not supported by this shared-world endpoint"
         return {
-            "detail": self._coordinator.readiness_detail(),
-            "operation": operations[0] if operations else None,
+            "detail": detail,
+            "operation": requested
+            if requested is not None
+            else (operations[0] if operations else None),
             "operations": list(operations),
-            "state": "READY" if healthy else "UNAVAILABLE",
+            "state": "READY" if healthy and supported else "UNAVAILABLE",
         }
 
     def accept(self, request: object) -> dict[str, object]:

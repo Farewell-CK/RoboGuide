@@ -18,6 +18,20 @@ RELOCATION_OPERATION = "object.relocate@v1"
 EXECUTION_SESSION_SCHEMA = "roboguide.execution-session/v0.1"
 
 
+def canonical_operation_from_route(
+    route_operation: str, supported_operations: tuple[str, ...]
+) -> str:
+    """Resolve a legacy readiness route to one exact canonical operation identity."""
+    if route_operation in supported_operations:
+        return route_operation
+    candidates = tuple(
+        operation
+        for operation in supported_operations
+        if operation.rsplit("@", 1)[0] == route_operation
+    )
+    return candidates[0] if len(candidates) == 1 else route_operation
+
+
 class IntegrationError(RuntimeError):
     """Reports a closed-boundary invocation or local execution failure."""
 

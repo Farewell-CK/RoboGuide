@@ -251,6 +251,25 @@ def test_initialization_failure_closes_backend(tmp_path: Path) -> None:
     assert backend.closed
 
 
+def test_readiness_is_scoped_to_the_requested_operation(tmp_path: Path) -> None:
+    """An unsupported capability route cannot inherit readiness from navigation."""
+    adapter, backend = _adapter(tmp_path)
+    try:
+        navigation = adapter.readiness("mobility.navigate@v1")
+        legacy_route = adapter.readiness("mobility.navigate")
+        relocation = adapter.readiness("object.relocate@v1")
+        assert navigation["state"] == "READY"
+        assert navigation["operation"] == "mobility.navigate@v1"
+        assert legacy_route["state"] == "READY"
+        assert legacy_route["operation"] == "mobility.navigate@v1"
+        assert relocation["state"] == "UNAVAILABLE"
+        assert relocation["operation"] == "object.relocate@v1"
+        assert relocation["operations"] == ["mobility.navigate@v1"]
+        assert "not supported" in str(relocation["detail"])
+    finally:
+        adapter.close()
+
+
 def test_navigation_backend_rejects_relocation_before_acceptance(tmp_path: Path) -> None:
     """An endpoint advertises only navigation and refuses relocation before queueing work."""
     adapter, backend = _adapter(tmp_path)

@@ -7,6 +7,7 @@ import logging
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from .model import IntegrationError
 
@@ -20,8 +21,8 @@ class WorkflowAdapter(Protocol):
     def health(self) -> dict[str, object]:
         """Report process-local backend health."""
 
-    def readiness(self) -> dict[str, object]:
-        """Report exact operation readiness."""
+    def readiness(self, operation: str | None = None) -> dict[str, object]:
+        """Report exact operation readiness, optionally scoped to one route identity."""
 
     def accept(self, request: object) -> dict[str, object]:
         """Durably accept one exact invocation."""
@@ -69,8 +70,13 @@ class HabitatBridgeHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/executions/recovery-support":
             self._respond(HTTPStatus.OK, self.server.adapter.recovery_support())
             return
-        if self.path.startswith("/v1/capabilities/"):
-            self._respond(HTTPStatus.OK, self.server.adapter.readiness())
+        path = urlsplit(self.path).path
+        if path.startswith("/v1/capabilities/"):
+            operation = path.removeprefix("/v1/capabilities/")
+            if not operation or "/" in operation:
+                self._respond(HTTPStatus.NOT_FOUND, {"error": "capability route is invalid"})
+                return
+            self._respond(HTTPStatus.OK, self.server.adapter.readiness(operation))
             return
         self._respond(HTTPStatus.NOT_FOUND, {"error": "route not found"})
 

@@ -1837,6 +1837,38 @@ def _http_post(server: HabitatBridgeServer, path: str, body: object) -> dict[str
     return cast(dict[str, Any], value)
 
 
+def _http_get(server: HabitatBridgeServer, path: str) -> dict[str, Any]:
+    """Read one capability route through the actual loopback HTTP boundary."""
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{server.server_address[1]}{path}", timeout=2
+    ) as response:
+        value: Any = json.load(response)
+    assert isinstance(value, dict)
+    return cast(dict[str, Any], value)
+
+
+def test_http_capability_route_preserves_exact_operation_identity(tmp_path: Path) -> None:
+    """The HTTP path identity is checked before readiness can be reported as READY."""
+    runtime, coordinator, endpoint_a, _, _ = _world(tmp_path)
+    server = HabitatBridgeServer(("127.0.0.1", 0), endpoint_a)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        supported = _http_get(server, "/v1/capabilities/mobility.navigate@v1")
+        legacy_route = _http_get(server, "/v1/capabilities/mobility.navigate")
+        unsupported = _http_get(server, "/v1/capabilities/object.relocate@v1")
+        assert supported["state"] == "READY"
+        assert supported["operation"] == "mobility.navigate@v1"
+        assert legacy_route["state"] == "READY"
+        assert legacy_route["operation"] == "mobility.navigate@v1"
+        assert unsupported["state"] == "UNAVAILABLE"
+        assert unsupported["operation"] == "object.relocate@v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        coordinator.shutdown()
+
+
 def test_http_cancel_receipt_precedes_real_group_stop_and_fresh_continuation(
     tmp_path: Path,
 ) -> None:
@@ -2648,6 +2680,23 @@ def test_shared_world_readiness_reports_runtime_operations(tmp_path: Path) -> No
             "mobility.navigate@v1",
             "mobility.move@v1",
         ]
+    finally:
+        coordinator.shutdown()
+
+
+def test_shared_world_readiness_is_scoped_to_requested_operation(tmp_path: Path) -> None:
+    """Shared-world readiness cannot claim an unsupported relocation operation."""
+    runtime, coordinator, endpoint_a, _, _ = _world(tmp_path)
+    try:
+        relocation = endpoint_a.readiness("object.relocate@v1")
+        assert relocation["state"] == "UNAVAILABLE"
+        assert relocation["operation"] == "object.relocate@v1"
+        assert relocation["operations"] == [
+            "mobility.navigate@v1",
+            "mobility.move@v1",
+        ]
+        assert "not supported" in str(relocation["detail"])
+        assert runtime.calls == 0
     finally:
         coordinator.shutdown()
 
