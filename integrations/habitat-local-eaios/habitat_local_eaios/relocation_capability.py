@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 RELOCATION_READINESS_PROFILE = "roboguide.habitat-relocation-readiness/v0.1"
 _REQUIRED_TOOLS = frozenset({"nav_to_obj", "pick", "place"})
-_REQUIRED_SKILLS = frozenset({"nav_to_obj", "pick", "place"})
+_REQUIRED_SKILLS = frozenset({"nav_to_obj", "pick", "place", "wait"})
 
 
 def _action_name(action: Any) -> str | None:
@@ -21,14 +21,26 @@ def _action_name(action: Any) -> str | None:
 
 
 def _skill_names(policy: Any) -> set[str]:
-    """Read declared policy skill names from either of EMOS' stable containers."""
-    names: set[str] = set()
-    index_names = getattr(policy, "_idx_to_name", None)
-    if isinstance(index_names, Sequence) and not isinstance(index_names, (str, bytes)):
-        names.update(name for name in index_names if isinstance(name, str))
+    """Check configured names against actual instantiated, observable EMOS skills."""
     skills = getattr(policy, "_skills", None)
-    if isinstance(skills, dict):
-        names.update(name for name in skills if isinstance(name, str))
+    if not isinstance(skills, Mapping):
+        return set()
+    index_names = getattr(policy, "_idx_to_name", None)
+    if isinstance(index_names, Mapping):
+        declarations = list(index_names.items())
+    elif isinstance(index_names, Sequence) and not isinstance(index_names, (str, bytes)):
+        declarations = list(enumerate(index_names))
+    else:
+        declarations = [(name, name) for name in skills if isinstance(name, str)]
+    names: set[str] = set()
+    for index, name in declarations:
+        if not isinstance(name, str) or not name:
+            continue
+        skill = skills.get(index, skills.get(name))
+        if callable(getattr(skill, "should_terminate", None)) and callable(
+            getattr(skill, "_is_skill_done", None)
+        ):
+            names.add(name)
     return names
 
 
@@ -89,6 +101,6 @@ def inspect_relocation_capability(policies: Sequence[Any]) -> RelocationCapabili
         )
     return RelocationCapabilityEvidence(
         True,
-        "loaded EMOS policies expose the required relocation tools and skills",
+        "loaded EMOS policies expose relocation tools and instantiated observable skills",
         len(policies),
     )

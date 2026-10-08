@@ -309,12 +309,9 @@ class CanonicalRelocationInvocation:
         ):
             raise IntegrationError("relocation resource_ids are unavailable")
         resources = raw_resources
-        raw_session = invocation["execution_session"]
-        session = (
-            ExecutionSessionMetadata.from_json(raw_session, mission_id, group_id, task_id, role_id)
-            if raw_session is not None
-            else None
-        )
+        session = invocation["execution_session"]
+        if session is not None and not isinstance(session, ExecutionSessionMetadata):
+            raise IntegrationError("validated relocation execution session is unavailable")
         raw_attempt_id = invocation["attempt_id"]
         attempt_id = (
             _non_empty_string(raw_attempt_id, "attempt_id") if raw_attempt_id is not None else None

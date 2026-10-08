@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from copy import deepcopy
@@ -349,3 +350,54 @@ def test_relocation_phase_advances_only_from_observed_skill_completion() -> None
     finally:
         restore()
         feedback.close()
+
+
+def _session_request() -> dict[str, Any]:
+    """Freeze exact accepted-plan topology beside the existing relocation request."""
+    request = _request()
+    value = request["invocation"]
+    session = {
+        "schema_version": "roboguide.execution-session/v0.1",
+        "mission_id": value["mission_id"],
+        "group_id": value["group_id"],
+        "slots": [
+            {
+                "task_id": value["task_id"],
+                "role_id": value["role_id"],
+                "actor_id": "actor",
+                "dependencies": [],
+                "independent": True,
+            }
+        ],
+    }
+    encoded = json.dumps(
+        session, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    session["digest"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    value["execution_session"] = session
+    return request
+
+
+def test_relocation_with_execution_session_parses_and_round_trips() -> None:
+    """The common parser's validated session is retained without treating it as raw JSON again."""
+    request = _session_request()
+    invocation = CanonicalRelocationInvocation.from_request(request)
+    assert invocation.execution_session is not None
+    assert invocation.execution_session.topology() == "single_actor_sequential"
+    assert invocation.as_dict() == request["invocation"]
+    assert (
+        CanonicalRelocationInvocation.from_request({"invocation": invocation.as_dict()})
+        == invocation
+    )
+
+
+@pytest.mark.parametrize("mutation", ["digest", "mission_id", "group_id", "task_id", "role_id"])
+def test_relocation_session_validation_remains_fail_closed(mutation: str) -> None:
+    """Reusing validated metadata never bypasses exact topology identity or digest checks."""
+    request = _session_request()
+    if mutation == "digest":
+        request["invocation"]["execution_session"]["digest"] = "sha256:" + "0" * 64
+    else:
+        request["invocation"][mutation] = "different-identity"
+    with pytest.raises(IntegrationError):
+        CanonicalRelocationInvocation.from_request(request)
