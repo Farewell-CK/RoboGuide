@@ -379,7 +379,8 @@ class CanonicalRelocationInvocation:
         return hashlib.sha256(encoded).hexdigest()
 
 
-CanonicalInvocation = CanonicalMobilityInvocation | CanonicalRelocationInvocation
+# This alias is evaluated at import, including inside the Python 3.9 Habitat worker.
+CanonicalInvocation = Union[CanonicalMobilityInvocation, CanonicalRelocationInvocation]  # noqa: UP007
 
 
 def parse_canonical_invocation(request: object) -> CanonicalInvocation:
