@@ -49,6 +49,13 @@ from .model import (
 from .navigation_preparation import NavigationPreparationFailure
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
+from .relocation_deployment import load_relocation_profile, verify_loaded_robots
+from .relocation_start import (
+    admit_relocation_source,
+    build_relocation_start,
+    planning_object_sources,
+    validate_relocation_start,
+)
 from .reset_route_support import build_reset_route_support
 from .retained_session import MAX_CONTINUATIONS, RetainedWorldSession, claim_retained_world
 from .semantic_evidence import build_authoritative_semantic_evidence
@@ -86,12 +93,22 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         )
         self._prepared_observations: Any | None = None
         self._reset_started = False
+        self._initialization_complete = False
+        self._relocation_start: dict[str, Any] | None = None
+        self._relocation_semantic: dict[str, Any] | None = None
         self._pair_session: RetainedWorldSession | None = None
         self._serial_session: RetainedWorldSession | None = None
 
     def supported_operations(self) -> tuple[str, ...]:
         """Advertise opted-in relocation only after actual Stage2 capability validation."""
         self._validate_relocation_profile()
+        if bool(getattr(self._config, "enable_relocation", False)):
+            snapshot = getattr(self, "_relocation_start", None)
+            semantic = getattr(self, "_relocation_semantic", None)
+            if snapshot is None or semantic is None:
+                raise IntegrationError("relocation reset-source readiness is unavailable")
+            validate_relocation_start(snapshot, semantic)
+            self._require_initialized()
         return super().supported_operations()
 
     def _validate_relocation_profile(self) -> None:
@@ -109,9 +126,17 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
 
     def initialize(self) -> None:
         """Reset once, then publish evidence from that same world before readiness."""
-        if getattr(self, "_prepared_observations", None) is not None:
+        if getattr(self, "_initialization_complete", False):
             return
+        if getattr(self, "_reset_started", False):
+            raise IntegrationError("shared-world initialization already reset and cannot restart")
         self._validate_relocation_profile()
+        relocation_profile = None
+        if bool(getattr(self._config, "enable_relocation", False)):
+            path = getattr(self._config, "relocation_profile_path", None)
+            if path is None:
+                raise IntegrationError("shared relocation needs a frozen Node registration profile")
+            relocation_profile = load_relocation_profile(path)
         super().initialize()
         _, habitat_env, _, _ = self._require_initialized()
         config = self._config
@@ -138,6 +163,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         "profiles": [profile.as_dict() for profile in config.spatial_capabilities],
                     },
                 )
+            if relocation_profile is not None:
+                verify_loaded_robots(relocation_profile, habitat_env, self._agent_ids)
             self._prepare_reset()
             document = build_authoritative_semantic_evidence(
                 habitat_env,
@@ -148,12 +175,31 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             )
             self._write_json("authoritative-semantic-evidence.json", document)
             self._write_json("task-verifier-source.json", build_task_verifier_source(document))
+            object_sources = None
+            if relocation_profile is not None:
+                path = self._config.relocation_profile_path
+                if path is None or load_relocation_profile(path) != relocation_profile:
+                    raise IntegrationError("relocation registration changed during reset")
+                self._write_json("relocation-registration-profile-used.json", relocation_profile)
+                source_snapshot = build_relocation_start(
+                    habitat_env,
+                    document,
+                    seed=self._config.seed,
+                    registration_digest=relocation_profile["digest"],
+                    agent_ids=self._agent_ids,
+                )
+                # Preserve incomplete observations before failing readiness.
+                self._write_json("relocation-episode-start.json", source_snapshot)
+                object_sources = planning_object_sources(source_snapshot, document)
+                self._relocation_start = source_snapshot
+                self._relocation_semantic = document
             planning_document = build_authoritative_planning_world_evidence(
                 habitat_env,
                 run_id=getattr(self._config, "run_id", ""),
                 episode_id=self._config.episode_id,
                 episode=self._episode,
                 reset_goal_geometry=True,
+                object_sources=object_sources,
             )
             self._write_json("authoritative-planning-world-evidence.json", planning_document)
             if (
@@ -179,7 +225,10 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 self._write_json("preassignment-feasibility.json", snapshot)
                 if config.reset_route_support:
                     self._record_reset_route_support(habitat_env, document, snapshot)
+            self._initialization_complete = True
         except Exception as error:
+            self._relocation_start = None
+            self._relocation_semantic = None
             if getattr(self, "_reset_started", False):
                 self._record_terminal_diagnostics(
                     habitat_env, 0, "execution_exception:initialization"
@@ -189,6 +238,18 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             except Exception:  # noqa: BLE001 - preserve the original initialization failure
                 _LOG.exception("shared-world cleanup failed after initialization")
             raise IntegrationError(f"shared-world initialization failed: {error}") from error
+
+    def _admit_relocation_source(
+        self, agent_id: int, invocation: CanonicalInvocation, habitat_env: Any
+    ) -> None:
+        """Reject ungrounded or stale relocation sources before any assigned policy call."""
+        if not isinstance(invocation, CanonicalRelocationInvocation):
+            return
+        snapshot = getattr(self, "_relocation_start", None)
+        semantic = getattr(self, "_relocation_semantic", None)
+        if snapshot is None or semantic is None:
+            raise IntegrationError("relocation source evidence is unavailable")
+        admit_relocation_source(habitat_env, invocation, agent_id, snapshot, semantic)
 
     def _record_reset_route_support(
         self, habitat_env: Any, semantic: dict[str, Any], preassignment: dict[str, Any]
@@ -303,6 +364,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 raise IntegrationError(
                     "serial session cannot switch physical agent or resume an ended episode"
                 )
+            phase = "relocation_source_admission"
+            self._admit_relocation_source(agent_id, invocation, habitat_env)
             phase = "serial_policy_loop"
             self._config = replace(
                 original_config,
@@ -500,6 +563,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
             self._write_text("scene_description.txt", str(text_context["scene_description"]))
             setup_phase = "spatial_feasibility"
             self._admit_pair_spatial_feasibility(invocations, habitat_env)
+            setup_phase = "relocation_source_admission"
+            for agent_id, invocation in invocations.items():
+                self._admit_relocation_source(agent_id, invocation, habitat_env)
             setup_phase = "task_context"
             for agent_id in agent_ids:
                 self._write_text(

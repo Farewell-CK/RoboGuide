@@ -1,0 +1,46 @@
+{
+  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "authority": "deployment-owned",
+  "identity": {
+    "profile_id": "shared-world-integrated-relocation",
+    "revision": "relocation-v1",
+    "source": "deployment://shared-world-relocation"
+  },
+  "capability_classes": [
+    {
+      "id": "integrated-single-floor-relocator",
+      "description": "Abstract single-floor mobility with locally observed integrated object relocation; payload limits remain unknown.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        },
+        {
+          "contract": {
+            "namespace": "object",
+            "name": "relocate",
+            "version": "v1"
+          },
+          "attributes": {}
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:da97f0c211605af3640bb7b1c52f7a6bab52371fbdf581f830701667aad151f8"
+}

@@ -202,8 +202,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   of one object, retained manipulation continuation and any_at-specific goal-region profiles
   fail explicitly. Navigation-only floor/progress evidence remains unknown for relocation;
   declared source identity does not prove actual source placement. Local completion, official
-  PDDL, Task satisfaction and Formal admission stay separate. Task3 registration, episode-start
-  source evidence and real physical preflight remain pending. See
+  PDDL, Task satisfaction and Formal admission stay separate. Task3 registration and episode-start
+  source evidence are implemented and offline-tested; real physical preflight remains pending. See
   `docs/extensions/habitat-relocation-profile.md`; no Core contract or vendor source is changed.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected

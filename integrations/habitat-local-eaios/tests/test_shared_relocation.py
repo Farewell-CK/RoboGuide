@@ -37,6 +37,7 @@ from habitat_local_eaios.task_verifier import (  # noqa: E402
     build_task_verifier_verdict,
 )
 from test_relocation_contract import _FakeModel  # noqa: E402
+from test_relocation_start import relocation_snapshot, relocation_world, source_for  # noqa: E402
 from test_shared_world import (  # noqa: E402
     ContractLoopHarness,
     FakeTensor,
@@ -62,7 +63,7 @@ def _request(index: int, *, object_ref: str | None = None) -> dict[str, Any]:
             "objective": "Relocate the specified object to its destination.",
             "parameters": {
                 "object": object_ref or f"object:{index}",
-                "source": f"source:{index}",
+                "source": source_for(index),
                 "destination": f"destination:{index}",
             },
             "resource_ids": [f"slot-{index}"],
@@ -270,20 +271,8 @@ class RelocationRuntime(ContractLoopHarness):
         )
         self._actor = actor
         self._gym_env = gym
-        self._habitat_env = SimpleNamespace(
-            episodes=[],
-            episode_over=False,
-            get_metrics=lambda: {"pddl_success": False},
-            current_episode=SimpleNamespace(episode_id="offline", scene_id="scene"),
-            task=SimpleNamespace(
-                get_task_text_context=lambda: {"scene_description": "scene"}, actions={}
-            ),
-            sim=SimpleNamespace(
-                get_agent_data=lambda agent_id: SimpleNamespace(
-                    articulated_agent=SimpleNamespace(base_pos=(float(agent_id), 0.0, 0.0))
-                )
-            ),
-        )
+        self._habitat_env, self._relocation_semantic = relocation_world(tmp_path)
+        self._relocation_start = relocation_snapshot(self._habitat_env, self._relocation_semantic)
         self._agent_access = SimpleNamespace(masks_shape=(1,))
         self._episode = object()
         self._stage2_feedback = None
@@ -291,6 +280,7 @@ class RelocationRuntime(ContractLoopHarness):
             actor._active_policies
         ).as_dict()
         self._prepare_reset()
+        self._initialization_complete = True
 
     def _current_skills(self, actor: Any) -> list[str]:
         """Read the existing selected skill identity without issuing another action."""
@@ -506,7 +496,10 @@ def test_endpoint_pair_dispatch_preserves_relocation_identity(tmp_path: Path) ->
             .splitlines()
         ]
         assert all(row["operation"] == "object.relocate@v1" for row in arrivals)
-        assert [row["parameters"]["source"] for row in arrivals] == ["source:0", "source:1"]
+        assert [row["parameters"]["source"] for row in arrivals] == [
+            source_for(0),
+            source_for(1),
+        ]
         assert gym.resets == 1 and actor.calls == 6
     finally:
         coordinator.shutdown()
@@ -720,3 +713,23 @@ def test_relocation_goal_region_extension_is_rejected_before_execution(tmp_path:
     with pytest.raises(IntegrationError, match="any_at goal-region"):
         runtime.execute_pair(_pair_invocations(), lambda: False, lambda *_: None)
     assert gym.steps == actor.calls == 0
+
+
+@pytest.mark.parametrize("serial", [False, True])
+def test_ungrounded_source_refused_before_actor_or_step(tmp_path: Path, serial: bool) -> None:
+    """An exact-target guard cannot hide a false canonical source in either execution topology."""
+    actor, gym = RelocationActor(), RelocationGym()
+    runtime = RelocationRuntime(tmp_path, actor, gym)
+    request = _request(0)
+    request["invocation"]["parameters"]["source"] = "invented-source"
+    value = CanonicalRelocationInvocation.from_request(request)
+    with pytest.raises(IntegrationError, match="source is not"):
+        if serial:
+            runtime.execute_serial(value, 0, lambda: False, lambda *_: None, False)
+        else:
+            values = _pair_invocations()
+            values[0] = value
+            runtime.execute_pair(values, lambda: False, lambda *_: None)
+    assert actor.calls == gym.steps == 0
+    assert gym.resets == 1
+    assert cast(RecordingDiagnostics, runtime._diagnostics).terminals

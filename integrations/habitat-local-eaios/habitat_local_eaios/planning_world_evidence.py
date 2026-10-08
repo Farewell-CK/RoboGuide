@@ -12,6 +12,7 @@ from .semantic_evidence import _dataset_identity, _expression
 
 _SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.1"
 _RESET_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.2"
+_OBJECT_SOURCE_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.3"
 _SOURCE_REVISION = "habitat-local-eaios-episode-static-scene/v0.1"
 _RESET_SOURCE_REVISION = "habitat-local-eaios-reset-goal-geometry/v0.2"
 
@@ -27,6 +28,7 @@ def build_authoritative_planning_world_evidence(
     episode_id: str,
     episode: Any | None = None,
     reset_goal_geometry: bool = False,
+    object_sources: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Read selected-episode facts and optional already-reset goal geometry.
 
@@ -34,6 +36,8 @@ def build_authoritative_planning_world_evidence(
     This builder neither resets nor steps the simulator. Missing geometric
     evidence remains an explicit gap and never becomes a guessed witness.
     """
+    if object_sources is not None and not reset_goal_geometry:
+        raise PlanningWorldEvidenceBuildError("object sources require the already-reset world")
     if not run_id.strip() or not episode_id.strip():
         raise PlanningWorldEvidenceBuildError("run_id and episode_id must be nonblank")
     selected = episode if episode is not None else getattr(environment, "current_episode", None)
@@ -70,7 +74,13 @@ def build_authoritative_planning_world_evidence(
     goal_witnesses = _reset_goal_witnesses(environment, gaps) if reset_goal_geometry else []
     gaps = list({(item["code"], item["detail"]): item for item in gaps}.values())
     body: dict[str, Any] = {
-        "schema_version": _RESET_SCHEMA if reset_goal_geometry else _SCHEMA,
+        "schema_version": (
+            _OBJECT_SOURCE_SCHEMA
+            if object_sources is not None
+            else _RESET_SCHEMA
+            if reset_goal_geometry
+            else _SCHEMA
+        ),
         "authority": "environment-authoritative",
         "identity": {
             "run_id": run_id,
@@ -95,6 +105,9 @@ def build_authoritative_planning_world_evidence(
     }
     if reset_goal_geometry:
         body["goal_witnesses"] = goal_witnesses
+    if object_sources is not None:
+        body["identity"]["source_revision"] = "habitat-local-eaios-reset-object-locations/v0.3"
+        body["object_sources"] = [dict(source) for source in object_sources]
     return {**body, "digest": _digest(body)}
 
 

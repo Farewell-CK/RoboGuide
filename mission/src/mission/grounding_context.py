@@ -701,6 +701,15 @@ def _require_matching_world_identity(
         raise GroundingContextError(
             "planning world dataset digest does not match semantic evidence"
         )
+    if planning_world_evidence.object_sources:
+        catalog = semantic_evidence.world_context.get("entity_catalog")
+        if not isinstance(catalog, list) or any(
+            source.object_entity_id not in catalog or source.source_entity_id in catalog
+            for source in planning_world_evidence.object_sources
+        ):
+            raise GroundingContextError(
+                "planning object source is not bound to the semantic entity catalog"
+            )
     if planning_world_evidence.goal_witnesses:
         goal = semantic_evidence.goal
         catalog = semantic_evidence.world_context.get("entity_catalog")

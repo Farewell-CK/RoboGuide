@@ -46,6 +46,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     reset_route_geometry: bool = False
     retain_stopped_session: bool = False
     enable_relocation: bool = False
+    relocation_profile_path: Path | None = None
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""

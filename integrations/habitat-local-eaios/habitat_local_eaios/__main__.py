@@ -84,6 +84,12 @@ def _arguments() -> argparse.Namespace:
         help="CrabAgent backends only: natural-objective (Protocol B) or entity-grounded",
     )
     parser.add_argument(
+        "--relocation-profile",
+        type=Path,
+        default=None,
+        help="shared relocation: trusted frozen Node registration snapshot, verified before spawn",
+    )
+    parser.add_argument(
         "--enable-relocation",
         action="store_true",
         help="opt in only when loaded EMOS action/skill readiness proves object relocation support",
@@ -177,6 +183,10 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         raise SystemExit("the shared-emos-stage2 backend requires --evidence-dir")
     if arguments.spatial_profile is None:
         raise SystemExit("the shared-emos-stage2 backend requires --spatial-profile")
+    if arguments.enable_relocation and arguments.relocation_profile is None:
+        raise SystemExit("shared relocation requires --relocation-profile from actual Node configs")
+    if not arguments.enable_relocation and arguments.relocation_profile is not None:
+        raise SystemExit("--relocation-profile requires --enable-relocation")
     if arguments.agent_id == arguments.agent_b_id:
         raise SystemExit("shared-world endpoints must map to distinct Habitat agents")
     config = CrabAgentBackendConfig(
@@ -203,6 +213,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         reset_route_geometry=arguments.reset_route_geometry,
         retain_stopped_session=arguments.retain_stopped_session,
         enable_relocation=arguments.enable_relocation,
+        relocation_profile_path=arguments.relocation_profile,
         progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
@@ -249,11 +260,8 @@ def main() -> None:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
-    if arguments.enable_relocation and arguments.backend not in {
-        "emos-crabagent",
-        "shared-emos-stage2",
-    }:
-        raise SystemExit("relocation readiness requires an EMOS Stage2 backend")
+    if arguments.enable_relocation and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("relocation readiness requires the shared-emos-stage2 backend")
     if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
         raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
     if arguments.step_aware_navmesh and not arguments.goal_region_navigation:

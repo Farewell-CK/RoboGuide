@@ -13,7 +13,11 @@ from mission.models import JSONObject, JSONValue
 
 PLANNING_WORLD_EVIDENCE_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.1"
 RESET_PLANNING_WORLD_EVIDENCE_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.2"
+OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA = (
+    "roboguide.authoritative-planning-world-evidence/v0.3"
+)
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
+_INITIAL_LOCATION = re.compile(r"^initial-location:[a-f0-9]{64}$")
 
 
 class PlanningWorldEvidenceError(ValueError):
@@ -189,6 +193,55 @@ class PlanningGoalWitness:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanningObjectSource:
+    """Bind an object to an observed initial location, without claiming receptacle containment."""
+
+    object_entity_id: str
+    source_entity_id: str
+    evidence_digest: str
+
+    def __post_init__(self) -> None:
+        """Reject fabricated aliases, invalid evidence identities and empty references."""
+        _require_text(self.object_entity_id, "object_source.object_entity_id")
+        _require_text(self.source_entity_id, "object_source.source_entity_id")
+        if self.object_entity_id == self.source_entity_id:
+            raise PlanningWorldEvidenceError("an object cannot stand in for its source location")
+        if _INITIAL_LOCATION.fullmatch(self.source_entity_id) is None:
+            raise PlanningWorldEvidenceError(
+                "object source must be an environment-observed initial-location reference"
+            )
+        if (
+            not isinstance(self.evidence_digest, str)
+            or _DIGEST.fullmatch(self.evidence_digest) is None
+        ):
+            raise PlanningWorldEvidenceError("object source evidence digest is invalid")
+
+    def to_json(self) -> JSONObject:
+        """Expose exact semantic references and their initial-state evidence identity."""
+        return {
+            "object_entity_id": self.object_entity_id,
+            "source_entity_id": self.source_entity_id,
+            "evidence_digest": self.evidence_digest,
+            "basis": "observed-initial-location",
+        }
+
+    @classmethod
+    def from_json(cls, value: object, path: str) -> PlanningObjectSource:
+        """Restore a versioned source fact without accepting current-placement claims."""
+        item = _object(value, path)
+        _exact_keys(
+            item, {"object_entity_id", "source_entity_id", "evidence_digest", "basis"}, path
+        )
+        if item["basis"] != "observed-initial-location":
+            raise PlanningWorldEvidenceError("object source basis is unsupported")
+        return cls(
+            _text(item["object_entity_id"], f"{path}.object_entity_id"),
+            _text(item["source_entity_id"], f"{path}.source_entity_id"),
+            _text(item["evidence_digest"], f"{path}.evidence_digest"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AuthoritativePlanningWorldEvidence:
     """Freeze environment-owned spatial facts before a Mission is planned."""
 
@@ -204,6 +257,7 @@ class AuthoritativePlanningWorldEvidence:
     evidence_digest: str
     schema_version: str = PLANNING_WORLD_EVIDENCE_SCHEMA
     goal_witnesses: tuple[PlanningGoalWitness, ...] = ()
+    object_sources: tuple[PlanningObjectSource, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject malformed, ambiguous, or tampered environment facts."""
@@ -213,8 +267,17 @@ class AuthoritativePlanningWorldEvidence:
             not in {
                 PLANNING_WORLD_EVIDENCE_SCHEMA,
                 RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+                OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
             }
             or (self.schema_version == PLANNING_WORLD_EVIDENCE_SCHEMA and self.goal_witnesses)
+            or (
+                self.schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA
+                and not self.object_sources
+            )
+            or (
+                self.schema_version != OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA
+                and self.object_sources
+            )
         ):
             raise PlanningWorldEvidenceError("unsupported planning world evidence schema")
         for field, value in (
@@ -275,6 +338,20 @@ class AuthoritativePlanningWorldEvidence:
             != len(self.goal_witnesses)
         ):
             raise PlanningWorldEvidenceError("planning goal witnesses must be unique and ordered")
+        if (
+            not isinstance(self.object_sources, tuple)
+            or any(not isinstance(source, PlanningObjectSource) for source in self.object_sources)
+            or self.object_sources
+            != tuple(sorted(self.object_sources, key=lambda source: source.object_entity_id))
+            or len({source.object_entity_id for source in self.object_sources})
+            != len(self.object_sources)
+            or len({source.source_entity_id for source in self.object_sources})
+            != len(self.object_sources)
+            or len({source.evidence_digest for source in self.object_sources}) > 1
+        ):
+            raise PlanningWorldEvidenceError(
+                "object sources must be unique, ordered and from one snapshot"
+            )
         if _DIGEST.fullmatch(self.evidence_digest) is None:
             raise PlanningWorldEvidenceError("planning world evidence digest is invalid")
         if self.evidence_digest != _digest(self._body()):
@@ -297,6 +374,7 @@ class AuthoritativePlanningWorldEvidence:
         gaps: tuple[PlanningWorldGap, ...] = (),
         schema_version: str = PLANNING_WORLD_EVIDENCE_SCHEMA,
         goal_witnesses: tuple[PlanningGoalWitness, ...] = (),
+        object_sources: tuple[PlanningObjectSource, ...] = (),
     ) -> AuthoritativePlanningWorldEvidence:
         """Create one digest-bound spatial snapshot with deterministic ordering."""
         ordered_facts = tuple(sorted(facts, key=lambda item: item.entity_id))
@@ -314,6 +392,7 @@ class AuthoritativePlanningWorldEvidence:
         ordered_witnesses = tuple(
             sorted(goal_witnesses, key=lambda item: item.destination_entity_id)
         )
+        ordered_sources = tuple(sorted(object_sources, key=lambda item: item.object_entity_id))
         body: JSONObject = {
             "schema_version": schema_version,
             "authority": "environment-authoritative",
@@ -329,8 +408,13 @@ class AuthoritativePlanningWorldEvidence:
             "relations": [relation.to_json() for relation in ordered_relations],
             "gaps": [gap.to_json() for gap in ordered_gaps],
         }
-        if schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA:
+        if schema_version in {
+            RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+            OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
+        }:
             body["goal_witnesses"] = [witness.to_json() for witness in ordered_witnesses]
+        if schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA:
+            body["object_sources"] = [source.to_json() for source in ordered_sources]
         return cls(
             run_id=run_id,
             episode_id=episode_id,
@@ -344,6 +428,7 @@ class AuthoritativePlanningWorldEvidence:
             evidence_digest=_digest(body),
             schema_version=schema_version,
             goal_witnesses=ordered_witnesses,
+            object_sources=ordered_sources,
         )
 
     @classmethod
@@ -354,6 +439,7 @@ class AuthoritativePlanningWorldEvidence:
         if not isinstance(schema_version, str) or schema_version not in {
             PLANNING_WORLD_EVIDENCE_SCHEMA,
             RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+            OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
         }:
             raise PlanningWorldEvidenceError("unsupported planning world evidence schema")
         expected = {
@@ -365,8 +451,13 @@ class AuthoritativePlanningWorldEvidence:
             "gaps",
             "digest",
         }
-        if schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA:
+        if schema_version in {
+            RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+            OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
+        }:
             expected.add("goal_witnesses")
+        if schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA:
+            expected.add("object_sources")
         _exact_keys(
             item,
             expected,
@@ -406,7 +497,8 @@ class AuthoritativePlanningWorldEvidence:
                     _array(item["goal_witnesses"], "planning world goal_witnesses")
                 )
             )
-            if schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA
+            if schema_version
+            in {RESET_PLANNING_WORLD_EVIDENCE_SCHEMA, OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA}
             else ()
         )
         evidence = cls.create(
@@ -421,6 +513,14 @@ class AuthoritativePlanningWorldEvidence:
             gaps=gaps,
             schema_version=schema_version,
             goal_witnesses=goal_witnesses,
+            object_sources=tuple(
+                PlanningObjectSource.from_json(raw, f"planning world object_sources[{index}]")
+                for index, raw in enumerate(
+                    _array(item["object_sources"], "planning world object_sources")
+                )
+            )
+            if schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA
+            else (),
         )
         supplied_digest = _text(item["digest"], "planning world digest")
         if _DIGEST.fullmatch(supplied_digest) is None:
@@ -459,8 +559,13 @@ class AuthoritativePlanningWorldEvidence:
             "relations": [relation.to_json() for relation in self.relations],
             "gaps": [gap.to_json() for gap in self.gaps],
         }
-        if self.schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA:
+        if self.schema_version in {
+            RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+            OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
+        }:
             body["goal_witnesses"] = [witness.to_json() for witness in self.goal_witnesses]
+        if self.schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA:
+            body["object_sources"] = [source.to_json() for source in self.object_sources]
         return body
 
     def to_json(self) -> JSONObject:
@@ -489,7 +594,13 @@ def planning_world_review_payload(
         "gaps": [gap.to_json() for gap in evidence.gaps],
         **(
             {"goal_witnesses": [witness.to_json() for witness in evidence.goal_witnesses]}
-            if evidence.schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA
+            if evidence.schema_version
+            in {RESET_PLANNING_WORLD_EVIDENCE_SCHEMA, OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA}
+            else {}
+        ),
+        **(
+            {"object_sources": [source.to_json() for source in evidence.object_sources]}
+            if evidence.schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA
             else {}
         ),
         "guidance": {
@@ -497,8 +608,21 @@ def planning_world_review_payload(
             "facts_do_not_select_nodes_or_physical_entities": True,
             "unknown_world_facts_must_not_be_guessed": True,
             **(
+                {
+                    "source_references_name_observed_initial_locations": True,
+                    "initial_location_is_not_containment_or_current_placement": True,
+                    "relocation_uses_exact_supplied_source_reference": True,
+                }
+                if evidence.schema_version == OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA
+                else {}
+            ),
+            **(
                 {"goal_witness_is_snapshot_not_execution_guarantee": True}
-                if evidence.schema_version == RESET_PLANNING_WORLD_EVIDENCE_SCHEMA
+                if evidence.schema_version
+                in {
+                    RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
+                    OBJECT_SOURCE_PLANNING_WORLD_EVIDENCE_SCHEMA,
+                }
                 else {}
             ),
         },

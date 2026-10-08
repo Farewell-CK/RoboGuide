@@ -1,7 +1,8 @@
 # Habitat Local EAIOS 搬运操作执行 Profile
 
-本页记录已实现并经过离线验证的 adapter 路径。Task3 部署注册、实际初始物体来源证据和
-真实物理预检尚待完成，不能将本页或 deterministic tests 当作批量实验已就绪的证明。
+本页记录已实现并经过离线验证的 adapter 路径。Task3 部署注册和实际初始物体来源证据
+已经实现并通过 deterministic tests；真实物理预检尚待完成，不能将本页或测试当作批量
+实验已就绪的证明。
 
 ## Canonical What 与本地 How
 
@@ -103,9 +104,9 @@ flowchart LR
 child entry / parent relay；没有加载 Habitat 或调用 Provider。
 
 这些测试不能证明模型会稳定生成正确搬运序列、初始来源事实可靠、机器人能够完成抓放、
-官方联合目标成立或成功率提高。进入固定小规模预检前还需完成 Task3 的真实注册、冻结
-输入和 episode-start evidence 审查；保留原生 EMOS arm 与 controlled guard/feedback/idle
-之间的差异，不改动历史结果。
+官方联合目标成立或成功率提高。进入固定小规模预检前还需用实际部署文件生成并核对
+registration profile，审查冻结输入和 episode-start evidence，并取得真实物理预检授权；
+保留原生 EMOS arm 与 controlled guard/feedback/idle 之间的差异，不改动历史结果。
 
 运行期模块同时在部署的 Python 3.9.23 中验证了实际导入、canonical session round-trip、
 契约阶段转换和 CLI help；这不加载仿真。运行期 type alias 使用 `typing.Union`，不能依靠

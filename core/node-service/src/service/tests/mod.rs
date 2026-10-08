@@ -129,6 +129,62 @@ fn habitat_mobility_profiles_reach_registration_with_distinct_floor_support() {
     }
 }
 
+/// Proves the relocation deployment projects exact capability, capacity and readiness facts.
+#[test]
+fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limits() {
+    for suffix in ["a", "b"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../scenarios/e1-shared-world-relocation/node-{suffix}.toml"
+        ));
+        let catalog = crate::NodeServiceConfig::load_compiled(&path)
+            .expect("relocation deployment Node config compiles");
+        let relocation = catalog
+            .operations()
+            .get("object.relocate@v1")
+            .expect("integrated relocation is registered");
+        let mobility = catalog
+            .operations()
+            .get("mobility.move@v1")
+            .expect("mobility shares the simulator endpoint");
+        assert_eq!(
+            relocation.required_resources(),
+            mobility.required_resources()
+        );
+        assert_eq!(relocation.local_locks(), mobility.local_locks());
+        assert_eq!(relocation.required_resources().len(), 1);
+        let resource = catalog
+            .resources()
+            .get(relocation.required_resources().first().unwrap())
+            .expect("operation resource exists");
+        assert_eq!(resource.kind(), "space");
+        assert_eq!(resource.capacity(), 1);
+        for ready in [false, true] {
+            let registration = registration_from_readiness(
+                &catalog,
+                &BTreeMap::from([("object.relocate@v1".to_string(), ready)]),
+            );
+            let profile = registration
+                .capability_profiles
+                .iter()
+                .find(|profile| profile.contract == "object.relocate@v1")
+                .expect("relocation profile reaches Node Protocol v0.4");
+            assert_eq!(profile.kind, "transport");
+            assert_eq!(profile.ready, ready);
+            assert!(
+                profile.attributes.is_empty(),
+                "payload limits remain unknown"
+            );
+            assert!(registration.operation_support.iter().any(|support| {
+                support.operation.as_ref().is_some_and(|operation| {
+                    operation.namespace == "object"
+                        && operation.name == "relocate"
+                        && operation.version == "v1"
+                }) && support.local_system_id == profile.local_system_id
+            }));
+        }
+    }
+}
+
 /// Resolves one checked-in Distributed Spatial Memory scenario file from the crate root.
 fn spatial_scenario_path(file_name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

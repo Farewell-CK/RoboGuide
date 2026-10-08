@@ -576,8 +576,9 @@ Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGu
 接入原始 nav/pick/place 技能及 Guard，支持双 Actor 操作不同物体，或单 Actor 逐 Task
 复用同一次 reset。搬运导航完成不等于操作完成；原始 place 完成后才报告本地终态，随后
 转入原始 wait，停止该 endpoint 的进一步模型决策。本地 place 完成仍不证明官方目标
-成立。取消续跑和 `any_at` 专用 goal-region profile 不支持该操作组合；Task3 注册及真实
-物理预检仍待完成。见[当前搬运 Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。
+成立。取消续跑和 `any_at` 专用 goal-region profile 不支持该操作组合；Task3 注册和
+episode-start source evidence 已实现并通过离线验证；真实物理预检仍待完成。见[当前搬运
+Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。
 独立原生 EMOS 对照可显式使用
 `python -m habitat_local_eaios.native_reset_observer --evidence-dir <new-dir>
 --run-id <id> --episode-id <id> -- <原生 evaluator 参数>`，从原厂 environment factory
