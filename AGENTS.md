@@ -215,6 +215,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   exclusive resource requirements remain, and Control still checks current registration.
   The combined source digest fences restored candidate restrictions; v0.3 cannot enable
   relocation implicitly. See ADR-0071.
+  Controlled shared relocation obtains Stage2 robot types from that frozen profile only
+  after actual loaded-class verification; contradictory native resume identities reject.
+  Missing resumes remain explicit gaps, never synthesized capabilities (ADR-0072).
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

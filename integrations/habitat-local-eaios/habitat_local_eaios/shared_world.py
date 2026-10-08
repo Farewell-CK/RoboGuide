@@ -166,6 +166,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 )
             if relocation_profile is not None:
                 verify_loaded_robots(relocation_profile, habitat_env, self._agent_ids)
+                self._relocation_agent_identity = {
+                    "registration_profile_digest": relocation_profile["digest"],
+                    "robot_types": {
+                        f"agent_{record['agent_id']}": record["robot_type"]
+                        for record in relocation_profile["agents"]
+                    },
+                }
             self._prepare_reset()
             document = build_authoritative_semantic_evidence(
                 habitat_env,
@@ -1323,27 +1330,14 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         """Translate both committed assignments into EMOS Stage1's output type."""
         from habitat_mas.utils import AgentArguments  # type: ignore[import-not-found]
 
-        raw_resumes = text_context.get("robot_resume")
-        if not isinstance(raw_resumes, str):
-            raise IntegrationError("EMOS task context lacks robot_resume assignments")
-        try:
-            resumes = json.loads(raw_resumes)
-        except json.JSONDecodeError as error:
-            raise IntegrationError("EMOS robot_resume is not valid JSON") from error
-        if not isinstance(resumes, dict):
-            raise IntegrationError("EMOS robot_resume does not contain an object")
+        robot_types = self._assignment_robot_types(text_context)
         assigned: dict[str, Any] = {}
         expected_names = {f"agent_{agent_id}" for agent_id in self._agent_ids}
-        for agent_name, resume in resumes.items():
-            if not isinstance(agent_name, str) or not isinstance(resume, dict):
-                raise IntegrationError("EMOS robot_resume has invalid structure")
+        for agent_name, robot_type in robot_types.items():
             if agent_name not in expected_names:
                 raise IntegrationError(
                     f"shared world has no configured agent slot for {agent_name!r}"
                 )
-            robot_type = resume.get("robot_type")
-            if not isinstance(robot_type, str) or not robot_type:
-                raise IntegrationError("EMOS robot_resume lacks robot_type")
             try:
                 agent_index = int(agent_name.rsplit("_", 1)[-1])
             except ValueError as error:

@@ -137,6 +137,75 @@ def test_binding_rejects_missing_or_unknown_agent_slots(monkeypatch: pytest.Monk
         )
 
 
+@pytest.mark.parametrize("missing_resume", [False, True])
+def test_verified_deployment_identity_binds_slots_without_synthesizing_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_resume: bool
+) -> None:
+    """Verified loaded identities bind exact assignments when the vendor resume is incomplete."""
+    utils = types.ModuleType("habitat_mas.utils")
+    utils.AgentArguments = FakeAgentArguments  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "habitat_mas.utils", utils)
+    runtime = _runtime("entity-grounded")
+    runtime._config.evidence_dir = tmp_path
+    runtime._relocation_agent_identity = {
+        "registration_profile_digest": "sha256:" + "a" * 64,
+        "robot_types": {"agent_0": "FetchRobot", "agent_1": "StretchRobot"},
+    }
+    resumes = {"agent_0": {"robot_type": "FetchRobot"}}
+    if not missing_resume:
+        resumes["agent_1"] = {"robot_type": "StretchRobot"}
+    context = {"robot_resume": json.dumps(resumes)}
+    original = dict(context)
+    invocations = _invocations()
+    pair = runtime._pair_arguments(context, invocations)
+    for index, robot_type in enumerate(("FetchRobot", "StretchRobot")):
+        assert pair[f"agent_{index}"].values["robot_type"] == robot_type
+        assert (
+            pair[f"agent_{index}"].values["subtask_description"]
+            == f"Navigate to {invocations[index].destination}."
+        )
+    runtime._config.agent_id = 1
+    serial = runtime._assigned_arguments(context, invocations[1])
+    assert serial["agent_0"].values["subtask_description"] == "Nothing to do"
+    assert (
+        serial["agent_1"].values["subtask_description"]
+        == pair["agent_1"].values["subtask_description"]
+    )
+    evidence = json.loads((tmp_path / "stage2-agent-identity.json").read_text())
+    assert evidence["capability_resume_synthesized"] is False
+    assert evidence["unavailable_vendor_resume_agent_names"] == (
+        ["agent_1"] if missing_resume else []
+    )
+    assert (
+        evidence["registration_profile_digest"]
+        == runtime._relocation_agent_identity["registration_profile_digest"]
+    )
+    assert context == original
+
+
+@pytest.mark.parametrize(
+    "resume",
+    [
+        {"agent_0": {"robot_type": "OtherRobot"}},
+        {"agent_9": {"robot_type": "FetchRobot"}},
+        {"agent_0": {"robot_type": None}},
+    ],
+)
+def test_verified_deployment_identity_rejects_contradictory_vendor_identity(
+    tmp_path: Path, resume: dict[str, Any]
+) -> None:
+    """A present contradictory identity is never silently overridden by the deployment profile."""
+    runtime = _runtime("entity-grounded")
+    runtime._config.evidence_dir = tmp_path
+    runtime._relocation_agent_identity = {
+        "registration_profile_digest": "sha256:" + "a" * 64,
+        "robot_types": {"agent_0": "FetchRobot", "agent_1": "StretchRobot"},
+    }
+    with pytest.raises(IntegrationError, match="identity differs|lacks robot_type"):
+        runtime._assignment_robot_types({"robot_resume": json.dumps(resume)})
+    assert not (tmp_path / "stage2-agent-identity.json").exists()
+
+
 def test_natural_objective_exposes_canonical_destination_to_stage2(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

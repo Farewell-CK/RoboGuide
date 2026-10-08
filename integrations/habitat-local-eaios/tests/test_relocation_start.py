@@ -717,6 +717,13 @@ def test_shared_initialization_records_one_reset_before_ready(
         runtime.initialize()
         runtime.initialize()
         assert "object.relocate@v1" in runtime.supported_operations()
+        assert runtime._assignment_robot_types({"robot_resume": "{}"}) == {
+            "agent_0": "FetchRobot",
+            "agent_1": "StretchRobot",
+        }
+        identity = json.loads((runtime._evidence_dir() / "stage2-agent-identity.json").read_text())
+        assert identity["registration_profile_digest"] == profile["digest"]
+        assert identity["capability_resume_synthesized"] is False
         start = json.loads((runtime._evidence_dir() / "relocation-episode-start.json").read_text())
         assert start["registration_profile_digest"] == profile["digest"]
         matrix = json.loads(

@@ -585,6 +585,8 @@ Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。
 导航负面候选检查仍保留，不能用它替代搬运可达性判断。共享拓扑与资源保护继续生效，
 当前节点能力、资源承诺和 Task 满足权威保持不变，见
 [`ADR-0071`](docs/decisions/0071-operation-aware-reset-admission.md)。
+受控搬运的 Stage2 robot type 使用经过实际加载核验的注册来源；缺失的原生 resume 保持
+显式证据缺口，不补造能力描述，见 [`ADR-0072`](docs/decisions/0072-verified-stage2-agent-identity.md)。
 独立原生 EMOS 对照可显式使用
 `python -m habitat_local_eaios.native_reset_observer --evidence-dir <new-dir>
 --run-id <id> --episode-id <id> -- <原生 evaluator 参数>`，从原厂 environment factory

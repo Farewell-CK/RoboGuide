@@ -849,23 +849,10 @@ class EmosStage2Runtime:
         """Translate one committed assignment into EMOS Stage1's output type."""
         from habitat_mas.utils import AgentArguments  # type: ignore[import-not-found]
 
-        raw_resumes = text_context.get("robot_resume")
-        if not isinstance(raw_resumes, str):
-            raise IntegrationError("EMOS task context lacks robot_resume assignments")
-        try:
-            resumes = json.loads(raw_resumes)
-        except json.JSONDecodeError as error:
-            raise IntegrationError("EMOS robot_resume is not valid JSON") from error
-        if not isinstance(resumes, dict):
-            raise IntegrationError("EMOS robot_resume does not contain an object")
+        robot_types = self._assignment_robot_types(text_context)
         assigned: dict[str, Any] = {}
         target = f"agent_{self._config.agent_id}"
-        for agent_name, resume in resumes.items():
-            if not isinstance(agent_name, str) or not isinstance(resume, dict):
-                raise IntegrationError("EMOS robot_resume has invalid structure")
-            robot_type = resume.get("robot_type")
-            if not isinstance(robot_type, str) or not robot_type:
-                raise IntegrationError("EMOS robot_resume lacks robot_type")
+        for agent_name, robot_type in robot_types.items():
             assigned[agent_name] = AgentArguments(
                 robot_id=agent_name,
                 robot_type=robot_type,
@@ -878,6 +865,51 @@ class EmosStage2Runtime:
         if target not in assigned:
             raise IntegrationError(f"assigned EMOS agent {target!r} is unavailable")
         return assigned
+
+    def _assignment_robot_types(self, text_context: dict[str, Any]) -> dict[str, str]:
+        """Resolve Stage2 identity without inventing a missing vendor capability resume.
+
+        Navigation retains its original resume source. Explicit shared relocation
+        may use only the frozen Node profile already checked against constructed
+        Habitat robots. Present vendor identities must agree; missing resume
+        records remain visible gaps, not synthetic capability descriptions.
+        """
+        raw_resumes = text_context.get("robot_resume")
+        if not isinstance(raw_resumes, str):
+            raise IntegrationError("EMOS task context lacks robot_resume assignments")
+        try:
+            resumes = json.loads(raw_resumes)
+        except json.JSONDecodeError as error:
+            raise IntegrationError("EMOS robot_resume is not valid JSON") from error
+        if not isinstance(resumes, dict):
+            raise IntegrationError("EMOS robot_resume does not contain an object")
+        observed: dict[str, str] = {}
+        for agent_name, resume in resumes.items():
+            if not isinstance(agent_name, str) or not isinstance(resume, dict):
+                raise IntegrationError("EMOS robot_resume has invalid structure")
+            robot_type = resume.get("robot_type")
+            if not isinstance(robot_type, str) or not robot_type:
+                raise IntegrationError("EMOS robot_resume lacks robot_type")
+            observed[agent_name] = robot_type
+        admitted = getattr(self, "_relocation_agent_identity", None)
+        if admitted is None:
+            return observed
+        expected: dict[str, str] = dict(admitted["robot_types"])
+        if any(expected.get(name) != robot_type for name, robot_type in observed.items()):
+            raise IntegrationError("EMOS resume identity differs from the verified loaded robot")
+        self._write_json(
+            "stage2-agent-identity.json",
+            {
+                "schema_version": "roboguide.stage2-agent-identity/v0.1",
+                "identity_basis": "loaded-robot-verified-frozen-node-profile",
+                "registration_profile_digest": admitted["registration_profile_digest"],
+                "robot_types": expected,
+                "vendor_resume_agent_names": sorted(observed),
+                "unavailable_vendor_resume_agent_names": sorted(set(expected) - set(observed)),
+                "capability_resume_synthesized": False,
+            },
+        )
+        return expected
 
     def _install_assignment(self, assignment: dict[str, Any]) -> tuple[Any, Any]:
         """Replace only Stage1 assignment production for one execution."""

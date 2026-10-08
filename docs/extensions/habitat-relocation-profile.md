@@ -30,6 +30,11 @@ Guard 不替模型改目标、修改参数、补造动作或执行额外 step。
 
 ## Readiness 与启动边界
 
+显式 shared relocation 的 `AgentArguments.robot_type` 来自冻结 Node profile，且已与实际
+加载机器人逐个核对；原生 resume 中已提供的类型必须一致。缺失 resume 记录保持 unavailable，
+不补造其能力描述，不修改 text context。`stage2-agent-identity.json` 保存来源 digest、
+类型映射与缺失名单；导航默认路径不变。见 [ADR-0072](../decisions/0072-verified-stage2-agent-identity.md)。
+
 默认仍只支持原有 navigation 操作，搬运开关关闭。开启时必须从所有实际加载的政策中读到
 nav/pick/place 工具与已实例化、具备原始终止观测接口的 nav/pick/place/wait 技能。
 readiness reader 支持原始 EMOS 的整数键 `_idx_to_name` / `_skills` 映射；它不调用技能、
