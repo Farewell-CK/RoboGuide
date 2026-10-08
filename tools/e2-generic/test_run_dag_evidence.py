@@ -25,6 +25,15 @@ class RecoveryEvidenceTests(unittest.TestCase):
                 controller_attempts("http://controller", "wanted"), [body["attempts"][0]]
             )
 
+    def test_controller_attempts_retry_one_transient_disconnect(self) -> None:
+        """A single transport race does not erase otherwise available attempt evidence."""
+        body = {"attempts": [{"mission_id": "wanted", "status": "Failed"}]}
+        with patch(
+            "run_dag.http_json", side_effect=[ConnectionResetError("race"), (200, body)]
+        ) as mocked:
+            self.assertEqual(controller_attempts("http://controller", "wanted"), body["attempts"])
+            self.assertEqual(mocked.call_count, 2)
+
     def test_local_outcome_drops_large_available_action_snapshot(self) -> None:
         """Recovery keeps the failure and transition facts but not repeated action catalogs."""
         invocation = {

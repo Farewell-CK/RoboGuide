@@ -114,6 +114,7 @@ def planner_feedback(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "goal",
         "execution_outcomes",
         "controller_execution_attempts",
+        "controller_attempt_read_error",
         "recovery_decision",
         "failure",
     )
@@ -130,15 +131,23 @@ def controller_diagnostics(api: str) -> dict[str, Any]:
 
 
 def controller_attempts(api: str, mission_id: str) -> list[dict[str, Any]]:
-    """Read and filter Controller-owned physical attempt history for one Mission."""
-    status, body = http_json("GET", f"{api}/v1/execution-attempts")
-    if status != 200 or not isinstance(body, dict) or not isinstance(body.get("attempts"), list):
-        raise RuntimeError("Controller execution-attempt history is unavailable or malformed")
-    return [
-        cast(dict[str, Any], attempt)
-        for attempt in body["attempts"]
-        if isinstance(attempt, dict) and attempt.get("mission_id") == mission_id
-    ]
+    """Read Mission attempts with bounded retries across transient HTTP disconnects."""
+    failure = "Controller execution-attempt history is unavailable or malformed"
+    for retry in range(5):
+        try:
+            status, body = http_json("GET", f"{api}/v1/execution-attempts")
+            if status == 200 and isinstance(body, dict) and isinstance(body.get("attempts"), list):
+                return [
+                    cast(dict[str, Any], attempt)
+                    for attempt in body["attempts"]
+                    if isinstance(attempt, dict) and attempt.get("mission_id") == mission_id
+                ]
+            failure = f"malformed Controller execution-attempt response: HTTP {status}"
+        except (OSError, ValueError) as error:
+            failure = f"{type(error).__name__}: {error}"
+        if retry < 4:
+            time.sleep(0.1)
+    raise RuntimeError(failure)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -439,7 +448,12 @@ def run(args: argparse.Namespace) -> int:
             graph, final_steps = read_graph_database(database)
             all_local_executions = local_executions(database)
             current_executions = mission_executions(all_local_executions, mission_id)
-            current_controller_attempts = controller_attempts(api, mission_id)
+            controller_attempt_read_error = None
+            try:
+                current_controller_attempts = controller_attempts(api, mission_id)
+            except RuntimeError as error:
+                current_controller_attempts = []
+                controller_attempt_read_error = str(error)
             local_terminal = bool(current_executions) and all(
                 row["state"] in {"COMPLETED", "FAILED", "CANCELLED"} for row in current_executions
             )
@@ -463,6 +477,7 @@ def run(args: argparse.Namespace) -> int:
                     "goal_cancel_request": goal_cancel,
                     "execution_outcomes": current_executions,
                     "controller_execution_attempts": current_controller_attempts,
+                    "controller_attempt_read_error": controller_attempt_read_error,
                 }
             )
             controller_completed = mission.get("status") == "Completed"
@@ -509,7 +524,8 @@ def run(args: argparse.Namespace) -> int:
                 record["recovery_decision"] = {
                     "eligible": False,
                     "reason": (
-                        "execution authority is ambiguous or cancellation was not goal-triggered"
+                        "execution authority or Controller attempt evidence is ambiguous, or "
+                        "cancellation was not goal-triggered"
                     ),
                 }
                 reason = f"controller {mission.get('status')}; unsafe to start another Mission"
