@@ -136,12 +136,16 @@ class Stage2ExecutionFeedback:
         self,
         contracts: Mapping[str, Stage2ExecutionContract],
         record: Callable[[dict[str, Any]], None],
+        *,
+        completion: Callable[[str, str, bool], None] | None = None,
     ) -> None:
         """Freeze contracts while retaining no simulator or control authority."""
         self._contracts = dict(contracts)
         self._record = record
+        self._completion = completion
         self._pending: dict[str, _PendingAction] = {}
         self._sequences: dict[str, int] = {}
+        self._operation_completed: dict[str, bool] = {}
         self._restores: list[Callable[[], None]] = []
 
     def _emit(self, event: str, document: dict[str, Any]) -> None:
@@ -312,8 +316,17 @@ class Stage2ExecutionFeedback:
         names, indices = inputs.get("skill_name"), inputs.get("batch_idx")
         if pending is None or names is None or indices != [0] or len(names) != 1:
             return
-        expected_skill = "nav_to_obj" if pending.document["tool_name"] == "nav_to_obj" else "wait"
-        if names[0] != expected_skill or not isinstance(result, tuple) or len(result) != 3:
+        expected_skill = {
+            "nav_to_obj": "nav_to_obj",
+            "pick": "pick",
+            "place": "place",
+            "reset_arm": "reset_arm",
+            "wait": "wait",
+            "send_request": "wait",
+        }.get(str(pending.document["tool_name"]))
+        if expected_skill is None or names[0] != expected_skill:
+            return
+        if not isinstance(result, tuple) or len(result) != 3:
             return
         returned_control = _boolean(result[0])
         bad_terminate = _boolean(result[1])
@@ -327,7 +340,7 @@ class Stage2ExecutionFeedback:
                 "completion-evidence-unavailable"
                 if pending.physical_steps == 0
                 else "local-skill-completed"
-                if expected_skill == "nav_to_obj"
+                if expected_skill != "wait"
                 else "wait-finished"
             )
         elif base_done is False and budget["over_max_len"] is True:
@@ -359,6 +372,25 @@ class Stage2ExecutionFeedback:
         )
         self._write_observed_receipt(pending)
         self._emit("skill-terminated", pending.document)
+        completed = status in {"local-skill-completed", "wait-finished"}
+        if completed and pending.document["tool_name"] == "place":
+            contract = self._contracts.get(agent_name)
+            if contract is not None and contract.is_relocation:
+                self._operation_completed[agent_name] = True
+        if self._completion is not None and status in {
+            "local-skill-completed",
+            "wait-finished",
+            "skill-budget-exhausted",
+            "high-level-interrupted",
+        }:
+            try:
+                self._completion(agent_name, str(pending.document["tool_name"]), completed)
+            except Exception:  # noqa: BLE001 - feedback cannot alter the vendor decision
+                _LOG.exception("Stage2 relocation state update unavailable")
+
+    def operation_completed(self, agent_name: str) -> bool:
+        """Report a definite relocation completion observed from the original place skill."""
+        return self._operation_completed.get(agent_name, False)
 
     def local_completion(self, agent_name: str) -> None:
         """Retain the loop's existing post-step terminal measure, never a PDDL assertion.
@@ -380,6 +412,11 @@ class Stage2ExecutionFeedback:
         )
         self._write_observed_receipt(pending)
         self._emit("local-terminal-measure", pending.document)
+        if self._completion is not None:
+            try:
+                self._completion(agent_name, "nav_to_obj", True)
+            except Exception:  # noqa: BLE001 - feedback cannot alter the vendor decision
+                _LOG.exception("Stage2 navigation state update unavailable")
 
     def close(self) -> None:
         """Remove hooks and close unresolved receipts without inventing an execution outcome."""

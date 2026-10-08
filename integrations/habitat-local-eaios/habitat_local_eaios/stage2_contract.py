@@ -44,9 +44,29 @@ class Stage2ContractViolation(IntegrationError):
 
 @dataclass
 class RelocationExecutionState:
-    """Track only actions admitted by one relocation attempt."""
+    """Track admitted and observed actions for one relocation attempt."""
 
     phase: str = "before_pick"
+    pending_action: str | None = None
+    last_completed_action: str | None = None
+
+    def admit(self, action_name: str) -> None:
+        """Fence the next semantic transition until its local skill is observed."""
+        self.pending_action = action_name
+        self.last_completed_action = None
+
+    def complete(self, action_name: str, succeeded: bool) -> None:
+        """Apply a phase transition only from definite local skill evidence."""
+        if self.pending_action != action_name:
+            return
+        self.pending_action = None
+        self.last_completed_action = action_name
+        if not succeeded:
+            return
+        if action_name == "pick":
+            self.phase = "holding"
+        elif action_name == "place":
+            self.phase = "placed"
 
 
 @dataclass(frozen=True)
@@ -117,16 +137,12 @@ class Stage2ExecutionContract:
         self._validate_navigation(agent_name, action, peer_names)
 
     def advance(self, action: object, state: RelocationExecutionState) -> None:
-        """Advance relocation state only after the selected action was admitted."""
-        if not self.is_relocation:
-            return
-        if not isinstance(action, dict):
+        """Record admission without claiming that the local skill has completed."""
+        if not self.is_relocation or not isinstance(action, dict):
             return
         name = action.get("name")
-        if name == "pick":
-            state.phase = "holding"
-        elif name == "place":
-            state.phase = "placed"
+        if isinstance(name, str):
+            state.admit(name)
 
     def _validate_navigation(
         self, agent_name: str, action: object, peer_names: frozenset[str]
@@ -158,6 +174,12 @@ class Stage2ExecutionContract:
         """Validate an exact relocation workflow and its current phase."""
         if state is None:
             state = RelocationExecutionState()
+        if state.pending_action is not None:
+            self._fail(
+                agent_name,
+                action,
+                f"previous relocation action {state.pending_action!r} has no observed completion",
+            )
         name, arguments = self._shape(agent_name, action)
         if name not in {
             "nav_to_obj",
@@ -479,12 +501,12 @@ def _guard_agent(
     peer_names: frozenset[str],
     record: Callable[[dict[str, Any]], None],
     feedback: Stage2ExecutionFeedback | None,
+    relocation_state: RelocationExecutionState | None,
 ) -> Callable[[], None]:
     """Wrap one agent instance, deferring its model lookup until lazy initialization."""
     original_chat = agent.chat
     previous_chat = vars(agent).get("chat", _MISSING)
     agent_name = agent.name
-    relocation_state = RelocationExecutionState() if contract.is_relocation else None
 
     def guarded_chat(observation: str) -> Any:
         """Validate raw model output before CrabAgent transforms or dispatches it."""
@@ -592,6 +614,7 @@ def install_stage2_contract_guard(
     record: Callable[[dict[str, Any]], None],
     *,
     feedback: Stage2ExecutionFeedback | None = None,
+    relocation_states: Mapping[str, RelocationExecutionState] | None = None,
 ) -> Callable[[], None]:
     """Bind all active agent instances without changing any vendor class or Prompt.
 
@@ -610,11 +633,14 @@ def install_stage2_contract_guard(
         raise IntegrationError("active EMOS agents must match execution contracts exactly")
     callbacks: list[Callable[[], None]] = []
     peer_names = frozenset(contracts)
+    states = dict(relocation_states or {})
     try:
         for agent in agents:
-            callbacks.append(
-                _guard_agent(agent, contracts[agent.name], peer_names, record, feedback)
-            )
+            contract = contracts[agent.name]
+            state = states.get(agent.name) if contract.is_relocation else None
+            if contract.is_relocation and state is None:
+                state = RelocationExecutionState()
+            callbacks.append(_guard_agent(agent, contract, peer_names, record, feedback, state))
     except BaseException:
         for callback in reversed(callbacks):
             callback()

@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,11 @@ from .diagnostics import BufferedJsonlWriter
 from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
-from .model import CanonicalMobilityInvocation, IntegrationError
+from .model import (
+    CanonicalInvocation,
+    CanonicalRelocationInvocation,
+    IntegrationError,
+)
 from .navigation_preparation import (
     NAVIGATION_PREPARATION_PROFILE,
     NavigationPreparationFailure,
@@ -29,6 +33,7 @@ from .spatial_navigation import (
     SPATIAL_ARRIVAL_PROFILE,
 )
 from .stage2_contract import (
+    RelocationExecutionState,
     Stage2ActionAudit,
     Stage2ContractViolation,
     Stage2ExecutionContract,
@@ -88,17 +93,32 @@ def _configure_goal_region_navigation(
             actions[key].type = action_name
 
 
-def format_stage2_subtask(invocation: CanonicalMobilityInvocation, mode: str) -> str:
-    """Preserve the objective while binding Stage2's navigation target to the intent.
+def format_stage2_subtask(invocation: CanonicalInvocation, mode: str) -> str:
+    """Preserve the objective while binding Stage2 to the committed operation.
 
     The EMOS model still chooses its own tool call. This text exposes the
-    committed parameter that the local contract guard will enforce; it never
-    changes the destination or repairs a model-selected action.
+    committed semantic fields that the local contract guard will enforce; it
+    never changes a model-selected action or supplies a replacement action.
     """
+    if mode not in {"entity-grounded", "natural-objective"}:
+        raise IntegrationError(f"unsupported Stage2 subtask mode {mode!r}")
+    if isinstance(invocation, CanonicalRelocationInvocation):
+        object_ref = json.dumps(invocation.object_ref, ensure_ascii=False)
+        source = json.dumps(invocation.source, ensure_ascii=False)
+        destination = json.dumps(invocation.destination, ensure_ascii=False)
+        if mode == "entity-grounded":
+            return (
+                f"Relocate object {object_ref} from source {source} to destination {destination}. "
+                "Use the committed object and destination exactly."
+            )
+        return (
+            f"{invocation.objective}\n\n"
+            f"Committed relocation object: {object_ref}; source: {source}; "
+            f"destination: {destination}. Use these exact semantic identities for "
+            "nav_to_obj, pick, and place. Do not substitute another object or location."
+        )
     if mode == "entity-grounded":
         return f"Navigate to {invocation.destination}."
-    if mode != "natural-objective":
-        raise IntegrationError(f"unsupported Stage2 subtask mode {mode!r}")
     destination = json.dumps(invocation.destination, ensure_ascii=False)
     return (
         f"{invocation.objective}\n\n"
@@ -398,7 +418,7 @@ class EmosStage2Runtime:
 
     def execute(
         self,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
@@ -463,7 +483,7 @@ class EmosStage2Runtime:
         observations: Any,
         text_context: dict[str, Any],
         assignment: dict[str, Any],
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         initial: tuple[float, float, float],
         scene_id: str,
         actor: Any,
@@ -494,6 +514,7 @@ class EmosStage2Runtime:
         progress = NavigationProgressPublisher(
             getattr(self._config, "progress_directory", None), invocation, self._config.agent_id
         )
+        is_relocation = isinstance(invocation, CanonicalRelocationInvocation)
         skill_sequence: list[str] = []
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
@@ -586,9 +607,23 @@ class EmosStage2Runtime:
                     _observation_true(observations, finished_key) or self._oracle_nav_finished()
                 ):
                     self._record_local_skill_completion(self._config.agent_id)
+                    if not is_relocation:
+                        return self._outcome(
+                            "COMPLETED",
+                            "original EMOS OracleNavPolicy reached its skill terminal measure",
+                            invocation,
+                            scene_id,
+                            steps,
+                            initial,
+                            skill_sequence,
+                            local_skill_completed=True,
+                            episode_terminated=done,
+                            terminal_basis="oracle-nav-skill",
+                        )
+                if is_relocation and self._operation_completed(self._config.agent_id):
                     return self._outcome(
                         "COMPLETED",
-                        "original EMOS OracleNavPolicy reached its skill terminal measure",
+                        "original EMOS relocation workflow observed a completed place skill",
                         invocation,
                         scene_id,
                         steps,
@@ -596,7 +631,7 @@ class EmosStage2Runtime:
                         skill_sequence,
                         local_skill_completed=True,
                         episode_terminated=done,
-                        terminal_basis="oracle-nav-skill",
+                        terminal_basis="relocation-place-skill",
                     )
                 if done and bool(info.get("pddl_success", False)):
                     return self._outcome(
@@ -687,7 +722,7 @@ class EmosStage2Runtime:
         env_action: Any,
         gym_env: Any,
         habitat_env: Any,
-        invocations: dict[int, CanonicalMobilityInvocation],
+        invocations: Mapping[int, CanonicalInvocation],
         steps: int,
     ) -> Callable[[], None]:
         """Prepare actual selected Local How commands before the one original Gym step.
@@ -761,7 +796,7 @@ class EmosStage2Runtime:
     def _assigned_arguments(
         self,
         text_context: dict[str, Any],
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
     ) -> dict[str, Any]:
         """Translate one committed assignment into EMOS Stage1's output type."""
         from habitat_mas.utils import AgentArguments  # type: ignore[import-not-found]
@@ -815,7 +850,7 @@ class EmosStage2Runtime:
     def _single_execution_contracts(
         self,
         assignment: dict[str, Any],
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
     ) -> dict[str, Stage2ExecutionContract]:
         """Guard the only agent authorized to request a physical Stage2 action."""
         target = f"agent_{self._config.agent_id}"
@@ -864,11 +899,29 @@ class EmosStage2Runtime:
                 )
             )
 
-        feedback = Stage2ExecutionFeedback(contracts, record_feedback)
+        relocation_states = {
+            name: RelocationExecutionState()
+            for name, contract in contracts.items()
+            if contract.is_relocation
+        }
+
+        def complete_relocation_action(agent_name: str, action_name: str, succeeded: bool) -> None:
+            """Apply only definite local-skill evidence to the execution-scoped phase."""
+            state = relocation_states.get(agent_name)
+            if state is not None:
+                state.complete(action_name, succeeded)
+
+        feedback = Stage2ExecutionFeedback(
+            contracts, record_feedback, completion=complete_relocation_action
+        )
         try:
             feedback.install(self._actor._active_policies)
             restore_guard = install_stage2_contract_guard(
-                agents, contracts, record, feedback=feedback
+                agents,
+                contracts,
+                record,
+                feedback=feedback,
+                relocation_states=relocation_states,
             )
         except BaseException:
             feedback.close()
@@ -892,6 +945,11 @@ class EmosStage2Runtime:
                     self._retain_action_audit(audit.summary)
 
         return restore
+
+    def _operation_completed(self, agent_id: int) -> bool:
+        """Return only the feedback bridge's observed relocation completion signal."""
+        feedback = getattr(self, "_stage2_feedback", None)
+        return bool(feedback is not None and feedback.operation_completed(f"agent_{agent_id}"))
 
     def _record_local_skill_completion(self, agent_id: int) -> None:
         """Forward an already-observed local completion without rereading sensors or truth."""
@@ -953,7 +1011,7 @@ class EmosStage2Runtime:
         self,
         state: str,
         detail: str,
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         scene_id: str,
         steps: int,
         initial: tuple[float, float, float],
@@ -1136,7 +1194,7 @@ class EmosStage2Runtime:
             **self._action_trace_writer.stats(),
         }
 
-    def _subtask(self, invocation: CanonicalMobilityInvocation) -> str:
+    def _subtask(self, invocation: CanonicalInvocation) -> str:
         """Return the configured assignment with its exact committed destination."""
         return format_stage2_subtask(invocation, self._config.subtask_mode)
 

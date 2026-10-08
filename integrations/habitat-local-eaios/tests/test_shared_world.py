@@ -30,7 +30,11 @@ from habitat_local_eaios.emos_stage2 import EmosStage2Runtime  # noqa: E402
 from habitat_local_eaios.goal_region_navigation import GoalRegionSearchMiss  # noqa: E402
 from habitat_local_eaios.http_service import HabitatBridgeServer  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
-from habitat_local_eaios.model import CanonicalMobilityInvocation, IntegrationError  # noqa: E402
+from habitat_local_eaios.model import (  # noqa: E402
+    CanonicalInvocation,
+    CanonicalMobilityInvocation,
+    IntegrationError,
+)
 from habitat_local_eaios.shared_world import (  # noqa: E402
     InProcessWorldService,
     NodeEndpoint,
@@ -605,7 +609,7 @@ class SerialRuntimeHarness(SharedEmosStage2Runtime):
         self._prepare_reset()
 
     def _assigned_arguments(
-        self, text_context: dict[str, Any], invocation: CanonicalMobilityInvocation
+        self, text_context: dict[str, Any], invocation: CanonicalInvocation
     ) -> dict[str, Any]:
         """Avoid importing the vendor AgentArguments class in this offline test."""
         del text_context, invocation
@@ -616,7 +620,7 @@ class SerialRuntimeHarness(SharedEmosStage2Runtime):
         observations: Any,
         text_context: dict[str, Any],
         assignment: dict[str, Any],
-        invocation: CanonicalMobilityInvocation,
+        invocation: CanonicalInvocation,
         initial: tuple[float, float, float],
         scene_id: str,
         actor: Any,
@@ -1401,7 +1405,7 @@ class RetainedRuntimeHarness(SingleIdleContractLoopHarness):
         }
 
     def _assigned_arguments(
-        self, text_context: dict[str, Any], invocation: CanonicalMobilityInvocation
+        self, text_context: dict[str, Any], invocation: CanonicalInvocation
     ) -> dict[str, Any]:
         """Keep the real single-policy path independent of vendor AgentArguments import."""
         del text_context, invocation

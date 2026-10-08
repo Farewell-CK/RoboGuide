@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,6 +25,7 @@ from habitat_local_eaios.stage2_contract import (  # noqa: E402
     Stage2ExecutionContract,
     install_stage2_contract_guard,
 )
+from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback  # noqa: E402
 
 
 def _request(**parameters: Any) -> dict[str, Any]:
@@ -127,6 +130,7 @@ def test_relocation_contract_accepts_only_ordered_semantic_workflow() -> None:
     for action, phase in zip(sequence, phases, strict=True):
         contract.validate("agent-0", action, peers, state)
         contract.advance(action, state)
+        state.complete(action["name"], True)
         assert state.phase == phase
 
 
@@ -216,7 +220,7 @@ class _FakeModel:
                     "tool_calls": [
                         {
                             "id": "call-1",
-                            "function": {"name": name, "arguments": "{}"},
+                            "function": {"name": name, "arguments": json.dumps(arguments)},
                         }
                     ],
                 },
@@ -224,6 +228,26 @@ class _FakeModel:
             ]
         )
         return name, arguments
+
+
+class _FakeSkill:
+    """Expose one original skill termination decision for feedback tests."""
+
+    def __init__(self) -> None:
+        """Create a completed skill with a nonzero physical-step witness."""
+        self._cur_skill_step = [1]
+        self._max_skill_steps = 10
+        self.base_done = True
+
+    def _is_skill_done(self, **kwargs: Any) -> list[bool]:
+        """Return the scripted original skill completion result."""
+        del kwargs
+        return [self.base_done]
+
+    def should_terminate(self, **kwargs: Any) -> tuple[list[bool], list[bool], list[bool]]:
+        """Mirror the vendor termination tuple while invoking its base predicate once."""
+        self._is_skill_done(**kwargs)
+        return ([True], [False], [False])
 
 
 class _FakeAgent:
@@ -280,3 +304,48 @@ def test_relocation_schema_failure_does_not_reach_provider_or_mutate_tools() -> 
     assert agent.dispatched == []
     assert agent.llm_model.actions == missing
     assert original != missing
+
+
+def test_relocation_phase_advances_only_from_observed_skill_completion() -> None:
+    """A selected pick cannot authorize place until the original skill reports success."""
+    agent = _FakeAgent(("pick", {"target_obj": "object:sample"}))
+    contract = _contract()
+    state = RelocationExecutionState()
+    skill = _FakeSkill()
+    feedback = Stage2ExecutionFeedback(
+        {"agent-0": contract},
+        lambda row: None,
+        completion=lambda name, action, succeeded: state.complete(action, succeeded),
+    )
+    feedback.install(
+        [SimpleNamespace(_high_level_policy=SimpleNamespace(llm_agent=agent), _skills={0: skill})]
+    )
+    restore = install_stage2_contract_guard(
+        [agent],
+        {"agent-0": contract},
+        lambda row: None,
+        feedback=feedback,
+        relocation_states={"agent-0": state},
+    )
+    try:
+        agent.chat("pick")
+        assert state.phase == "before_pick"
+        with pytest.raises(Stage2ContractViolation, match="no observed completion"):
+            contract.validate(
+                "agent-0",
+                _action("nav_to_obj", {"target_obj": "object:sample"}),
+                frozenset({"agent-0"}),
+                state,
+            )
+        feedback.physical_step()
+        skill.should_terminate(skill_name=["pick"], batch_idx=[0], hl_wants_skill_term=[False])
+        assert state.phase == "holding"
+        contract.validate(
+            "agent-0",
+            _action("nav_to_obj", {"target_obj": "receptacle:destination"}),
+            frozenset({"agent-0"}),
+            state,
+        )
+    finally:
+        restore()
+        feedback.close()
