@@ -13,6 +13,24 @@ Oracle navigation action used below the EMOS/CrabAgent high-level policy boundar
 resolution, agent selection, path planning, action arguments, simulator stepping, and local safety
 remain Local How.
 
+## Opt-in object relocation
+
+`--enable-relocation` enables the existing canonical `object.relocate@v1` for the
+`emos-crabagent` and `shared-emos-stage2` backends only after loaded tool/skill readiness.
+It binds exact `object`, `source`, and `destination`; model-selected nav/pick/place calls
+remain unchanged and are independently guarded. Navigation completion cannot complete
+relocation: only observed original place completion (or the existing official-success
+termination path) produces the local terminal result. A completed relocation endpoint
+uses the original wait skill without further model calls while its peer continues.
+Local place completion never proves official PDDL success.
+
+The shared world supports distinct-object dual Actors or single-Actor sequential Tasks
+in one reset world. Concurrent relocation of one object fails before Stage2. Manipulation
+continuation and the navigation-only `any_at` goal-region profile remain unsupported.
+The option does not add Node registrations or make a Task3 runner ready by itself.
+See the [implemented relocation profile](../../docs/extensions/habitat-relocation-profile.md)
+for lifecycle, evidence, native-arm differences and remaining deployment validation.
+
 ## Local workflow
 
 The loopback-only HTTP facade implements the existing declarative Node workflow routes:
@@ -346,9 +364,9 @@ normal wait, or a well-formed peer request, but its `nav_to_obj.target_obj`
 must equal the committed `parameters.destination`; an unassigned sibling may
 only wait or communicate. Peer messages do not transfer authority: the receiving
 agent retains its own invocation-bound destination. Pick, place, reset-arm and
-unknown tools are outside this implemented navigation profile. A future local
-integration that legitimately requires another action must provide an explicit
-operation profile; broad robot capability alone does not authorize it.
+unknown tools are outside this implemented navigation profile. The explicitly enabled
+relocation profile separately admits guarded manipulation steps; broad robot capability
+alone does not authorize them under a navigation invocation.
 
 The `natural-objective` Stage2 assignment preserves the canonical objective and states the exact
 committed `parameters.destination` as the target for this execution's `nav_to_obj`. A joint

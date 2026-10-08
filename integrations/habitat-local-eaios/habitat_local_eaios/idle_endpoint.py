@@ -173,8 +173,9 @@ def prepare_completed_idle_agent(actor: Any, agent_name: str) -> PassiveIdleBind
     """Validate a future post-place idle transition before executing relocation.
 
     Only an observed original place completion may activate the returned binding.
-    The passive policy then selects the original wait skill, preserving physical
-    placement while other endpoints continue. No model-selected action is edited.
+    The passive policy then selects the original wait skill, preventing further
+    model-directed actions while peers continue. It does not prove pose or goal
+    stability, and no model-selected action is edited.
     """
     policies = [
         policy

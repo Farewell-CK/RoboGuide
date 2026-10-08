@@ -192,6 +192,19 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
+- The default-off Habitat relocation profile reuses canonical `object.relocate@v1` and
+  exact object/source/destination through durable endpoints and shared-world IPC. Readiness
+  requires loaded, observable original skills; the guard advances only on observed pick/place
+  completion. Navigation is an intermediate step, not relocation success. Observed original
+  place completion switches only the completed endpoint to original wait while its peer continues;
+  this scoped model-free idle is disclosed as a controlled-arm difference. Both distinct-object
+  dual-Actor and single-Actor sequential sessions reuse one reset world. Concurrent manipulation
+  of one object, retained manipulation continuation and any_at-specific goal-region profiles
+  fail explicitly. Navigation-only floor/progress evidence remains unknown for relocation;
+  declared source identity does not prove actual source placement. Local completion, official
+  PDDL, Task satisfaction and Formal admission stay separate. Task3 registration, episode-start
+  source evidence and real physical preflight remain pending. See
+  `docs/extensions/habitat-relocation-profile.md`; no Core contract or vendor source is changed.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

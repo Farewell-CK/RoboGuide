@@ -529,6 +529,14 @@ Guard。此环只属于 Local How，不能证明 Task/Mission satisfaction、改
 或触发 MI 重规划；与原生 EMOS 的 synthetic receipt 路径不同，须在 arm 配置与证据中
 披露。详见 [`ADR-0069`](../../decisions/0069-observed-local-skill-feedback.md)。
 
+当前 Habitat Local EAIOS 还提供默认关闭的 canonical `object.relocate@v1` 执行 profile：
+完整 object/source/destination 及 Execution Session 跨 endpoint/IPC 保留，原始 nav/pick/place
+工具受精确契约与已观察阶段约束。局部导航完成不能结束搬运；原始 place 完成后以原始
+wait 保持已完成 endpoint，让同伴继续。单 Actor 顺序复用和双 Actor 不同物体并发共用原有
+拓扑；同一物体并发、取消后搬运续跑及 `any_at` 专用 Local How 组合明确拒绝。它不增加
+Core 资源语义，不放宽官方成功或 Formal admission，Task3 部署和真实物理验证尚未完成。
+[当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。
