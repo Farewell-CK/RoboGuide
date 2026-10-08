@@ -2463,6 +2463,10 @@ class StubRuntime:
         """Describe the stub world."""
         return "stub shared world"
 
+    def supported_operations(self) -> tuple[str, ...]:
+        """Expose the exact navigation operations implemented by the stub."""
+        return ("mobility.navigate@v1", "mobility.move@v1")
+
     def final_metrics(self) -> dict[str, object]:
         """Return official benchmark metrics."""
         return {"pddl_success": True}
@@ -2628,6 +2632,56 @@ def _world(
     endpoint_a = NodeEndpoint("node-a", 0, ExecutionStore(tmp_path / "a.sqlite3"), coordinator)
     endpoint_b = NodeEndpoint("node-b", 1, ExecutionStore(tmp_path / "b.sqlite3"), coordinator)
     return runtime, coordinator, endpoint_a, endpoint_b, evidence
+
+
+def test_shared_world_readiness_reports_runtime_operations(tmp_path: Path) -> None:
+    """Endpoint readiness must come from the world profile, not a hard-coded list."""
+    runtime, coordinator, endpoint_a, _, _ = _world(tmp_path)
+    try:
+        readiness = endpoint_a.readiness()
+        assert readiness["state"] == "READY"
+        assert readiness["operation"] == "mobility.navigate@v1"
+        assert readiness["operations"] == ["mobility.navigate@v1", "mobility.move@v1"]
+        assert coordinator.supported_operations() == runtime.supported_operations()
+    finally:
+        coordinator.shutdown()
+
+
+def test_shared_world_rejects_relocation_before_queue_or_reset(tmp_path: Path) -> None:
+    """The navigation-only shared deployment rejects relocation before durable admission."""
+    runtime, coordinator, endpoint_a, _, evidence = _world(tmp_path)
+    request = {
+        "invocation": {
+            "mission_id": "mission-relocation",
+            "task_id": "task-relocation",
+            "group_id": "group-relocation",
+            "role_id": "role-relocation",
+            "operation": "object.relocate@v1",
+            "objective": "Move the selected object to the selected destination.",
+            "parameters": {
+                "object": "object:sample",
+                "source": "receptacle:source",
+                "destination": "receptacle:destination",
+            },
+            "resource_ids": ["slot-relocation"],
+        }
+    }
+    try:
+        with pytest.raises(IntegrationError, match=r"does not support 'object\.relocate@v1'"):
+            endpoint_a.submit(request)
+        assert runtime.calls == 0
+        assert coordinator.episode_consumed() is False
+        assert not list(evidence.glob("shared-world-start-admission*"))
+        assert endpoint_a.store().all_executions() == []
+    finally:
+        coordinator.shutdown()
+
+
+def test_shared_world_ready_payload_keeps_legacy_child_navigation_only() -> None:
+    """A legacy string READY message cannot grant relocation capability."""
+    detail, operations = shared_world_module._parse_ready_payload("legacy shared world")
+    assert detail == "legacy shared world"
+    assert operations == ("mobility.navigate@v1", "mobility.move@v1")
 
 
 def test_lone_assignment_waits_then_fails_closed(tmp_path: Path) -> None:

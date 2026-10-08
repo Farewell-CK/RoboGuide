@@ -38,6 +38,7 @@ from .execution_progress import NavigationProgressPublisher, read_execution_prog
 from .execution_recovery import execution_recovery_profile
 from .idle_endpoint import PassiveIdleBinding, install_passive_idle_agents
 from .model import (
+    SUPPORTED_OPERATIONS,
     CanonicalInvocation,
     CanonicalMobilityInvocation,
     IntegrationError,
@@ -85,6 +86,15 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         self._reset_started = False
         self._pair_session: RetainedWorldSession | None = None
         self._serial_session: RetainedWorldSession | None = None
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Advertise only operations implemented by the shared navigation lifecycle."""
+        if bool(getattr(self._config, "enable_relocation", False)):
+            raise IntegrationError(
+                "shared-world deployment does not support object.relocate@v1; "
+                "its lifecycle remains navigation-only"
+            )
+        return SUPPORTED_OPERATIONS
 
     def initialize(self) -> None:
         """Reset once, then publish evidence from that same world before readiness."""
@@ -1339,19 +1349,27 @@ class NodeEndpoint:
     def readiness(self) -> dict[str, object]:
         """Report exact operation readiness for this endpoint."""
         healthy = self._coordinator.runtime_ready()
+        operations = self._coordinator.supported_operations()
         return {
             "detail": self._coordinator.readiness_detail(),
-            "operation": "mobility.navigate@v1",
-            "operations": ["mobility.move@v1", "mobility.navigate@v1"],
+            "operation": operations[0] if operations else None,
+            "operations": list(operations),
             "state": "READY" if healthy else "UNAVAILABLE",
         }
 
     def accept(self, request: object) -> dict[str, object]:
         """Durably accept one exact invocation without starting simulator work."""
         invocation = parse_canonical_invocation(request)
+        supported_operations = self._coordinator.supported_operations()
+        if invocation.operation not in supported_operations:
+            supported = ", ".join(supported_operations) or "none"
+            raise IntegrationError(
+                f"shared-world deployment does not support {invocation.operation!r}; "
+                f"supported operations: {supported}"
+            )
         if not isinstance(invocation, CanonicalMobilityInvocation):
             raise IntegrationError(
-                f"shared-world navigation endpoint does not support {invocation.operation!r}"
+                f"shared-world navigation lifecycle cannot execute {invocation.operation!r}"
             )
         with self._lock:
             key = invocation.request_key()
@@ -1481,6 +1499,7 @@ class InProcessWorldService:
     def __init__(self, runtime: Any) -> None:
         """Retain the runtime double that owns the shared world."""
         self._runtime = runtime
+        self._supported_operations = SUPPORTED_OPERATIONS
         self._start_requested = False
 
     def start(self) -> str:
@@ -1489,7 +1508,12 @@ class InProcessWorldService:
             raise IntegrationError("one world service cannot restart or replace its simulator")
         self._start_requested = True
         self._runtime.initialize()
+        self._supported_operations = _runtime_supported_operations(self._runtime)
         return str(self._runtime.readiness_detail())
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Return the operation identities proven by the in-process runtime."""
+        return self._supported_operations
 
     def is_ready(self) -> bool:
         """Report whether the world initialized."""
@@ -1562,7 +1586,15 @@ def _child_world_process(
     try:
         try:
             runtime.initialize()
-            connection.send(("READY", runtime.readiness_detail()))
+            connection.send(
+                (
+                    "READY",
+                    {
+                        "detail": runtime.readiness_detail(),
+                        "operations": list(runtime.supported_operations()),
+                    },
+                )
+            )
         except Exception as error:  # noqa: BLE001 - relayed to the parent
             connection.send(("INITIALIZATION_FAILED", str(error)))
             return
@@ -1639,6 +1671,7 @@ class ProcessWorldService:
         self._connection: Any = None
         self._process: Any = None
         self._ready_detail = "shared world process is not initialized"
+        self._supported_operations = SUPPORTED_OPERATIONS
         self._ready = False
         self._start_requested = False
 
@@ -1662,7 +1695,7 @@ class ProcessWorldService:
             if parent_connection.poll(0.5):
                 kind, payload = _receive_message(parent_connection)
                 if kind == "READY":
-                    self._ready_detail = str(payload)
+                    self._ready_detail, self._supported_operations = _parse_ready_payload(payload)
                     self._ready = True
                     return self._ready_detail
                 if kind == "INITIALIZATION_FAILED":
@@ -1671,6 +1704,10 @@ class ProcessWorldService:
             if not process.is_alive():
                 raise IntegrationError("shared world process exited during initialization")
         raise IntegrationError("shared world process initialization timed out")
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Return the operation identities received from the child world."""
+        return self._supported_operations
 
     def is_ready(self) -> bool:
         """Report whether the child world reported readiness."""
@@ -1903,6 +1940,10 @@ class SharedWorldCoordinator:
     def readiness_detail(self) -> str:
         """Describe the shared world without mutating execution state."""
         return str(self._world.readiness_detail())
+
+    def supported_operations(self) -> tuple[str, ...]:
+        """Return operations supported by the initialized shared-world lifecycle."""
+        return _runtime_supported_operations(self._world)
 
     def runtime_ready(self) -> bool:
         """Report whether the shared world initialized on its owning thread."""
@@ -2637,6 +2678,41 @@ class SharedWorldCoordinator:
         if invocation.attempt_id is not None:
             document["attempt_id"] = invocation.attempt_id
         return document
+
+
+def _runtime_supported_operations(runtime: Any) -> tuple[str, ...]:
+    """Read and validate operation readiness without granting unknown capabilities."""
+    advertised = getattr(runtime, "supported_operations", None)
+    operations = tuple(advertised()) if callable(advertised) else SUPPORTED_OPERATIONS
+    if not operations or any(
+        not isinstance(operation, str) or not operation for operation in operations
+    ):
+        raise IntegrationError("shared-world runtime advertised invalid operation support")
+    if len(set(operations)) != len(operations):
+        raise IntegrationError("shared-world runtime advertised duplicate operation support")
+    return operations
+
+
+def _parse_ready_payload(payload: object) -> tuple[str, tuple[str, ...]]:
+    """Decode child readiness while keeping legacy string children navigation-only."""
+    if isinstance(payload, str):
+        if not payload:
+            raise IntegrationError("shared-world readiness detail is empty")
+        return payload, SUPPORTED_OPERATIONS
+    if not isinstance(payload, dict) or set(payload) != {"detail", "operations"}:
+        raise IntegrationError("shared-world readiness envelope is invalid")
+    detail = payload["detail"]
+    raw_operations = payload["operations"]
+    if not isinstance(detail, str) or not detail or not isinstance(raw_operations, list):
+        raise IntegrationError("shared-world readiness envelope fields are invalid")
+    operations = tuple(raw_operations)
+    if not operations or any(
+        not isinstance(operation, str) or not operation for operation in operations
+    ):
+        raise IntegrationError("shared-world readiness operations are invalid")
+    if len(set(operations)) != len(operations):
+        raise IntegrationError("shared-world readiness operations are duplicated")
+    return detail, operations
 
 
 def _require_mobility_invocation(invocation: CanonicalInvocation) -> CanonicalMobilityInvocation:
