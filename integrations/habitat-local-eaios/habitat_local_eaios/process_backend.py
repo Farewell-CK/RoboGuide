@@ -39,6 +39,7 @@ class HabitatProcessBackend:
         self._connection: Connection | None = None
         self._process: BaseProcess | None = None
         self._readiness_detail = "Habitat simulator process is not initialized"
+        self._supported_operations: tuple[str, ...] = SUPPORTED_OPERATIONS
 
     def initialize(self) -> None:
         """Start one persistent simulator process and wait for explicit readiness evidence."""
@@ -60,7 +61,9 @@ class HabitatProcessBackend:
             if parent_connection.poll(_POLL_INTERVAL_S):
                 kind, payload = _receive_message(parent_connection)
                 if kind == "READY":
-                    self._readiness_detail = _require_text(payload, "readiness detail")
+                    detail, operations = _parse_ready_payload(payload)
+                    self._readiness_detail = detail
+                    self._supported_operations = operations
                     return
                 if kind == "INITIALIZATION_FAILED":
                     raise IntegrationError(_require_text(payload, "initialization failure"))
@@ -70,8 +73,8 @@ class HabitatProcessBackend:
         raise IntegrationError("Habitat simulator process initialization timed out")
 
     def supported_operations(self) -> tuple[str, ...]:
-        """Advertise the operation support of the configured child backend."""
-        return SUPPORTED_OPERATIONS
+        """Return operation support received from the initialized child backend."""
+        return self._supported_operations
 
     def execute(
         self,
@@ -142,7 +145,16 @@ def _run_habitat_process(
     try:
         try:
             backend.initialize()
-            connection.send(("READY", backend.readiness_detail()))
+            advertised = getattr(backend, "supported_operations", None)
+            operations = tuple(advertised()) if callable(advertised) else SUPPORTED_OPERATIONS
+            if not operations or len(set(operations)) != len(operations):
+                raise IntegrationError("Habitat child backend advertised invalid operation support")
+            connection.send(
+                (
+                    "READY",
+                    {"detail": backend.readiness_detail(), "operations": list(operations)},
+                )
+            )
         except Exception as error:
             connection.send(("INITIALIZATION_FAILED", str(error)))
             return
@@ -198,6 +210,26 @@ def _receive_message(connection: Connection) -> tuple[str, object]:
     if not isinstance(value, tuple) or len(value) != 2 or not isinstance(value[0], str):
         raise IntegrationError("Habitat process emitted an invalid IPC message")
     return value[0], value[1]
+
+
+def _parse_ready_payload(value: object) -> tuple[str, tuple[str, ...]]:
+    """Parse a child readiness envelope while accepting the pre-operation string form."""
+    if isinstance(value, str):
+        return _require_text(value, "readiness detail"), SUPPORTED_OPERATIONS
+    if not isinstance(value, dict):
+        raise IntegrationError("Habitat child readiness payload is invalid")
+    detail = _require_text(value.get("detail"), "readiness detail")
+    raw_operations = value.get("operations")
+    if (
+        not isinstance(raw_operations, list)
+        or not raw_operations
+        or not all(isinstance(item, str) and item for item in raw_operations)
+    ):
+        raise IntegrationError("Habitat child readiness operations are invalid")
+    operations = tuple(raw_operations)
+    if len(set(operations)) != len(operations):
+        raise IntegrationError("Habitat child readiness operations contain duplicates")
+    return detail, operations
 
 
 def _require_text(value: object, field: str) -> str:
