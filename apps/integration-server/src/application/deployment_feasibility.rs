@@ -1,5 +1,6 @@
 //! Deployment-owned reset-state eligibility before Control commits a Mission.
 
+use super::deployment_operation_admission::DeploymentOperationAdmission;
 use crate::*;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +22,8 @@ pub(crate) struct DeploymentFeasibility {
     initial_preferences: Option<super::initial_operation_preferences::InitialOperationPreferences>,
     /// Explicit opt-in to read-only, initial-world support assessment.
     assessment_enabled: bool,
+    /// Optional versioned exact-operation sources, independent of navigation decisions.
+    operation_admission: Option<DeploymentOperationAdmission>,
 }
 
 impl DeploymentFeasibility {
@@ -40,15 +43,26 @@ impl DeploymentFeasibility {
             return Err("deployment feasibility digest does not match content".into());
         }
         let body = document.as_object().expect("checked above");
-        if body.keys().map(String::as_str).collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "schema_version",
-                "authority",
-                "identity",
-                "initial_agent_positions",
-                "records",
-            ])
-            || body["schema_version"] != "roboguide.deployment-intent-feasibility/v0.3"
+        let schema = body
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let mut fields = BTreeSet::from([
+            "schema_version",
+            "authority",
+            "identity",
+            "initial_agent_positions",
+            "records",
+        ]);
+        if schema == "roboguide.deployment-intent-feasibility/v0.4" {
+            fields.insert("operation_admission");
+        }
+        if body.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
+            || !matches!(
+                schema,
+                "roboguide.deployment-intent-feasibility/v0.3"
+                    | "roboguide.deployment-intent-feasibility/v0.4"
+            )
             || body["authority"] != "deployment-observed-reset-state"
         {
             return Err("deployment feasibility schema or authority is unsupported".into());
@@ -127,6 +141,7 @@ impl DeploymentFeasibility {
         }
         let mut entries = BTreeMap::<(String, String), BTreeMap<domain::NodeId, String>>::new();
         let mut node_agents = BTreeMap::<domain::NodeId, i64>::new();
+        let mut node_sources = BTreeMap::<domain::NodeId, String>::new();
         for record in records {
             let item = record
                 .as_object()
@@ -183,6 +198,16 @@ impl DeploymentFeasibility {
                 || profile.get("node_id") != Some(&serde_json::json!(node_id.as_str()))
             {
                 return Err("deployment feasibility profile and endpoint differ".into());
+            }
+            let source = profile["source_digest"]
+                .as_str()
+                .expect("digest checked above")
+                .to_owned();
+            if node_sources
+                .insert(node_id.clone(), source.clone())
+                .is_some_and(|prior| prior != source)
+            {
+                return Err("deployment feasibility changes one Node's registration source".into());
             }
             let start = item
                 .get("start")
@@ -301,6 +326,12 @@ impl DeploymentFeasibility {
         {
             return Err("deployment feasibility lacks complete endpoint coverage".into());
         }
+        let operation_admission = body
+            .get("operation_admission")
+            .map(|value| {
+                DeploymentOperationAdmission::from_json(value, &node_agents, &node_sources)
+            })
+            .transpose()?;
         Ok(Self {
             digest,
             entries,
@@ -309,6 +340,7 @@ impl DeploymentFeasibility {
             node_agents,
             initial_preferences: None,
             assessment_enabled: false,
+            operation_admission,
         })
     }
 
@@ -395,6 +427,7 @@ impl DeploymentFeasibility {
         let session = domain::ExecutionSessionDescriptor::from_plan(plan, group_id.clone())?
             .ok_or("deployment feasibility requires MissionPlan v0.8 session metadata")?;
         let mut candidates = BTreeMap::<domain::ActorId, BTreeSet<domain::NodeId>>::new();
+        let mut relocation_actors = BTreeMap::<String, BTreeSet<domain::ActorId>>::new();
         for task in plan.task_graph().tasks() {
             for role in task.requirement().roles() {
                 if !role.resource_requirements().iter().any(|resource| {
@@ -411,6 +444,27 @@ impl DeploymentFeasibility {
                 let intent = task
                     .execution_intent(role.role_id())
                     .ok_or("deployment role lacks canonical intent")?;
+                if intent.operation().to_string() == "object.relocate@v1" {
+                    let admitted = self
+                        .operation_admission
+                        .as_ref()
+                        .ok_or("relocation requires reset-bound deployment operation admission")?;
+                    let allowed = admitted.candidates(intent)?;
+                    let Some(domain::ExecutionValue::String(object)) =
+                        intent.parameters().get("object")
+                    else {
+                        unreachable!("operation admission checked the exact parameter contract")
+                    };
+                    relocation_actors
+                        .entry(object.clone())
+                        .or_default()
+                        .insert(actor.clone());
+                    candidates
+                        .entry(actor.clone())
+                        .and_modify(|existing| existing.retain(|node| allowed.contains(node)))
+                        .or_insert(allowed);
+                    continue;
+                }
                 let destination = match (
                     intent.parameters().len(),
                     intent.parameters().get("destination"),
@@ -440,6 +494,12 @@ impl DeploymentFeasibility {
         }
         if candidates.values().any(BTreeSet::is_empty) {
             return Err("deployment feasibility leaves a logical Actor without a candidate".into());
+        }
+        if relocation_actors.values().any(|actors| actors.len() > 1) {
+            return Err(
+                "shared-world deployment does not support concurrent relocation of one object"
+                    .into(),
+            );
         }
         let actors = session
             .slots
@@ -494,7 +554,7 @@ fn text(value: Option<serde_json::Value>, field: &str) -> Result<String, String>
 }
 
 /// Check one canonical lowercase SHA-256 digest without a prefix.
-fn valid_sha256(value: &str) -> bool {
+pub(super) fn valid_sha256(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()

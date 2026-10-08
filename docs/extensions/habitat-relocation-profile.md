@@ -70,6 +70,8 @@ flowchart LR
   R --> P[新 run 的 neutral 来源与官方语义证据]
   P --> I[生产 Interpreter / Planner / Reviewer / Repairer]
   I --> C
+  P --> A[版本化 operation admission：精确来源 / 配置容量 / route unknown]
+  A --> C
   C[Control 已承诺的 canonical object/source/destination] --> E[Node 与 Execution Session]
   E --> G[本地精确工具契约]
   G --> M[原始 Stage2 模型选择]
@@ -113,6 +115,14 @@ registration profile，审查冻结输入和 episode-start evidence，并取得�
 保留原生 EMOS arm 与 controlled guard/feedback/idle 之间的差异，不改动历史结果。
 
 ## B1 部署接线与离线准备
+
+Controller 的部署准入按 canonical operation 区分参数。导航仍使用原有 v0.3 负面候选
+矩阵；显式搬运部署使用 `roboguide.deployment-intent-feasibility/v0.4`，在保留全部导航
+记录的同时附带 neutral `operation_admission/v0.1`。搬运检查实际 reset 的 object/source、
+destination 和配置 endpoint 身份，不将导航楼层判断当作搬运可达性；route 明确为 unknown。
+共享拓扑、`space:1`、同物体并发限制，以及 Control 当前节点能力和资源承诺继续生效。
+原始来源快照、注册配置与组合 digest 共同绑定持久候选约束；缺失和篡改会在启动检查中
+失败。见 [ADR-0071](../decisions/0071-operation-aware-reset-admission.md)。
 
 [`relocation runner`](../../scenarios/e1-shared-world-relocation/README.md) 复用现有 B1 入口，
 通过严格版本化 `b1-deployment.json` 选择原始 `llm_height_man.yaml`、4,000 steps 和显式

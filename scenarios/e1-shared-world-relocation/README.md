@@ -52,6 +52,14 @@ change Formal admission. Relocation recovery declarations include all three
 supported operations, with group stop and unsupported continuation. Retained
 cancellation and navigation-specific goal-region profiles are rejected.
 
+The actual reset also publishes deployment feasibility v0.4 with a separate
+neutral operation-admission v0.1 profile. Controller checks exact
+object/source/destination and configured endpoints without applying navigation-only
+floor exclusions to manipulation. Shared topology and exclusive `space:1` rules
+remain in effect; current operation support and resource authority stay in Control.
+The profile is not proof of a manipulation route or official success. See
+[ADR-0071](../../docs/decisions/0071-operation-aware-reset-admission.md).
+
 This wiring and its startup checks are offline-tested. A full production MI and
 physical relocation preflight remains pending; do not treat preparation or
 deterministic fixture plans as an experiment result or batch-readiness evidence.

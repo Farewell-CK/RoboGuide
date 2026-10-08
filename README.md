@@ -581,6 +581,10 @@ episode-start source evidence 与通用 B1 runner 接线已实现并通过离线
 `scenarios/e1-shared-world-relocation/run-b1-roboguide.sh`，要求显式 frozen input；
 `ROBOGUIDE_B1_PREPARE_ONLY=1` 只准备部署文件，不启动服务或仿真。真实物理预检仍待完成。见[当前搬运
 Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。
+搬运部署采用版本化 operation admission，绑定实际 reset 的物体来源、目的地与配置 endpoint；
+导航负面候选检查仍保留，不能用它替代搬运可达性判断。共享拓扑与资源保护继续生效，
+当前节点能力、资源承诺和 Task 满足权威保持不变，见
+[`ADR-0071`](docs/decisions/0071-operation-aware-reset-admission.md)。
 独立原生 EMOS 对照可显式使用
 `python -m habitat_local_eaios.native_reset_observer --evidence-dir <new-dir>
 --run-id <id> --episode-id <id> -- <原生 evaluator 参数>`，从原厂 environment factory

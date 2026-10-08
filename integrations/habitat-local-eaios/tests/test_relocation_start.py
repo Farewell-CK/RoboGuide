@@ -469,10 +469,16 @@ def test_neutral_sources_reach_frozen_grounding(tmp_path: Path) -> None:
 
 def preflight_run(tmp_path: Path) -> Path:
     """Freeze a fake reset through production builders and exact run-local registration files."""
+    from habitat_local_eaios.operation_admission import attach_relocation_admission
     from habitat_local_eaios.planning_world_evidence import (
         build_authoritative_planning_world_evidence,
     )
+    from habitat_local_eaios.preassignment_feasibility import build_preassignment_feasibility
     from habitat_local_eaios.relocation_capability import RelocationCapabilityEvidence
+    from habitat_local_eaios.spatial_feasibility import (
+        build_spatial_profile_snapshot,
+        load_spatial_profile_snapshot,
+    )
 
     run = tmp_path / "run-offline"
     evidence = run / "evidence"
@@ -485,6 +491,18 @@ def preflight_run(tmp_path: Path) -> Path:
     start = build_relocation_start(
         environment, semantic, seed=40, registration_digest=profile["digest"], agent_ids=(0, 1)
     )
+    spatial = build_spatial_profile_snapshot(((0, run / "node-a.toml"), (1, run / "node-b.toml")))
+    spatial_path = run / "spatial-profile.json"
+    spatial_path.write_text(json.dumps(spatial))
+    navigation = build_preassignment_feasibility(
+        environment,
+        semantic,
+        load_spatial_profile_snapshot(spatial_path),
+        str(spatial["digest"]),
+        40,
+        (0, 1),
+    )
+    matrix = attach_relocation_admission(navigation, semantic, start, profile)
     planning = build_authoritative_planning_world_evidence(
         environment,
         run_id="run-offline",
@@ -508,6 +526,7 @@ def preflight_run(tmp_path: Path) -> Path:
         ("authoritative-planning-world-evidence.json", planning),
         ("relocation-readiness.json", RelocationCapabilityEvidence(True, "observed", 2).as_dict()),
         ("relocation-registration-profile-used.json", profile),
+        ("preassignment-feasibility.json", matrix),
     ):
         (evidence / name).write_text(json.dumps(document))
     return run
@@ -630,6 +649,10 @@ def test_shared_initialization_records_one_reset_before_ready(
     from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig
     from habitat_local_eaios.emos_stage2 import EmosStage2Runtime
     from habitat_local_eaios.shared_world import SharedEmosStage2Runtime
+    from habitat_local_eaios.spatial_feasibility import (
+        build_spatial_profile_snapshot,
+        load_spatial_profile_snapshot,
+    )
     from test_shared_world import RecordingDiagnostics
 
     profile = build_relocation_profile(
@@ -637,6 +660,14 @@ def test_shared_initialization_records_one_reset_before_ready(
     )
     path = tmp_path / "registration.json"
     path.write_text(json.dumps(profile))
+    spatial_path = tmp_path / "spatial.json"
+    spatial_path.write_text(
+        json.dumps(
+            build_spatial_profile_snapshot(
+                tuple((i, SCENARIO / f"node-{suffix}.toml") for i, suffix in enumerate(("a", "b")))
+            )
+        )
+    )
     environment, _ = relocation_world(tmp_path)
     if incomplete:
         environment.sim.get_agent_data(1).grasp_mgrs = []
@@ -669,6 +700,8 @@ def test_shared_initialization_records_one_reset_before_ready(
             evidence_dir=tmp_path / "evidence",
             enable_relocation=True,
             relocation_profile_path=path,
+            spatial_profile_path=spatial_path,
+            spatial_capabilities=load_spatial_profile_snapshot(spatial_path),
         ),
         (0, 1),
     )
@@ -686,6 +719,11 @@ def test_shared_initialization_records_one_reset_before_ready(
         assert "object.relocate@v1" in runtime.supported_operations()
         start = json.loads((runtime._evidence_dir() / "relocation-episode-start.json").read_text())
         assert start["registration_profile_digest"] == profile["digest"]
+        matrix = json.loads(
+            (runtime._evidence_dir() / "preassignment-feasibility.json").read_text()
+        )
+        assert matrix["schema_version"] == "roboguide.deployment-intent-feasibility/v0.4"
+        assert matrix["operation_admission"]["source_snapshot_digest"] == start["digest"]
         planning = AuthoritativePlanningWorldEvidence.load(
             runtime._evidence_dir() / "authoritative-planning-world-evidence.json"
         )

@@ -2,6 +2,7 @@
 
 mod actor_placement;
 mod deployment_feasibility;
+mod deployment_operation_admission;
 mod dispatch;
 mod initial_operation_assessment;
 mod initial_operation_preferences;

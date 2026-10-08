@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .model import IntegrationError
+from .operation_admission import OPERATION_FEASIBILITY_SCHEMA, attach_relocation_admission
+from .preassignment_feasibility import PREASSIGNMENT_FEASIBILITY_SCHEMA, preassignment_digest
 from .relocation_capability import RELOCATION_READINESS_PROFILE
 from .relocation_deployment import load_relocation_profile, verify_relocation_profile_sources
 from .relocation_start import MAX_ARTIFACT_BYTES, planning_object_sources, validate_relocation_start
@@ -94,8 +96,18 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
         or readiness.get("missing_skills") != []
     ):
         raise IntegrationError("actual relocation skill readiness is unavailable")
+    matrix = _read_object(evidence / "preassignment-feasibility.json")
+    if matrix.get("schema_version") != OPERATION_FEASIBILITY_SCHEMA:
+        raise IntegrationError("relocation requires versioned deployment operation admission")
+    navigation = {
+        key: value for key, value in matrix.items() if key not in {"digest", "operation_admission"}
+    }
+    navigation["schema_version"] = PREASSIGNMENT_FEASIBILITY_SCHEMA
+    navigation["digest"] = preassignment_digest(navigation)
+    if matrix != attach_relocation_admission(navigation, semantic, start, profile):
+        raise IntegrationError("deployment operation admission differs from actual reset sources")
     return {
-        "schema_version": "roboguide.habitat-relocation-preflight/v0.1",
+        "schema_version": "roboguide.habitat-relocation-preflight/v0.2",
         "valid": True,
         "identity": expected,
         "registration_profile_digest": profile["digest"],
@@ -104,6 +116,7 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
         "planning_evidence_digest": planning["digest"],
         "reset_count": start["reset_count"],
         "simulator_steps": start["simulator_steps"],
+        "deployment_admission_digest": matrix["digest"],
     }
 
 
@@ -116,7 +129,7 @@ def main() -> None:
         result = preflight_relocation(args.run)
     except (IntegrationError, KeyError, TypeError, ValueError) as error:
         result = {
-            "schema_version": "roboguide.habitat-relocation-preflight/v0.1",
+            "schema_version": "roboguide.habitat-relocation-preflight/v0.2",
             "valid": False,
             "reason": str(error),
         }

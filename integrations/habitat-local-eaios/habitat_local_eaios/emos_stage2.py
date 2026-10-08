@@ -415,6 +415,7 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.relocation_capability",
                         "habitat_local_eaios.stage2_contract",
+                        "habitat_local_eaios.operation_admission",
                         "habitat_local_eaios.emos_stage2",
                         "habitat_local_eaios.goal_region_action",
                         "habitat_local_eaios.goal_region_navigation",

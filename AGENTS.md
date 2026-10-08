@@ -209,6 +209,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   request. Prepare-only mode starts no service or world; relocation recovery is group-stop with
   unsupported continuation, never silently inherited navigation repeat support. See
   `docs/extensions/habitat-relocation-profile.md`; no Core contract or vendor source is changed.
+  Explicit relocation publishes deployment feasibility v0.4 with a separate neutral
+  operation-admission v0.1 profile binding reset object sources and configured endpoints.
+  Navigation floor exclusions never prove manipulation feasibility. Common topology and
+  exclusive resource requirements remain, and Control still checks current registration.
+  The combined source digest fences restored candidate restrictions; v0.3 cannot enable
+  relocation implicitly. See ADR-0071.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

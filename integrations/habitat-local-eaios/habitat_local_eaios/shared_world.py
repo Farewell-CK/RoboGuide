@@ -47,6 +47,7 @@ from .model import (
     parse_canonical_invocation,
 )
 from .navigation_preparation import NavigationPreparationFailure
+from .operation_admission import attach_relocation_admission
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
 from .relocation_deployment import load_relocation_profile, verify_loaded_robots
@@ -222,6 +223,10 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     config.seed,
                     self._agent_ids,
                 )
+                if relocation_profile is not None:
+                    snapshot = attach_relocation_admission(
+                        snapshot, document, source_snapshot, relocation_profile
+                    )
                 self._write_json("preassignment-feasibility.json", snapshot)
                 if config.reset_route_support:
                     self._record_reset_route_support(habitat_env, document, snapshot)

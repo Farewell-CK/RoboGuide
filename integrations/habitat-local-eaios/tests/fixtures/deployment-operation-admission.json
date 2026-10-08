@@ -1,0 +1,691 @@
+{
+  "schema_version": "roboguide.deployment-intent-feasibility/v0.4",
+  "authority": "deployment-observed-reset-state",
+  "identity": {
+    "run_id": "synthetic-run",
+    "episode_id": "synthetic-episode",
+    "scene_id": "synthetic-scene",
+    "dataset_revision": "synthetic-dataset",
+    "dataset_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "habitat_seed": 40,
+    "episode_reset_count": 1,
+    "semantic_evidence_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "spatial_profile_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "initial_agent_positions": {
+    "0": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "1": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "records": [
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.move@v1",
+      "destination": "object:0",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.move@v1",
+      "destination": "object:0",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.move@v1",
+      "destination": "object:1",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.move@v1",
+      "destination": "object:1",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.move@v1",
+      "destination": "destination:0",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.move@v1",
+      "destination": "destination:0",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.move@v1",
+      "destination": "destination:1",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.move@v1",
+      "destination": "destination:1",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.navigate@v1",
+      "destination": "object:0",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.navigate@v1",
+      "destination": "object:0",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.navigate@v1",
+      "destination": "object:1",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.navigate@v1",
+      "destination": "object:1",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.navigate@v1",
+      "destination": "destination:0",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.navigate@v1",
+      "destination": "destination:0",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-a",
+      "agent_id": 0,
+      "operation": "mobility.navigate@v1",
+      "destination": "destination:1",
+      "profile": {
+        "node_id": "node-a",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    },
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "node-b",
+      "agent_id": 1,
+      "operation": "mobility.navigate@v1",
+      "destination": "destination:1",
+      "profile": {
+        "node_id": "node-b",
+        "agent_id": 1,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": false,
+          "mobility.navigate@v1": false
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-0"
+      },
+      "destination_entity": {
+        "position": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "floor-1"
+      },
+      "status": "incompatible",
+      "reason": "synthetic navigation-only exclusion; not a manipulation route proof",
+      "route_reachability_proven": false
+    }
+  ],
+  "operation_admission": {
+    "schema_version": "roboguide.deployment-operation-admission/v0.1",
+    "operation": "object.relocate@v1",
+    "parameter_names": [
+      "destination",
+      "object",
+      "source"
+    ],
+    "source_basis": "observed-initial-location",
+    "source_snapshot_digest": "sha256:55a592cf69ed8e07b097a956449eb7360fde6622eee7205b570ce0c63d2fd015",
+    "registration_profile_digest": "sha256:28feb8109b84709d15c48416145929b2883adf96d806ff40d515af9a500467ed",
+    "object_sources": {
+      "object:0": "initial-location:e6b1c0a5e1197efcaade1140b22f2287173a15f8ea11022b35efa2970449608c",
+      "object:1": "initial-location:ed488c05e47eaefed9337ca39127d1a1dc1d34b8816a8a23b50ae0f4c12d88d0"
+    },
+    "destination_entities": [
+      "destination:0",
+      "destination:1"
+    ],
+    "endpoint_profiles": [
+      {
+        "agent_id": 0,
+        "node_id": "node-a",
+        "node_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "resource_kind": "space",
+        "resource_capacity": 1
+      },
+      {
+        "agent_id": 1,
+        "node_id": "node-b",
+        "node_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "resource_kind": "space",
+        "resource_capacity": 1
+      }
+    ],
+    "route_reachability": "unknown"
+  },
+  "digest": "sha256:b988cff9848b0e205666658f7a8bb5ec6bd9403b95bcd75ab75c4fdcc4ddd4ad"
+}

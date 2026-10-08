@@ -18,6 +18,100 @@ from roboguide_eval.b1_provenance import (
 from roboguide_eval.b1_workload import extract_b1_workload
 
 _SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
+_OPERATION_SCHEMA = "roboguide.deployment-intent-feasibility/v0.4"
+
+
+def _check_reset_source(document: dict[str, Any], schema: str) -> None:
+    """Check the native bounded JSON identity before projecting archived source fields."""
+    body = {key: value for key, value in document.items() if key != "digest"}
+    encoded = json.dumps(
+        body, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    if document.get("schema_version") != schema or document.get("digest") != digest:
+        raise ValueError("deployment operation admission reset source schema or digest is invalid")
+
+
+def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
+    """Cross-bind the neutral profile to archived reset sources, never infer route feasibility."""
+    admission = document["operation_admission"]
+    start = load_document(run / "evidence/relocation-episode-start.json")
+    profile = load_document(run / "relocation-registration-profile.json")
+    if not all(isinstance(item, dict) for item in (admission, start, profile)):
+        raise ValueError("deployment operation admission or its reset sources are missing")
+    assert isinstance(start, dict)
+    assert isinstance(profile, dict)
+    assert isinstance(admission, dict)
+    _check_reset_source(start, "roboguide.habitat-relocation-start/v0.1")
+    _check_reset_source(profile, "roboguide.habitat-relocation-profile/v0.1")
+    try:
+        objects, destinations, agents = start["objects"], start["destinations"], profile["agents"]
+        if any(
+            not isinstance(records, list)
+            or not 1 <= len(records) <= 64
+            or any(not isinstance(record, dict) for record in records)
+            for records in (objects, destinations, agents)
+        ):
+            raise ValueError("reset source records are invalid")
+        object_sources = {record["entity_id"]: record["source_entity_id"] for record in objects}
+        destination_entities = [record["entity_id"] for record in destinations]
+        endpoints = [
+            {
+                "agent_id": record["agent_id"],
+                "node_id": record["node_id"],
+                "node_config_digest": record["node_config_digest"],
+                "resource_kind": record["resource"]["kind"],
+                "resource_capacity": record["resource"]["capacity"],
+            }
+            for record in agents
+        ]
+        if len(object_sources) != len(objects) or any(
+            record["operation"] != "object.relocate@v1"
+            or record["resource"]["kind"] != "space"
+            or type(record["resource"]["capacity"]) is not int
+            or record["resource"]["capacity"] != 1
+            for record in agents
+        ):
+            raise ValueError("reset source endpoint contract is invalid")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "deployment operation admission reset source records are invalid"
+        ) from error
+    expected = {
+        "schema_version": "roboguide.deployment-operation-admission/v0.1",
+        "operation": "object.relocate@v1",
+        "parameter_names": ["destination", "object", "source"],
+        "source_basis": "observed-initial-location",
+        "source_snapshot_digest": start.get("digest"),
+        "registration_profile_digest": profile.get("digest"),
+        "object_sources": object_sources,
+        "destination_entities": destination_entities,
+        "endpoint_profiles": endpoints,
+        "route_reachability": "unknown",
+    }
+    if (
+        _content_digest(admission) != _content_digest(expected)
+        or start.get("identity")
+        != {
+            key: document["identity"][key]
+            for key in (
+                "run_id",
+                "episode_id",
+                "scene_id",
+                "dataset_revision",
+                "dataset_sha256",
+                "habitat_seed",
+            )
+        }
+        or start.get("semantic_evidence_digest") != document["identity"]["semantic_evidence_digest"]
+        or start.get("registration_profile_digest") != profile.get("digest")
+        or start.get("complete") is not True
+        or type(start.get("reset_count")) is not int
+        or start["reset_count"] != 1
+        or type(start.get("simulator_steps")) is not int
+        or start["simulator_steps"] != 0
+    ):
+        raise ValueError("deployment operation admission differs from its actual reset sources")
 
 
 def _canonical_digest_value(value: Any) -> Any:
@@ -81,18 +175,18 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
     assert isinstance(document, dict)
     assert isinstance(semantic, dict)
     assert isinstance(profile, dict)
-    if (
-        set(document)
-        != {
-            "schema_version",
-            "authority",
-            "identity",
-            "initial_agent_positions",
-            "records",
-            "digest",
-        }
-        or document["schema_version"] != _SCHEMA
-    ):
+    fields = {
+        "schema_version",
+        "authority",
+        "identity",
+        "initial_agent_positions",
+        "records",
+        "digest",
+    }
+    schema = document.get("schema_version")
+    if schema == _OPERATION_SCHEMA:
+        fields.add("operation_admission")
+    if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA}:
         raise ValueError("preassignment feasibility schema is invalid")
     claimed = document["digest"]
     body = {key: value for key, value in document.items() if key != "digest"}
@@ -125,6 +219,8 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
     }
     if identity != expected:
         raise ValueError("preassignment feasibility differs from frozen B1 identity")
+    if schema == _OPERATION_SCHEMA:
+        _validate_operation_sources(run, document)
     if not isinstance(document["records"], list) or not document["records"]:
         raise ValueError("preassignment feasibility has no candidate records")
     for record in document["records"]:
