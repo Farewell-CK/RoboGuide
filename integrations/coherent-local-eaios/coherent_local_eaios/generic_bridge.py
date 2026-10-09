@@ -333,6 +333,7 @@ class GenericBackendConfig:
     evidence_dir: Path
     task_data: dict[str, object]
     pre_effect_hold_step: int | None = None
+    pre_effect_hold_agent_id: int | None = None
     pre_effect_hold_seconds: float = 0.0
 
 
@@ -437,7 +438,9 @@ class CoherentPrimitiveAdapter:
                 execution = self.store.get(execution_id)
                 if execution is None or execution["state"] != "ACCEPTED":
                     continue
-                self._hold_before_effect_if_configured(execution_id)
+                self._hold_before_effect_if_configured(
+                    execution_id, cast(PrimitiveInvocation, execution["invocation"])
+                )
                 execution = self.store.get(execution_id)
                 if execution is None or execution["state"] != "ACCEPTED":
                     continue
@@ -446,22 +449,36 @@ class CoherentPrimitiveAdapter:
                 with self.lock:
                     self.scheduled_execution_ids.discard(execution_id)
 
-    def _hold_before_effect_if_configured(self, execution_id: str) -> None:
-        """Open one deterministic pre-effect recovery window for a selected graph step."""
+    def _hold_before_effect_if_configured(
+        self, execution_id: str, invocation: PrimitiveInvocation
+    ) -> None:
+        """Open one deterministic pre-effect recovery window for a selected step or agent."""
         selected = self.config.pre_effect_hold_step
-        if selected is None or self.config.pre_effect_hold_seconds <= 0:
+        selected_agent = self.config.pre_effect_hold_agent_id
+        if (
+            self.config.pre_effect_hold_seconds <= 0
+            or (selected is None and selected_agent is None)
+            or (
+                selected_agent is not None
+                and invocation.parameters.get("agent_id") != selected_agent
+            )
+        ):
             return
         _, completed_steps = self.store.graph_state()
         next_step = completed_steps + 1
         with self.lock:
-            if next_step != selected or next_step in self.held_steps:
+            if selected is not None and next_step != selected:
                 return
-            self.held_steps.add(next_step)
+            hold_key = selected_agent if selected_agent is not None else next_step
+            if hold_key in self.held_steps:
+                return
+            self.held_steps.add(hold_key)
         deadline = time.monotonic() + self.config.pre_effect_hold_seconds
         LOG.info(
-            "holding local execution %s before graph step %s for at most %.3fs",
+            "holding local execution %s before graph step %s (agent %s) for at most %.3fs",
             execution_id,
             next_step,
+            invocation.parameters.get("agent_id"),
             self.config.pre_effect_hold_seconds,
         )
         while time.monotonic() < deadline and not self.stop.wait(0.05):

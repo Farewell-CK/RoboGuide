@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--env", required=True)
     parser.add_argument("--task", type=int, required=True)
     parser.add_argument("--pre-effect-hold-step", type=int)
+    parser.add_argument("--pre-effect-hold-agent-id", type=int)
     parser.add_argument("--pre-effect-hold-seconds", type=float, default=0.0)
     arguments = parser.parse_args()
     if arguments.host not in {"127.0.0.1", "localhost"}:
@@ -34,6 +35,9 @@ def main() -> None:
     if (
         arguments.pre_effect_hold_step is not None
         and arguments.pre_effect_hold_step < 1
+    ) or (
+        arguments.pre_effect_hold_agent_id is not None
+        and arguments.pre_effect_hold_agent_id < 0
     ) or arguments.pre_effect_hold_seconds < 0:
         raise SystemExit("pre-effect hold step and duration must be non-negative")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -45,6 +49,7 @@ def main() -> None:
         evidence_dir=arguments.evidence_dir,
         task_data=task_data,
         pre_effect_hold_step=arguments.pre_effect_hold_step,
+        pre_effect_hold_agent_id=arguments.pre_effect_hold_agent_id,
         pre_effect_hold_seconds=arguments.pre_effect_hold_seconds,
     )
     adapter = CoherentPrimitiveAdapter(

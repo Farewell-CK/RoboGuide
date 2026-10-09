@@ -27,7 +27,9 @@ def unused_port(port: int) -> None:
         probe.bind(("127.0.0.1", port))
 
 
-def fault_verdict(output: Path, profile: str, inject_after: int | None) -> dict[str, Any]:
+def fault_verdict(
+    output: Path, profile: str, inject_after: int | None, target_agent_id: int | None
+) -> dict[str, Any]:
     """Derive a fault-specific verdict without rewriting the task verdict."""
     base_path = output / "verdict.json"
     base = json.loads(base_path.read_text(encoding="utf-8")) if base_path.exists() else None
@@ -71,6 +73,7 @@ def fault_verdict(output: Path, profile: str, inject_after: int | None) -> dict[
         "schema": "roboguide.e2-node-failure-verdict/v0.1",
         "fault_profile": profile,
         "inject_after_completed_primitives": inject_after,
+        "target_agent_id": target_agent_id,
         "base_task_verdict": base,
         "injection_valid": recovery_valid,
         "infrastructure_ok": infrastructure_ok,
@@ -106,12 +109,17 @@ def run(args: argparse.Namespace) -> int:
     expected_bridge_port = 28220 + args.port_offset
     actual_bridge_port = expected_bridge_port + args.upstream_port_delta
     unused_port(actual_bridge_port)
-    inject_after = None if args.fault_profile == "f0-clean" else args.inject_after_steps
+    inject_after = (
+        None
+        if args.fault_profile == "f0-clean" or args.fault_agent_id is not None
+        else args.inject_after_steps
+    )
     fault_spec = {
         "schema": "roboguide.e2-fault-spec/v0.1",
         "fault_profile": args.fault_profile,
         "public_task": f"{args.env}/task{args.task}",
         "inject_after_completed_primitives": inject_after,
+        "target_agent_id": args.fault_agent_id,
         "prompt_profile": args.prompt_profile,
         "dag_profile": "serial",
         "model_is_read_from_frozen_config": True,
@@ -124,6 +132,7 @@ def run(args: argparse.Namespace) -> int:
         actual_bridge_port=actual_bridge_port,
         controller_api=f"http://127.0.0.1:{28170 + args.port_offset}",
         inject_after_steps=inject_after,
+        target_agent_id=args.fault_agent_id,
         original_start=run_dag.start_process,
     )
     original = run_dag.start_process
@@ -149,7 +158,7 @@ def run(args: argparse.Namespace) -> int:
         manager.finish()
         json_write(output / "fault-spec.json", fault_spec)
         staging_spec.unlink(missing_ok=True)
-        verdict = fault_verdict(output, args.fault_profile, inject_after)
+        verdict = fault_verdict(output, args.fault_profile, inject_after, args.fault_agent_id)
         json_write(output / "fault-verdict.json", verdict)
         refresh_hashes(output)
     print(json.dumps(verdict, ensure_ascii=False, indent=2))
@@ -165,13 +174,16 @@ def main() -> int:
     parser.add_argument("--task", type=int, default=17)
     parser.add_argument("--fault-profile", choices=("f0-clean", "f1-node-loss"), required=True)
     parser.add_argument("--inject-after-steps", type=int, default=6)
+    parser.add_argument("--fault-agent-id", type=int)
     parser.add_argument("--prompt-profile", choices=("fair",), default="fair")
     parser.add_argument("--max-segments", type=int, default=3)
     parser.add_argument("--execution-timeout", type=int, default=360)
     parser.add_argument("--port-offset", type=int, default=0)
     parser.add_argument("--upstream-port-delta", type=int, default=20)
     arguments = parser.parse_args()
-    if arguments.inject_after_steps < 1 or arguments.upstream_port_delta < 1:
+    if (
+        arguments.inject_after_steps < 1 and arguments.fault_agent_id is None
+    ) or arguments.upstream_port_delta < 1:
         parser.error("fault step and private port delta must be positive")
     return run(arguments)
 

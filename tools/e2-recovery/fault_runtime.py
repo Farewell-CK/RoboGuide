@@ -129,6 +129,7 @@ class FaultRuntime:
         actual_bridge_port: int,
         controller_api: str,
         inject_after_steps: int | None,
+        target_agent_id: int | None,
         original_start: Callable[
             [list[str], Path, dict[str, str]], subprocess.Popen[bytes]
         ],
@@ -139,6 +140,7 @@ class FaultRuntime:
         self.actual_bridge_port = actual_bridge_port
         self.controller_api = controller_api
         self.inject_after_steps = inject_after_steps
+        self.target_agent_id = target_agent_id
         self.original_start = original_start
         self.timeline: list[dict[str, Any]] = []
         self.node_processes: dict[int, SuppressedExitProcess] = {}
@@ -175,6 +177,15 @@ class FaultRuntime:
                     [
                         "--pre-effect-hold-step",
                         str(self.inject_after_steps + 1),
+                        "--pre-effect-hold-seconds",
+                        "120",
+                    ]
+                )
+            if self.target_agent_id is not None:
+                rewritten.extend(
+                    [
+                        "--pre-effect-hold-agent-id",
+                        str(self.target_agent_id),
                         "--pre-effect-hold-seconds",
                         "120",
                     ]
@@ -220,8 +231,6 @@ class FaultRuntime:
         with self._lock:
             self._request_count += 1
             request_number = self._request_count
-        if self.inject_after_steps is None or request_number != self.inject_after_steps + 1:
-            return
         try:
             request = json.loads(body)
             invocation = request["invocation"]
@@ -229,6 +238,11 @@ class FaultRuntime:
             local_execution_id = str(json.loads(payload)["execution_id"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             self.event("injection_request_invalid", error=f"{type(error).__name__}: {error}")
+            return
+        if self.target_agent_id is None:
+            if self.inject_after_steps is None or request_number != self.inject_after_steps + 1:
+                return
+        elif agent_id != self.target_agent_id:
             return
         with self._lock:
             if self._fault_started:
@@ -239,6 +253,7 @@ class FaultRuntime:
             request_number=request_number,
             completed_steps=request_number - 1,
             target_agent_id=agent_id,
+            trigger_mode="agent_id" if self.target_agent_id is not None else "completed_step",
             accepted_invocation=invocation,
             local_execution_id=local_execution_id,
         )
