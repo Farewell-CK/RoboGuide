@@ -414,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="传感器噪声/开机定位误差的随机种子 (对照实验用)")
     ap.add_argument("--slam-dump", metavar="DIR", default=None,
                     help="退出时把每个本体自建的三维地图导成 PLY 点云到该目录")
+    ap.add_argument("--no-world-fallback", action="store_true",
+                    help="禁止规划失败时回退到仿真器栅格: 自建地图规划不出路径就直接"
+                         "判失败。留着回退时本体会拿到一张全局可见、且预先知道哪些"
+                         "障碍可被推动的地图, 任务能过但结论不成立")
     args = ap.parse_args(argv)
 
     if len(args.ports) != len(args.roles):
@@ -441,7 +445,8 @@ def main(argv: list[str] | None = None) -> int:
         for r, s in specs.items():
             specs[r] = dataclasses.replace(s, runtime_name=args.runtime_name)
     runtimes = [RoleRuntime(world, specs[r], shots, tracers[r],
-                            slam=(args.slam == "on"), slam_seed=args.slam_seed)
+                            slam=(args.slam == "on"), slam_seed=args.slam_seed,
+                            no_world_fallback=args.no_world_fallback)
                 for r in args.roles]
 
     recorder = None

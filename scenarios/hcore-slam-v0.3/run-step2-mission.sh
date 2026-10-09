@@ -40,6 +40,13 @@ FACADE_ARGS=(--speed "${RG_SPEED:-2}" \
              --runtime-name "${RG_RUNTIME_NAME:-robonix-os}" \
              --slam "${RG_SLAM:-on}" --slam-seed "${RG_SLAM_SEED:-7}" \
              --slam-dump "$RUN/artifacts")
+# 上帝地图回退开关: RG_NO_WORLD_FALLBACK=1 时, 自己的地图规划不出来就判失败,
+# 不再悄悄换成仿真器栅格。这是"自建地图"claim 的硬约束 —— 上一轮实测 M3 的
+# 后两次导航都走了回退, 留着它时任务能过但结论不成立。
+if [ "${RG_NO_WORLD_FALLBACK:-0}" = "1" ]; then
+    FACADE_ARGS+=(--no-world-fallback)
+    echo "  上帝地图回退: 关闭 (规划只照自己建的地图)"
+fi
 if [ -n "${RG_RECORD:-}" ]; then
     FACADE_ARGS+=(--record "$RG_RECORD" --record-fps "${RG_RECORD_FPS:-15}" \
                   --record-defer --record-skip-idle)

@@ -65,12 +65,24 @@ from .slam import (  # noqa: E402  本体自带的三维感知 (深度相机 + �
 # ------------------------------ 常量 ------------------------------
 
 DETECTION_RANGE_M: dict[str, float] = {"aruco": 2.5, "object": 1.6, "qr": 8.0}
+# 各类目标的典型外接半径: 回波打在目标**表面**, 天然比"到中心"近这么多, 回波确认
+# 必须扣掉它, 否则凡是有体积的目标都会被判成"被遮挡"而永远测不到。
+DETECTION_RADIUS_M: dict[str, float] = {"aruco": 0.06, "object": 0.22, "qr": 0.05}
 # 用自建地图定位时的到点判定: 比真值判据 (WAYPOINT_TOL_M) 宽松, 因为"自己认为到了"
 # 与"真的到了"之间隔着定位误差 (实测 0.05~0.20 m), 判定太紧会永远到不了。
 SLAM_WAYPOINT_TOL_M = 0.28
 # 卡住恢复: 这么久没有实质位移就用当前估计位姿重规划, 最多重规划这么多次
 STUCK_REPLAN_S = 4.0
 MAX_REPLANS = 3
+# 推挤 (接触式操作)。判据必须是**被推物体真的动了**, 而不是"我到没到目的地":
+# 后者正是 M3 上一次的假成功 —— 路径绕开障碍、到点容差 0.28 m 判到达, 箱子原地
+# 不动却记 COMPLETED。位移由本体自己的识别 + 测距测得, 不查真值。
+PUSH_SAMPLE_INTERVAL_S = 0.5    # 推进过程中重测目标位置的间隔 (s)
+DEFAULT_PUSH_MIN_M = 0.50       # 未显式指定时要求的推动位移 (m)
+PUSH_TARGET_RADIUS_M = 0.36     # 可推目标的外接半径: 这块区域规划时允许穿越
+PUSH_STANDOFF_M = 0.80          # 接触前先绕到目标正后方这么远, 摆正推挤方向
+PUSH_OVERTRAVEL_M = 0.90        # 压过 destination 再走这么远: 行程不足会推不到位
+                                # (实测 0.50 时只推到 r=1.04, 持物回转要 1.16)
 GROUND_FOV_HALF_RAD = math.radians(35.0)   # 地面平台相机水平半视场角
 PTZ_AIM_TOL_RAD = 0.10                     # PTZ 精对准阈值 (rad)
 WAYPOINT_TOL_M = 0.15                      # 路径点到达判定
@@ -309,6 +321,14 @@ class Execution:
     survey_dir: str = ""           # 照片落盘目录
     shots: list[str] = field(default_factory=list)      # 已落盘的照片路径
     shot_seen: list[bool] = field(default_factory=list)  # 每张照片里是否看到目标
+    # 推挤 (mobility.navigate 带 push_target 时)。成功判据是**目标的测得位移**,
+    # 不是自车到点: push_p0 是首次测得的目标位置, 之后按 PUSH_SAMPLE_INTERVAL_S
+    # 重测, 位移达 push_min_m 才算真把东西顶走了。
+    push_target: str = ""
+    push_min_m: float = 0.0
+    push_p0: np.ndarray | None = None
+    push_last_pos: np.ndarray | None = None   # 上一次测得的位置: 它挪开后旧占据要清掉
+    push_sample_t: float = 0.0
 
 
 class ArenaWorld:
@@ -594,18 +614,27 @@ class RoleRuntime:
     def __init__(self, world: ArenaWorld, spec: RoleSpec,
                  shots: Snapshotter | None = None,
                  tracer: ExecutionTracer | None = None,
-                 slam: bool = True, slam_seed: int = 0) -> None:
+                 slam: bool = True, slam_seed: int = 0,
+                 no_world_fallback: bool = False) -> None:
         """绑定世界与角色规格; shots 为相机的拍照设施, tracer 为轨迹日志。
 
         slam=True 时本体用自带的深度相机 + 雷达建三维地图并**自己估计位姿**:
         导航的闭环控制、到点判定与"看见了没有"都只用估计量, 不再直接读世界真值
         (真值只用于产生观测与事后评估误差)。
+
+        no_world_fallback=True 时, 自己的地图规划不出路径就直接判失败, 不再回退到
+        仿真器栅格 —— 那条回退会让本体拿到一张全局可见的地图, 结论不成立。
         """
         self.world = world
         self.spec = spec
         self._shots = shots
         self._tracer = tracer
         self.slam: SlamNode | None = None
+        self.no_world_fallback = no_world_fallback
+        self._plan_fail_reason = ""     # 自建地图规划失败的原因 (诊断用)
+        # 推挤时"允许穿越"的圆盘 (中心, 半径): 只在带 push_target 的 execution 期间
+        # 非空, 一旦测得目标位置才设置 —— 本体自己的地图分不出墙和可推的箱子。
+        self._pushable: tuple[np.ndarray, float] | None = None
         # 导航卡住检测的状态 (每个 navigate execution 开始时重置)
         self._nav_stuck_t = 0.0
         self._nav_replans = 0
@@ -738,7 +767,8 @@ class RoleRuntime:
             # 的识别方位 + 测距, 目标位置由 perceive_target 合成。**看不到时它什么都
             # 拿不到**, 而不是像直接读坐标那样永远知道。
             pos, _dist, _why = self.slam.perceive_target(
-                tgt3, DETECTION_RANGE_M.get(kind, 2.0), GROUND_FOV_HALF_RAD)
+                tgt3, DETECTION_RANGE_M.get(kind, 2.0), GROUND_FOV_HALF_RAD,
+                DETECTION_RADIUS_M.get(kind, 0.10))
             return pos is not None
         eye = self.eye()
         try:
@@ -820,10 +850,18 @@ class RoleRuntime:
         `plan_source`, 让"这次导航是照自己的地图走的"成为可核对的事实。
         """
         path: list[np.ndarray] | None = None
+        self._plan_fail_reason = ""
         if self.slam is not None:
-            path = self.slam.planner.plan(start, goal)
-            self.slam.plan_source = "self-map" if path else "world-fallback"
+            path = self.slam.planner.plan(start, goal, pushable=self._pushable)
+            self._plan_fail_reason = self.slam.planner.fail_reason
+            self.slam.plan_source = "self-map" if path else (
+                "self-map-no-path" if self.no_world_fallback else "world-fallback")
         if not path:
+            # 同构对照/自建地图场景可以关掉这条回退 (`--no-world-fallback`): 自己的
+            # 地图规划不出来就是规划不出来。留着它时导航会悄悄拿到一张全局可见、
+            # 且预先知道"哪些东西能被推走"的地图, 任务能过但结论不成立。
+            if self.no_world_fallback and self.slam is not None:
+                return None
             path = self.world.grid(self.spec.inflate).plan(start, goal)
             if path and self.slam is not None:
                 self.slam.plan_source = "world-fallback"
@@ -839,12 +877,24 @@ class RoleRuntime:
                              "local-resolution-failed")
                 return
             ex.goal = goal
+            self._pushable = None
+            # 推挤: 上层的 execution 参数给出"推谁"和"推够多少算数"。目标位置**不在
+            # 这里取** —— 边走边测, 首次测到才建基准并把它标成可穿越。
+            ex.push_target = str(ex.parameters.get("push_target", "") or "")
+            if ex.push_target:
+                ex.push_min_m = float(ex.parameters.get("min_push_m",
+                                                        DEFAULT_PUSH_MIN_M))
+                ex.push_p0 = None
+                ex.push_sample_t = PUSH_SAMPLE_INTERVAL_S   # 第一拍就测
             self._nav_stuck_t = 0.0
             self._nav_replans = 0
             self._nav_last_xy = self.xy_est()
             path = self._plan_to(self.xy_est(), goal)
             if not path:
-                self._finish(ex, STATE_FAILED, f"no path to {dest}",
+                why = self._plan_fail_reason
+                self._finish(ex, STATE_FAILED,
+                             f"no path to {dest}"
+                             + (f" (self-map: {why})" if why else ""),
                              "local-planner-no-path")
                 return
             ex.path = list(path)
@@ -1092,7 +1142,14 @@ class RoleRuntime:
 
         有 SLAM 时, 反馈量全部取自**自己估计的位姿** (`xy_est` / `yaw_est`), 因此
         闭环里流的是"我认为我在哪", 而不是世界真值。
+
+        带 `push_target` 时这是接触式操作: 成功判据换成"目标被推动了多少", 见
+        `_tick_push`。
         """
+        if ex.push_target:
+            self._tick_push(ex, dt)
+            if ex.state != STATE_RUNNING:
+                return
         cur = self.xy_est()
         tol = self.tol()
         while ex.path and float(np.linalg.norm(ex.path[0] - cur)) < tol:
@@ -1127,6 +1184,11 @@ class RoleRuntime:
             ex.path = list(replanned)
             ex.detail += f" [replan #{self._nav_replans}]"
         if not ex.path:
+            if ex.push_target:
+                # 路点走完了但目标还没被推够: 继续顶着走。到点判据在这里是**错的**
+                # 判据 —— 上次就是它让"绕了一圈、箱子没动"记成 COMPLETED。
+                self._thrust(ex, dt)
+                return
             self._hold()
             self._finish(ex, STATE_COMPLETED, "destination reached",
                          "local-odometry-arrival")
@@ -1140,7 +1202,13 @@ class RoleRuntime:
         # 朝向偏差过大时先转向, 避免横移; 但已经贴近路点时方位角会剧烈抖动,
         # 若仍要求"先转向"会永久停死在离目标 ~0.2 m 处 (到点判定 0.15 m 永远
         # 不成立)。故近距离直接放行。
-        speed = self.spec.max_speed if (abs(yaw_err) < 0.45 or dist < 0.40) else 0.0
+        # 近距离放行是为了避免"贴近路点时方位角抖动、到点判定永远不成立"的死锁
+        # (见上一条注释)。但推挤时**方向就是结果**: 站位结束时本体常常还朝着来时
+        # 的方向, 此时若因为路点近就放行全速, 它会按还没转过来的朝向先冲出去 ——
+        # 实测倒退 0.28 m、原地转 1 s 再掉头, 画面上就是"绕了一圈"。推挤改为先转
+        # 向再前进, 只有几乎贴着路点时才放行。
+        close = 0.12 if ex.push_target else 0.40
+        speed = self.spec.max_speed if (abs(yaw_err) < 0.45 or dist < close) else 0.0
         # 世界系执行器必须按**本体自己认为的朝向**分解速度: 用 yaw_est 而不是 yaw。
         # 真实全向底盘接受的是**本体系**指令, 由底盘控制器按它自己认为的朝向换算成
         # 轮速 —— 本体不可能按真值朝向发指令。此处用估计朝向, 朝向误差才会真的进入
@@ -1150,6 +1218,80 @@ class RoleRuntime:
         self.world.set_ctrl(f"{self.spec.yaw_joint}_act", yaw_cmd)
         self._gait(speed, dt)
         ex.detail = f"navigate: {dist:.2f} m to next waypoint"
+
+    def _tick_push(self, ex: Execution, dt: float) -> None:
+        """推挤的目标位移测量与判定 —— 判据是"它动了", 不是"我到点"。
+
+        首次测得目标时, 把它所在的一小块区域标成**可穿越**并重规划: 本体自己建的
+        地图只认几何占据, 分不出"墙"和"能被顶开的箱子", 于是原路径会绕着它走,
+        接触根本不会发生 —— 这正是上一版"绕一圈、箱子原地不动"的成因。上层给出
+        "它可推"这一语义, 路径才改成压过去。
+
+        量程用雷达口径 (不额外要求相机视场): 被顶的东西就在本体旁边, 雷达 360°
+        全程可见, 而相机视场只有几十度, 绕行时它可能一直在视野外。
+        """
+        ex.push_sample_t += dt
+        if ex.push_sample_t < PUSH_SAMPLE_INTERVAL_S:
+            return
+        ex.push_sample_t = 0.0
+        if self.slam is None:
+            return
+        try:
+            echo = self.world.body_xyz(ex.push_target)[:3]
+        except KeyError:
+            self._hold()
+            self._finish(ex, STATE_FAILED, f"unknown push target: {ex.push_target}",
+                         "local-resolution-failed")
+            return
+        pos, _dist, _why = self.slam.perceive_target(
+            echo, DETECTION_RANGE_M.get("object", 1.6), None, PUSH_TARGET_RADIUS_M)
+        if pos is None:
+            ex.detail = f"push {ex.push_target}: 此刻没测到目标位置"
+            return
+        if ex.push_p0 is None:
+            ex.push_p0 = pos.copy()
+            self._pushable = (pos.copy(), PUSH_TARGET_RADIUS_M)
+            # 先绕到目标**正后方**站位, 再沿推方向直线压过去。接触必须发生在直线
+            # 段: A* 给的是绕行路径, 顺着它撞上去方向会偏 —— 实测把障碍推向基座
+            # (相对基座 r 从 0.905 掉到 0.755), 位移够了、任务实质却没达成。
+            d = ex.goal - pos
+            L = float(np.linalg.norm(d))
+            u = d / L if L > 1e-6 else np.array([1.0, 0.0])
+            standoff = pos - u * PUSH_STANDOFF_M
+            lead = self._plan_to(self.xy_est(), standoff)
+            travel = PUSH_STANDOFF_M + L + PUSH_OVERTRAVEL_M
+            n = max(2, int(travel / 0.15))
+            line = [standoff + u * (0.15 * k) for k in range(1, n + 1)]
+            ex.path = (list(lead) + line) if lead else line
+            ex.push_last_pos = pos.copy()
+            ex.detail = (f"push {ex.push_target}: 测得目标在 "
+                         f"({pos[0]:.2f},{pos[1]:.2f}), 沿直线压过去")
+            return
+        moved = float(np.linalg.norm(pos - ex.push_p0))
+        # 它挪开了: 旧位置在地图里的占据就该清掉。否则本体随后站到那里时会被判
+        # "起点在障碍里" (撤离动作正是这样失败的)。
+        if ex.push_last_pos is not None and float(
+                np.linalg.norm(pos - ex.push_last_pos)) > 0.12:
+            self.slam.map.clear_disc(ex.push_last_pos, PUSH_TARGET_RADIUS_M)
+            ex.push_last_pos = pos.copy()
+        if moved >= ex.push_min_m:
+            self._hold()
+            self._finish(ex, STATE_COMPLETED,
+                         f"pushed {ex.push_target} by {moved:.2f} m "
+                         f"(>= {ex.push_min_m:.2f} m; 由自身识别+测距测得)",
+                         "local-push-displacement-observed")
+            return
+        ex.detail = (f"push {ex.push_target}: 已推动 {moved:.2f} m / 需要 "
+                     f"{ex.push_min_m:.2f} m")
+
+    def _thrust(self, ex: Execution, dt: float) -> None:
+        """保持当前朝向全速前进: 路点走完但目标还没被推够时继续顶。"""
+        speed = self.spec.max_speed
+        self.world.set_ctrl(f"{self.spec.slide[0]}_act", speed * math.cos(self.yaw_est()))
+        self.world.set_ctrl(f"{self.spec.slide[1]}_act", speed * math.sin(self.yaw_est()))
+        self.world.set_ctrl(f"{self.spec.yaw_joint}_act", 0.0)
+        self._gait(speed, dt)
+        ex.detail = f"push {ex.push_target}: 路点走完但还没推够, 继续顶进"
 
     def _tick_verify(self, ex: Execution, dt: float) -> None:
         """执行观测: 地面平台原地扫掠, PTZ 精对准; 观测成功才 COMPLETED。"""

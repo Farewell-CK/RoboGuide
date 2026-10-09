@@ -280,6 +280,28 @@ class VoxelMap:
         c = self.center_of(idx)
         return c[(c[:, 2] >= z_lo) & (c[:, 2] <= z_hi)]
 
+    def clear_disc(self, center_xy: np.ndarray, radius_m: float,
+                   z_lo: float = MAP_Z_LO, z_hi: float = MAP_Z_HI) -> int:
+        """把一块区域标为**已空**: 那个东西被推走了, 那里不再是障碍。
+
+        地图是累积的, 动态物体离开后它的旧位置仍是占据 —— 而本体随后正好站在
+        那个位置上, 于是规划时判"起点在障碍里", 撤离动作因此失败过。依据是本体
+        自己的观测 (测得它移动了), 不是真值; 这也是真实动态环境 SLAM 必须做的
+        地图维护, 只是这里由推挤这一已知交互显式触发。
+        """
+        c = np.asarray(center_xy, dtype=float)
+        xs = self.xlim[0] + (np.arange(self.nx) + 0.5) * self.voxel
+        ys = self.ylim[0] + (np.arange(self.ny) + 0.5) * self.voxel
+        zs = self.zlim[0] + (np.arange(self.nz) + 0.5) * self.voxel
+        disc = ((xs[:, None] - c[0]) ** 2
+                + (ys[None, :] - c[1]) ** 2) <= radius_m ** 2
+        band = (zs >= z_lo) & (zs <= z_hi)
+        sel = disc[:, :, None] & band[None, None, :]
+        self.log[sel] = np.minimum(self.log[sel], -OCC_THR)
+        self.seen[disc] = True
+        self._field = None
+        return int(disc.sum())
+
     def grid2d(self, z_lo: float = MAP_Z_LO, z_hi: float = MAP_Z_HI) -> np.ndarray:
         """投影成二维占据栅格 (nx, ny): True = 该竖列内有实体。"""
         idx = self.occupied()
@@ -477,6 +499,7 @@ class PlanGrid:
     def __init__(self, map_: VoxelMap, inflate_cells: int = 4) -> None:
         self.map = map_
         self.inflate = int(inflate_cells)
+        self.fail_reason = ""          # 上一次 plan 失败的原因 (成功时为空)
 
     def _grid(self) -> np.ndarray:
         occ = self.map.grid2d()
@@ -493,21 +516,69 @@ class PlanGrid:
             out[:, :-1] |= out[:, 1:].copy()
         return out
 
-    def plan(self, start: np.ndarray, goal: np.ndarray) -> list[np.ndarray] | None:
-        """在世界坐标间规划; 失败返回 None (调用方决定是否回退)。"""
+    def disc_mask(self, center: np.ndarray, radius: float) -> np.ndarray:
+        """以 center 为心、radius 为半径的圆盘覆盖到的格子 (nx, ny)。"""
+        m = self.map
+        xs = m.xlim[0] + (np.arange(m.nx) + 0.5) * m.voxel
+        ys = m.ylim[0] + (np.arange(m.ny) + 0.5) * m.voxel
+        return ((xs[:, None] - center[0]) ** 2
+                + (ys[None, :] - center[1]) ** 2) <= radius * radius
+
+    def plan(self, start: np.ndarray, goal: np.ndarray,
+             pushable: tuple[np.ndarray, float] | None = None
+             ) -> list[np.ndarray] | None:
+        """在世界坐标间规划; 失败返回 None (调用方决定是否回退)。
+
+        `pushable=(中心, 半径)` 标出一块**允许穿越**的区域: 上层的推挤任务会告诉
+        本体"这个东西是可以被顶开的", 于是它在规划时不再是障碍, 路径可以压过去
+        —— 接触式操作 (把箱子顶走) 的前提就是路径**不能**绕开它。本体自己建出来
+        的地图只认几何占据, 分不出"墙"和"可推动的箱子", 所以这一层语义只能由任务
+        先验给出 (真实系统里同样如此: 人下达"把这箱子推开"时已隐含它可推)。
+        注意该区域只对**本体认为可推的目标**生效, 不是全局豁免。
+
+        失败原因记到 `self.fail_reason`: 自己的地图规划不出来时, "起点在障碍里"、
+        "目标在障碍里" 与 "不可达" 是完全不同的三种问题, 必须能区分, 否则只能看到
+        一个笼统的 no-path。
+
+        两级约束 (与真实 costmap 一致):
+          raw 占据  = 硬约束。路径不可穿越, 起点/终点也不能落在里面。
+          膨胀层    = 软约束 (安全余量)。搜索时避让, 但**允许**起点/终点位于其中 ——
+                      本体贴着障碍站着 (顶推动作的必然结果) 是物理合法的, 目标也可
+                      能就在障碍旁边 (例如目的地就是 obs2 本身)。拿膨胀去否决"我在
+                      哪儿"会把这类任务判死: 实测占据格就在起点旁 1 格 (6 cm), 于是
+                      2/3/4 格膨胀全都把起点判成占据, 缩小膨胀根本无解。
+        """
         m = self.map
         g = self._grid()
+        raw = m.grid2d()
+        if pushable is not None:
+            soft = self.disc_mask(np.asarray(pushable[0], dtype=float), float(pushable[1]))
+            # 可推动体: 既不是硬阻挡 (要压过去), 也不该再收膨胀代价 (否则仍会绕行)
+            raw = raw & ~soft
+            g = g & ~soft
         si = int(np.floor((start[0] - m.xlim[0]) / m.voxel))
         sj = int(np.floor((start[1] - m.ylim[0]) / m.voxel))
         gi = int(np.floor((goal[0] - m.xlim[0]) / m.voxel))
         gj = int(np.floor((goal[1] - m.ylim[0]) / m.voxel))
         for v, n in ((si, m.nx), (sj, m.ny), (gi, m.nx), (gj, m.ny)):
             if not (0 <= v < n):
+                self.fail_reason = "out-of-map"
                 return None
-        if g[gi, gj] or g[si, sj]:
+        if raw[si, sj]:
+            self.fail_reason = "start-occupied"
             return None
-        # Dijkstra/A* (4 邻域 + 对角, 对角要求两侧都空)
+        if raw[gi, gj]:
+            self.fail_reason = "goal-occupied"
+            return None
+        # 膨胀层对起点/终点豁免: 站在安全余量里不是错, 走不出去才是。
+        g[si, sj] = False
+        g[gi, gj] = False
+        # Dijkstra/A*: raw 是硬阻挡, 膨胀层是**额外代价**而不是禁止 —— 本体贴着障碍
+        # 站着时, 四周可能整个落在安全余量里, 禁止穿越就等于把它关在里面
+        # (实测 3/4 格膨胀下直接 unreachable)。给一个足够大的 penalty, 有自由路时
+        # 一定绕行, 没路时才从余量里蹭出来。
         import heapq
+        inflate_penalty = 6.0
         open_h: list[tuple[float, int, int]] = [(0.0, si, sj)]
         came: dict[tuple[int, int], tuple[int, int]] = {}
         cost: dict[tuple[int, int], float] = {(si, sj): 0.0}
@@ -522,15 +593,16 @@ class PlanGrid:
                 return [m.center_of(np.array([[i, j, 0]]))[0][:2] for i, j in path[::-1]]
             for di, dj, w in nbrs:
                 ni, nj = ci + di, cj + dj
-                if not (0 <= ni < m.nx and 0 <= nj < m.ny) or g[ni, nj]:
+                if not (0 <= ni < m.nx and 0 <= nj < m.ny) or raw[ni, nj]:
                     continue
-                if di and dj and (g[ci + di, cj] or g[ci, cj + dj]):
+                if di and dj and (raw[ci + di, cj] or raw[ci, cj + dj]):
                     continue
-                nc = cost[(ci, cj)] + w
+                nc = cost[(ci, cj)] + w + (inflate_penalty if g[ni, nj] else 0.0)
                 if nc < cost.get((ni, nj), 1e18):
                     cost[(ni, nj)] = nc
                     came[(ni, nj)] = (ci, cj)
                     heapq.heappush(open_h, (nc + math.hypot(gi - ni, gj - nj), ni, nj))
+        self.fail_reason = "unreachable"
         return None
 
 
@@ -823,7 +895,8 @@ class SlamNode:
     # ---------------- 传感器判定"看见了" ----------------
 
     def perceive_target(self, echo_xyz: np.ndarray, max_range: float,
-                        fov_half_rad: float | None = None
+                        fov_half_rad: float | None = None,
+                        target_radius_m: float = 0.0
                         ) -> tuple[np.ndarray | None, float, str]:
         """识别层对本目标的读数: 观测到则返回**地图系下的测得位置**, 否则 None。
 
@@ -859,11 +932,17 @@ class SlamNode:
         dir_m = dir_m / float(np.linalg.norm(dir_m))
         d_m = max(dist + self.rng_percept.normal(
             0, PERCEPT_RANGE_SIGMA_M + PERCEPT_RANGE_SIGMA_K * dist), 0.0)
-        # --- 回波确认: 打过去得到的距离要和目标距离吻合 ---
+        # --- 回波确认: 打过去得到的距离要和目标吻合 ---
+        # 射线打在目标的**表面**, 所以它天然比"到目标中心"的距离近, 近的量约等于
+        # 目标半径。因此只有回波近得超出目标尺寸 (中间挡着别的东西) 或比目标还远
+        # (那个方向上没有它) 才算不匹配 —— 用 `abs(hit - d_m) > tol` 会把所有有体积
+        # 的目标都判成被遮挡 (实测 obs2 因此全程测不到, 推挤无从谈起)。
         hit = float(self.caster.cast(o, dir_m[None, :])[0])
         if hit < 0:
             return None, dist, "no-return"
-        if abs(hit - d_m) > PERCEPT_ECHO_TOL_M:
+        if hit - d_m > PERCEPT_ECHO_TOL_M:
+            return None, dist, f"echo-beyond-target-{hit:.2f}"
+        if d_m - hit > target_radius_m + PERCEPT_ECHO_TOL_M:
             return None, dist, f"occluded-at-{hit:.2f}"
         # --- 地图系下的目标位置: 只用估计位姿与测得量合成 ---
         org = (np.array([self.pose[0], self.pose[1], self.base_z])

@@ -13,7 +13,7 @@
 #   M3 地面平台把可移动障碍顶出扇区 -> 让出短弧
 #   M4 机械臂转 180° 到正后方取物, 再转回起始方位放下 -> COMPLETED (placed)
 #
-# 用法: bash scenarios/hcore-heterogeneous-v0.1/run-step2-mission.sh
+# 用法: bash scenarios/hcore-homogeneous-v0.2/run-step2-mission.sh
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -22,8 +22,8 @@ export RUSTUP_HOME=/var/tmp/rg-rustup CARGO_HOME=/var/tmp/rg-cargo CARGO_TARGET_
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 
 PY=/home/sunweihao/miniconda3/envs/py310/bin/python
-RUN=/var/tmp/rg-run/hcore-het-2
-SCEN=scenarios/hcore-heterogeneous-v0.1
+RUN=/var/tmp/rg-run/hcore-hom-2
+SCEN=scenarios/hcore-homogeneous-v0.2
 rm -rf "$RUN"; mkdir -p "$RUN/artifacts"
 trap 'kill $(jobs -p) 2>/dev/null || true' EXIT INT TERM
 
@@ -36,7 +36,17 @@ echo "### 1. 共享 MuJoCo 世界 + 四个 facade"
 #   --record-skip-idle  跳过"四个本体都没在跑"的仿真步, 剪掉控制面在 Mission/Task
 #                       之间重走 Match -> Propose -> Commit 的那几秒静止。
 # 因此视频时长 **短于** 仿真/墙钟时长, 但没有任何一段是不动的画面。
-FACADE_ARGS=(--speed "${RG_SPEED:-8}")
+FACADE_ARGS=(--speed "${RG_SPEED:-8}" \
+             --runtime-name "${RG_RUNTIME_NAME:-robonix-os}" \
+             --slam "${RG_SLAM:-on}" --slam-seed "${RG_SLAM_SEED:-7}" \
+             --slam-dump "$RUN/artifacts")
+# 上帝地图回退开关: RG_NO_WORLD_FALLBACK=1 时, 自己的地图规划不出来就判失败,
+# 不再悄悄换成仿真器栅格。这是"自建地图"claim 的硬约束 —— 上一轮实测 M3 的
+# 后两次导航都走了回退, 留着它时任务能过但结论不成立。
+if [ "${RG_NO_WORLD_FALLBACK:-0}" = "1" ]; then
+    FACADE_ARGS+=(--no-world-fallback)
+    echo "  上帝地图回退: 关闭 (规划只照自己建的地图)"
+fi
 if [ -n "${RG_RECORD:-}" ]; then
     FACADE_ARGS+=(--record "$RG_RECORD" --record-fps "${RG_RECORD_FPS:-15}" \
                   --record-defer --record-skip-idle)

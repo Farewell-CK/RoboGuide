@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Step 1 — 全链路就绪: 共享 MuJoCo 世界 + Integration Server + 三个异构 roboguide-node
+# Step 1 — 全链路就绪: 共享 MuJoCo 世界 + Integration Server + 四个同构 roboguide-node
+#         (四个节点全部上报 robonix-os, 本体/能力/运动学一个字不改 —— 同构对照)
 #
-# 验收点: 三个 runtime_name 不同的节点同时在册 (ADR-0006 异构 EAIOS 协调)。
-# 用法:   bash scenarios/hcore-heterogeneous-v0.1/run-step1-bringup.sh
+# 验收点: 四个 runtime_name 都报 robonix-os 的节点同时在册 (同构对照, 验证 OS 同名也能靠 capability 区分)。
+# 用法:   bash scenarios/hcore-homogeneous-v0.2/run-step1-bringup.sh
 # 退出:   Ctrl-C (trap 会清理全部子进程)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -14,12 +15,14 @@ export RUSTUP_HOME=/var/tmp/rg-rustup CARGO_HOME=/var/tmp/rg-cargo CARGO_TARGET_
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 
 PY=/home/sunweihao/miniconda3/envs/py310/bin/python
-RUN=/var/tmp/rg-run/hcore-het-1
+RUN=/var/tmp/rg-run/hcore-hom-1
 rm -rf "$RUN"; mkdir -p "$RUN/artifacts"
 trap 'kill $(jobs -p) 2>/dev/null || true' EXIT INT TERM
 
 # 1. 共享 MuJoCo 世界 + 四个 facade (一个进程托管, 空间冲突真实可观测)
-( cd integrations/hcore-mujoco-local-eaios && exec "$PY" -m hcore_mujoco_local_eaios --speed 8 ) \
+( cd integrations/hcore-mujoco-local-eaios && exec "$PY" -m hcore_mujoco_local_eaios --speed 8 \
+        --runtime-name "${RG_RUNTIME_NAME:-robonix-os}" \
+        --slam "${RG_SLAM:-on}" --slam-seed "${RG_SLAM_SEED:-7}" ) \
     > "$RUN/bridge.log" 2>&1 &
 for _ in $(seq 30); do curl -sf http://127.0.0.1:28111/v1/health >/dev/null && break; sleep 1; done
 
@@ -31,7 +34,7 @@ for _ in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz >/dev/null && brea
 # 3. 四个节点: 每台节点机器只运行一个 roboguide-node
 for n in quadruped-om1 rover-robonix ptz-ros2 arm-roboos; do
     "$CARGO_TARGET_DIR/debug/roboguide-node" \
-        "scenarios/hcore-heterogeneous-v0.1/node-$n.toml" > "$RUN/node-$n.log" 2>&1 &
+        "scenarios/hcore-homogeneous-v0.2/node-$n.toml" > "$RUN/node-$n.log" 2>&1 &
 done
 for _ in $(seq 60); do
     count=$(curl -sf http://127.0.0.1:8080/v1/inventory 2>/dev/null \

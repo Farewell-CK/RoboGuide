@@ -83,7 +83,7 @@
     },
     {
       "id": "task-push-out-once",
-      "description": "一次性顶出: 终点取 arm_push_out_clear (-0.19, 0.10) 而不是障碍自身的位置。推进量 = 行程 - 接触间隙 0.51 m, 若终点只写到障碍原位, rover 顶到那里就停、推进量被钳死在半个身位; 终点设在障碍初始位置之外, 一次冲撞才能把它真正推出回转环带 (中心 r 需 > 扫掠半径 0.63 + 障碍外接圆 0.36 m, 否则机械臂持物回转时仍会被它挡住)。带 freejoint 的可动体不进静态栅格, 因此 A* 直接规划一条穿过它的路径, 接触真实发生。",
+      "description": "一次性顶出: 终点取 arm_push_out_clear (-0.19, 0.10) 而不是障碍自身的位置。推进量 = 行程 - 接触间隙 0.51 m, 若终点只写到障碍原位, rover 顶到那里就停、推进量被钳死在半个身位; 终点设在障碍初始位置之外, 一次冲撞才能把它真正推出回转环带 (中心 r 需 > 扫掠半径 0.63 + 障碍外接圆 0.36 m, 否则机械臂持物回转时仍会被它挡住)。push_target 告诉执行者'这个东西是可以被顶开的': 本体自建的地图只认几何占据, 分不出墙和可推的箱子, 不给出这一语义时 A* 会绕着它走, 接触根本不会发生。成功判据是目标**实测位移** >= min_push_m (由本体的识别 + 测距合成), 而不是自车到点距离 —— 后者曾让'绕一圈、箱子没动'记成 COMPLETED。",
       "context_id": "ctx-arm-sweep",
       "depends_on": [
         "task-push-out-stage"
@@ -124,7 +124,9 @@
             },
             "objective": "一次冲撞把可移动障碍顶出机械臂回转扇区。",
             "parameters": {
-              "destination": "arm_push_out_clear"
+              "destination": "arm_push_out_clear",
+              "push_target": "obs2",
+              "min_push_m": 0.7
             }
           },
           "resource_scope": "task"
