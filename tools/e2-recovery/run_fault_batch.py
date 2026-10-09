@@ -95,7 +95,7 @@ def run(args: argparse.Namespace) -> int:
         "prompt_profile": "fair",
         "dag_profile": "serial",
         "credentials_recorded": False,
-        "execution_order": "counterbalanced F0/F1/F1/F0/F0/F1",
+        "execution_order": "counterbalanced F1/F0/F0/F1/F1/F0",
     }
     if experiment["model"] != "gpt-6.1-sol" or experiment["review_model"] != "gpt-6.1-sol":
         raise ValueError("all Mission Intelligence calls must use gpt-6.1-sol")

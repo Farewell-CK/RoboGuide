@@ -8,11 +8,11 @@
   "max_segments": 3,
   "execution_timeout_seconds": 360,
   "runs": [
-    {"fault_profile": "f0-clean", "replicate": 1},
     {"fault_profile": "f1-node-loss", "replicate": 1},
-    {"fault_profile": "f1-node-loss", "replicate": 2},
+    {"fault_profile": "f0-clean", "replicate": 1},
     {"fault_profile": "f0-clean", "replicate": 2},
-    {"fault_profile": "f0-clean", "replicate": 3},
-    {"fault_profile": "f1-node-loss", "replicate": 3}
+    {"fault_profile": "f1-node-loss", "replicate": 2},
+    {"fault_profile": "f1-node-loss", "replicate": 3},
+    {"fault_profile": "f0-clean", "replicate": 3}
   ]
 }

@@ -24,12 +24,12 @@ def test_manifest_has_three_clean_and_three_fault_runs() -> None:
     manifest = module.load_manifest(Path(__file__).with_name("fault-pilot6.json"))
     profiles = [run["fault_profile"] for run in manifest["runs"]]
     assert profiles == [
-        "f0-clean",
-        "f1-node-loss",
         "f1-node-loss",
         "f0-clean",
         "f0-clean",
         "f1-node-loss",
+        "f1-node-loss",
+        "f0-clean",
     ]
 
 
