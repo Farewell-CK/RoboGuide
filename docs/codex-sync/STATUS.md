@@ -6,17 +6,17 @@
 
 ## 当前实验目标
 
-当前主目标是验证 RoboGuide 的故障处理能力，具体限定为：执行中的已分配 Node 丢失后，系统能否保守地标记物理执行歧义，阻塞受影响的任务，保留未受影响的上下文，经由 `Match -> Schedule -> Propose -> Commit -> Rebind` 选择备用 Node，并继续执行至官方 COHERENT 目标成立。
+当前主目标是验证 RoboGuide 的故障处理能力，具体限定为：执行中的已分配 Node 丢失后，系统能否保守地标记物理执行歧义，等待可信停止事实，保留未受影响的上下文，经由 `Match -> Schedule -> Propose -> Commit -> Rebind` 形成新 Attempt，并继续执行至官方 COHERENT 目标成立。
 
 当前阶段只研究单个 Node 的执行前故障。它不证明任意物理机器人故障、动作 exactly-once、持物状态迁移、同时多 Role 故障或跨全部 COHERENT 任务泛化。
 
 ## Git 状态
 
 - 当前命名实验分支：`codex/e2-coherent-gpt6-sol`
-- 本次同步文档提交前的实验代码基线 HEAD：`fda825d33cf8882f0018b7b7003f3ce150d7000c`
-- HEAD 主题：Recovery pilot 先执行 F1 preflight
-- 远程分支 `origin/codex/e2-coherent-gpt6-sol` 已核对为同一个 `fda825d`。
-- 服务器本地分支原先位于 `95420574050608180e17d8394f875440a45c5873`；在显式 fetch 并验证本地分支为远程分支严格祖先后，已通过 `git merge --ff-only` 安全同步到 `fda825d`，没有 force push 或覆盖提交。
+- 本次核验的实验代码基线 HEAD：`1d01ef75840484278b8abf2b56577af25f1c489a`
+- HEAD 主题：`feat: complete confirmed-stop E2 recovery`
+- 远程分支 `origin/codex/e2-coherent-gpt6-sol` 已核对为同一个 `1d01ef7`，ahead/behind 为 `0/0`。
+- 同步前本地 HEAD 为文档提交 `7f5a0bd398843868871a21c78d90e8f498983485`。显式 fetch 后确认它是远程 HEAD 的祖先，再通过 `git merge --ff-only` 快进到 `1d01ef7`；没有 force push，也没有创建新 Merge Commit。
 - 当前分支原有未跟踪文件：
   - `tools/e2-full-task17/mission-gpt-5.6-luna.toml`
   - `tools/e2-full-task17/mission-luna.toml`
@@ -41,13 +41,15 @@
 - fair/informed prompt ablation pilot；
 - E2 Node-loss 故障注入 runtime；
 - F0 clean / F1 pre-effect Node-loss 六次 pilot runner、manifest 和自动 verdict；
-- 故障时间线、图快照、Controller attempts、standby Node 日志和校验和证据。
+- 故障时间线、图快照、Controller attempts、重启 Node 日志和校验和证据。
+- 显式 `/recover` 授权、可信 `Cancelled` 停止事实、恢复预算、same-owner Matching、Commit、Rebind 和新 physical Attempt。
+- COHERENT generic bridge 的执行前可取消窗口，以及以 Controller Attempt identity 区分本地幂等句柄。
 
-恢复 harness 不修改 RoboGuide Core、Controller、Scheduler、Node 或 COHERENT adapter 的恢复语义。它在第 7 个 primitive 请求进入 COHERENT 前阻断请求，终止当前绑定的 Dog Node，并注册声明相同 operation 的 standby Node。
+当前恢复 harness 在第 7 个 primitive 已被 Local EAIOS 接收、但尚未产生图效果时终止绑定 Node，显式提交有界恢复授权，重启同一个 Node identity，并等待旧 Attempt 的真实 `Cancelled` 后验证新 Attempt。它不直接执行或编辑 primitive，但当前实现已经依赖 `1d01ef7` 新增的 Core、Controller、Node workflow 与 COHERENT adapter confirmed-stop 语义。
 
 ## 最新实验事实
 
-最新已完成批次：`task17-pilot6-fda825d-20261009T103000Z`
+历史批次：`task17-pilot6-fda825d-20261009T103000Z`
 
 - 模型：`gpt-6.1-sol`
 - 任务：官方 `env4/task17`
@@ -65,42 +67,56 @@ F1 的逐次事实：
 
 因此当前证据只证明故障注入器能够稳定杀死主 Node、保存故障前图状态并注册 standby；尚未证明 RoboGuide 的端到端恢复链路已经成功。
 
+同步后发现一份基于 `1d01ef7` 的新单次真实运行：`dog-a-recovery-1d01ef7-20261009T171500Z`。证据清单校验全部通过，实际结果如下：
+
+- `injection_valid=true`，`infrastructure_ok=true`；故障发生在完成 6 个 primitive 后。
+- 实际故障目标是 `agent 25` 四旋翼的 `[land_on]`，不是运行目录和部分说明文字所称的 Dog-A。
+- 原 Controller Attempt 先为 `Unknown`；恢复授权返回 HTTP 202 时仍为 `AwaitingStop`，没有把回执当停止证明。
+- 重启同一 Node identity 后，旧本地执行在产生图效果前报告 `Cancelled`；Controller 随后形成新 Attempt `r07-2`，完成 Rebind，并成功执行原 `[land_on]` primitive。
+- 该次运行因此证明了一次 COHERENT pre-effect、same-owner confirmed-stop 恢复链路实际跑通。
+- 整体任务仍失败：第二规划段的 Provider 请求在约 600 秒后超时，官方目标只满足 2/3，`task_success=false`、`full_fault_run_success=false`。
+
+这不能写成“RoboGuide 已成功完成故障任务”，也不能证明备用 Node、不同物理 Dog 接替、post-effect 歧义或跨任务泛化。
+
 ## 本次核验和测试
 
-在 commit `fda825d` 上执行了以下选定离线测试；该提交现已是当前命名分支 HEAD：
+在 commit `1d01ef7` 上执行了以下针对性检查：
 
 ```text
 PYTHONPATH=integrations/coherent-local-eaios:tools/e2-generic \
 .venv/bin/python -m pytest -q \
-  tools/e2-recovery/test_fault_runtime.py \
-  tools/e2-generic/test_dag_policy.py \
-  tools/e2-generic/test_goal_guard.py \
-  tools/e2-generic/test_prompt_ablation.py \
-  tools/e2-generic/test_run_dag_evidence.py
+  tools/e2-generic/test_recovery_boundary.py \
+  tools/e2-recovery/test_fault_runtime.py
+
+cargo test -p runtime recovery
+cargo test -p integration-server recovery
+
+.venv/bin/python tools/quality/check_group_continuation_processes.py \
+  --output <fresh-temporary-directory>
 ```
 
-当前命名分支同步到 `fda825d` 后使用以上命令复测，实际结果：22 项选定测试通过。
+- Python：5 项通过，0 失败。
+- Runtime：17 项恢复相关测试通过，0 失败；另有 27 项被过滤。
+- Integration Server：35 项恢复相关测试通过，0 失败；另有 76 项被过滤。
+- 进程级检查：2 个 case 通过，使用真实 Controller 与两个真实 Node、合成 Local EAIOS；0 次 Provider 调用、0 次 simulator reset。该结果不是 COHERENT 物理实验成绩。
 
-已保留的环境失败：此前未设置 `PYTHONPATH` 时，两个模块在收集阶段无法导入 `coherent_local_eaios`。本次同步后首次复测时，非交互 SSH 环境没有 `python` 命令；随后使用系统 `python3`（3.10）又因缺少 `tomllib` 导致两个模块收集失败。改用项目 `.venv/bin/python` 并补齐明确的 `PYTHONPATH` 后，22 项测试全部通过。这些失败属于解释器/环境选择问题，不是 Recovery 测试失败，也不能从记录中省略。
-
-本次同步文件为文档变更。提交前已执行 `git diff --cached --check`、`git status --short --branch`、完整 staged diff 审查和敏感字段扫描：空白检查通过，暂存区只有两份同步文档，敏感字段扫描没有命中；三个无关 TOML 仍保持未跟踪状态。
+最初通过非交互 SSH 调用 `uv`、`cargo` 时因工具路径不在 `PATH` 而未进入测试；改用项目 `.venv/bin/python` 和服务器 Rust 工具链的显式路径后获得以上有效结果。两个额外的 Rust 名称过滤命令各匹配 0 项测试，不计入通过数。
 
 ## 当前阻塞与已知问题
 
-1. 两次有效 F1 注入中，主 Node 丢失和 standby 注册均成功，但没有观察到完整 Recovery candidate、Proposal、Commit、Rebind 事件链。
-2. clean 对照只有 `2/3` 成功；一次规划失败说明在线模型波动会干扰 Recovery 因果判断。
-3. F1 pilot 的 standby 仍声明同一个 COHERENT agent identity `24`。当前结果最多研究 Node failover，不能表述为不同物理机器狗的接替。
-4. 当前正式证据只有 `env4/task17`，不能外推到不同环境和任务。
-5. 当前恢复实现只覆盖单个不可用 Role，不是多 Role 联合恢复。
+1. 新代码已经解决旧 Pilot 中“只有 `Unknown`、Controller 保持 `Running`”的代码与协议阻塞，但只有 1 次真实 COHERENT 链路观测，尚无重复稳定性。
+2. 新运行的恢复链路成功，整体任务却因后续 Provider 超时失败；在线模型波动仍会干扰 Recovery 因果判断。
+3. 当前实际验证的是 same-owner Node restart，不是 standby Node，更不是不同 PhysicalEntity 的机器人替换。
+4. 运行目录、verdict interpretation、README 和一个测试名仍含 `Dog-A`/`standby` 旧表述；实际故障对象由第 7 个 primitive 决定，本次是 `agent 25` 四旋翼。
+5. 当前真实证据仍只有 `env4/task17`，不能外推到不同环境和任务；post-effect 歧义也未验证。
 6. 当前分支的三个未跟踪模型配置文件来源和保留策略尚未确认，不能擅自纳入或删除。
 
 ## 下一步计划
 
-1. 从两次有效 F1 证据中定位 Controller 保持 `Running` 的原因，检查 route loss、lease/liveness、`RecoveryRequired`、Blocked 状态和应用 timer 是否按预期推进。
-2. 增加自动 verifier，要求完整观察到 `RecoveryRequired -> Match -> Proposal -> Commit -> Rebind -> new attempt`，仅最终 goal pass 不足以判定 Recovery PASS。
-3. 先使用冻结的受控计划或稳定的规划产物完成 F0/F1 机制验证，避免在线 LLM 规划波动掩盖恢复结果。
-4. task17 Pilot 通过后，扩展到 5 个跨环境任务；只有 Pilot 稳定后再冻结 15--20 个任务、每个任务重复 3 次的正式集合。
-5. 单独决定后续研究的是“备用 Node 控制同一物理 Dog”还是“不同 PhysicalEntity Dog-B 接替”。后者需要独立实体状态、Actor/PhysicalEntity 迁移和不能继承持物状态的实验规则。
+1. 修正 harness、README、运行命名和 verifier 中硬编码的 `Dog-A`/`standby` 表述，按实际 fault target 生成证据标签。
+2. 使用冻结的受控计划完成至少 3 次 same-owner F1 重复，并把“恢复协议链成功”与“官方任务成功”作为两个独立 verdict，避免在线 LLM 超时掩盖机制结果。
+3. 在 same-owner Pilot 稳定后，再单独设计备用 Node 或不同 PhysicalEntity 接替；后者需要独立实体状态、Actor/PhysicalEntity 迁移和不能继承持物状态的实验规则。
+4. task17 Pilot 通过后扩展到 5 个跨环境任务；只有 Pilot 稳定后再冻结 15--20 个任务、每个任务重复 3 次的正式集合。
 
 ## 后续维护规则
 

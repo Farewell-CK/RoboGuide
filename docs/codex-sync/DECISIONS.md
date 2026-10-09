@@ -22,7 +22,7 @@
 ## D-003：执行前 Node loss 与执行后物理歧义必须分开评测
 
 - 状态：Accepted
-- 决定：当前 F1 pilot 只在 primitive 尚未进入 COHERENT 前终止绑定 Node。动作已经改变世界但完成事实未返回的 post-effect ambiguity 作为独立实验处理。
+- 决定：当前 confirmed-stop F1 在 primitive 已被 Local EAIOS 接收、但尚未产生 COHERENT 图效果的受控窗口内终止绑定 Node。只有旧 Attempt 返回可信 `Cancelled` 后才允许新 Attempt。动作已经改变世界但完成事实未返回的 post-effect ambiguity 作为独立实验处理。
 - 原因：前者允许安全地由新 Attempt 重试；后者可能已经产生物理副作用，盲目重放会违反安全边界。
 - 结论边界：F1 成功不能证明 exactly-once physical action，也不能证明 post-effect reconciliation 已完成。
 
@@ -30,8 +30,8 @@
 
 - 状态：Accepted
 - 决定：`env4/task17` 的 3 次 clean 和 3 次 Node-loss 运行只验证 harness 和 Recovery 链路，不作为跨任务正式统计结果。
-- 原因：单任务无法支持跨环境泛化结论；当前 clean 只有 `2/3`，F1 为 `0/3`，恢复链路尚未闭合。
-- 下一门槛：先使有效 F1 运行出现完整且可验证的 Recovery 事件链，再扩展任务集。
+- 原因：单任务无法支持跨环境泛化结论；历史批次的 clean 只有 `2/3`，F1 为 `0/3`。`1d01ef7` 后的一次运行已出现完整 confirmed-stop 与新 Attempt 链路，但整体任务因后续 Provider 超时失败，不能回写或替代历史统计。
+- 下一门槛：冻结计划后重复验证协议链和官方任务结果，再扩展任务集。
 
 ## D-005：主 Recovery 结论必须同时满足协议链和任务结果
 
@@ -75,9 +75,16 @@
 ## D-011：分支整合策略
 
 - 状态：Accepted，已执行
-- 决定：以 GitHub 远程分支为事实来源。显式 fetch 后确认 `origin/codex/e2-coherent-gpt6-sol` 位于 `fda825d`，服务器本地命名分支 `9542057` 是其严格祖先，因此只使用 `git merge --ff-only` 同步，不创建重复 merge commit，也不 force push。
-- 结果：本地命名分支和远程分支均指向 `fda825d33cf8882f0018b7b7003f3ce150d7000c`，最新 Recovery 代码和真实失败结果均被保留。
+- 决定：以 GitHub 远程分支为事实来源。2026-10-09 再次显式 fetch 后，确认本地 `7f5a0bd` 是远程 `1d01ef7` 的祖先，因此只使用 `git merge --ff-only` 同步，不创建重复 merge commit，也不 force push。
+- 结果：本地命名分支和远程分支均指向 `1d01ef75840484278b8abf2b56577af25f1c489a`；三个无关 TOML 保持未跟踪且未修改。
 - 原因：先核对远程对象和祖先关系，可以避免覆盖 GitHub 上已有提交，并保证同步文档引用的是远程可访问代码。
+
+## D-012：当前 confirmed-stop E2 只验证 same-owner restart
+
+- 状态：Accepted（能力边界）
+- 决定：`1d01ef7` 的 E2 harness 重启原 Node identity，并在可信停止后为相同 operation 创建新 Attempt。这是 same-owner Node restart，不是 standby Node 选择，也不是不同 PhysicalEntity 机器人接替。
+- 原因：当前 Actor、资源和物理 agent identity 都保持不变；将它表述为备用机器人替换会扩大证据支持的结论。
+- 后续：备用 Node 或 Dog-B 接替必须另行定义候选拓扑、实体状态迁移、持物状态与安全停止规则，不能从本次结果外推。
 
 ## 会话共享安全边界
 
