@@ -51,6 +51,25 @@ def wait_service(url: str, processes: list[subprocess.Popen[bytes]]) -> None:
     raise TimeoutError(f"service startup timeout: {url}")
 
 
+def controller_event_archive(api: str, max_pages: int = 1000) -> dict[str, Any]:
+    """Read ordered Controller event pages; reject gaps, repeats and truncated archives."""
+    events: list[dict[str, Any]] = []
+    after = 0
+    for _ in range(max_pages):
+        status, body = http_json("GET", f"{api}/v1/events?after={after}&limit=1000")
+        if status != 200 or not isinstance(body, dict) or not isinstance(body.get("events"), list):
+            raise ValueError("Controller returned an invalid event page")
+        page = body["events"]
+        if not page:
+            return {"events": events, "complete_through_sequence": after}
+        for event in page:
+            if not isinstance(event, dict) or event.get("sequence") != after + 1:
+                raise ValueError("Controller event archive has a gap or repeated page")
+            after = event["sequence"]
+            events.append(event)
+    raise ValueError("Controller event archive page budget exhausted")
+
+
 def local_executions(database: Path) -> list[dict[str, Any]]:
     """Read raw local execution outcomes, including failures, without modifying the store."""
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
@@ -595,8 +614,11 @@ def run(args: argparse.Namespace) -> int:
     finally:
         # Read-only snapshots precede shutdown; hashes are taken only after writers have stopped.
         if processes:
+            try:
+                json_write(output / "controller-events.json", controller_event_archive(api))
+            except (OSError, ValueError) as error:
+                json_write(output / "controller-events-error.json", {"error": str(error)})
             for route, filename in (
-                ("events", "controller-events.json"),
                 ("execution-attempts", "execution-attempts.json"),
             ):
                 try:

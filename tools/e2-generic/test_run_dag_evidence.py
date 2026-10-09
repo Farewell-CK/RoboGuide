@@ -6,11 +6,31 @@ import json
 import unittest
 from unittest.mock import patch
 
-from run_dag import controller_attempts, mission_executions, planner_feedback
+from run_dag import controller_attempts, controller_event_archive, mission_executions, planner_feedback
 
 
 class RecoveryEvidenceTests(unittest.TestCase):
     """Exercise Controller/local evidence filtering without a running Controller."""
+
+    def test_events_continue_past_default_page(self) -> None:
+        """A recovery after startup heartbeats survives paginated evidence export."""
+        first = [{"sequence": n} for n in range(1, 101)]
+        last = {"sequence": 101, "payload": {"RecoveryRebound": {}}}
+        with patch("run_dag.http_json", side_effect=[
+            (200, {"events": first}), (200, {"events": [last]}), (200, {"events": []})
+        ]) as mocked:
+            result = controller_event_archive("http://controller")
+        self.assertEqual(result["events"][-1], last)
+        self.assertEqual(result["complete_through_sequence"], 101)
+        self.assertIn("after=100", mocked.call_args_list[1].args[1])
+
+    def test_events_reject_repeated_page_and_exhaustion(self) -> None:
+        """Nonadvancing or unbounded reads cannot claim complete evidence."""
+        with patch("run_dag.http_json", return_value=(200, {"events": [{"sequence": 1}]})):
+            with self.assertRaisesRegex(ValueError, "gap or repeated"):
+                controller_event_archive("http://controller")
+            with self.assertRaisesRegex(ValueError, "budget exhausted"):
+                controller_event_archive("http://controller", max_pages=1)
 
     def test_controller_attempts_are_filtered_by_mission(self) -> None:
         """Only attempts owned by the failed Mission enter its recovery context."""
