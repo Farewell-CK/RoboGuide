@@ -89,3 +89,23 @@
 ## 会话共享安全边界
 
 跨 ChatGPT/Codex 对话共享项目上下文时，优先共享本目录的人工筛选摘要。完整会话原始记录可能包含工具输入输出、路径、环境信息和其他敏感上下文，不应提交到公开 GitHub。需要审计或备份时，应保存在访问受控的本地或加密存储中，并在复制前进行秘密扫描和人工复核。
+
+## D-013：LIVE_STATUS 只能由公开白名单证据生成
+
+- 状态：Accepted
+- 决定：`LIVE_STATUS.md` 只读取已完成运行的 `fault-verdict.json`、`fault-timeline.json` 和 `provenance.json` 中明确列出的字段。不得复制原始日志、Planner/Provider 响应、提示词、绝对路径、环境变量或凭据。
+- 判定：Recovery Protocol 与官方 Task Success 必须分列。故障注入无效或基础设施异常时标为 `NOT_EVALUABLE`，不能计为 Recovery 成功或失败。
+- 原因：实时摘要需要可验证，但不能把公开仓库变成原始实验数据或会话日志的泄露通道。
+
+## D-014：同步发布使用独立工作树和乐观并发控制
+
+- 状态：Accepted
+- 决定：状态生成和提交在独立 `codex/e2-live-status-sync` 工作树中执行。发布前后各 fetch 一次目标实验分支；若目标 SHA 变化则停止。最终只使用普通 `git push`，禁止 force push。
+- 限制：工作树必须干净，自动提交只能包含 `docs/codex-sync/LIVE_STATUS.md`。目标分支并发变化时保留本地提交供人工检查，不自动 rebase、merge 或覆盖。
+- 原因：这能隔离实验工作树，并由 Git 的 fast-forward 检查阻止其他会话的新提交被覆盖。
+
+## D-015：同步不得进入实验计时区间
+
+- 状态：Accepted
+- 决定：不安装持续轮询正式结果目录的 watcher。外层 supervisor 可在实验启动前记录 `running`，并在关键边界或 verdict/checksum 完成后渲染和发布；Git 和网络操作不得与动作执行或 LLM 计时区间重叠。
+- 原因：同步是观测与交接机制，不应改变随机性、资源竞争、计时或 COHERENT 环境状态。

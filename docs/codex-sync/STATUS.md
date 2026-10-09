@@ -130,3 +130,33 @@ cargo test -p integration-server recovery
 - 下一步计划。
 
 结果必须来自 Git、自动 verdict 或原始实验日志。不得根据聊天记忆推测完成状态，也不得把凭据、私有路径、API 地址或完整聊天记录写入仓库。
+
+## 2026-10-09 第一阶段同步实现
+
+第一阶段实现位于独立工作树的 `codex/e2-live-status-sync` 分支，基于远程实验分支 `f44e84857867665d5daabb59598f9e407f1a4e12`。它没有修改 RoboGuide Core、Recovery harness、实验配置或既有结果，也没有触碰主实验工作树中的三个未跟踪 TOML。
+
+新增内容：
+
+- `docs/codex-sync/LIVE_STATUS.md`：从机器证据生成的公开实时摘要；
+- `tools/codex-sync/render_live_status.py`：只读取 verdict、timeline 和 provenance 的白名单字段；
+- `tools/codex-sync/record_active_run.py`：在仓库外原子记录外部 supervisor 声明的运行状态；
+- `tools/codex-sync/publish-live-status.sh`：在独立工作树中执行双 fetch、目标 SHA 比较和普通非强制 push；
+- `tools/codex-sync/test_render_live_status.py`：覆盖 Recovery/Task 结果分离、无效注入和 active-run 状态校验；
+- `tools/codex-sync/README.md`：说明工作树、调用时机和安全边界。
+
+首次真实汇总读取 7 份完成的 `fault-verdict.json`：Task Success 为 `2`，Task Failure 为 `5`；故障运行的 Recovery Protocol 为 `PASS=1`、`FAIL=2`、`NOT_EVALUABLE=1`。最新运行的实际故障目标仍是 `agent 25` 四旋翼，Recovery Protocol 为 `PASS`，Task Success 为 `FAIL`，官方目标为 `2/3`。历史 F1 `0/3` 没有被改写。
+
+针对性验证结果：
+
+```text
+python -m pytest -q tools/codex-sync/test_render_live_status.py
+bash -n tools/codex-sync/publish-live-status.sh
+python -m py_compile tools/codex-sync/render_live_status.py
+```
+
+- Python 测试：4 项通过，0 失败；
+- Bash 语法检查：通过；
+- Python 编译检查：通过；
+- 真实结果渲染：成功生成 7 次运行的汇总，未复制原始日志或 Provider 响应。
+
+尚未完成：自动 watcher/timer 尚未安装，active-run 状态也尚未接入正在修改的 Recovery harness。这样做是为了避免在正式计时区间引入额外进程或 Git/network 操作。待当前 harness 修改稳定后，只能由外层 supervisor 在启动前、关键状态边界或 verdict/checksum 完成后调用，不得在动作或 LLM 计时区间内调用。
