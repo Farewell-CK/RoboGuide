@@ -1,0 +1,12 @@
+{
+  "schema": "roboguide.physical-entity-registry/v0.1",
+  "registry_id": "e2-dog-takeover-registry",
+  "revision": 1,
+  "routing_profile": "one-routable-entity-per-node",
+  "entities": [
+    {"entity_id": "dog-a", "node_id": "coherent-dog-a"},
+    {"entity_id": "dog-b", "node_id": "coherent-dog-b"},
+    {"entity_id": "arm-a", "node_id": "coherent-arm-a"},
+    {"entity_id": "drone-a", "node_id": "coherent-drone-a"}
+  ]
+}
