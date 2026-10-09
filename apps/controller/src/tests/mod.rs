@@ -89,6 +89,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::TaskExecutionFailed { task_ref, .. }
         | EventPayload::TaskExecutionBindingsReleased { task_ref, .. }
         | EventPayload::MissionActorBound { task_ref, .. }
+        | EventPayload::MissionActorTakenOver { task_ref, .. }
         | EventPayload::ExecutionGroupActivated { task_ref, .. }
         | EventPayload::ReconciliationRoleRecoveryRequired { task_ref, .. }
         | EventPayload::RecoveryCandidatesMatched { task_ref, .. }
